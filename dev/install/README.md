@@ -45,6 +45,17 @@ This starts three services:
 - **dsh-web** — DSH Web UI on port 3080, pre-configured to use vllm
 - **dsh-test** — Test runner with Node.js + Playwright + Chromium
 
+If the host's own DSH GUI already owns port 3080 (it does on a dev box running this
+harness), start the containerized UI on another host port instead of stopping your session:
+
+```bash
+DSH_PORT=3081 docker compose up -d    # UI published at http://localhost:3081
+```
+
+`DSH_PORT` only picks the host side of the mapping; the container always binds 3080 internally.
+On machines where a local proxy intercepts Docker's published ports (see Troubleshooting), reach
+the UI with `docker exec dsh-chapters-dev curl -s http://127.0.0.1:3080/` or an SSH tunnel.
+
 ### Running Tests
 
 ```bash
