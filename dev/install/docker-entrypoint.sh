@@ -48,7 +48,7 @@ CREDENTIALS_FILE="$DSH_HOME/.credentials.yaml"
 if [ ! -f "$CREDENTIALS_FILE" ]; then
   echo "[entrypoint] seeding $CREDENTIALS_FILE (mode 600)"
   umask 077
-  printf 'credentials:\n  version: 1\n  items: {}\n' > "$CREDENTIALS_FILE"
+  printf 'version: 1\nrefs: {}\n' > "$CREDENTIALS_FILE"
   chmod 600 "$CREDENTIALS_FILE"
 fi
 
