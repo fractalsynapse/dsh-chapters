@@ -74,6 +74,25 @@ One visible side effect, stated plainly because users notice it: the plugin hide
 doors replacing it. It is a cosmetic rule matched on the button's accessible label, so if a future host
 rewords that label the native button simply reappears — fails open, visibly, never silently.
 
+## `/chapters-save` — archive without creating a child session
+
+```
+/chapters-save              # archive completed turns into searchable chapters
+/chapters-save [title]      # optional title prefix for the saved chapters
+```
+
+Archives everything after the last archive watermark up to the last completed turn into
+verbatim chapters on disk, updates the search index, and triggers enrichment — **without**
+creating a child session or triggering compaction. The parent session remains fully functional.
+
+This is the side-effect-only half of the deterministic door: same archive pipeline as
+`/chapters-fork` and `/chapters-continue` (`composeChapters` + `writeArchive`, zero model
+involvement), but stops before `agents.create`. Useful for sharing session context with
+parallel sessions via `chapters_search` without disrupting the active conversation.
+
+Idempotent: re-running saves only what has not yet been archived (respects the watermark).
+If nothing new was said since the last save, reports "nothing to save" without error.
+
 ## Plus the host's `/compact`
 
 With the `chapters` agent preset mounted, `/compact` runs through the plugin's deterministic engine: checkpoint summary with carried plot, zero inference tokens, append-only shadowing. (The harness's own command surface, ours underneath.)

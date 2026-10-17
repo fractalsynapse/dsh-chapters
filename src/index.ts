@@ -305,6 +305,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         hostRoute = r
         void store.putSetting('enrichment.route', `${r.provider}/${r.model}`).catch(() => undefined)
       },
+      enrich,
     })
     registerHostCommands(ctx as never, domain, {
       artifactStoreRoot: config.artifactStoreRoot,
