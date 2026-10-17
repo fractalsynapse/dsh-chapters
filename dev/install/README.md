@@ -61,6 +61,28 @@ docker compose run --rm dsh-test npm run coverage:ci
 docker compose exec dsh-test bash
 ```
 
+### Troubleshooting
+
+**`dsh-vllm` exits with `invalid human_readable_int_or_auto value: '${MAX_MODEL_LEN}'`.**
+The image was built from an old `vllm.Dockerfile` that passed literal `${VAR}` strings to vLLM
+(exec-form `CMD` does not interpolate). Fixed by rebuilding the image:
+
+```bash
+cd dev/install
+docker compose build --no-cache vllm
+docker compose up -d
+```
+
+Verify the container is serving before starting the dependents:
+
+```bash
+docker compose ps            # vllm should be healthy (model load takes ~2 min)
+curl -s http://localhost:8080/health
+```
+
+If a stale `dsh-vllm` container keeps getting reused, remove it first:
+`docker rm -f dsh-vllm`.
+
 ### Uninstall
 
 ```bash

@@ -148,6 +148,16 @@ All variables are read from the **parent shell**. No `.env` file required. See
 | `LLM_MODEL` | `qwen3-4b-instruct` | Default model for DSH sessions |
 | `SYSTEMONE_MODEL` | `qwen3-4b-systemone` | Decision model name |
 
+## Troubleshooting
+
+- **vllm exits with `invalid human_readable_int_or_auto value: '${MAX_MODEL_LEN}'`** — the image
+  predates the shell-form CMD fix (#19): exec-form `CMD ["...", "${VAR}", ...]` passes literal
+  `${VAR}` strings to vLLM because Docker does not interpolate inside JSON arrays. Rebuild with
+  `docker compose build --no-cache vllm`, then `docker compose up -d`. A stale `dsh-vllm` container
+  is reused by `up`; remove it with `docker rm -f dsh-vllm` if compose keeps the old one.
+- **`dependency vllm failed to start`** for `dsh-web`/`dsh-test` — always a symptom of the above or
+  a failed healthcheck; fix vllm first, the dependents follow once healthy.
+
 ## Requirements
 
 - **Containerized**: Docker ≥ 24, Compose v2, NVIDIA GPU ≥ 4 GB VRAM, nvidia-container-toolkit
