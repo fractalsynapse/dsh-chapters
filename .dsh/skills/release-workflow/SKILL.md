@@ -1,3 +1,9 @@
+---
+name: release-workflow
+description: Mandatory Git/GitHub development and release workflow for dsh-chapters — branch model, feature/release/hotfix flows, CI gates, commit conventions, issue/PR templates, and cross-linking rules.
+whenToUse: When working on any code change, creating branches, opening PRs, merging, tagging releases, creating issues, commenting, or discussing the development workflow for this project.
+---
+
 # dsh-chapters Release Workflow
 
 This skill defines the mandatory Git/GitHub development and release workflow for the dsh-chapters project. Follow these rules in every session. They are non-negotiable unless explicitly overridden by the project maintainer.
@@ -20,11 +26,222 @@ This skill defines the mandatory Git/GitHub development and release workflow for
 5. **Every feature/fix branch tracks a GitHub Issue.** Either adopt an existing issue or create one before starting work. Reference it in the branch name and PR.
 6. **Merge staging INTO your feature branch before merging TO staging.** Resolve conflicts on the feature branch, not on staging.
 
+## Version & Tag Format
+
+Tags and package versions MUST follow strict **semantic versioning** with NO `v` prefix:
+
+```
+Format:  <major>.<minor>.<patch>           (stable release)
+         <major>.<minor>.<patch>-dev.<N>   (development/prerelease)
+```
+
+```
+0.1.19        ✅ correct
+0.1.19-dev.1  ✅ correct (development prerelease)
+v0.1.19       ❌ WRONG — no 'v' prefix, ever
+0.1           ❌ WRONG — all three components required
+1.0           ❌ WRONG — patch component required
+0.1.19-beta   ❌ WRONG — only -dev.<N> suffix allowed
+```
+
+**Rules:**
+- Tags are bare semver: `<major>.<minor>.<patch>` — **NO `v` prefix**
+- The `package.json` version field matches exactly: `"version": "0.1.19"`
+- Development/prerelease tags use `-dev.<N>` suffix: `0.2.0-dev.1`, `0.2.0-dev.2`
+- Bump rules: breaking change → major, new feature → minor, fix/chore/docs → patch
+- Never reuse a tag. If a tag was pushed incorrectly, delete it (`git tag -d X.Y.Z && git push origin :refs/tags/X.Y.Z`) before creating the correct one.
+- Always verify the tag format BEFORE pushing: `git tag -l | tail -5`
+
+## Issue Guidelines
+
+### Creating Issues
+
+Every piece of work starts with an issue. Use the appropriate template structure:
+
+**Bug Report:**
+```bash
+gh issue create --title "fix: <short description>" --label "bug" --body '
+## Problem
+<What is broken? What behavior did you expect vs what happened?>
+
+## Reproduction
+<Steps to reproduce, or "N/A" if discovered through code inspection>
+
+## Environment
+- DSH version: <version>
+- Node version: <version>
+- OS: <os>
+
+## Impact
+<Who/what is affected? How severe?>
+'
+```
+
+**Feature/Enhancement:**
+```bash
+gh issue create --title "feat: <short description>" --label "enhancement" --body '
+## Goal
+<What should this achieve? Why does it matter?>
+
+## Proposed Approach
+<High-level design, if known. "TBD" is fine.>
+
+## Acceptance Criteria
+- [ ] <criterion 1>
+- [ ] <criterion 2>
+
+## Related
+<Link to related issues, PRs, discussions, or external references>
+'
+```
+
+**Refactor/Chore:**
+```bash
+gh issue create --title "refactor: <short description>" --label "refactor" --body '
+## Motivation
+<Why restructure? What pain does this address?>
+
+## Scope
+<What changes? What stays the same?>
+
+## Risk
+<What could break? How do we verify safety?>
+'
+```
+
+### Issue Hygiene
+
+- **Title format:** `<type>: <imperative description>` — mirrors commit convention (`feat:`, `fix:`, `refactor:`, `docs:`, `chore:`)
+- **Labels:** Apply at creation. At minimum one of: `bug`, `enhancement`, `refactor`, `docs`, `chore`. Add `priority` for urgent work.
+- **Related links:** Always link related issues, PRs, or external references in the body or comments using `#<number>` or full URLs.
+- **Close keywords:** PRs should use `Closes #<issue>` or `Fixes #<issue>` in the body to auto-close on merge.
+- **Update, don't duplicate:** If an issue evolves, edit it or comment. Don't create a new one for the same concern.
+
+## Pull Request Guidelines
+
+### PR Templates
+
+**Feature/Fix PR (targeting staging):**
+```bash
+gh pr create --base staging \
+  --title "feat: <description> (#<issue>)" \
+  --body '
+## Summary
+<One paragraph: what changed and why>
+
+## Changes
+- <bullet list of concrete changes>
+
+## Testing
+- [ ] Unit tests pass (`npm test`)
+- [ ] TypeCheck clean (`npm run typecheck`)
+- [ ] Build passes (`npm run build`)
+- [ ] E2E replay verified (if applicable)
+
+## Related
+Closes #<issue>
+<Links to related PRs, issues, docs, or external references>
+'
+```
+
+**Release Candidate PR (staging → main):**
+```bash
+gh pr create --base main --head staging \
+  --title "Release candidate: <major>.<minor>.<patch>" \
+  --body '
+## Release <major>.<minor>.<patch>
+
+### Changes since <previous>
+- <bullet list from merged PRs/issues since last tag>
+
+### Verification
+- [ ] All CI checks green
+- [ ] Deterministic suite passes (unit + integration)
+- [ ] E2E replay passes (if tapes updated)
+- [ ] Version bumped in package.json
+
+### Tag after merge
+`<major>.<minor>.<patch>`
+'
+```
+
+**Hotfix PR (targeting main):**
+```bash
+gh pr create --base main \
+  --title "HOTFIX: <description> (#<issue>)" \
+  --body '
+## ⚠️ Emergency Hotfix
+
+Bypassing staging due to urgency.
+
+## Problem
+<What is broken in production?>
+
+## Fix
+<What changed and why it is safe>
+
+## Testing
+- [ ] Deterministic suite passes (`npm test`)
+- [ ] TypeCheck clean (`npm run typecheck`)
+- [ ] Manual verification: <describe>
+
+## Related
+Closes #<issue>
+
+## Post-merge
+- [ ] Merge main back into staging
+'
+```
+
+### PR Hygiene
+
+- **Title format:** `<type>: <description> (#<issue>)` — include the issue number in parentheses
+- **Base branch:** Features/fixes target `staging`. Hotfixes and release candidates target `main`.
+- **Body must include:** Summary, testing checklist, and `Closes #<issue>` (or `Fixes #<issue>`)
+- **Link everything:** Reference related issues (`#<number>`), prior PRs, docs, and external resources
+- **Keep PRs small:** If a PR touches >10 files or takes >15 min of CI, split it into stacked PRs
+- **Self-review before requesting review:** Read your own diff. Catch typos, leftover debug code, missing tests.
+
+## Commenting Conventions
+
+### On Issues
+- **Status updates:** Comment when work starts, when blocked, or when scope changes. Don't let issues go silent.
+- **Decisions:** Record architectural or scope decisions as comments so future readers understand the "why."
+- **Cross-references:** Link to related PRs, commits, or other issues: "Addressed in #<pr>", "See also #<issue>"
+- **Closing:** Let the PR auto-close via `Closes #<issue>`. Only close manually if the issue is invalid or won't-fix (with explanation).
+
+### On PRs
+- **Review comments:** Be specific. Reference line numbers. Suggest fixes, not just problems.
+- **Author responses:** Reply to every review comment. Resolve threads when addressed. If disagreeing, explain why.
+- **CI failures:** Comment on the PR with the failure diagnosis and fix plan. Don't leave red CI unexplained.
+- **Post-merge:** No need to comment "merged" — GitHub shows this automatically. Comment only if there's follow-up work.
+
+### General
+- **Be concise.** One thought per comment. Use bullet points for lists.
+- **Use markdown.** Code blocks for snippets, links for references, checkboxes for action items.
+- **@mention sparingly.** Only when someone needs to see it. Don't @mention for FYI.
+- **Never edit others' comments.** Reply instead.
+
+## Cross-Linking Requirements
+
+Linking creates traceability. These are REQUIRED, not optional:
+
+| From | To | How | Required? |
+|------|----|-----|-----------|
+| PR | Issue | `Closes #<N>` or `Fixes #<N>` in PR body | **Yes** |
+| Feature branch | Issue | Issue number in branch name: `feature/42-desc` | **Yes** |
+| Commit | Issue | `(#<N>)` in commit message | **Yes** |
+| Issue | Related issue/PR | `#<N>` or full URL in body/comment | **Yes** |
+| RC PR | Previous tag | `Changes since <X.Y.Z>` in RC body | **Yes** |
+| Hotfix PR | Staging sync reminder | Checklist item in hotfix PR body | **Yes** |
+| Comment | Code/file | Permalink or file:line reference | Encouraged |
+| Comment | External resource | Full URL with description | Encouraged |
+
 ## Feature/Fix Workflow
 
 ```
 1. Create or adopt a GitHub Issue
-   gh issue create --title "..." --body "..." --label "enhancement"
+   gh issue create --title "feat: ..." --label "enhancement" --body '...'
    # or: gh issue list --state open  (find existing)
 
 2. Branch from staging
@@ -41,9 +258,9 @@ This skill defines the mandatory Git/GitHub development and release workflow for
    # Resolve conflicts if any, then:
    git push origin feature/<issue-number>-short-description
 
-5. Open PR targeting staging
+5. Open PR targeting staging (use template above)
    gh pr create --base staging --title "feat: description (#<issue>)" \
-     --body "Closes #<issue>. ..."
+     --body "..."
 
 6. Wait for CI green, address review, merge to staging
    gh pr merge <number> --squash   # after approval + green CI
@@ -54,29 +271,34 @@ This skill defines the mandatory Git/GitHub development and release workflow for
 When staging is ready for release:
 
 ```
-1. Open a release candidate PR from staging to main
-   gh pr create --base main --head staging \
-     --title "Release candidate: v0.X.Y" \
-     --body "## Changes since last release\n..."
+1. Determine the next version: <major>.<minor>.<patch>
+   # Check current: grep '"version"' package.json
+   # Bump: patch for fixes, minor for features, major for breaking changes
 
-2. ALL CI must pass on this PR. No exceptions for normal releases.
+2. Open a release candidate PR from staging to main (use RC template above)
+   gh pr create --base main --head staging \
+     --title "Release candidate: <major>.<minor>.<patch>" \
+     --body "..."
+
+3. ALL CI must pass on this PR. No exceptions for normal releases.
    gh pr checks <number> --watch
 
-3. After green CI + review approval, merge to main
+4. After green CI + review approval, merge to main
    gh pr merge <number> --merge   # use merge commit, not squash, for RCs
 
-4. Bump version in package.json, commit, push
-   # Edit package.json version field
-   git add package.json && git commit -m "v0.X.Y"
+5. Bump version in package.json, commit, push
+   # Edit package.json version field to "<major>.<minor>.<patch>"
+   git add package.json && git commit -m "<major>.<minor>.<patch>"
    git push origin main
 
-5. Tag and push — this triggers the release workflow
-   git tag -a v0.X.Y -m "v0.X.Y — summary of changes"
+6. Tag and push — this triggers the release workflow
+   # VERIFY FORMAT: must be <major>.<minor>.<patch> — NO 'v' PREFIX
+   git tag -a <major>.<minor>.<patch> -m "<major>.<minor>.<patch> — summary"
    git push origin main --tags
 
-6. Verify the release succeeded
+7. Verify the release succeeded
    gh run list --workflow=Release --limit 1
-   gh release view v0.X.Y
+   gh release view <major>.<minor>.<patch>
 ```
 
 ## Hotfix Workflow (Emergency Only)
@@ -92,9 +314,9 @@ Hotfixes bypass staging when waiting for full CI would cause unacceptable delay.
    git add ... && git commit -m "fix: urgent description (#<issue>)"
    git push origin hotfix/<issue-number>-short-description
 
-3. Open PR targeting main (NOT staging)
+3. Open PR targeting main (NOT staging, use hotfix template above)
    gh pr create --base main --title "HOTFIX: description (#<issue>)" \
-     --body "⚠️ Emergency hotfix bypassing staging.\n\nCloses #<issue>."
+     --body "..."
 
 4. Run ONLY the deterministic suite (fast gate), not full e2e
    # The CI workflow runs this automatically on PRs to main.
@@ -103,7 +325,8 @@ Hotfixes bypass staging when waiting for full CI would cause unacceptable delay.
 5. Merge to main after fast-gate green + maintainer approval
    gh pr merge <number> --merge
 
-6. Tag and release as normal (steps 4-6 of Release Candidate above)
+6. Tag and release as normal (steps 5-7 of Release Candidate above)
+   # Remember: <major>.<minor>.<patch> format — NO 'v' prefix
 
 7. AFTER the hotfix is on main: sync staging
    git checkout staging && git pull origin staging
@@ -145,13 +368,14 @@ Follow conventional commits for automated changelog extraction:
 ```
 feat: add CodeGraph integration (#42)
 fix: correct search scoring when symbols absent (#38)
-refactor: extract codegraph resolver into own module
-test: add unit tests for codegraphBoost
-docs: update AGENTS.md with CodeGraph integration notes
-chore: bump tsx devDependency for build fix
+refactor: extract codegraph resolver into own module (#45)
+test: add unit tests for codegraphBoost (#42)
+docs: update AGENTS.md with CodeGraph integration notes (#42)
+chore: bump tsx devDependency for build fix (#46)
+0.1.19  ← version bump commit (no v prefix)
 ```
 
-The type prefix (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`) drives release notes grouping. Always reference the issue number.
+The type prefix (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`) drives release notes grouping. Always reference the issue number in parentheses.
 
 ## Quick Reference
 
@@ -162,10 +386,12 @@ The type prefix (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`) drives rele
 | Open PR to staging | `gh pr create --base staging --title "..." --body "Closes #N"` |
 | Check CI status | `gh pr checks <N> --watch` |
 | Merge PR (squash) | `gh pr merge <N> --squash` |
-| Open release candidate | `gh pr create --base main --head staging --title "RC: vX.Y.Z"` |
+| Open release candidate | `gh pr create --base main --head staging --title "RC: X.Y.Z"` |
 | Merge RC to main | `gh pr merge <N> --merge` |
-| Tag a release | `git tag -a vX.Y.Z -m "message" && git push origin main --tags` |
+| Tag a release | `git tag -a X.Y.Z -m "message" && git push origin main --tags` |
+| Delete a bad tag | `git tag -d X.Y.Z && git push origin :refs/tags/X.Y.Z` |
 | Emergency hotfix | Branch from main → PR to main → fast-gate → merge → tag → sync staging |
 | View failed CI logs | `gh run view <id> --log-failed` |
 | List open issues | `gh issue list --state open` |
 | Create an issue | `gh issue create --title "..." --body "..." --label "..."` |
+| Comment on issue/PR | `gh issue comment <N> --body "..."` / `gh pr comment <N> --body "..."` |
