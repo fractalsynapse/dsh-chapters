@@ -69,29 +69,13 @@ RUN npm install --omit=dev --ignore-scripts
 # Copy the dev Cordis patch into the profile
 COPY dev/install/profile-cordis.patch.yml ${PROFILE_DIR}/cordis.patch.yml
 
-# Create profile package.json with web bundles + all dev plugins
-RUN cat > "${PROFILE_DIR}/package.json" <<'EOF'
-{
-  "name": "dsh-profile-web",
-  "private": true,
-  "dependencies": {
-    "@jiangzhenguo/dsh-codegraph": "github:jiangzhenguo/dsh-codegraph",
-    "@treeseed/dsh-chapters": "link:/app",
-    "dsh-tinyfish-search": "0.15.0"
-  },
-  "dsh": {
-    "profile": {
-      "bundles": [
-        "@deepseek-ai/dsh-base",
-        "@deepseek-ai/dsh-web-app",
-        "dsh-tinyfish-search",
-        "@treeseed/dsh-chapters",
-        "@jiangzhenguo/dsh-codegraph"
-      ]
-    }
-  }
-}
-EOF
+# Create profile package.json with web bundles + all dev plugins.
+# NOT a heredoc: on the legacy builder multi-line RUN continuations are joined
+# with " && \\\n", so `<<EOF` never gets its body and the file lands EMPTY —
+# every container then dies at JSON.parse in a restart loop (#19). printf is
+# one logical line and survives both builders; %s is filled by the shell from
+# $PROFILE_DIR (the Dockerfile ${} was expanded before /bin/sh ever saw it).
+RUN printf '{\n  "name": "dsh-profile-web",\n  "private": true,\n  "dependencies": {\n    "@jiangzhenguo/dsh-codegraph": "github:jiangzhenguo/dsh-codegraph",\n    "@treeseed/dsh-chapters": "link:/app",\n    "dsh-tinyfish-search": "0.15.0"\n  },\n  "dsh": {\n    "profile": {\n      "bundles": [\n        "@deepseek-ai/dsh-base",\n        "@deepseek-ai/dsh-web-app",\n        "dsh-tinyfish-search",\n        "@treeseed/dsh-chapters",\n        "@jiangzhenguo/dsh-codegraph"\n      ]\n    }\n  }\n}\n' > "${PROFILE_DIR}/package.json"
 
 # Create empty cordis root
 RUN echo '[]' > "${PROFILE_DIR}/cordis.yml"
@@ -108,7 +92,10 @@ RUN chmod +x /docker-entrypoint.sh
 
 EXPOSE 3080
 
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=30s \
-  CMD curl -fsS http://localhost:3080/api/health 2>/dev/null || exit 1
+# No /api/health route exists on host 0.2.x (measured: 404 even authenticated).
+# Probe the SPA index instead; a Host authority equal to the bind address passes
+# the browser-trust fence from inside the container.
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=60s \
+  CMD curl -fsS -H "Host: localhost:3080" http://localhost:3080/ >/dev/null 2>&1 || exit 1
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

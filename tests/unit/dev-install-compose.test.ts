@@ -151,4 +151,45 @@ test('regression: dsh-web launches with the 0.2.x launcher form and a loopback b
   assert.match(entry, /DSH_HOST="\$\{DSH_HOST:-127\.0\.0\.1\}"/, 'default DSH_HOST must be loopback; 0.0.0.0 aborts the boot')
   const compose = read('compose.yml')
   assert.doesNotMatch(compose, /DSH_HOST:\s*"?0\.0\.0\.0/, 'compose must not set DSH_HOST to 0.0.0.0 — the host refuses it')
+
+  // A bind-mounted or wiped $DSH_HOME may lack profiles/web; settings.yaml is
+  // written by redirect and dies on ENOENT without the mkdir.
+  assert.match(entry, /mkdir -p "\$PROFILE_DIR"/, 'entrypoint must create the profile dir before writing settings.yaml')
+})
+
+test('regression: web healthcheck probes a route that exists on host 0.2.x (#19)', () => {
+  // Measured: /api/health returns 404 even authenticated on 0.2.0-rc.2 — the
+  // old probe kept dsh-web permanently unhealthy no matter what it served.
+  // The SPA index answers 200 from inside the container once the browser-trust
+  // fence passes (Host authority == bind address).
+  const dockerfile = read('Dockerfile')
+  const compose = read('compose.yml')
+  for (const [name, text] of [['Dockerfile', dockerfile], ['compose.yml', compose]] as const) {
+    assert.doesNotMatch(text, /curl[^\n]*\/api\/health/, `${name} still probes /api/health, which 404s on host 0.2.x`)
+  }
+  assert.match(dockerfile, /HEALTHCHECK[\s\S]{0,200}curl -fsS -H "Host: localhost:3080" http:\/\/localhost:3080\//, 'Dockerfile HEALTHCHECK must probe the SPA index with a self-matching Host')
+  assert.match(compose, /CMD-SHELL", "curl -fsS -H \\"Host: localhost:3080\\" http:\/\/localhost:3080\//, 'compose healthcheck must probe the SPA index with a self-matching Host')
+})
+
+test('regression: profile package.json survives the legacy builder (#19)', () => {
+  // The classic (non-BuildKit) builder joins multi-line RUN continuations with
+  // " && \\\n", so a trailing `<<EOF` heredoc never receives its body: the
+  // manifest landed ZERO BYTES and every boot died at JSON.parse in a restart
+  // loop. printf is one logical line and works under both builders.
+  const dockerfile = read('Dockerfile')
+  assert.doesNotMatch(dockerfile, /RUN cat > .*package\.json <</, 'heredoc in a continued RUN writes an empty file on the legacy builder')
+  assert.match(dockerfile, /RUN printf .* > "\$\{PROFILE_DIR\}\/package\.json"/, 'profile manifest must be written with single-line printf')
+
+  // Belt and braces: the entrypoint repairs a zero-byte manifest (never a real
+  // one) so already-built bad images recover instead of crash-looping.
+  const entry = read('docker-entrypoint.sh')
+  assert.match(entry, /\[ ! -s "\$PROFILE_DIR\/package\.json" \][\s\S]*rm -f/, 'entrypoint must delete a zero-byte manifest so app-boot re-initializes it')
+
+  // A named volume mounted at a FILE path is created as an empty mode-755
+  // directory when the image has no file there; credentials-local refuses any
+  // world-readable document → permanent restart loop. No volume may sit on
+  // .credentials.yaml; the entrypoint seeds it with mode 600 instead.
+  const compose = read('compose.yml')
+  assert.doesNotMatch(compose, /volumes:[\s\S]{0,400}\.credentials\.yaml/, 'compose must not mount a volume at the credentials FILE path')
+  assert.match(entry, /umask 077[\s\S]*chmod 600 "\$CREDENTIALS_FILE"/, 'entrypoint must seed .credentials.yaml owner-only (600)')
 })

@@ -87,7 +87,8 @@ services:
       # Plugin API keys (optional — marketplace features need these)
       QWEN_TOKEN_PLAN_API_KEY: ${QWEN_TOKEN_PLAN_API_KEY:-}
       TINYFISH_API_KEY: ${TINYFISH_API_KEY:-}
-      # DSH configuration
+      # DSH configuration — the container always binds 3080 INSIDE itself;
+      # DSH_PORT only picks the host-side port of the mapping below.
       DSH_PORT: "3080"
       # 0.2.x refuses --host 0.0.0.0 (RCU safety, startup.js); bind loopback and
       # reach the UI through the published port mapping instead.
@@ -96,15 +97,23 @@ services:
     volumes:
       - dsh-sessions:/dsh-home/sessions
       - dsh-storage:/dsh-home/storages
-      - dsh-credentials:/dsh-home/.credentials.yaml
+      # Credentials are NOT a volume: a named volume mounted at a FILE path is
+      # created as an empty DIRECTORY (mode 755) when the image has no file
+      # there, and credentials-local refuses any world-readable credentials
+      # document — a permanent restart loop. The entrypoint seeds the file with
+      # mode 600 instead; nothing here needs it persisted (API keys ride in via
+      # env: LOCAL_API_KEY / QWEN_TOKEN_PLAN_API_KEY).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:3080/api/health"]
+      # No /api/health route exists on host 0.2.x (measured: 404 even authenticated).
+      # The SPA index answers 200 once the browser-trust fence passes; a Host whose
+      # authority equals the bind address self-matches from inside the container.
+      test: ["CMD-SHELL", "curl -fsS -H \"Host: localhost:3080\" http://localhost:3080/ >/dev/null"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     networks:
       - dsh-net
 
@@ -150,8 +159,6 @@ volumes:
     name: dsh-chapters-sessions
   dsh-storage:
     name: dsh-chapters-storage
-  dsh-credentials:
-    name: dsh-chapters-credentials
   vllm-cache:
     name: dsh-vllm-cache
   test-results:
