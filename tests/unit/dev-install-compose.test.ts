@@ -111,7 +111,7 @@ test('contract: compose.yml feeds vllm env with defaults matching .env.example',
   }
   // the two knobs the #19 crash turned on must have numeric fallbacks, not empty ones
   assert.equal(composeEnv.MAX_MODEL_LEN!.fallback, '32768')
-  assert.equal(composeEnv.GPU_MEMORY_UTILIZATION!.fallback, '0.90')
+  assert.equal(composeEnv.GPU_MEMORY_UTILIZATION!.fallback, '0.75')
 })
 
 test('contract: every variable the CMD expands has an ENV default (docker run alone works)', () => {

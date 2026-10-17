@@ -125,7 +125,10 @@ and repeated flags keep only the last value. The fixed image and `.env.example` 
 under `curl localhost:8080/v1/models`.
 
 **`Free memory on device cuda:0 ... less than desired GPU memory utilization`.**
-Other processes hold VRAM (shared desktop GPU). Lower `VLLM_GPU_MEM` (e.g. `0.75`) or free the GPU.
+vLLM reserves a fraction of the GPU's *free* memory at startup; on a GPU shared with the desktop
+compositor even 0.75 can be too much when other apps hold VRAM. Lower it further (e.g. `0.6`) or
+close the competing GPU users. The stack default is already `0.75` (chosen for a 16 GB GPU under a
+desktop session); if you carried an older `.env` with `VLLM_GPU_MEM=0.90`, bring it down.
 
 ### Uninstall
 
@@ -231,7 +234,7 @@ unindexed project).
 | `VLLM_PORT` | `8080` | vLLM model server port |
 | `VLLM_MODEL_ID` | `Qwen/Qwen3-4B-AWQ` | HuggingFace model |
 | `VLLM_MAX_MODEL_LEN` | `32768` | Context window |
-| `VLLM_GPU_MEM` | `0.90` | GPU memory utilization |
+| `VLLM_GPU_MEM` | `0.75` | GPU memory utilization (raise to 0.90 on a dedicated GPU) |
 | `LLM_MODEL` | `qwen3-4b-instruct` | Default model for DSH |
 | `SYSTEMONE_MODEL` | `qwen3-4b-systemone` | Decision model name |
 | `QWEN_TOKEN_PLAN_API_KEY` | *(empty)* | Cloud marketplace key (optional) |
