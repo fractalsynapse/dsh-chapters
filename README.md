@@ -45,10 +45,25 @@ optional `chapters` preset that routes `/compact` through the zero-token engine.
 
 ## Developing / contributing
 
+Three ways to set up a development environment — pick whichever fits your workflow:
+
+| Mode | Best for | Command |
+|------|----------|---------|
+| **Centralized** (your live profile) | Day-to-day development on your main machine | `./dev/install/install.sh && dsh web` |
+| **Compartmentalized** (isolated DSH_HOME) | Testing changes without touching your live sessions | `DSH_HOME=/tmp/dsh-dev ./dev/install/install.sh` |
+| **Containerized** (full stack) | Isolated platform with vLLM + Playwright + Chromium | `cd dev/install && docker compose up -d` |
+
+All three install the same plugin set: dsh-chapters, [dsh-codegraph](https://github.com/jiangzhenguo/dsh-codegraph)
+(structural code search via pre-indexed AST graph), and dsh-tinyfish-search. Full details in
+[`dev/install/README.md`](dev/install/README.md). The containerized stack additionally ships its own
+vLLM model server (Qwen3-4B-AWQ with inference + systemone endpoints), a DSH Web UI service, and a
+CI-capable test runner — everything runs locally with no external API keys required.
+
 The site's Part VI covers the daily loop; the repository itself holds the engineering truth for agents:
 
 - **[`AGENTS.md`](AGENTS.md)** — working spec for AI agents developing this repo (invariants, budget, hard rules)
 - **[`docs/`](docs/)** — deep specs: `contract.md` (host API facts), `architecture.md` (mechanics), `development.md` (build/test loop + tape system), `verify.md` (every claim's procedure), `knowledge-repo.md` (design record), `host-compaction-seam.md`, `provider.md`
+- **[`dev/install/`](dev/install/)** — installer, containerized platform, and local-llm skill
 - **benchmarks**: `npm run bench` — three arms, local model, never CI ([protocol](benchmarks/README.md))
 
 Feature requests and bugs: [open an issue](https://github.com/treeseed-ai/dsh-chapters/issues) —

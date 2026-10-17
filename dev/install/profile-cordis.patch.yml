@@ -1,0 +1,165 @@
+# dsh-chapters DEV Cordis patch — mirrors the live web profile configuration.
+# Appended to $DSH_HOME/profiles/web/cordis.patch.yml by install.sh.
+#
+# Contains the FULL working configuration:
+#   - Alibaba/Qwen token plan model marketplace (8 models)
+#   - Default model selection (qwen3.8-max via token plan)
+#   - UI settings (theme, chat view, onboarding)
+#   - Agent loop config (parallel tool calls)
+#   - Directory picker pinned to in-browser mode
+#   - Plugin configs (tinyfish, codegraph, chapters preset)
+#   - Dev overrides (local LLM provider, llm-gate, fetch-timeouts)
+#
+# The installer checks for each section before appending, so re-running is safe.
+
+# ── UI Settings ────────────────────────────────────────────────────────────────
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
+
+# ── Model Marketplace (Alibaba Qwen Token Plan) ───────────────────────────────
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      qwen-token-plan:
+        models:
+          - id: deepseek-v4-pro
+            name: DeepSeek V4 Pro
+            contextWindow: 1000000
+            maxTokens: 384000
+            input:
+              - text
+          - id: deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            input:
+              - text
+              - image
+          - id: glm-5.3
+            name: GLM-5.3
+            contextWindow: 1000000
+            maxTokens: 131072
+            input:
+              - text
+          - id: kimi-k2.6
+            name: Kimi K2.6
+            contextWindow: 262144
+            maxTokens: 262144
+            input:
+              - text
+              - image
+          - id: kimi-k2.7-code
+            name: Kimi K2.7 Code
+            contextWindow: 262144
+            maxTokens: 262144
+            input:
+              - text
+              - image
+          - id: MiniMax-M2.5
+            name: MiniMax-M2.5
+            contextWindow: 196608
+            maxTokens: 32768
+            input:
+              - text
+          - id: qwen3.8-flash
+            name: Qwen3.8 Flash
+            contextWindow: 1000000
+            maxTokens: 131072
+            input:
+              - text
+              - image
+          - id: qwen3.8-max
+            name: Qwen3.8 Max
+            contextWindow: 1000000
+            maxTokens: 131072
+            input:
+              - text
+              - image
+        apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY
+
+# ── Default Model ──────────────────────────────────────────────────────────────
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: qwen-token-plan
+    model: qwen3.8-max
+
+# ── UI Theme & Chat ───────────────────────────────────────────────────────────
+- id: ui-theme
+  name: "@deepseek-ai/dsh-client-ui-theme"
+  config:
+    fontSize: 17
+
+- id: ui-chat
+  name: "@deepseek-ai/dsh-client-ui-chat"
+  config:
+    transcriptView: normal
+
+# ── Agent Loop ─────────────────────────────────────────────────────────────────
+- id: agent-loop
+  name: "@deepseek-ai/dsh-agent-loop"
+  config:
+    agents: []
+    maxParallelToolCalls: 5
+
+# ── Directory Picker (pinned to in-browser) ───────────────────────────────────
+# The host's auto row samples bind/display at boot and can resolve to native
+# dialogs that don't work in remote/browser contexts. Pin to browse directly.
+- id: directory-picker
+  disabled: true
+- insert:
+    - id: directory-picker-browse
+      name: '@deepseek-ai/dsh-host-directory-picker-browse'
+    - id: directory-picker-browse-surface
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'
+
+# ── Plugin: dsh-tinyfish-search ────────────────────────────────────────────────
+- id: dsh-tinyfish-search
+  name: "dsh-tinyfish-search"
+  config:
+    apiKeyEnv: TINYFISH_API_KEY
+    location: US
+    language: en
+
+# ── Preset Registry ───────────────────────────────────────────────────────────
+- id: agent-preset-registry
+  name: "@deepseek-ai/dsh-agent-preset-registry"
+  config:
+    default: standard
+    selectedDefault: chapters
+
+# ── Plugin: dsh-codegraph ─────────────────────────────────────────────────────
+- id: dsh-codegraph
+  name: dsh-codegraph
+  config:
+    guideSearch: true
+    surface: core
+    frontload: true
+
+# ── Dev Overrides: Local vLLM Provider ────────────────────────────────────────
+# Points at the bundled vLLM service (Qwen3-4B-AWQ). The inference and systemone
+# endpoints share the same server under different model names.
+- id: agent-default-model
+  config:
+    provider: local
+    model: qwen3-4b-instruct
+
+- id: agent-presets
+  config:
+    default: chapters
+
+- id: llm-gate
+  config:
+    providers:
+      local:
+        maxConcurrent: 4
+        maxQueued: 16
+        queueTimeoutMs: 7200000
+
+- id: fetch-timeouts
+  config:
+    headersTimeoutMs: 0
+    bodyTimeoutMs: 0

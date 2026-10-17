@@ -8,6 +8,68 @@ whenToUse: When working on any code change, creating branches, opening PRs, merg
 
 This skill defines the mandatory Git/GitHub development and release workflow for the dsh-chapters project. Follow these rules in every session. They are non-negotiable unless explicitly overridden by the project maintainer.
 
+## ⚠️ MANDATORY: Starting Any New Work
+
+**Before writing a single line of code or making any change, you MUST:**
+
+1. **Load this skill** (`release-workflow`) at the start of every new project or statement of work.
+2. **Create or adopt a GitHub Issue** that describes the work. If no issue exists, create one NOW using the templates below. Every piece of work — feature, fix, refactor, docs — requires an issue.
+3. **Create a feature branch from the latest staging.** Never work directly on `staging` or `main`.
+   ```bash
+   git checkout staging && git pull origin staging
+   git checkout -b feature/<issue-number>-short-description
+   ```
+4. **Commit incrementally.** After completing each logical segment of work (a fix, a sub-feature, a test suite), commit and push to the feature branch. Do not accumulate uncommitted changes across sessions.
+5. **Open a PR when complete.** When the project is done, open a PR targeting `staging` with `Closes #<issue>` in the body. Wait for CI green before merging.
+6. **Load this skill again before completion.** Re-read this workflow before opening the PR to verify branch naming, commit messages, PR template, and cross-linking are correct.
+
+**Agents may merge PRs to staging after all acceptance tests pass. Agents may NOT approve or merge PRs to main.** Only the project maintainer approves releases to production.
+
+If you find yourself with uncommitted work on `staging` or `main`, stop: create the issue and branch NOW, then move the changes to the proper branch.
+
+## ⚠️ MANDATORY: Documentation-First Development Cycle
+
+**Every change follows this cycle, in this order. No exceptions.**
+
+```
+Plan/Issue → Documentation → Tests → Implementation → Release
+```
+
+### 1. Plan / Issue
+Create or adopt a GitHub Issue. Define what changes, why, and the acceptance criteria.
+
+### 2. Documentation FIRST
+**Write or update the documentation BEFORE writing any code.** This locks in the programmatic
+interface, forces clarity on what is changing, and prevents docs from going stale. Update all
+affected pages: site docs (`site/src/content/docs/`), repo docs (`docs/`), README, skills, and
+AGENTS.md as applicable. If the change adds new functionality, write the docs that describe it.
+If it changes existing behavior, update the docs that describe that behavior. Commit the docs.
+
+### 3. Tests (outside-in)
+Write tests in this order, committing after each layer:
+1. **Acceptance / smoke tests** — user-facing behavior, end-to-end flows, CLI commands
+2. **Regression tests** — pin the specific bug or edge case being fixed
+3. **Integration tests** — component boundaries, service interactions, host wiring
+4. **Unit tests** — pure logic, isolated functions, data transformations
+
+Testing outside-in ensures the interface is stable before internals are built. A test that cannot
+be written because the interface does not exist yet is a signal that step 2 (documentation) is
+incomplete.
+
+### 4. Implementation
+Write the code that makes the tests pass. Commit incrementally — each logical unit of work gets
+its own commit referencing the issue number.
+
+### 5. Release
+Open PR, wait for CI green, merge to staging. For production releases, follow the Release
+Candidate workflow below.
+
+**Why this order matters:** Documentation written after code describes what was built, not what
+should be built — it captures implementation details instead of intent, and it is perpetually
+behind. Tests written after code verify the implementation, not the specification. The cycle
+forces specification-driven development: the docs ARE the spec, the tests validate the spec,
+and the code satisfies the tests.
+
 ## Branch Model
 
 | Branch | Purpose | Protection |
@@ -56,7 +118,7 @@ v0.1.19       ❌ WRONG — no 'v' prefix, ever
 
 ### Creating Issues
 
-Every piece of work starts with an issue. Use the appropriate template structure:
+Every piece of work starts with an issue. **All issue types require acceptance criteria** — even refactors and chores. Acceptance criteria are living checkboxes that MUST be updated as work progresses (see Progress Comments below).
 
 **Bug Report:**
 ```bash
@@ -74,6 +136,11 @@ gh issue create --title "fix: <short description>" --label "bug" --body '
 
 ## Impact
 <Who/what is affected? How severe?>
+
+## Acceptance Criteria
+- [ ] Bug no longer reproduces under the original conditions
+- [ ] Regression test added that pins the specific failure
+- [ ] Existing tests still pass
 '
 ```
 
@@ -87,8 +154,11 @@ gh issue create --title "feat: <short description>" --label "enhancement" --body
 <High-level design, if known. "TBD" is fine.>
 
 ## Acceptance Criteria
-- [ ] <criterion 1>
-- [ ] <criterion 2>
+- [ ] <functional requirement 1>
+- [ ] <functional requirement 2>
+- [ ] Documented in site docs / README / AGENTS.md as applicable
+- [ ] Unit tests covering the new behavior
+- [ ] Integration or e2e test verifying end-to-end flow (if user-facing)
 
 ## Related
 <Link to related issues, PRs, discussions, or external references>
@@ -106,8 +176,25 @@ gh issue create --title "refactor: <short description>" --label "refactor" --bod
 
 ## Risk
 <What could break? How do we verify safety?>
+
+## Acceptance Criteria
+- [ ] Refactoring complete — no behavioral change
+- [ ] All existing tests pass without modification
+- [ ] TypeCheck clean
+- [ ] Documentation updated if public API surface changed
 '
 ```
+
+### ⚠️ MANDATORY: Acceptance Criteria Are Living Checkboxes
+
+Acceptance criteria are NOT write-once. They are a **progress tracker**:
+
+1. **At issue creation:** Write all criteria as unchecked `- [ ]` items
+2. **During work:** Edit the issue body to check off items as they are completed: `- [x]`
+3. **Before opening PR:** ALL acceptance criteria must be checked. If any cannot be met, comment explaining why and update the criterion
+4. **At PR review:** Reviewer verifies each checked criterion is actually satisfied
+
+Use `gh issue edit <number> --body '...'` or the GitHub web UI to update checkboxes. A PR that closes an issue with unchecked acceptance criteria is incomplete.
 
 ### Issue Hygiene
 
@@ -132,11 +219,17 @@ gh pr create --base staging \
 ## Changes
 - <bullet list of concrete changes>
 
+## Acceptance Criteria (from #<issue>)
+<!-- Copy the acceptance criteria from the issue. Check each one as verified. -->
+- [ ] <criterion 1>
+- [ ] <criterion 2>
+
 ## Testing
-- [ ] Unit tests pass (`npm test`)
-- [ ] TypeCheck clean (`npm run typecheck`)
-- [ ] Build passes (`npm run build`)
-- [ ] E2E replay verified (if applicable)
+<!-- Fill these AFTER CI runs, not at PR creation. Update via gh pr edit or web UI. -->
+- [ ] CI green (typecheck + build + unit/integration)
+- [ ] E2E replay passed (if applicable)
+- [ ] New tests added for new behavior
+- [ ] Existing tests pass without modification (for refactors)
 
 ## Related
 Closes #<issue>
@@ -205,18 +298,41 @@ Closes #<issue>
 ## Commenting Conventions
 
 ### On Issues
-- **Status updates:** Comment when work starts, when blocked, or when scope changes. Don't let issues go silent.
+
+- **Progress updates (MANDATORY):** When completing a logical segment of work, post a comment updating the acceptance criteria state. Use this format:
+
+  ```
+  ## Progress Update
+  
+  Completed:
+  - [x] <criterion that was just met>
+  - [x] <another completed criterion>
+  
+  Remaining:
+  - [ ] <what is left>
+  
+  <Brief note on what was done, any decisions made, or blockers encountered>
+  ```
+
+  Also **edit the issue body** to check off the completed criteria there. The comment provides context; the issue body is the source of truth.
+
+- **Work started:** Comment when beginning work: "Starting implementation on `feature/N-desc`."
+- **Blocked:** Comment immediately when blocked. Name the blocker and what is needed to unblock.
+- **Scope change:** Comment explaining what changed and why before modifying acceptance criteria.
 - **Decisions:** Record architectural or scope decisions as comments so future readers understand the "why."
 - **Cross-references:** Link to related PRs, commits, or other issues: "Addressed in #<pr>", "See also #<issue>"
 - **Closing:** Let the PR auto-close via `Closes #<issue>`. Only close manually if the issue is invalid or won't-fix (with explanation).
 
 ### On PRs
+
+- **Testing verification (MANDATORY):** After CI completes, **edit the PR body** to check off the testing checkboxes based on actual CI results. Do not leave them as unchecked from creation. Use `gh pr edit <number> --body '...'` or the web UI.
+- **CI failures:** Comment on the PR with the failure diagnosis and fix plan. Don't leave red CI unexplained. After fixing, update the testing checkboxes.
 - **Review comments:** Be specific. Reference line numbers. Suggest fixes, not just problems.
 - **Author responses:** Reply to every review comment. Resolve threads when addressed. If disagreeing, explain why.
-- **CI failures:** Comment on the PR with the failure diagnosis and fix plan. Don't leave red CI unexplained.
-- **Post-merge:** No need to comment "merged" — GitHub shows this automatically. Comment only if there's follow-up work.
+- **Post-merge:** No need to comment "merged" — GitHub shows this automatically. Comment only if there is follow-up work.
 
 ### General
+
 - **Be concise.** One thought per comment. Use bullet points for lists.
 - **Use markdown.** Code blocks for snippets, links for references, checkboxes for action items.
 - **@mention sparingly.** Only when someone needs to see it. Don't @mention for FYI.
@@ -240,7 +356,7 @@ Linking creates traceability. These are REQUIRED, not optional:
 ## Feature/Fix Workflow
 
 ```
-1. Create or adopt a GitHub Issue
+1. Create or adopt a GitHub Issue (with acceptance criteria checkboxes)
    gh issue create --title "feat: ..." --label "enhancement" --body '...'
    # or: gh issue list --state open  (find existing)
 
@@ -248,22 +364,27 @@ Linking creates traceability. These are REQUIRED, not optional:
    git checkout staging && git pull origin staging
    git checkout -b feature/<issue-number>-short-description
 
-3. Work, commit, push
+3. Work, commit, push — update issue checkboxes after each segment
    git add ... && git commit -m "feat: description (#<issue>)"
    git push origin feature/<issue-number>-short-description
+   # Edit issue body: check off completed acceptance criteria
+   # Post progress comment with what was done and what remains
 
-4. Before opening PR: sync staging in
+4. Before opening PR: sync staging in, verify ALL acceptance criteria checked
    git fetch origin staging
    git merge origin/staging
    # Resolve conflicts if any, then:
    git push origin feature/<issue-number>-short-description
 
-5. Open PR targeting staging (use template above)
+5. Open PR targeting staging (copy acceptance criteria from issue into PR body)
    gh pr create --base staging --title "feat: description (#<issue>)" \
      --body "..."
 
-6. Wait for CI green, address review, merge to staging
-   gh pr merge <number> --squash   # after approval + green CI
+6. After CI completes: edit PR body to check off testing checkboxes
+   gh pr edit <number> --body '...'   # update based on actual CI results
+
+7. Address review, merge to staging
+   gh pr merge <number> --squash   # after approval + green CI + all checkboxes checked
 ```
 
 ## Release Candidate Workflow (staging → main)

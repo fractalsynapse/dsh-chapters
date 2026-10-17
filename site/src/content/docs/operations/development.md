@@ -10,11 +10,70 @@ One package, plain npm, no monorepo:
 npm ci && npm run build && npm test          # the deterministic suite: unit + integration, no model
 npm run coverage:ci                          # the ≥85% gate, same numbers CI enforces
 npm run test:e2e:replay                      # the browser acceptance chain, off model TAPES
-bash scripts/bootstrap-dev-profile.sh --home .dshdev-local   # isolated dev harness home
 ```
 
 (Deliberately no test count here: a number typed into a page goes stale on the next commit, and the honest
 figure lives in the release ledger on [§26](/operations/changelog/).)
+
+## Development environments
+
+Three setup modes live in `dev/install/` — pick whichever fits your workflow. All three install the same
+plugin set (dsh-chapters, dsh-codegraph, dsh-tinyfish-search) with the full Cordis configuration mirror.
+
+### Centralized (your live profile)
+
+Installs directly into your existing `web` profile. Edits in this checkout are reflected after rebuild
+via the `link:` protocol — no republish needed. Best for day-to-day development on your main machine.
+
+```bash
+./dev/install/install.sh
+dsh web
+```
+
+### Compartmentalized (isolated DSH_HOME)
+
+Same installer, different home. Your live sessions and config stay untouched. Best for testing changes
+that might break things, or running multiple configurations side by side.
+
+```bash
+DSH_HOME=/tmp/dsh-dev ./dev/install/install.sh
+DSH_HOME=/tmp/dsh-dev dsh --profile web web
+```
+
+### Containerized (full stack with vLLM + test runner)
+
+A self-contained Docker Compose platform with three services:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| `vllm` | 8080 | Qwen3-4B-AWQ model server (inference + systemone endpoints) |
+| `dsh-web` | 3080 | DSH Web UI, pre-configured to use vllm |
+| `dsh-test` | *(none)* | Node.js 22 + Playwright + Chromium for acceptance tests |
+
+No external API keys required. Model weights cache in a Docker volume after first download. Environment
+variables are read from your shell — no `.env` file needed.
+
+```bash
+cd dev/install
+docker compose up -d                                    # start everything
+docker compose run --rm dsh-test npm run test:e2e:replay  # run tests
+docker compose exec dsh-test bash                        # interactive test shell
+```
+
+Requires Docker ≥ 24, Compose v2, NVIDIA GPU with nvidia-container-toolkit. Full documentation in
+[`dev/install/README.md`](https://github.com/treeseed-ai/dsh-chapters/tree/main/dev/install).
+
+## CodeGraph — structural code search
+
+The installer includes [`@jiangzhenguo/dsh-codegraph`](https://github.com/jiangzhenguo/dsh-codegraph),
+which builds an AST-level index of every symbol and call edge in the project. Instead of running dozens
+of grep/glob/read round-trips to find a function or trace a flow, the agent calls `codegraph_explore`
+with a natural-language description and gets back verbatim source plus call paths — including
+dynamic-dispatch hops that text search cannot follow.
+
+The plugin is configured with `surface: core` (four tools: `status`, `init`, `sync`, `explore`) and
+`frontload: true` (injects structural context into prompts so the agent starts with code structure).
+The index lives at `.codegraph/codegraph.db` and updates incrementally via `codegraph_sync` after edits.
 
 ## The tape system (why CI has no LLM)
 

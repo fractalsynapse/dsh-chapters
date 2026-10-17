@@ -9,7 +9,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { estimateTokens, toolResultCandidates } from './render.ts'
+import { estimateTokens, renderChapter, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { buildRulesSection } from './rules.ts'
 import { rulesCommand } from './rules-commands.ts'
@@ -20,8 +20,10 @@ import { projectForCwd } from './sync.ts'
 import { deriveRanges, refusalResult, runContinue, runFork, type BudgetProbe, type ContinueConfig, type ContinuePorts } from './continue-core.ts'
 import { searchKnowledge, searchLocalStore } from './search.ts'
 import { resolveArtifactPath, resolveArtifactWithMirror, buildToc, searchArtifact, readLines } from './artifact-query.ts'
-import { makeArchiveFs, type DomainLike, type RegistryStore } from './store.ts'
-import type { SessionState } from './registry.ts'
+import { makeArchiveFs, commitChapters, type DomainLike, type RegistryStore } from './store.ts'
+import { reserve, reservePlan as reservePlanNumber, type SessionState } from './registry.ts'
+import { writeArchive, attemptKey } from './archive.ts'
+import { chapterTopics } from './signature.ts'
 
 const jsonOutput = <T>(render: (value: T) => string) => ({
   schema: { type: 'json' } as const,
@@ -75,6 +77,9 @@ export interface ToolsConfig extends ContinueConfig {
    * fork-only flow (no in-place compaction ever) never captures a route and
    * /chapters-enrich run has nothing to call. */
   noteRoute?: (route: { provider: string, model: string }) => void
+  /** P2 enrichment surface for /chapters-save: trigger an immediate drain
+   * after archiving so saved chapters are enriched promptly. */
+  enrich?: { runNow(cwd?: string): Promise<{ processed: number; remaining: number }> }
 }
 
 /** Build the two tool definitions (registration is the caller's lifecycle). */
@@ -90,7 +95,7 @@ export function buildChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
   config: ToolsConfig,
-): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand } {
+): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand } {
 
   const portsFor = async (caller: CallerAgent): Promise<ContinuePorts> => {
     const cwd = caller.session.header.cwd ?? ''
@@ -528,6 +533,100 @@ export function buildChaptersTools(
     noDirective: 'If the notice above names an active plan, that is your directive — read its full text before implementing and do NOT re-plan from recall. Otherwise ask the user what to carry on with.',
   })
 
+  // ------------------------------------------------- /chapters-save (archive without child)
+
+  /**
+   * Archive-only door: same pipeline as fork/continue (composeChapters + writeArchive)
+   * but stops before agents.create. Writes chapters to disk, commits records to the
+   * session state (so search picks them up), and triggers enrichment. No child session,
+   * no compaction, no disruption to the active conversation.
+   */
+  const saveCommand: HostCommand = {
+    name: 'chapters-save',
+    description: 'Save completed turns as searchable chapters without creating a new session. Archives verbatim, updates the search index, and triggers enrichment. Idempotent — re-running saves only what has not yet been archived.',
+    input: { hint: '[title]' },
+    async handler(invocation: { agent: unknown; rawInput?: string; signal?: AbortSignal }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
+      const agent = invocation.agent as CallerAgent
+      if (agent?.session === undefined) return { kind: 'error' as const, text: 'chapters-save: no session context for this invocation' }
+      try {
+        const ports = await portsFor(agent)
+        const cwd0 = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+        const events = await ports.readCallerEvents()
+        const anchor = [...events].reverse().find((e) => e.type === 'turn/end')?.seq
+        if (anchor === undefined) return { kind: 'error' as const, text: 'chapters-save: nothing to save yet — the conversation has no completed turn' }
+
+        // Watermark: only archive what is newer than the last saved chapter.
+        const parentState = await ports.getState(agent.session.id)
+        const lastArchived = parentState.chapters.reduce((m, c) => Math.max(m, c.endSeq), 0)
+        const fromSeq = lastArchived > 0 ? lastArchived + 1 : 0
+        if (fromSeq > 0 && anchor <= lastArchived) {
+          return { kind: 'success' as const, text: `Nothing to save: all ${parentState.chapters.length} chapter(s) already archived through seq ${lastArchived}. Content is searchable via chapters_search.` }
+        }
+
+        // Topic-sequential composition — same pipeline as fork/continue.
+        const composed = composeChapters(events, fromSeq, anchor, parentState.collections, {
+          mergeThreshold: config.mergeThreshold,
+          chapterLimit: config.chapterLimit,
+        })
+        const chapters = composed.chapters.length > 0
+          ? composed.chapters
+          : deriveRanges(events, anchor, config.chapterTokenTarget, fromSeq).chapters
+
+        // Render + write archive (same as runContinue steps 2-3, minus child creation).
+        const below = events.filter((e) => e.seq <= anchor)
+        const renderConfig = {
+          toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
+          chapterTokenTarget: config.chapterTokenTarget,
+          ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),
+          ...(config.callArgArtifactTokens !== undefined ? { callArgArtifactTokens: config.callArgArtifactTokens } : {}),
+        }
+        const rendered = chapters.map((range) => renderChapter(below, range, renderConfig, [], chapterTopics(below, range.startSeq, range.endSeq)))
+        const fsPort = ports.fs()
+        const wrote = await writeArchive({
+          fs: fsPort,
+          allocator: {
+            async reserve(attemptId, count) {
+              const fresh = await ports.getState(agent.session.id)
+              const r = reserve(fresh, attemptId, count)
+              await ports.putState(agent.session.id, r.state)
+              return r.numbers
+            },
+            async reservePlan(attemptId, count) {
+              const fresh = await ports.getState(agent.session.id)
+              const r = reservePlanNumber(fresh, attemptId, count)
+              await ports.putState(agent.session.id, r.state)
+              return r.numbers
+            },
+          },
+          storeRoot: config.artifactStoreRoot,
+          rootSessionId: parentState.rootSession,
+          chapters: rendered,
+          attemptId: attemptKey(agent.session.id, anchor),
+        })
+
+        // Commit chapter records to session state so search index picks them up.
+        await commitChapters(store, agent.session.id, wrote.records)
+
+        // Trigger enrichment on newly archived chapters.
+        let enrichNote = ''
+        if (config.enrich !== undefined) {
+          try {
+            const result = await config.enrich.runNow(cwd0 || undefined)
+            enrichNote = `; enriched ${result.processed} chapter(s)${result.remaining > 0 ? `, ${result.remaining} remaining` : ''}`
+          } catch { /* enrichment best-effort */ }
+        }
+
+        // Schedule sync so saved chapters travel to the pool.
+        if (cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:save')
+
+        const warnings = wrote.warnings.length > 0 ? ` (${wrote.warnings.length} warning(s))` : ''
+        return { kind: 'success' as const, text: `Saved: ${wrote.records.length} chapter(s) archived (seqs ${fromSeq}..${anchor})${enrichNote}${warnings}. Content is searchable via chapters_search from any session in this workspace.` }
+      } catch (error) {
+        return { kind: 'error' as const, text: `chapters-save failed: ${String((error as Error)?.message ?? error)}`.slice(0, 500) }
+      }
+    },
+  }
+
   // ------------------------------------------------- knowledge project line
 
   // The notice carries the knowledge-project line (record §8) when a project
@@ -731,7 +830,7 @@ export function buildChaptersTools(
     },
   })
 
-  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, forkCommand, continueCommand }
+  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, forkCommand, continueCommand, saveCommand }
 }
 
 export function registerChaptersTools(
@@ -754,7 +853,7 @@ export function registerChaptersTools(
       // that overwrote `disposeCommand` would leak the first registration and unregister
       // only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }
