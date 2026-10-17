@@ -186,10 +186,43 @@ dev/install/
 ├── .env.example                 ← environment variable reference (not required at runtime)
 └── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
 
-.dsh/skills/
-└── local-llm/
-    └── SKILL.md                 ← agent skill for working with the local vLLM
+.dsh/skills/                     ← all agent skills (see below)
+skills-lock.json                 ← lock file for upstream-installed skills
 ```
+
+## Skills
+
+Skills live in `.dsh/skills/<name>/SKILL.md`. Two categories:
+
+### Project-owned (maintained in this repo, NOT in skills-lock.json)
+
+These are authored or customized locally. `npx skills update` will not touch them.
+
+| Skill | Origin | Notes |
+|-------|--------|-------|
+| `release-workflow` | Authored locally | Mandatory Git/GitHub workflow |
+| `local-llm` | Authored locally | vLLM endpoint guidance |
+| `find-skills` | Forked from vercel-labs/skills | Modified to require user approval before install |
+| `gh-cli` | Pre-existing | GitHub CLI reference |
+
+### Upstream-tracked (installed via `npx skills`, tracked in skills-lock.json)
+
+These are installed from skills.sh and pinned by content hash. Run `npx skills update`
+to update them. The lock file ensures reproducible installs across clones.
+
+| Skill | Source | Installs |
+|-------|--------|----------|
+| `brainstorming` | obra/superpowers | 395K |
+| `writing-plans` | obra/superpowers | 275.7K |
+| `verification-before-completion` | obra/superpowers | 242.6K |
+| `writing-skills` | obra/superpowers | 211.7K |
+| `doc-coauthoring` | anthropics/skills | 91.5K |
+| `documentation-writer` | github/awesome-copilot | 27.5K |
+| `github-ops` | affaan-m/ecc | 8.3K |
+
+**Updating**: `npx skills update` refreshes upstream-tracked skills only. Project-owned
+skills are updated by editing them directly and committing. If an upstream update breaks
+a customization, re-fork and re-apply the modification.
 
 ## Prerequisites
 
