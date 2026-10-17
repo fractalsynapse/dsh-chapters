@@ -15,7 +15,7 @@ FROM vllm/vllm-openai:latest
 
 # Model configuration
 ENV MODEL_ID=Qwen/Qwen3-4B-AWQ
-ENV SERVED_NAMES="qwen3-4b-instruct,qwen3-4b-systemone"
+ENV SERVED_NAMES="qwen3-4b-instruct qwen3-4b-systemone"
 ENV MAX_MODEL_LEN=32768
 ENV GPU_MEMORY_UTILIZATION=0.90
 ENV TENSOR_PARALLEL_SIZE=1
@@ -35,15 +35,15 @@ HEALTHCHECK --interval=15s --timeout=5s --retries=20 --start-period=120s \
 # NOT interpolated — the old form handed vLLM the literal string "${MAX_MODEL_LEN}"
 # and argparse killed every boot (#19).
 ENTRYPOINT []
-# SERVED_NAMES is a comma-separated list and --served-model-name is VARIADIC:
-# passing "a,b" as one argv element registers a single alias literally named
-# "a,b", so requests for either bare name 404 (measured on vLLM 0.31).
-# Word-split it into repeated flags — shell-form CMD gives us /bin/sh.
-# (POSIX sh has no ${VAR/IFS/x} substitution; set IFS around the loop.)
-CMD OLDIFS=$IFS; IFS=,; for n in $SERVED_NAMES; do set -- "$@" --served-model-name "$n"; done; IFS=$OLDIFS; \
-  python3 -m vllm.entrypoints.openai.api_server \
+# --served-model-name is VARIADIC (nargs="+"), NOT append. Measured on vLLM 0.31:
+#   repeated flags  -> argparse keeps only the LAST value (one alias served);
+#   one "a,b" value -> a single alias literally named "a,b";
+# both make the other bare name 404. The correct form is ONE flag with
+# space-separated values, so SERVED_NAMES is space-separated and expands
+# unquoted into argv words (shell-form CMD gives us /bin/sh).
+CMD python3 -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_ID" \
-  "$@" \
+  --served-model-name $SERVED_NAMES \
   --max-model-len "$MAX_MODEL_LEN" \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \

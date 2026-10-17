@@ -76,14 +76,15 @@ test('regression: no vLLM CLI argument is passed as an unexpanded ${...} literal
     assert.deepEqual(parsers, ['hermes'], `unexpected tool-call parser(s): ${parsers}`)
   }
 
-  // `--served-model-name` is variadic in argparse: an unquoted $SERVED_NAMES
-  // word-splits "a,b" into ONE alias 'a,b' (measured: /v1/models returns a
-  // single id containing a comma; both bare names then 404). The loop form
-  // with IFS=, produces one flag per name. POSIX sh has no ${VAR/IFS/x}
-  // substitution — a row here so the broken expansion never comes back.
-  assert.match(body, /IFS=,; for n in \$SERVED_NAMES/, 'SERVED_NAMES must be IFS-split into repeated --served-model-name args')
-  assert.doesNotMatch(body, /\$\{IFS=,\}\$SERVED_NAMES/, 'POSIX sh does not substitute IFS inside ${...} — this form never splits')
-  assert.doesNotMatch(body, /^CMD.*--served-model-name \$SERVED_NAMES/m, 'single comma-joined served-model-name arg is the #19-adjacent 404 bug')
+  // `--served-model-name` is VARIADIC (nargs="+"), NOT append. Measured against
+  // vLLM 0.31's real parser: repeated flags make argparse keep only the LAST
+  // value (one alias served, the other 404s); a single "a,b" value registers
+  // one alias literally named "a,b" (both bare names 404). The only correct
+  // form is ONE flag with space-separated values expanding unquoted into argv.
+  assert.match(body, /--served-model-name \$SERVED_NAMES/, 'exactly one --served-model-name flag with an unquoted, space-separated $SERVED_NAMES')
+  assert.doesNotMatch(body, /for n in .*SERVED_NAMES/, 'repeated --served-model-name flags: argparse keeps only the last value')
+  const servedEnv = body.match(/^ENV\s+SERVED_NAMES=(.*)$/m)?.[1] ?? ''
+  assert.ok(!servedEnv.includes(','), `ENV SERVED_NAMES must be space-separated, got: ${servedEnv}`)
 
   // The base image ships ENTRYPOINT ["vllm","serve"]; an exec-form ENTRYPOINT
   // here would swallow the shell-form CMD entirely (the python module never

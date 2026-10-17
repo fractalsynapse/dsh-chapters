@@ -36,7 +36,7 @@ services:
       - "${VLLM_PORT:-8080}:8080"
     environment:
       MODEL_ID: ${VLLM_MODEL_ID:-Qwen/Qwen3-4B-AWQ}
-      SERVED_NAMES: ${VLLM_SERVED_NAMES:-qwen3-4b-instruct,qwen3-4b-systemone}
+      SERVED_NAMES: ${VLLM_SERVED_NAMES:-qwen3-4b-instruct qwen3-4b-systemone}
       MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-32768}
       GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEM:-0.90}
       TENSOR_PARALLEL_SIZE: ${VLLM_TP_SIZE:-1}

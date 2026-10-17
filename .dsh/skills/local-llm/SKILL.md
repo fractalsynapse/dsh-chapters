@@ -142,7 +142,7 @@ All variables are read from the **parent shell**. No `.env` file required. See
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VLLM_MODEL_ID` | `Qwen/Qwen3-4B-AWQ` | HuggingFace model to serve |
-| `VLLM_SERVED_NAMES` | `qwen3-4b-instruct,qwen3-4b-systemone` | Model aliases |
+| `VLLM_SERVED_NAMES` | `qwen3-4b-instruct qwen3-4b-systemone` | Model aliases (**space**-separated — vLLM's flag is variadic; commas or repeated flags 404 all but one alias) |
 | `VLLM_MAX_MODEL_LEN` | `32768` | Context window size |
 | `VLLM_GPU_MEM` | `0.90` | GPU memory utilization |
 | `LLM_MODEL` | `qwen3-4b-instruct` | Default model for DSH sessions |
@@ -157,6 +157,18 @@ All variables are read from the **parent shell**. No `.env` file required. See
   is reused by `up`; remove it with `docker rm -f dsh-vllm` if compose keeps the old one.
 - **`dependency vllm failed to start`** for `dsh-web`/`dsh-test` — always a symptom of the above or
   a failed healthcheck; fix vllm first, the dependents follow once healthy.
+- **vllm exits with `--enable-auto-tool-choice requires --tool-call-parser`** — also an old image:
+  vLLM ≥ 0.31 refuses auto tool choice unless a parser is named. The fixed Dockerfile passes
+  `--tool-call-parser hermes` (Qwen3's native tool-call format). Rebuild with
+  `docker compose build --no-cache vllm`.
+- **`The model 'qwen3-4b-instruct' does not exist` while the server is healthy** — two causes, both
+  in how aliases are passed: a comma-joined value registers ONE alias literally named `"a,b"`, and
+  repeated `--served-model-name` flags make argparse keep only the LAST value. Set
+  `VLLM_SERVED_NAMES` space-separated (the fixed image passes it as one variadic flag), rebuild,
+  and confirm with `curl localhost:8080/v1/models` listing BOTH ids.
+- **`Free memory on device cuda:0 ... less than desired GPU memory utilization`** — other processes
+  hold VRAM (this box shares the GPU with desktop compositing). Lower `VLLM_GPU_MEM` (e.g. 0.75) or
+  free the GPU; this is a host condition, not a stack bug.
 
 ## Requirements
 
