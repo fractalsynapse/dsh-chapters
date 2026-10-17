@@ -144,7 +144,7 @@ All variables are read from the **parent shell**. No `.env` file required. See
 | `VLLM_MODEL_ID` | `Qwen/Qwen3-4B-AWQ` | HuggingFace model to serve |
 | `VLLM_SERVED_NAMES` | `qwen3-4b-instruct qwen3-4b-systemone` | Model aliases (**space**-separated — vLLM's flag is variadic; commas or repeated flags 404 all but one alias) |
 | `VLLM_MAX_MODEL_LEN` | `32768` | Context window size |
-| `VLLM_GPU_MEM` | `0.90` | GPU memory utilization |
+| `VLLM_GPU_MEM` | `0.75` | GPU memory utilization (0.90 only on a dedicated GPU; desktop-shared GPUs abort at 0.90) |
 | `LLM_MODEL` | `qwen3-4b-instruct` | Default model for DSH sessions |
 | `SYSTEMONE_MODEL` | `qwen3-4b-systemone` | Decision model name |
 
