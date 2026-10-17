@@ -5,6 +5,9 @@
 set -euo pipefail
 
 PROFILE_DIR="$DSH_HOME/profiles/web"
+# The image bakes this directory, but a bind-mounted or wiped $DSH_HOME may not
+# have it; settings.yaml below would die on the redirect with ENOENT.
+mkdir -p "$PROFILE_DIR"
 
 # ── Defaults ───────────────────────────────────────────────────────────────────
 LLM_BASE_URL="${LLM_BASE_URL:-http://vllm:8080/v1}"
@@ -17,7 +20,37 @@ SYSTEMONE_MODEL="${SYSTEMONE_MODEL:-qwen3-4b-systemone}"
 QWEN_TOKEN_PLAN_API_KEY="${QWEN_TOKEN_PLAN_API_KEY:-}"
 TINYFISH_API_KEY="${TINYFISH_API_KEY:-}"
 DSH_PORT="${DSH_PORT:-3080}"
-DSH_HOST="${DSH_HOST:-0.0.0.0}"
+# 0.2.x refuses to bind 0.0.0.0 (remote-code-execution safety, dsh-web-app
+# startup.js). Inside the container we bind loopback; Docker's published port
+# mapping is what makes the UI reachable from the host.
+DSH_HOST="${DSH_HOST:-127.0.0.1}"
+
+# ── Repair the profile manifest ───────────────────────────────────────────────
+# The image writes profiles/web/package.json with a heredoc inside RUN. On the
+# legacy (non-BuildKit) builder, multi-line RUN continuations are joined with
+# " && \\\n", so a trailing `<<EOF` heredoc never receives its body: the file
+# is created EMPTY and every boot dies at JSON.parse ("Unexpected end of JSON
+# input") in a restart loop (#19). An empty manifest is never valid — delete it
+# and let app-boot re-init the profile from its shipped template. A manifest
+# with real bytes (a user's edited one) is left alone.
+if [ -e "$PROFILE_DIR/package.json" ] && [ ! -s "$PROFILE_DIR/package.json" ]; then
+  echo "[entrypoint] removing zero-byte profile manifest; dsh will re-initialize it"
+  rm -f "$PROFILE_DIR/package.json"
+fi
+
+# ── Seed the credentials document ─────────────────────────────────────────────
+# credentials-local refuses to load a world-readable .credentials.yaml (mode
+# must be owner-only) and its absence would fail the `credentials` service.
+# A named volume mounted at that FILE path becomes an empty 755 DIRECTORY —
+# so compose no longer mounts one, and we own the file here instead. API keys
+# still arrive through env (apiKeyEnv references), nothing is lost per boot.
+CREDENTIALS_FILE="$DSH_HOME/.credentials.yaml"
+if [ ! -f "$CREDENTIALS_FILE" ]; then
+  echo "[entrypoint] seeding $CREDENTIALS_FILE (mode 600)"
+  umask 077
+  printf 'version: 1\nrefs: {}\n' > "$CREDENTIALS_FILE"
+  chmod 600 "$CREDENTIALS_FILE"
+fi
 
 # ── Generate settings.yaml ────────────────────────────────────────────────────
 echo "[entrypoint] Generating settings for model=$LLM_MODEL window=$LLM_CONTEXT_WINDOW..."
@@ -123,6 +156,6 @@ echo "[entrypoint] LLM: $LLM_BASE_URL ($LLM_MODEL)"
 echo "[entrypoint] SystemOne: $SYSTEMONE_BASE_URL ($SYSTEMONE_MODEL)"
 echo "[entrypoint] Token plan: ${QWEN_TOKEN_PLAN_API_KEY:+configured}${QWEN_TOKEN_PLAN_API_KEY:-not set}"
 
-exec dsh --profile web web \
+exec dsh web \
   --host "$DSH_HOST" \
   --port "$DSH_PORT"

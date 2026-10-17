@@ -282,6 +282,13 @@ not a plugin bug.
 - **Always give a tool an `output` schema** — mandatory on every `ToolDefinition`.
 - **Call `next()` in waterfall listeners** unless deliberately short-circuiting, and document why.
 - **No hardcoded tunables.** If `cordis.yml` can change it, it belongs in config.
+- **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
+  with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
+  When a question stalls, change something real: different arguments, a different tool, or state what is
+  established and act on it. Measured against myself 2026-10-17: dozens of byte-identical greps during one
+  debug loop, each justified as "one more check" — the fact that would have ended it (`api/health` 404s even
+  authenticated on host 0.2.x) was already proven several rounds earlier. If you catch a near-verbatim
+  repeat in your own history, STOP the loop and proceed from what is already measured.
 
 ## Start Here
 

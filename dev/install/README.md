@@ -61,6 +61,61 @@ docker compose run --rm dsh-test npm run coverage:ci
 docker compose exec dsh-test bash
 ```
 
+### Troubleshooting
+
+**`dsh-vllm` exits with `invalid human_readable_int_or_auto value: '${MAX_MODEL_LEN}'`.**
+The image was built from an old `vllm.Dockerfile` that passed literal `${VAR}` strings to vLLM
+(exec-form `CMD` does not interpolate). Fixed by rebuilding the image:
+
+```bash
+cd dev/install
+docker compose build --no-cache vllm
+docker compose up -d
+```
+
+Verify the container is serving before starting the dependents:
+
+```bash
+docker compose ps            # vllm should be healthy (model load takes ~2 min)
+curl -s http://localhost:8080/health
+```
+
+If a stale `dsh-vllm` container keeps getting reused, remove it first:
+`docker rm -f dsh-vllm`.
+
+**`dsh-web` restarts with `error: too many arguments ... web`.** The image was built before the
+launcher fix: host 0.2.x boots a profile with `dsh web --host … --port …` (the old
+`dsh --profile web web` form is rejected). Rebuild: `docker compose build dsh-web`.
+
+**The UI binds loopback inside the container.** Host 0.2.x deliberately refuses `--host 0.0.0.0`
+(remote code execution exposure). Normally you reach it through the published port mapping
+(`http://localhost:3080`). On some machines a local proxy intercepts Docker's published ports and
+resets host-side connections (measured on this box 2026-10-17 — even an unrelated test listener was
+unreachable from the host, so this is not a compose bug). Workarounds that always work:
+
+```bash
+docker exec dsh-chapters-dev curl -s http://127.0.0.1:3080/   # from inside the network
+ssh -L 3080:127.0.0.1:3080 <this-host>                        # tunnel to the bind directly
+```
+
+The token URL printed by `docker logs dsh-chapters-dev` (`dsh web: http://…/?token=…`) is what the
+browser opens; the same exchange works over the tunnel.
+
+**`dsh-vllm` exits with `--enable-auto-tool-choice requires --tool-call-parser`.**
+Also the old image: newer vLLM (≥ 0.31) refuses auto tool choice without naming a parser.
+The fixed image passes `--tool-call-parser hermes`, the format Qwen3 emits natively.
+Rebuild as above.
+
+**Server is healthy but `The model 'qwen3-4b-instruct' does not exist`.**
+Model aliases were passed wrong: vLLM's `--served-model-name` is *variadic* — one flag,
+space-separated values. A comma-joined value registers a single alias literally named `"a,b"`,
+and repeated flags keep only the last value. The fixed image and `.env.example` use
+`VLLM_SERVED_NAMES=qwen3-4b-instruct qwen3-4b-systemone`; rebuild and confirm both ids appear
+under `curl localhost:8080/v1/models`.
+
+**`Free memory on device cuda:0 ... less than desired GPU memory utilization`.**
+Other processes hold VRAM (shared desktop GPU). Lower `VLLM_GPU_MEM` (e.g. `0.75`) or free the GPU.
+
 ### Uninstall
 
 ```bash
