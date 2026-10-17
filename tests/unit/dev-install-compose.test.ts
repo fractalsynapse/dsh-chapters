@@ -65,6 +65,12 @@ test('regression: no vLLM CLI argument is passed as an unexpanded ${...} literal
   const hasShellForm = /^[ \t]*(CMD|ENTRYPOINT)[ \t]+(?!["[])/m.test(body)
   const expandsInScript = /docker-entrypoint\.sh/.test(body) && /\$\{?[A-Z_]+\}?/.test(read('docker-entrypoint.sh'))
   assert.ok(hasShellForm || expandsInScript, 'vLLM args are not expanded anywhere — literal ${VAR} strings will reach argv')
+
+  // The base image ships ENTRYPOINT ["vllm","serve"]; an exec-form ENTRYPOINT
+  // here would swallow the shell-form CMD entirely (the python module never
+  // runs). Overriding it empty is the contract.
+  const entrypoints = [...body.matchAll(/^ENTRYPOINT(.*)$/gm)].map((m) => m[1]!.trim())
+  assert.deepEqual(entrypoints, ['[]'], 'vllm.Dockerfile must carry exactly `ENTRYPOINT []` to clear the base image launcher')
 })
 
 test('contract: compose.yml feeds vllm env with defaults matching .env.example', () => {
@@ -88,12 +94,23 @@ test('contract: compose.yml feeds vllm env with defaults matching .env.example',
   assert.equal(composeEnv.GPU_MEMORY_UTILIZATION!.fallback, '0.90')
 })
 
-test('contract: vllm.Dockerfile ENV defaults exist for every variable its CMD expands', () => {
+test('contract: every variable the CMD expands has an ENV default (docker run alone works)', () => {
   const dockerfile = read('vllm.Dockerfile')
-  const used = new Set([...dockerfile.matchAll(/\$\{([A-Z_]+)\}/g)].map((m) => m[1]!))
-  const setByEnv = new Set([...dockerfile.matchAll(/^ENV\s+([A-Z_]+)=/gm)].map((m) => m[1]!))
-  for (const v of used) {
-    assert.ok(setByEnv.has(v), `CMD expands \${${v}} but no ENV line gives it a build-time default`)
-  }
+  // ignore prose inside comments — only instructions can expand at runtime
+  const body = dockerfile.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+  const used = new Set([...body.matchAll(/\$(?:\{([A-Z_]+)\}|([A-Z_]{3,})\b)/g)].map((m) => m[1] ?? m[2]!))
   assert.ok(used.size >= 4, 'expected the launch args to read at least four env vars')
+
+  // ENV keys may be quoted (ENV X="a,b"); a bare `${VAR}` in argv with no ENV
+  // default expands to empty and argparse dies again.
+  const setByEnv = new Set([...body.matchAll(/^ENV\s+([A-Z_]+)=/gm)].map((m) => m[1]!))
+  for (const v of used) {
+    assert.ok(setByEnv.has(v), `$${v} is expanded by the CMD but no ENV line gives it a build-time default`)
+  }
+
+  // compose must ALSO feed each of these with a :-fallback so host overrides win
+  const compose = read('compose.yml')
+  for (const v of used) {
+    assert.ok(new RegExp(`\\b${v}:\\s*\\$\\{[A-Z_]+:-[^}]+\\}`).test(compose), `compose.yml does not pass ${v} with a :-default`)
+  }
 })
