@@ -88,8 +88,18 @@ launcher fix: host 0.2.x boots a profile with `dsh web --host … --port …` (t
 `dsh --profile web web` form is rejected). Rebuild: `docker compose build dsh-web`.
 
 **The UI binds loopback inside the container.** Host 0.2.x deliberately refuses `--host 0.0.0.0`
-(remote code execution exposure). Reach the UI through the published port mapping
-(`http://localhost:3080`) — Docker forwards into the container's loopback just fine.
+(remote code execution exposure). Normally you reach it through the published port mapping
+(`http://localhost:3080`). On some machines a local proxy intercepts Docker's published ports and
+resets host-side connections (measured on this box 2026-10-17 — even an unrelated test listener was
+unreachable from the host, so this is not a compose bug). Workarounds that always work:
+
+```bash
+docker exec dsh-chapters-dev curl -s http://127.0.0.1:3080/   # from inside the network
+ssh -L 3080:127.0.0.1:3080 <this-host>                        # tunnel to the bind directly
+```
+
+The token URL printed by `docker logs dsh-chapters-dev` (`dsh web: http://…/?token=…`) is what the
+browser opens; the same exchange works over the tunnel.
 
 **`dsh-vllm` exits with `--enable-auto-tool-choice requires --tool-call-parser`.**
 Also the old image: newer vLLM (≥ 0.31) refuses auto tool choice without naming a parser.

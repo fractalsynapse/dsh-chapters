@@ -158,8 +158,15 @@ All variables are read from the **parent shell**. No `.env` file required. See
 - **`dsh-web` restart loop with `error: too many arguments ... web`** — image built before the
   launcher fix: host 0.2.x boots via `dsh web --host … --port …`; the old `dsh --profile web web`
   form is rejected. Rebuild: `docker compose build dsh-web`. The UI binds **loopback inside the
-  container** (0.2.x refuses `--host 0.0.0.0` for RCE safety); the published port mapping still
-  makes it reachable at `http://localhost:3080`.
+  container** (0.2.x refuses `--host 0.0.0.0` for RCE safety). If the published port resets host
+  connections on your machine (a local proxy intercepts Docker NAT — measured on this box), reach
+  it with `docker exec dsh-chapters-dev curl http://127.0.0.1:3080/` or an SSH tunnel instead.
+- **`dsh: startup failed: 1 required plugin did not activate` + credentials mode 755** — a named
+  volume mounted at the FILE path `.credentials.yaml` becomes an empty 755 directory. Fixed (#19):
+  no credentials volume; the entrypoint seeds the file at mode 600. If you re-added one, remove it.
+- **`skipping profile bundle "@treeseed/dsh-chapters"` / plugins absent in the Web UI** — pre-fix
+  images had `link:/app` (npm rejects the protocol) and a silent `|| true` install. Rebuild the
+  image; verify with `docker exec dsh-chapters-dev ls /dsh-home/profiles/web/node_modules/@treeseed`.
 - **`dependency vllm failed to start`** for `dsh-web`/`dsh-test` — always a symptom of the above or
   a failed healthcheck; fix vllm first, the dependents follow once healthy.
 - **vllm exits with `--enable-auto-tool-choice requires --tool-call-parser`** — also an old image:
