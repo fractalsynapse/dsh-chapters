@@ -37,7 +37,7 @@ that might break things, or running multiple configurations side by side.
 
 ```bash
 DSH_HOME=/tmp/dsh-dev ./dev/install/install.sh
-DSH_HOME=/tmp/dsh-dev dsh --profile web web
+DSH_HOME=/tmp/dsh-dev dsh web
 ```
 
 ### Containerized (full stack with vLLM + test runner)

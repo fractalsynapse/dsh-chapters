@@ -83,6 +83,14 @@ curl -s http://localhost:8080/health
 If a stale `dsh-vllm` container keeps getting reused, remove it first:
 `docker rm -f dsh-vllm`.
 
+**`dsh-web` restarts with `error: too many arguments ... web`.** The image was built before the
+launcher fix: host 0.2.x boots a profile with `dsh web --host … --port …` (the old
+`dsh --profile web web` form is rejected). Rebuild: `docker compose build dsh-web`.
+
+**The UI binds loopback inside the container.** Host 0.2.x deliberately refuses `--host 0.0.0.0`
+(remote code execution exposure). Reach the UI through the published port mapping
+(`http://localhost:3080`) — Docker forwards into the container's loopback just fine.
+
 **`dsh-vllm` exits with `--enable-auto-tool-choice requires --tool-call-parser`.**
 Also the old image: newer vLLM (≥ 0.31) refuses auto tool choice without naming a parser.
 The fixed image passes `--tool-call-parser hermes`, the format Qwen3 emits natively.

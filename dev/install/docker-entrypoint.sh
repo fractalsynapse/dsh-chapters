@@ -17,7 +17,10 @@ SYSTEMONE_MODEL="${SYSTEMONE_MODEL:-qwen3-4b-systemone}"
 QWEN_TOKEN_PLAN_API_KEY="${QWEN_TOKEN_PLAN_API_KEY:-}"
 TINYFISH_API_KEY="${TINYFISH_API_KEY:-}"
 DSH_PORT="${DSH_PORT:-3080}"
-DSH_HOST="${DSH_HOST:-0.0.0.0}"
+# 0.2.x refuses to bind 0.0.0.0 (remote-code-execution safety, dsh-web-app
+# startup.js). Inside the container we bind loopback; Docker's published port
+# mapping is what makes the UI reachable from the host.
+DSH_HOST="${DSH_HOST:-127.0.0.1}"
 
 # ── Generate settings.yaml ────────────────────────────────────────────────────
 echo "[entrypoint] Generating settings for model=$LLM_MODEL window=$LLM_CONTEXT_WINDOW..."
@@ -123,6 +126,6 @@ echo "[entrypoint] LLM: $LLM_BASE_URL ($LLM_MODEL)"
 echo "[entrypoint] SystemOne: $SYSTEMONE_BASE_URL ($SYSTEMONE_MODEL)"
 echo "[entrypoint] Token plan: ${QWEN_TOKEN_PLAN_API_KEY:+configured}${QWEN_TOKEN_PLAN_API_KEY:-not set}"
 
-exec dsh --profile web web \
+exec dsh web \
   --host "$DSH_HOST" \
   --port "$DSH_PORT"

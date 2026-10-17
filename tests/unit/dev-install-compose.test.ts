@@ -137,3 +137,18 @@ test('contract: every variable the CMD expands has an ENV default (docker run al
     assert.ok(new RegExp(`\\b${v}:\\s*\\$\\{[A-Z_]+:-[^}]+\\}`).test(compose), `compose.yml does not pass ${v} with a :-default`)
   }
 })
+
+test('regression: dsh-web launches with the 0.2.x launcher form and a loopback bind (#19)', () => {
+  const entry = read('docker-entrypoint.sh')
+  // Host 0.2.x boots a profile as `dsh web …`; the old `dsh --profile web web`
+  // form dies at exec with "too many arguments ... web" — a restart loop that
+  // kept dsh-web from ever serving.
+  assert.doesNotMatch(entry, /dsh --profile web web/, 'the 0.2.x launcher rejects "--profile web web" (too many arguments)')
+  assert.match(entry, /exec dsh web \\/, 'entrypoint must boot the web profile with `exec dsh web \\`')
+
+  // 0.2.x refuses --host 0.0.0.0 for RCE safety (dsh-web-app startup.js); the
+  // published port mapping is what makes the UI reachable from the host.
+  assert.match(entry, /DSH_HOST="\$\{DSH_HOST:-127\.0\.0\.1\}"/, 'default DSH_HOST must be loopback; 0.0.0.0 aborts the boot')
+  const compose = read('compose.yml')
+  assert.doesNotMatch(compose, /DSH_HOST:\s*"?0\.0\.0\.0/, 'compose must not set DSH_HOST to 0.0.0.0 — the host refuses it')
+})

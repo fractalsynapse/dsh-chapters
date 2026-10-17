@@ -89,7 +89,9 @@ services:
       TINYFISH_API_KEY: ${TINYFISH_API_KEY:-}
       # DSH configuration
       DSH_PORT: "3080"
-      DSH_HOST: "0.0.0.0"
+      # 0.2.x refuses --host 0.0.0.0 (RCU safety, startup.js); bind loopback and
+      # reach the UI through the published port mapping instead.
+      DSH_HOST: "127.0.0.1"
       DSH_HOME: /dsh-home
     volumes:
       - dsh-sessions:/dsh-home/sessions

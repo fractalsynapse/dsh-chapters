@@ -155,6 +155,11 @@ All variables are read from the **parent shell**. No `.env` file required. See
   `${VAR}` strings to vLLM because Docker does not interpolate inside JSON arrays. Rebuild with
   `docker compose build --no-cache vllm`, then `docker compose up -d`. A stale `dsh-vllm` container
   is reused by `up`; remove it with `docker rm -f dsh-vllm` if compose keeps the old one.
+- **`dsh-web` restart loop with `error: too many arguments ... web`** — image built before the
+  launcher fix: host 0.2.x boots via `dsh web --host … --port …`; the old `dsh --profile web web`
+  form is rejected. Rebuild: `docker compose build dsh-web`. The UI binds **loopback inside the
+  container** (0.2.x refuses `--host 0.0.0.0` for RCE safety); the published port mapping still
+  makes it reachable at `http://localhost:3080`.
 - **`dependency vllm failed to start`** for `dsh-web`/`dsh-test` — always a symptom of the above or
   a failed healthcheck; fix vllm first, the dependents follow once healthy.
 - **vllm exits with `--enable-auto-tool-choice requires --tool-call-parser`** — also an old image:
