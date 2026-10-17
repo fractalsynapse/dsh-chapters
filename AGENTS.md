@@ -501,6 +501,18 @@ being edited from is solved — see [docs/development.md](docs/development.md).
 Then [docs/contract.md](docs/contract.md) for how to declare things, and
 [docs/verify.md](docs/verify.md) before claiming any step passes.
 
+## Workflow Gate (MANDATORY)
+
+**At the START of every new project or statement of work:** load the `release-workflow` skill,
+create or adopt a GitHub Issue, and create a feature branch from the latest `staging`. Never begin
+work without an issue and a branch. Never work directly on `staging` or `main`.
+
+**Before COMPLETING any project:** reload the `release-workflow` skill to verify branch naming,
+commit messages, PR template, and cross-linking are correct before opening the PR. Agents may merge
+PRs to `staging` after acceptance tests pass. Agents may NOT approve or merge to `main`.
+
+This gate is non-negotiable. If you find uncommitted work on the wrong branch, stop and fix it now.
+
 ## Efficiency Rules
 
 1. Do not read all four `examples/` repos. Read the one file that answers the current question
@@ -518,3 +530,9 @@ Then [docs/contract.md](docs/contract.md) for how to declare things, and
    itself the drift this rule warns about.)
 5. Build before installing (`tsc -p tsconfig.json`), and remember a restart recomposes every session's
    header, so cache measurements only mean something within one process generation.
+6. Attempt the solution yourself first. Run the build, the test, the command — do not describe what
+   *should* happen and wait for confirmation. Iterate on failures until you hit a genuine blocker
+   (missing credentials, hardware unavailable, a decision that requires human judgment, or a system
+   error beyond your control). The user learns what the limits are by watching you push against them;
+   stopping early to ask "should I try?" wastes everyone's time. Report completion, blockers, or
+   errors — not plans to attempt.

@@ -8,6 +8,25 @@ whenToUse: When working on any code change, creating branches, opening PRs, merg
 
 This skill defines the mandatory Git/GitHub development and release workflow for the dsh-chapters project. Follow these rules in every session. They are non-negotiable unless explicitly overridden by the project maintainer.
 
+## ⚠️ MANDATORY: Starting Any New Work
+
+**Before writing a single line of code or making any change, you MUST:**
+
+1. **Load this skill** (`release-workflow`) at the start of every new project or statement of work.
+2. **Create or adopt a GitHub Issue** that describes the work. If no issue exists, create one NOW using the templates below. Every piece of work — feature, fix, refactor, docs — requires an issue.
+3. **Create a feature branch from the latest staging.** Never work directly on `staging` or `main`.
+   ```bash
+   git checkout staging && git pull origin staging
+   git checkout -b feature/<issue-number>-short-description
+   ```
+4. **Commit incrementally.** After completing each logical segment of work (a fix, a sub-feature, a test suite), commit and push to the feature branch. Do not accumulate uncommitted changes across sessions.
+5. **Open a PR when complete.** When the project is done, open a PR targeting `staging` with `Closes #<issue>` in the body. Wait for CI green before merging.
+6. **Load this skill again before completion.** Re-read this workflow before opening the PR to verify branch naming, commit messages, PR template, and cross-linking are correct.
+
+**Agents may merge PRs to staging after all acceptance tests pass. Agents may NOT approve or merge PRs to main.** Only the project maintainer approves releases to production.
+
+If you find yourself with uncommitted work on `staging` or `main`, stop: create the issue and branch NOW, then move the changes to the proper branch.
+
 ## Branch Model
 
 | Branch | Purpose | Protection |

@@ -62,6 +62,38 @@ scripts/bootstrap-dev-profile.sh            # -> .dshdev-local (browser-safe: no
 scripts/bootstrap-dev-profile.sh --with-probe   # scripted rounds only (probe self-exits)
 ```
 
+### The `dev/install/` platform (three development modes)
+
+`dev/install/` provides a unified installer and containerized platform that replaces ad-hoc bootstrap
+for new developers. Three modes, same plugin set (dsh-chapters + dsh-codegraph + dsh-tinyfish-search),
+same Cordis configuration mirror:
+
+| Mode | Command | When to use |
+|------|---------|-------------|
+| **Centralized** | `./dev/install/install.sh && dsh web` | Day-to-day dev on your main machine; modifies your live web profile additively |
+| **Compartmentalized** | `DSH_HOME=/tmp/dsh-dev ./dev/install/install.sh` | Isolated testing without touching live sessions; throwaway or persistent alternate home |
+| **Containerized** | `cd dev/install && docker compose up -d` | Full stack: vLLM (Qwen3-4B-AWQ, inference + systemone), DSH Web UI, Playwright test runner |
+
+The containerized stack is self-contained — no external API keys required for core operation. The vLLM
+service serves two model names (`qwen3-4b-instruct` for inference, `qwen3-4b-systemone` for decisions)
+from the same weights, cached in a Docker volume. The test runner mounts the repo source read-only so
+edits are reflected without rebuild. Environment variables are read from the parent shell — no `.env`
+file needed. See `dev/install/README.md` for full documentation and `.dsh/skills/local-llm/SKILL.md`
+for the agent skill covering endpoint usage.
+
+The legacy `scripts/bootstrap-dev-profile.sh` still works for the probe-based isolation loop described
+below; `dev/install/` is the recommended path for new setups.
+
+### CodeGraph — structural code search
+
+All three dev modes install `@jiangzhenguo/dsh-codegraph`, which builds an AST-level index of every
+symbol and call edge in the project (`.codegraph/codegraph.db`). The agent uses `codegraph_explore`
+instead of grep/glob/read to find symbols, understand flows, and trace callers/callees — including
+dynamic-dispatch hops that text search misses. Configured with `surface: core` (status/init/sync/explore)
+and `frontload: true` (structural context injected into prompts). After editing source, run
+`codegraph_sync` so subsequent queries reflect the new code. The index is gitignored and persists
+across sessions.
+
 ### Three test layers (and why the third exists)
 
 | Layer | Command | Runs | Covers |
