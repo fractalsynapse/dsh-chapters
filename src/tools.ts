@@ -607,20 +607,18 @@ export function buildChaptersTools(
         // Commit chapter records to session state so search index picks them up.
         await commitChapters(store, agent.session.id, wrote.records)
 
-        // Trigger enrichment on newly archived chapters.
-        let enrichNote = ''
+        // Schedule enrichment asynchronously — do NOT await. Enrichment calls
+        // the LLM per chapter and can exceed the command timeout. The idle and
+        // afterPush triggers will pick up any remaining work.
         if (config.enrich !== undefined) {
-          try {
-            const result = await config.enrich.runNow(cwd0 || undefined)
-            enrichNote = `; enriched ${result.processed} chapter(s)${result.remaining > 0 ? `, ${result.remaining} remaining` : ''}`
-          } catch { /* enrichment best-effort */ }
+          void config.enrich.runNow(cwd0 || undefined).catch(() => undefined)
         }
 
         // Schedule sync so saved chapters travel to the pool.
         if (cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:save')
 
         const warnings = wrote.warnings.length > 0 ? ` (${wrote.warnings.length} warning(s))` : ''
-        return { kind: 'success' as const, text: `Saved: ${wrote.records.length} chapter(s) archived (seqs ${fromSeq}..${anchor})${enrichNote}${warnings}. Content is searchable via chapters_search from any session in this workspace.` }
+        return { kind: 'success' as const, text: `Saved: ${wrote.records.length} chapter(s) archived (seqs ${fromSeq}..${anchor})${warnings}. Enrichment queued. Content is searchable via chapters_search from any session in this workspace.` }
       } catch (error) {
         return { kind: 'error' as const, text: `chapters-save failed: ${String((error as Error)?.message ?? error)}`.slice(0, 500) }
       }

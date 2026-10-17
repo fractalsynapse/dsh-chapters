@@ -134,7 +134,7 @@ test('save: no completed turn returns clean error', async () => {
   assert.equal(w.createRequests.length, 0)
 })
 
-test('save: triggers enrichment when available', async () => {
+test('save: triggers enrichment asynchronously (fire-and-forget)', async () => {
   let enrichCalled = false
   const w = makeWorld()
   // Inject enrich surface into config
@@ -151,6 +151,8 @@ test('save: triggers enrichment when available', async () => {
   }
   const result = await built.saveCommand.handler({ agent: caller as never, rawInput: '' })
   assert.equal(result.kind, 'success')
-  assert.ok(enrichCalled, 'enrichment was triggered')
-  assert.match(result.text ?? '', /enriched/, 'success text mentions enrichment')
+  // Enrichment is fire-and-forget — give it a tick to execute
+  await new Promise((r) => setTimeout(r, 50))
+  assert.ok(enrichCalled, 'enrichment was triggered asynchronously')
+  assert.match(result.text ?? '', /Enrichment queued/, 'success text mentions enrichment is queued')
 })
