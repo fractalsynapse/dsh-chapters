@@ -27,6 +27,49 @@ This skill defines the mandatory Git/GitHub development and release workflow for
 
 If you find yourself with uncommitted work on `staging` or `main`, stop: create the issue and branch NOW, then move the changes to the proper branch.
 
+## ⚠️ MANDATORY: Documentation-First Development Cycle
+
+**Every change follows this cycle, in this order. No exceptions.**
+
+```
+Plan/Issue → Documentation → Tests → Implementation → Release
+```
+
+### 1. Plan / Issue
+Create or adopt a GitHub Issue. Define what changes, why, and the acceptance criteria.
+
+### 2. Documentation FIRST
+**Write or update the documentation BEFORE writing any code.** This locks in the programmatic
+interface, forces clarity on what is changing, and prevents docs from going stale. Update all
+affected pages: site docs (`site/src/content/docs/`), repo docs (`docs/`), README, skills, and
+AGENTS.md as applicable. If the change adds new functionality, write the docs that describe it.
+If it changes existing behavior, update the docs that describe that behavior. Commit the docs.
+
+### 3. Tests (outside-in)
+Write tests in this order, committing after each layer:
+1. **Acceptance / smoke tests** — user-facing behavior, end-to-end flows, CLI commands
+2. **Regression tests** — pin the specific bug or edge case being fixed
+3. **Integration tests** — component boundaries, service interactions, host wiring
+4. **Unit tests** — pure logic, isolated functions, data transformations
+
+Testing outside-in ensures the interface is stable before internals are built. A test that cannot
+be written because the interface does not exist yet is a signal that step 2 (documentation) is
+incomplete.
+
+### 4. Implementation
+Write the code that makes the tests pass. Commit incrementally — each logical unit of work gets
+its own commit referencing the issue number.
+
+### 5. Release
+Open PR, wait for CI green, merge to staging. For production releases, follow the Release
+Candidate workflow below.
+
+**Why this order matters:** Documentation written after code describes what was built, not what
+should be built — it captures implementation details instead of intent, and it is perpetually
+behind. Tests written after code verify the implementation, not the specification. The cycle
+forces specification-driven development: the docs ARE the spec, the tests validate the spec,
+and the code satisfies the tests.
+
 ## Branch Model
 
 | Branch | Purpose | Protection |
