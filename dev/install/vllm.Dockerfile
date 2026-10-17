@@ -35,13 +35,20 @@ HEALTHCHECK --interval=15s --timeout=5s --retries=20 --start-period=120s \
 # NOT interpolated — the old form handed vLLM the literal string "${MAX_MODEL_LEN}"
 # and argparse killed every boot (#19).
 ENTRYPOINT []
-CMD python3 -m vllm.entrypoints.openai.api_server \
+# SERVED_NAMES is a comma-separated list and --served-model-name is VARIADIC:
+# passing "a,b" as one argv element registers a single alias literally named
+# "a,b", so requests for either bare name 404 (measured on vLLM 0.31).
+# Word-split it into repeated flags — shell-form CMD gives us /bin/sh.
+# (POSIX sh has no ${VAR/IFS/x} substitution; set IFS around the loop.)
+CMD OLDIFS=$IFS; IFS=,; for n in $SERVED_NAMES; do set -- "$@" --served-model-name "$n"; done; IFS=$OLDIFS; \
+  python3 -m vllm.entrypoints.openai.api_server \
   --model "$MODEL_ID" \
-  --served-model-name $SERVED_NAMES \
+  "$@" \
   --max-model-len "$MAX_MODEL_LEN" \
   --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
   --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
   --host 0.0.0.0 \
   --port 8080 \
   --trust-remote-code \
-  --enable-auto-tool-choice
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes

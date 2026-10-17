@@ -66,6 +66,25 @@ test('regression: no vLLM CLI argument is passed as an unexpanded ${...} literal
   const expandsInScript = /docker-entrypoint\.sh/.test(body) && /\$\{?[A-Z_]+\}?/.test(read('docker-entrypoint.sh'))
   assert.ok(hasShellForm || expandsInScript, 'vLLM args are not expanded anywhere — literal ${VAR} strings will reach argv')
 
+  // vLLM ≥ 0.31 hard-fails boot on `--enable-auto-tool-choice` without a named
+  // parser ("requires --tool-call-parser"). Qwen3's chat template emits the
+  // hermes-style <tool_call>{"name":...} format, so hermes is the
+  // correct parser — and it must be spelled exactly as vLLM registers it.
+  if (/--enable-auto-tool-choice/.test(body)) {
+    const parsers = [...body.matchAll(/--tool-call-parser\s+(\S+)/g)].map((m) => m[1]!)
+    assert.ok(parsers.length > 0, '--enable-auto-tool-choice without --tool-call-parser kills every boot')
+    assert.deepEqual(parsers, ['hermes'], `unexpected tool-call parser(s): ${parsers}`)
+  }
+
+  // `--served-model-name` is variadic in argparse: an unquoted $SERVED_NAMES
+  // word-splits "a,b" into ONE alias 'a,b' (measured: /v1/models returns a
+  // single id containing a comma; both bare names then 404). The loop form
+  // with IFS=, produces one flag per name. POSIX sh has no ${VAR/IFS/x}
+  // substitution — a row here so the broken expansion never comes back.
+  assert.match(body, /IFS=,; for n in \$SERVED_NAMES/, 'SERVED_NAMES must be IFS-split into repeated --served-model-name args')
+  assert.doesNotMatch(body, /\$\{IFS=,\}\$SERVED_NAMES/, 'POSIX sh does not substitute IFS inside ${...} — this form never splits')
+  assert.doesNotMatch(body, /^CMD.*--served-model-name \$SERVED_NAMES/m, 'single comma-joined served-model-name arg is the #19-adjacent 404 bug')
+
   // The base image ships ENTRYPOINT ["vllm","serve"]; an exec-form ENTRYPOINT
   // here would swallow the shell-form CMD entirely (the python module never
   // runs). Overriding it empty is the contract.
@@ -98,7 +117,10 @@ test('contract: every variable the CMD expands has an ENV default (docker run al
   const dockerfile = read('vllm.Dockerfile')
   // ignore prose inside comments — only instructions can expand at runtime
   const body = dockerfile.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
-  const used = new Set([...body.matchAll(/\$(?:\{([A-Z_]+)\}|([A-Z_]{3,})\b)/g)].map((m) => m[1] ?? m[2]!))
+  const shellVars = new Set([...body.matchAll(/\$(?:\{([A-Z_]+)\}|([A-Z_]{3,})\b)/g)].map((m) => m[1] ?? m[2]!))
+  // $@ is the loop accumulator; OLDIFS/IFS are shell internals, not config —
+  // only variables that must come from ENV/compose need defaults.
+  const used = new Set([...shellVars].filter((v) => !['@', 'IFS', 'OLDIFS'].includes(v)))
   assert.ok(used.size >= 4, 'expected the launch args to read at least four env vars')
 
   // ENV keys may be quoted (ENV X="a,b"); a bare `${VAR}` in argv with no ENV
