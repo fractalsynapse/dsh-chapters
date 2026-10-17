@@ -31,6 +31,7 @@ export async function startGitHttpServer(rootDir: string): Promise<GitHttpServer
   if (!fs.existsSync(BACKEND) && spawnSync('git', ['--version']).status !== 0) return null
   fs.mkdirSync(rootDir, { recursive: true })
   const sockets = new Set<import('node:net').Socket>()
+  const children = new Set<import('node:child_process').ChildProcess>()
   const gates = new Map<string, string>()
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = []
@@ -66,10 +67,16 @@ export async function startGitHttpServer(rootDir: string): Promise<GitHttpServer
         HTTP_HOST: req.headers.host ?? '127.0.0.1',
       }
       const cgi = spawn(BACKEND, [], { env })
+      children.add(cgi)
+      cgi.on('close', () => children.delete(cgi))
+      // Suppress EPIPE on stderr — CGI children can emit after the response
+      // closes during teardown; that async activity fails the test runner.
+      cgi.stderr.on('data', (c: Buffer) => {
+        try { process.stderr.write(`[http-backend] ${c}`) } catch { /* EPIPE during teardown */ }
+      })
       cgi.stdin.end(body)
       const out: Buffer[] = []
       cgi.stdout.on('data', (c: Buffer) => out.push(c))
-      cgi.stderr.on('data', (c: Buffer) => process.stderr.write(`[http-backend] ${c}`))
       cgi.on('close', () => {
         const raw = Buffer.concat(out)
         const sep = raw.indexOf('\r\n\r\n') >= 0 ? raw.indexOf('\r\n\r\n') + 4 : (() => {
@@ -91,8 +98,7 @@ export async function startGitHttpServer(rootDir: string): Promise<GitHttpServer
           if (k.toLowerCase() === 'status') status = Number.parseInt(v, 10) || 200
           else headers[k] = v
         }
-        res.writeHead(status, headers)
-        res.end(rest)
+        try { res.writeHead(status, headers); res.end(rest) } catch { /* EPIPE during teardown */ }
       })
     })
   })
@@ -117,6 +123,10 @@ export async function startGitHttpServer(rootDir: string): Promise<GitHttpServer
       return `${base}/repos/${name}`
     },
     async stop(): Promise<void> {
+      // Kill in-flight CGI children BEFORE closing the server — they hold
+      // pipes to response objects that would EPIPE on write after close.
+      for (const child of children) { try { child.kill() } catch { /* already dead */ } }
+      children.clear()
       await new Promise<void>((resolve) => { server.close(() => resolve()) })
       for (const s of sockets) s.destroy()
     },
