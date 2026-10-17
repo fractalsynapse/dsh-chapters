@@ -157,18 +157,19 @@ test('regression: dsh-web launches with the 0.2.x launcher form and a loopback b
   assert.match(entry, /mkdir -p "\$PROFILE_DIR"/, 'entrypoint must create the profile dir before writing settings.yaml')
 })
 
-test('regression: web healthcheck probes a route that exists on host 0.2.x (#19)', () => {
-  // Measured: /api/health returns 404 even authenticated on 0.2.0-rc.2 — the
-  // old probe kept dsh-web permanently unhealthy no matter what it served.
-  // The SPA index answers 200 from inside the container once the browser-trust
-  // fence passes (Host authority == bind address).
+test('regression: web healthcheck probes something that can go green on host 0.2.x (#19)', () => {
+  // Measured: /api/health returns 404 even authenticated on 0.2.0-rc.2, and the
+  // SPA index answers 401 until a browser completes the token exchange — an
+  // HTTP-status probe from inside the container can never go green. The fix is
+  // a TCP connect probe (node ships in this image).
   const dockerfile = read('Dockerfile')
   const compose = read('compose.yml')
   for (const [name, text] of [['Dockerfile', dockerfile], ['compose.yml', compose]] as const) {
     assert.doesNotMatch(text, /curl[^\n]*\/api\/health/, `${name} still probes /api/health, which 404s on host 0.2.x`)
+    assert.doesNotMatch(text, /curl -fsS[^\n]*localhost:3080\//, `${name} still probes the SPA index over HTTP, which 401s pre-auth`)
   }
-  assert.match(dockerfile, /HEALTHCHECK[\s\S]{0,200}curl -fsS -H "Host: localhost:3080" http:\/\/localhost:3080\//, 'Dockerfile HEALTHCHECK must probe the SPA index with a self-matching Host')
-  assert.match(compose, /CMD-SHELL", "curl -fsS -H \\"Host: localhost:3080\\" http:\/\/localhost:3080\//, 'compose healthcheck must probe the SPA index with a self-matching Host')
+  assert.match(dockerfile, /HEALTHCHECK[\s\S]{0,300}require\("net"\)[\s\S]*connect\(3080,"127\.0\.0\.1"/, 'Dockerfile HEALTHCHECK must be a TCP connect probe to 3080')
+  assert.match(compose, /test: \["CMD", "node", "-e"[^\n]*\\"net\\"[^\n]*connect\(3080,\\"127\.0\.0\.1\\"/, 'compose healthcheck must be a TCP connect probe to 3080')
 })
 
 test('regression: profile package.json survives the legacy builder (#19)', () => {
