@@ -16,6 +16,11 @@ Session plans in chapters / the ACTIVE PLAN line / `kind: plan` documents / seed
 Open items / what a fresh session should pick up next → `docs/backlog.md` (NOTE: `tsconfig.json` excludes `src/client/`, so `npm run typecheck` never checks the client plane — run a strict `tsc` over `src/client/*.ts` when touching it) (scoped, with the traps already fixed on main).
 Numbers from real runs (compaction, cache, retrievals) → site Part V (field study §20, cache §21).
 Releases/incidents → site §26 + git log. Benchmarks → `benchmarks/README.md` + site §19.
+Dev/install platform (compose, containerized web) → `dev/install/README.md` + site §24. **SDK service /
+hosted headless API / gateway** → `dev/install/sdk-service-analysis.md` (measured host facts: SDK server
+is stdio-only; profile-dir `settings.yaml` is read by NOTHING on 0.2.x — config must ride
+`cordis.patch.yml`; provider routes at `initialize` are the profile's names, never
+`deepseek-official`).
 
 **Scope: development only.** This file guides agents developing THIS repository. Nothing shipped —
 runtime behavior, the knowledge corpus, or any test — may depend on it or its contents: every real

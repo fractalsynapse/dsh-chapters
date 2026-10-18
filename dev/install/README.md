@@ -138,6 +138,64 @@ desktop session); if you carried an older `.env` with `VLLM_GPU_MEM=0.90`, bring
 ./dev/install/uninstall.sh --purge-home  # nuclear: remove entire $DSH_HOME
 ```
 
+### SDK API Service (headless, for external systems)
+
+A second Compose definition hosts the harness as an **SDK JSON-RPC API** — no Web UI — so another
+system drives it with `@deepseek-ai/dsh-sdk-client`. It carries the same configuration as the Web UI
+profile: the Alibaba/Qwen token-plan marketplace, the local vLLM provider, and all dev plugins
+(`dsh-chapters`, `dsh-codegraph`, `dsh-tinyfish-search`). Tuned for small local models.
+
+```bash
+cd dev/install
+docker compose -f compose.sdk.yml up -d       # vllm + dsh-agent-api (gateway on :8765)
+```
+
+The load-bearing fact: **the SDK server is stdio-only by design** — `dsh --profile sdk` speaks
+newline-delimited JSON-RPC over its own stdin/stdout; there is no port or HTTP route anywhere in
+`@deepseek-ai/dsh-sdk-jsonrpc-server`. The `dsh-agent-api` service therefore runs a thin **gateway**:
+one WebSocket listener that, per connection, spawns a `dsh --profile sdk` child via the official
+`HarnessClient({ dshBin })` and relays frames verbatim. One connection = one runtime lifetime;
+`shutdown` or socket loss ends that child. Sessions persist under `$DSH_HOME/sessions` (shared volume),
+so a fresh connection recovers any session with `session/resume`.
+
+Caller example (any machine that can reach the published port):
+
+```ts
+import { HarnessClient } from '@deepseek-ai/dsh-sdk-client'
+
+// connector(): spawn a local pipe process whose stdout feeds the WS and whose
+// stdin is written by the WS messages — HarnessClient speaks to the pipes.
+const client = new HarnessClient({ /* transport wired to the WS relay */ })
+client.start()
+await client.initialize({
+  cwd: '/workspace',
+  provider: 'local',                 // NOT 'deepseek-official' — see below
+  model: 'qwen3-4b-instruct',
+})
+const { messageId } = await client.request('session/prompt', {
+  sessionId: 'my-task-1',
+  contentBlocks: [{ type: 'text', text: 'summarize README.md' }],
+})
+// notifications stream as session.event / session.status until the agent idles
+```
+
+Two protocol facts callers must know (verified against host 0.2.x sources):
+
+- **Provider routes are the profile's configured names** — `local` (vLLM) or `qwen-token-plan`
+  (Alibaba). `initialize` validates them against registered adapters; `deepseek-official` falls back
+  to a DeepSeek adapter that has no credential here and fails at first call.
+- **No mid-turn cancel exists on the wire.** Abandoning a turn means closing the connection (which
+  reaps the child); follow-up work resumes via `session/resume`. Full analysis and alternatives
+  (ACP, socat relay): [sdk-service-analysis.md](sdk-service-analysis.md).
+
+Auth: the gateway rejects connections before spawning anything unless the `Sec-WebSocket-Protocol`
+handshake carries `dsh-auth.<token>` matching `GATEWAY_TOKEN` (compose env; keep it private — this is
+a remote-code-execution surface, bind through loopback publishing only).
+
+Coexistence with the Web UI: run one role per `$DSH_HOME` mount at a time. Sharing sessions/storage
+volumes between a live `dsh-web` and `dsh-agent-api` is not tested; give each stack its own home if
+both must run simultaneously.
+
 ## Architecture
 
 ```
@@ -157,6 +215,20 @@ desktop session); if you carried an older `.env` with `VLLM_GPU_MEM=0.90`, bring
 │                  └──────────┘                            │
 │                        ▲                                 │
 │                   Browser :3080                          │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│           compose.sdk.yml — SDK API Stack                │
+│                                                         │
+│  ┌──────────┐    ┌────────────────────────────┐         │
+│  │  vllm    │◄───│ dsh-agent-api              │         │
+│  │  :8080   │    │  gateway :8765 (WS)        │         │
+│  │          │    │   └─ spawn per connection: │         │
+│  │          │    │      dsh --profile sdk     │         │
+│  │          │    │      (stdio JSON-RPC)      │         │
+│  └──────────┘    └────────────────────────────┘         │
+│                        ▲                                │
+│        @deepseek-ai/dsh-sdk-client over WS relay        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -239,6 +311,12 @@ unindexed project).
 | `SYSTEMONE_MODEL` | `qwen3-4b-systemone` | Decision model name |
 | `QWEN_TOKEN_PLAN_API_KEY` | *(empty)* | Cloud marketplace key (optional) |
 | `TINYFISH_API_KEY` | *(empty)* | Search plugin key (optional) |
+| `GATEWAY_PORT` | `8765` | SDK gateway WebSocket port (compose.sdk.yml) |
+| `GATEWAY_TOKEN` | *(empty → refuses clients)* | Shared secret for the SDK gateway |
+| `DSH_ROLE` | `web` | Entrypoint role: `web` (UI) or `gateway` (SDK API service) |
+| `DSH_SDK_PROFILE` | `sdk` | Profile name the gateway spawns (`dsh --profile sdk`) |
+| `GATEWAY_IDLE_MS` | `1800000` | Idle socket TTL before the runtime child is reaped (30 min) |
+| `DSH_HOME_VERSION_PIN` | — | Pin `DSH_HOST_VERSION` to the exact host; the SDK client enforces an exact same-version match with it |
 
 ## Directory Layout
 
@@ -247,13 +325,18 @@ dev/install/
 ├── README.md                    ← this file
 ├── install.sh                   ← native installer (targets web profile)
 ├── uninstall.sh                 ← removal script
-├── Dockerfile                   ← DSH Web UI service image
-├── docker-entrypoint.sh         ← container entrypoint
+├── Dockerfile                   ← DSH service image (web UI + SDK gateway roles)
+├── docker-entrypoint.sh         ← container entrypoint (generates profiles; role dispatch)
 ├── vllm.Dockerfile              ← vLLM model server image
 ├── test.Dockerfile              ← test runner image (Node+Playwright+Chromium)
 ├── compose.yml                  ← compose stack (Web UI + vLLM + test runner)
+├── compose.sdk.yml              ← compose stack (SDK API gateway + vLLM)
+├── sdk-gateway/                 ← WebSocket↔stdio relay for the SDK profile
+│   ├── gateway.ts               ← the gateway server
+│   └── smoke.mts                ← end-to-end smoke client (GPU box only)
 ├── .env.example                 ← environment variable reference (not required at runtime)
-└── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
+├── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
+└── sdk-service-analysis.md      ← SDK integration analysis (host facts, options, effort)
 
 .dsh/skills/                     ← all agent skills (see below)
 skills-lock.json                 ← lock file for upstream-installed skills

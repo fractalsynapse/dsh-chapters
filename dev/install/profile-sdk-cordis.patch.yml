@@ -1,0 +1,115 @@
+# dsh-chapters DEV Cordis patch — SDK profile variant (issue #25).
+# Generated into $DSH_HOME/profiles/sdk/cordis.patch.yml by the container
+# entrypoint; mirrors profile-cordis.patch.yml MINUS the web-only rows
+# (ui-settings-general, ui-theme, ui-chat, directory-picker*) — those target
+# client/UI entries the sdk composition never mounts. Everything that matters
+# to hosted agents rides here: the Alibaba/Qwen token-plan marketplace, the
+# local vLLM provider override (baseURL/apiKeyEnv env-interpolated at boot),
+# default model + chapters preset, tinyfish/codegraph configs, llm-gate, and
+# fetch-timeouts. The entrypoint's generate_profile_patch() prepends the
+# `local:` provider into the llm-pi-ai row below — patch rows REPLACE whole
+# config blocks on 0.2.x (base README "Overrides replace whole settings
+# blocks"), so BOTH routes must live in one row or the marketplace vanishes.
+
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      qwen-token-plan:
+        models:
+          - id: deepseek-v4-pro
+            name: DeepSeek V4 Pro
+            contextWindow: 1000000
+            maxTokens: 384000
+            input:
+              - text
+          - id: deepseek-v4.1-flash
+            name: DeepSeek V4.1 Flash
+            contextWindow: 1000000
+            maxTokens: 384000
+            input:
+              - text
+              - image
+          - id: glm-5.3
+            name: GLM-5.3
+            contextWindow: 1000000
+            maxTokens: 131072
+            input:
+              - text
+          - id: kimi-k2.6
+            name: Kimi K2.6
+            contextWindow: 262144
+            maxTokens: 262144
+            input:
+              - text
+              - image
+          - id: kimi-k2.7-code
+            name: Kimi K2.7 Code
+            contextWindow: 262144
+            maxTokens: 262144
+            input:
+              - text
+              - image
+          - id: MiniMax-M2.5
+            name: MiniMax-M2.5
+            contextWindow: 196608
+            maxTokens: 32768
+            input:
+              - text
+          - id: qwen3.8-flash
+            name: Qwen3.8 Flash
+            contextWindow: 1000000
+            maxTokens: 131072
+            input:
+              - text
+              - image
+          - id: qwen3.8-max
+            name: Qwen3.8 Max
+            contextWindow: 1000000
+            maxTokens: 131072
+            input:
+              - text
+              - image
+        apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY
+
+# ── Default Model ──────────────────────────────────────────────────────────────
+- id: agent-loop
+  name: "@deepseek-ai/dsh-agent-loop"
+  config:
+    agents: []
+    maxParallelToolCalls: 5
+
+- id: dsh-tinyfish-search
+  name: "dsh-tinyfish-search"
+  config:
+    apiKeyEnv: TINYFISH_API_KEY
+    location: US
+    language: en
+
+# ── Preset Registry ───────────────────────────────────────────────────────────
+- id: dsh-codegraph
+  name: dsh-codegraph
+  config:
+    guideSearch: true
+    surface: core
+    frontload: true
+
+# ── Dev Overrides: Local vLLM Provider ────────────────────────────────────────
+# Points at the bundled vLLM service (Qwen3-4B-AWQ). The inference and systemone
+# endpoints share the same server under different model names.
+- id: agent-presets
+  config:
+    default: chapters
+
+- id: llm-gate
+  config:
+    providers:
+      local:
+        maxConcurrent: 4
+        maxQueued: 16
+        queueTimeoutMs: 7200000
+
+- id: fetch-timeouts
+  config:
+    headersTimeoutMs: 0
+    bodyTimeoutMs: 0

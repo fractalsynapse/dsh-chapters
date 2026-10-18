@@ -63,6 +63,28 @@ docker compose exec dsh-test bash                        # interactive test shel
 Requires Docker ≥ 24, Compose v2, NVIDIA GPU with nvidia-container-toolkit. Full documentation in
 [`dev/install/README.md`](https://github.com/treeseed-ai/dsh-chapters/tree/main/dev/install).
 
+### Containerized SDK API service (headless harness for external systems)
+
+A fourth mode hosts the harness as an **SDK JSON-RPC API** instead of a Web UI — for another system
+that uses DeepSeek Harness as its agent runtime. `compose.sdk.yml` runs the same image in a gateway
+role: one WebSocket listener (`:8765`, token-authenticated before any spawn) that per connection
+launches `dsh --profile sdk` and relays the stdio protocol verbatim. The `sdk` profile carries the
+identical configuration to the Web UI profile — Alibaba/Qwen token-plan marketplace, local vLLM
+provider, and all three dev plugins including dsh-chapters — so hosted agents get the same tools and
+zero-inference chapter compaction, tuned for small local models.
+
+```bash
+cd dev/install
+GATEWAY_TOKEN=$(openssl rand -hex 16) docker compose -f compose.sdk.yml up -d
+```
+
+The serving side is stock host (`@deepseek-ai/dsh-sdk-jsonrpc-server`); only the thin relay is ours.
+Callers use `@deepseek-ai/dsh-sdk-client` with `provider: 'local'` or `'qwen-token-plan'` at
+`initialize` — never `deepseek-official`. One connection owns one runtime process; sessions survive
+reconnection through `session/resume`. Why stdio-shaped hosting looks like this, the alternatives
+(ACP, socat), and the measured host facts:
+[`dev/install/sdk-service-analysis.md`](https://github.com/treeseed-ai/dsh-chapters/blob/main/dev/install/sdk-service-analysis.md).
+
 ## CodeGraph — structural code search
 
 The installer includes [`@jiangzhenguo/dsh-codegraph`](https://github.com/jiangzhenguo/dsh-codegraph),

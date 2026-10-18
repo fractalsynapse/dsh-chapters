@@ -152,9 +152,11 @@ test('regression: dsh-web launches with the 0.2.x launcher form and a loopback b
   const compose = read('compose.yml')
   assert.doesNotMatch(compose, /DSH_HOST:\s*"?0\.0\.0\.0/, 'compose must not set DSH_HOST to 0.0.0.0 — the host refuses it')
 
-  // A bind-mounted or wiped $DSH_HOME may lack profiles/web; settings.yaml is
-  // written by redirect and dies on ENOENT without the mkdir.
-  assert.match(entry, /mkdir -p "\$PROFILE_DIR"/, 'entrypoint must create the profile dir before writing settings.yaml')
+  // A bind-mounted or wiped $DSH_HOME may lack profiles/web; the composed
+  // cordis.patch.yml is written by redirect and dies on ENOENT without the
+  // mkdir (#25 moved config delivery from settings.yaml to the patch — a
+  // profile-dir settings.yaml is read by NOTHING on 0.2.x).
+  assert.match(entry, /mkdir -p "\$profile_dir"|generate_profile_patch/, 'entrypoint must create the profile dir before writing its patch')
 })
 
 test('regression: web healthcheck probes something that can go green on host 0.2.x (#19)', () => {
@@ -168,7 +170,9 @@ test('regression: web healthcheck probes something that can go green on host 0.2
     assert.doesNotMatch(text, /curl[^\n]*\/api\/health/, `${name} still probes /api/health, which 404s on host 0.2.x`)
     assert.doesNotMatch(text, /curl -fsS[^\n]*localhost:3080\//, `${name} still probes the SPA index over HTTP, which 401s pre-auth`)
   }
-  assert.match(dockerfile, /HEALTHCHECK[\s\S]{0,300}require\("net"\)[\s\S]*connect\(3080,"127\.0\.0\.1"/, 'Dockerfile HEALTHCHECK must be a TCP connect probe to 3080')
+  // The probe lives inside a shell-form CMD whose node -e string is
+  // double-quoted, so its inner quotes are backslash-escaped on disk.
+  assert.match(dockerfile, /HEALTHCHECK[\s\S]{0,600}require\(\\"net\\"\)[\s\S]*connect\(3080,\\"127\.0\.0\.1\\"/, 'Dockerfile HEALTHCHECK must keep a TCP connect probe to 3080 for the web role (#25 made it role-aware; the gateway branch may not replace this one)')
   assert.match(compose, /test: \["CMD", "node", "-e"[^\n]*\\"net\\"[^\n]*connect\(3080,\\"127\.0\.0\.1\\"/, 'compose healthcheck must be a TCP connect probe to 3080')
 })
 
@@ -182,9 +186,15 @@ test('regression: profile package.json survives the legacy builder (#19)', () =>
   assert.match(dockerfile, /RUN printf .* > "\$\{PROFILE_DIR\}\/package\.json"/, 'profile manifest must be written with single-line printf')
 
   // Belt and braces: the entrypoint repairs a zero-byte manifest (never a real
-  // one) so already-built bad images recover instead of crash-looping.
+  // one) so already-built bad images recover instead of crash-looping. #25
+  // generalized the repair to every profile dir (web + sdk) — a loop over
+  // profiles/*/package.json satisfies the same contract for both.
   const entry = read('docker-entrypoint.sh')
-  assert.match(entry, /\[ ! -s "\$PROFILE_DIR\/package\.json" \][\s\S]*rm -f/, 'entrypoint must delete a zero-byte manifest so app-boot re-initializes it')
+  assert.match(
+    entry,
+    /\[ ! -s "\$PROFILE_DIR\/package\.json" \][\s\S]*rm -f|\$DSH_HOME\/profiles"\/\*\/package\.json[\s\S]*\[ ! -s "\$p" \][\s\S]*rm -f/,
+    'entrypoint must delete a zero-byte manifest so app-boot re-initializes it',
+  )
 
   // A named volume mounted at a FILE path is created as an empty mode-755
   // directory when the image has no file there; credentials-local refuses any
