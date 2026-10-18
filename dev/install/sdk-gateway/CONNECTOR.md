@@ -21,8 +21,9 @@ import { connectToGateway } from './connector.ts'   // or '/gateway/connector.mj
 await using gw = await connectToGateway({ url: 'ws://localhost:8765', token: process.env.GATEWAY_TOKEN! })
 
 // high-level: one owned activity interval, like DeepSeekHarness.run()
-const result = await gw.run('summarize README.md in one line', { sessionId: 'task-42' })
+const result = await gw.run('summarize README.md in one line', { sessionId: 'task-42', includeReasoning: true })
 console.log(result.finalResponse)     // last committed assistant text before idle
+console.log(result.thinking)          // its reasoning blocks (#37), undefined when the flag is off
 
 // low-level: raw protocol, when you want receipts and streaming yourself
 const { messageId } = await gw.request('session/prompt', {
@@ -76,7 +77,7 @@ permission/preset · sandbox/mode · approval/policy · agent/inbox/spliced · t
 | You want | Subscribe to | Payload pointer |
 |---|---|---|
 | The answer text | `assistant/message` | `data.message.content[]` blocks; small models emit reasoning first — fold or filter by `type` |
-| **Thinking** | same message's `reasoning` blocks, or `assistant/attempt` (discarded retries) | `content[].type === 'reasoning'`; NOTE: `run().finalResponse` folds TEXT ONLY — read raw events for thinking |
+| **Thinking** | same message's `reasoning` blocks, or `assistant/attempt` (discarded retries) | `content[].type === 'reasoning'`; `run({ includeReasoning: true })` also returns them separately as `result.thinking` (folded across the run's LAST assistant message); raw events always carry them |
 | **Every tool invocation + arguments** | `tool/call` | `{turn, step, callId, name, arguments}` — e.g. `name:"write", arguments:{file_path,…}` is your file-change signal |
 | Tool outcomes | `tool/result` | message with `toolCallId` correlation + content blocks (path/status/errors) |
 | Turn/step boundaries & failure reasons | `turn/end`, `step/end` | `data.reason` (`{kind:'completed'}` / error / max-tokens) — the run-failure signal |
@@ -98,12 +99,29 @@ for await (const n of sub) {
 }
 ```
 
-### Honest gaps (measured, #36 follow-ups)
+### Per-turn file changes — now on the hosted wire (#37)
 
-- **Per-turn file-diff summaries** (`workspace/changes` event + diff service) exist in the host but are
-  mounted by the **web-app bundle only** — the sdk profile does not have them today. Until that mount
-  lands, reconstruct changed files from `tool/call` arguments (`write`/`edit` name `file_path`) plus
-  `bash` results; it is complete for tool-mediated edits, not for out-of-band writes.
+The sdk profile mounts `@deepseek-ai/dsh-workspace-changes`, so every changed top-level turn emits a
+`workspace/changes` session event. **Measured shape (plugin types, `types.ts:106`): the event data is
+only `{ turn: number }` — it announces; the summary itself stays host-side** and is served by the
+in-process `workspaceChanges.summary(sessionId, seq)` while the Session lives. The web UI's card reads
+that service; the SDK wire does NOT expose it, so over the gateway the event tells you *which turn*
+touched the workspace, and the file-level detail comes from the same turn's `tool/call` arguments
+(`write`/`edit` carry `file_path`; `bash` results describe their own effects). That combination is
+complete for tool-mediated changes — which is what hosted agents do.
+
+```ts
+if (ev.type === 'workspace/changes') console.log('turn', ev.data.turn, 'changed the workspace')
+```
+
+If your framework needs true per-file diff summaries over the network, that is a small product change
+(surface the service on the SDK protocol or a connector helper polling the host) — deliberately not
+built here: the announcement + tool-call pair already answers "what did this run touch?" for
+auto-approved hosted runs. Scope notes: one event per TOP-LEVEL turn; empty change sets emit nothing;
+git IS present in the service image, so counts come from working-tree snapshots.
+
+### Remaining limits (honest)
+
 - **No mid-turn cancel** on the wire: observing a runaway turn means closing the connection (child
   reaps; resume later).
 - **Approvals are one-way**: `approval/asked` streams out, but client→server notification/reply is
@@ -117,7 +135,7 @@ for await (const n of sub) {
 | Member | Wire | Notes |
 |---|---|---|
 | `connectToGateway(opts)` | `initialize` | resolves after handshake; opts: `url`, `token`, `bearerKey` (#32), `cwd` (default `/workspace`), `provider` (default `local`), `model` (default env `LLM_MODEL` else `qwen3-4b-instruct`), `reasoningEffort?`, `maxTokens?`, `requestTimeoutMs?` |
-| `gw.run(text, {sessionId?, onNotification?})` | prompt → events → idle | returns `{sessionId, finalResponse, events, notifications}`; mirrors `DeepSeekHarness.run()` semantics including its caveat: `finalResponse` is the last committed root-assistant text in the interval, not causally attributed to the prompt |
+| `gw.run(text, {sessionId?, onNotification?, includeReasoning?})` | prompt → events → idle | returns `{sessionId, finalResponse, thinking?, events, notifications}`; mirrors `DeepSeekHarness.run()` semantics including its caveat: `finalResponse` is the last committed root-assistant text in the interval, not causally attributed to the prompt. `thinking` (only with `includeReasoning: true`) folds the reasoning blocks of that same final message (#37) |
 | `gw.resumeSession(id)` | `session/resume` | requires the original persistence home (same volume); rejects missing/occupied without creating a replacement |
 | `gw.wait(sessionId)` | `session/wait` | resolves when the root stays idle incl. managed descendants |
 | `gw.request(method, params?)` | any | raw escape hatch — future host methods need no connector release |

@@ -69,6 +69,8 @@ export interface GatewayNotification {
 export interface RunResult {
   sessionId: string
   finalResponse: string
+  /** Reasoning blocks of the SAME final assistant message — only when run was called with `includeReasoning` (#37). Absent, not empty, otherwise. */
+  thinking?: string
   events: GatewayNotification[]
   notifications: GatewayNotification[]
 }
@@ -85,7 +87,7 @@ export class GatewayRequestError extends Error {
 }
 
 export interface GatewayConnection extends AsyncDisposable {
-  run(prompt: string, options?: { sessionId?: string; onNotification?: (n: GatewayNotification) => void }): Promise<RunResult>
+  run(prompt: string, options?: { sessionId?: string; onNotification?: (n: GatewayNotification) => void; includeReasoning?: boolean }): Promise<RunResult>
   resumeSession(sessionId: string): Promise<void>
   wait(sessionId: string): Promise<void>
   request<T = Record<string, unknown>>(method: string, params?: Record<string, unknown>): Promise<T>
@@ -120,11 +122,12 @@ const defaultCreateSocket = async (url: string, opts: { protocols?: string[]; he
 interface Pending { resolve: (v: unknown) => void; reject: (e: Error) => void; timer?: ReturnType<typeof setTimeout> }
 
 /** Fold one assistant/message event into plain text (measured shape: data.message.content blocks). */
-export function foldAssistantText(params: Record<string, unknown>): string {
+/** Fold one assistant/message event's content blocks of a given type (measured shape: data.message.content). Default 'text' keeps historical behavior; 'reasoning' powers the #37 thinking fold. */
+export function foldAssistantText(params: Record<string, unknown>, blockType: 'text' | 'reasoning' = 'text'): string {
   const data = (params.data ?? {}) as Record<string, unknown>
   const message = (data.message ?? data) as Record<string, unknown>
   const content = Array.isArray(message.content) ? message.content as { type?: string; text?: string }[] : []
-  return content.filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text!).join('')
+  return content.filter((b) => b.type === blockType && typeof b.text === 'string').map((b) => b.text!).join('')
 }
 
 /**
@@ -275,6 +278,7 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
       const notifications: GatewayNotification[] = []
       const events: GatewayNotification[] = []
       let lastAssistant = ''
+      let lastReasoning = ''
       // subscribe first, then queue the prompt (client README task-owning order)
       let settleIdle: (() => void) | undefined
       let settled = false
@@ -286,7 +290,11 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
           notifications.push(n)
           runOptions.onNotification?.(n)
           if (n.method === 'session.event') events.push(n)
-          if (isAssistantMessage(n)) { const ev = unwrapEvent(n.params); lastAssistant = foldAssistantText(ev ?? {}) }
+          if (isAssistantMessage(n)) {
+            const ev = unwrapEvent(n.params) ?? {}
+            lastAssistant = foldAssistantText(ev)
+            lastReasoning = foldAssistantText(ev, 'reasoning')
+          }
           if (isIdleStatus(n, sessionId) && !settled) { settled = true; queue.return(); queues.delete(queue); settleIdle?.() }
         }
       }
@@ -298,7 +306,13 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
         collect()
         await idle
       } finally { queues.delete(queue) }
-      return { sessionId, finalResponse: lastAssistant, events, notifications }
+      return {
+        sessionId,
+        finalResponse: lastAssistant,
+        ...(runOptions.includeReasoning === true ? { thinking: lastReasoning } : {}),
+        events,
+        notifications,
+      }
     },
     async resumeSession(sessionId) {
       await requestOnce('session/resume', { sessionId }, Math.max(options.initializeTimeoutMs ?? 15_000, 30_000))

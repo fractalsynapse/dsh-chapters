@@ -295,6 +295,58 @@ test('unit: run() collects notifications and resolves at idle even with queued e
   gw.close()
 })
 
+// ── #37: thinking fold ───────────────────────────────────────────────────────
+
+const reasoningResponder = (frame: Record<string, unknown>, emit: (o: Record<string, unknown>) => void): void => {
+  const id = frame.id as number
+  if (frame.method === 'initialize') { emit({ jsonrpc: '2.0', id, result: { serverInfo: { name: 'x', version: 'y' } } }); return }
+  if (frame.method === 'session/prompt') {
+    emit({ jsonrpc: '2.0', id, result: { messageId: 'm' } })
+    emit({ jsonrpc: '2.0', method: 'session.event', params: { sessionId: 's', event: { seq: 5, type: 'assistant/message', data: { message: { role: 'assistant', content: [
+      { type: 'reasoning', text: 'Let me think hard about this.' },
+      { type: 'text', text: 'the answer' },
+    ] } } } } })
+    emit({ jsonrpc: '2.0', method: 'session.status', params: { sessionId: 's', status: 'idle' } })
+  }
+}
+
+test('unit: includeReasoning returns thinking blocks separately from finalResponse (#37)', async () => {
+  const socket = new FakeSocket(reasoningResponder)
+  const gw = await connectWith(socket, { token: 't' })
+  const r = await gw.run('x', { sessionId: 's', includeReasoning: true })
+  assert.equal(r.finalResponse, 'the answer', 'text fold unchanged')
+  assert.equal(r.thinking, 'Let me think hard about this.', 'reasoning blocks folded into thinking')
+  gw.close()
+})
+
+test('unit: thinking is absent unless requested — default bytes unchanged (#37)', async () => {
+  const socket = new FakeSocket(reasoningResponder)
+  const gw = await connectWith(socket, { token: 't' })
+  const r = await gw.run('x', { sessionId: 's' })
+  assert.equal(r.finalResponse, 'the answer')
+  assert.equal(r.thinking, undefined, 'no thinking field without the flag')
+  assert.ok(!('thinking' in r), 'absent means ABSENT, not empty string')
+  gw.close()
+})
+
+test('unit: flat-envelope hosts still yield thinking with the flag (#37 both shapes)', async () => {
+  const responder = (frame: Record<string, unknown>, emit: (o: Record<string, unknown>) => void): void => {
+    const id = frame.id as number
+    if (frame.method === 'initialize') { emit({ jsonrpc: '2.0', id, result: { serverInfo: { name: 'x', version: 'y' } } }); return }
+    if (frame.method === 'session/prompt') {
+      emit({ jsonrpc: '2.0', id, result: { messageId: 'm' } })
+      emit({ jsonrpc: '2.0', method: 'session.event', params: { seq: 5, type: 'assistant/message', data: { message: { content: [{ type: 'reasoning', text: 'flat think' }] } } } })
+      emit({ jsonrpc: '2.0', method: 'session.status', params: { sessionId: 's', status: 'idle' } })
+    }
+  }
+  const socket = new FakeSocket(responder)
+  const gw = await connectWith(socket, { token: 't' })
+  const r = await gw.run('x', { sessionId: 's', includeReasoning: true })
+  assert.equal(r.thinking, 'flat think')
+  assert.equal(r.finalResponse, '', 'text-only fold stays empty when no text block exists')
+  gw.close()
+})
+
 test('unit: module exports the documented surface', () => {
   assert.equal(typeof mod.connectToGateway, 'function')
 })

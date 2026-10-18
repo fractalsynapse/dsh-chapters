@@ -209,6 +209,15 @@ REGROW
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 SETROW
+      # Per-turn workspace-change announcements (#37): the recorder emits a
+      # `workspace/changes` session event per changed top-level turn (summary
+      # stays host-side behind ctx.workspaceChanges — measured payload is {turn}).
+      # web-app mounts it; base does not. Needs subprocess+fs only, both in base.
+      cat <<WCROW
+- insert:
+    - id: workspace-changes
+      name: '@deepseek-ai/dsh-workspace-changes'
+WCROW
     fi
     # Hosted-archive durability (#33): the chapter store root is cwd-relative
     # by design (measured: path.join(cwd, artifactStoreRoot) — `read` must reach

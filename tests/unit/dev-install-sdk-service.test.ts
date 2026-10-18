@@ -195,6 +195,16 @@ test('regression: the store-root row lands only for non-web profiles (#33)', () 
   assert.ok(guardStart > 0 && idx - guardStart < 400, 'the store-root row sits inside the no-web-app guard — the web UI manages per-project stores in its own workspaces')
 })
 
+test('contract: sdk profile mounts the workspace-changes recorder (#37)', () => {
+  const entry = read('docker-entrypoint.sh')
+  // base ships neither row (measured: web-app bundle only) — the generator must insert it
+  // for non-web profiles, same pattern as agent-preset-registry/model-selection-settings.
+  assert.match(entry, /dsh-workspace-changes/, 'entrypoint must mount @deepseek-ai/dsh-workspace-changes for hosted profiles')
+  const idx = entry.indexOf('dsh-workspace-changes')
+  const guardStart = entry.lastIndexOf('if ! grep -q "dsh-web-app"', idx)
+  assert.ok(guardStart > 0 && idx - guardStart < 900, 'the mount sits inside the no-web-app guard — web already has it via its bundle')
+})
+
 // ── 6. unit: the gateway relay ───────────────────────────────────────────────
 
 test('unit: gateway module exists and exports the pure relay core', async () => {
