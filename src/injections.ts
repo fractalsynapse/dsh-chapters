@@ -54,6 +54,11 @@ export function isHumanAuthored(data: Record<string, unknown>): boolean {
  */
 export function isSessionStateNarration(data: Record<string, unknown>): boolean {
   const source = data.source as { kind?: string; plugin?: string; form?: string } | undefined
+  // v4 (issue #43, measured against dsh-plan-mode/lib/index.js:395-410 on
+  // 0.2.0-rc.2): the producer owns the kind — `{ kind: 'plan-mode', form: 'notice' }`.
+  if (source?.kind === 'plan-mode' && source.form === 'notice') return true
+  // v3 logs, still replayed from disk: the retired wrapper the exception was
+  // written against. Both arms stay named by producer AND form — neither widens.
   return source?.kind === 'plugin' && source.plugin === 'plan-mode' && source.form === 'notice'
 }
 

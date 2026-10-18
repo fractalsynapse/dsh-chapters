@@ -23,12 +23,17 @@ test('unlabelled and kind:user are human conversation; everything else is inject
   assert.equal(isHumanAuthored({ source: { kind: 'user' } }), true)
   assert.equal(isHumanAuthored({ source: { kind: 'agent-instructions' } }), false)
   assert.equal(isHumanAuthored({ source: { kind: 'plugin', plugin: 'dsh-chapters' } }), false)
+  // v4 (issue #43): producer-owned colon kinds are injected context too.
+  assert.equal(isHumanAuthored({ source: { kind: 'plugin:dsh-chapters', form: 'snapshot' } }), false)
   assert.equal(isHumanAuthored({ source: { kind: 'tool' } }), false)
   assert.equal(isHumanAuthored({ source: { kind: 'system' } }), false)
 })
 
 test('plugin sources are labeled with the plugin name in the marker', () => {
   assert.equal(sourceLabel({ source: { kind: 'plugin', plugin: 'dsh-chapters' } }), 'plugin:dsh-chapters')
+  // The v4 colon kind labels BYTE-IDENTICALLY to the retired wrapper — omission
+  // markers already archived in chapters keep matching after the emitter changed.
+  assert.equal(sourceLabel({ source: { kind: 'plugin:dsh-chapters' } }), 'plugin:dsh-chapters')
   assert.equal(sourceLabel({ source: { kind: 'agent-instructions' } }), 'agent-instructions')
   assert.equal(sourceLabel({}), 'unlabelled')
 })
@@ -111,7 +116,7 @@ test('RENDER: a reminder span inside a human message is removed; the human text 
 
 test('RENDER: our own TOC notice (plugin source) is omitted — children re-archiving themselves never bloat the corpus', () => {
   const events = [
-    ev(0, { source: { kind: 'plugin', plugin: 'dsh-chapters', form: 'snapshot', sections: [{ name: 'chapters:toc', text: 'CHAPLIST' }] }, content: [{ type: 'text', text: 'CHAPLIST-HUGE-SENTINEL-TEXT' }] }),
+    ev(0, { source: { kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [{ name: 'chapters:toc', text: 'CHAPLIST' }] }, content: [{ type: 'text', text: 'CHAPLIST-HUGE-SENTINEL-TEXT' }] }),
     ev(1, { role: 'assistant', source: { kind: 'assistant' }, content: [{ type: 'text', text: 'child works' }] }, 'assistant/message'),
   ]
   const r = renderChapter(events, { title: 'T', summary: 's', startSeq: 0, endSeq: 1 }, CONFIG)
@@ -143,10 +148,13 @@ test('omittedMarker has the one pinned shape (assertions + tests anchor on this 
   assert.ok(m.includes('12 chars'))
 })
 
-test('the plan-mode narration is the named exception: archived verbatim', async () => {
+test('the plan-mode narration is the named exception: archived verbatim (both host generations)', async () => {
   const { screenConversation, isSessionStateNarration, isArchivableConversation } = await import('../../src/injections.ts')
-  const notice = { id: 'n1', role: 'user', source: { kind: 'plugin', plugin: 'plan-mode', form: 'notice', summary: 'x' }, content: [{ type: 'text', text: 'The user switched this session to plan mode.' }] }
+  // v4 (host 0.2.x): the producer owns the kind. Measured dsh-plan-mode/lib/index.js:395-410.
+  const notice = { id: 'n1', role: 'user', source: { kind: 'plan-mode', form: 'notice', summary: 'x' }, content: [{ type: 'text', text: 'The user switched this session to plan mode.' }] }
   assert.equal(isSessionStateNarration(notice), true)
+  // v3 logs, still replayed from disk: the retired wrapper.
+  assert.equal(isSessionStateNarration({ source: { kind: 'plugin', plugin: 'plan-mode', form: 'notice' } }), true)
   assert.equal(isHumanAuthored(notice), false, 'still NOT human-authored (signatures must not change)')
   const r = screenConversation(notice, 'The user switched this session to plan mode.', 'user')
   assert.equal(r.omittedEvent, false)
@@ -155,10 +163,13 @@ test('the plan-mode narration is the named exception: archived verbatim', async 
 
 test('the exception is narrow: another plugin notice, or a plan-mode snapshot, still screens', async () => {
   const { screenConversation } = await import('../../src/injections.ts')
-  const other = { role: 'user', source: { kind: 'plugin', plugin: 'dsh-chapters', form: 'snapshot' } }
+  const other = { role: 'user', source: { kind: 'plugin:dsh-chapters', form: 'snapshot' } }
   assert.equal(screenConversation(other, '# Continuation: x', 'user').omittedEvent, true)
-  const wrongForm = { role: 'user', source: { kind: 'plugin', plugin: 'plan-mode', form: 'snapshot' } }
+  const wrongForm = { role: 'user', source: { kind: 'plan-mode', form: 'snapshot' } }
   assert.equal(screenConversation(wrongForm, 'instructions', 'user').omittedEvent, true)
-  const wrongPlugin = { role: 'user', source: { kind: 'plugin', plugin: 'plan-mode-x', form: 'notice' } }
+  const wrongPlugin = { role: 'user', source: { kind: 'plan-mode-x', form: 'notice' } }
   assert.equal(screenConversation(wrongPlugin, 'imposter', 'user').omittedEvent, true)
+  // same narrowness for the legacy wrapper arms
+  assert.equal(screenConversation({ role: 'user', source: { kind: 'plugin', plugin: 'plan-mode', form: 'snapshot' } }, 'x', 'user').omittedEvent, true)
+  assert.equal(screenConversation({ role: 'user', source: { kind: 'plugin', plugin: 'plan-mode-x', form: 'notice' } }, 'x', 'user').omittedEvent, true)
 })

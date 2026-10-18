@@ -38,7 +38,7 @@ test('a chapter archived from an injected-context session carries no instruction
   const events = [
     ev(0, { source: { kind: 'user' }, content: [{ type: 'text', text: `please fix login\n\n<system-reminder>\ninstructions from: AGENTS.md\n${SENTINEL}\n</system-reminder>` }] }),
     ev(1, { source: { kind: 'agent-instructions' }, content: [{ type: 'text', text: `${SENTINEL} (whole-event form)` }] }),
-    ev(2, { source: { kind: 'plugin', plugin: 'dsh-chapters' }, content: [{ type: 'text', text: `${SENTINEL} (toc-notice form)` }] }),
+    ev(2, { source: { kind: 'plugin:dsh-chapters' }, content: [{ type: 'text', text: `${SENTINEL} (toc-notice form)` }] }),
     ev(3, { content: [{ type: 'text', text: 'the patched line is src/login.ts:42' }] }, 'assistant/message'),
   ]
   const chapter = renderChapter(events, { title: 'login-fix', summary: 'fixed login', startSeq: 0, endSeq: 3 }, {

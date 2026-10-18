@@ -4,7 +4,7 @@ description: The single message a new session starts with — every section, ann
 lastUpdated: true
 ---
 
-A continuation's whole inherited history is one message: exactly one synthetic `user/message` event at seq 0, seeded with source `{ kind: 'plugin', plugin: 'dsh-chapters', form: 'snapshot', sections: [...] }`. Here is the structure, line by line (as `assembleNotice` renders it — `src/continue-core.ts` is its only author):
+A continuation's whole inherited history is one message: exactly one synthetic `user/message` event at seq 0, seeded with source `{ kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [...] }` (a producer-owned kind — session format v4 retired the bare `plugin` wrapper; see `docs/contract.md`). Here is the structure, line by line (as `assembleNotice` renders it — `src/continue-core.ts` is its only author):
 
 ```markdown
 # Continuation: <title>                              ← the branch's headline
