@@ -93,6 +93,29 @@ parallel sessions via `chapters_search` without disrupting the active conversati
 Idempotent: re-running saves only what has not yet been archived (respects the watermark).
 If nothing new was said since the last save, reports "nothing to save" without error.
 
+## Auto-save when a subagent settles
+
+No command. With `subagentAutoSave` on (the default), every subagent run that carries the
+`chapters` preset is archived the moment it ends: the plugin subscribes to the host's
+`subagent/end` lifecycle event, reads the child's completed turns, and runs the **same**
+save pipeline as `/chapters-save` — `composeChapters` + `writeArchive`, zero model
+involvement — with enrichment **queued** rather than run (a ten-child fanout must not
+hammer the annotator). A continuable child that is woken again archives again: the
+watermark makes the repeat save only its new turns.
+
+The child's chapters live under **its own** session tree, exactly like every other session —
+searchable and pool-published on its own. Its frontmatter says where it came from:
+`subagent: true` plus `parentSession: <id>`, read from the child's own durable session header
+(the host stamps `parentSession`, `origin: subagent`, `delegationDepth`, and `agentPreset`
+at creation — measured, `spikes/subagent-end/FINDINGS.md`). Nothing links a subagent into its
+spawner's ancestry; parent and children share a workspace, not a TOC.
+
+Honest limits, stated because silence here would be the kind of unstated loss this project
+refuses: only **completed turns** are archived (the anchor is the child's last `turn/end`, so
+an interrupted tail is skipped, never half-saved); a child on a different preset is left
+alone; and if a child's log can be read neither live nor from disk at settlement, the archive
+is skipped with a loud diagnostic rather than guessed at.
+
 ## Plus the host's `/compact`
 
 With the `chapters` agent preset mounted, `/compact` runs through the plugin's deterministic engine: checkpoint summary with carried plot, zero inference tokens, append-only shadowing. (The harness's own command surface, ours underneath.)
