@@ -81,6 +81,12 @@ services:
     volumes:
       - dsh-sessions:/dsh-home/sessions
       - dsh-storage:/dsh-home/storages
+      # Hosted-agent WORKSPACE (#33): the default agent cwd (/workspace) is a
+      # named volume, so chapter archives written under it survive container
+      # recreate. The archive store root is cwd-relative by design (measured:
+      # path.join(cwd, artifactStoreRoot)) — persisting the cwd IS persisting
+      # the archive. Empty on first boot; agents fill it with their work.
+      - dsh-workspace:/workspace
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -101,6 +107,8 @@ volumes:
     name: dsh-chapters-sessions
   dsh-storage:
     name: dsh-chapters-storage
+  dsh-workspace:
+    name: dsh-chapters-workspace
 
 networks:
   # Shared by NAME with compose.vllm.yml (which declares it) and compose.yml —

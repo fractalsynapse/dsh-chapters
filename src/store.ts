@@ -19,7 +19,7 @@ import { z } from 'zod'
 import { ruleRecordSchema } from './rules.ts'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname , isAbsolute} from 'node:path'
 import type { ArchiveFs, ChapterRecord, NumberAllocator } from './archive.ts'
 import { appendChapters, freshSession, reserve, reservePlan as reservePlanNumber, type SessionState } from './registry.ts'
 
@@ -312,8 +312,18 @@ const join = (...parts: string[]): string =>
  * `read` maps ENOENT to undefined; anything else propagates: a permission
  * error must not look like a missing file.
  */
+/** Resolve a configured store root against the session cwd. An ABSOLUTE root
+ * wins verbatim — the hosted profiles (#33) pin `/workspace/.dsh-chapters` so
+ * archives land on a persisted volume no matter which subdirectory a session
+ * runs in; relative roots keep the historical per-workspace meaning. */
+export function resolveStoreRoot(cwd: string, storeRoot: string): string {
+  return isAbsolute(storeRoot) ? storeRoot : join(cwd, storeRoot)
+}
+
 export function makeArchiveFs(baseDir: string): ArchiveFs {
-  const abs = (p: string): string => join(baseDir, p)
+  // absolute paths pass through (resolveStoreRoot may hand writeArchive an
+  // absolute storeRoot); relative ones stay workspace-rooted as always.
+  const abs = (p: string): string => (isAbsolute(p) ? p : join(baseDir, p))
   return {
     async write(p, content) {
       const target = abs(p)

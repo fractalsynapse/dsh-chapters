@@ -175,6 +175,26 @@ test('contract: compose.vllm.yml boots the model server standalone (#27)', () =>
   assert.match(compose, /GPU_MEMORY_UTILIZATION: \$\{VLLM_GPU_MEM:-0\.75\}/, 'default GPU memory utilization stays 0.75 (#21)')
 })
 
+test('contract: sdk profile pins an absolute chapter-store root on the workspace volume (#33)', () => {
+  const entry = read('docker-entrypoint.sh')
+  // The archive store is cwd-relative by design (path.join(cwd, artifactStoreRoot));
+  // durability for hosted agents comes from (a) an ABSOLUTE store root and (b) a
+  // PERSISTED mount at it. Both halves must be present or the row fails loudly.
+  assert.match(entry, /DSH_CHAPTERS_STORE_ROOT="\$\{DSH_CHAPTERS_STORE_ROOT:-\/workspace\/.dsh-chapters\}"/, 'entrypoint defaults the store root to /workspace/.dsh-chapters')
+  assert.match(entry, /artifactStoreRoot: \$\{DSH_CHAPTERS_STORE_ROOT\}/, 'the generated patch row emits the expanded value (patch YAML has NO runtime interpolation — ${VAR} would reach Cordis as a literal)')
+  const compose = read('compose.sdk.yml')
+  assert.match(compose, /dsh-workspace:\/workspace/, 'compose mounts a named volume AT the store-root parent (/workspace) — recreate keeps the archive')
+  assert.match(compose, /name: dsh-chapters-workspace/, 'the workspace volume has a stable name (down does not destroy it)')
+})
+
+test('regression: the store-root row lands only for non-web profiles (#33)', () => {
+  const entry = read('docker-entrypoint.sh')
+  const idx = entry.indexOf('artifactStoreRoot: \${DSH_CHAPTERS_STORE_ROOT}')
+  assert.ok(idx > 0, 'store row emitted')
+  const guardStart = entry.lastIndexOf('if ! grep -q "dsh-web-app"', idx)
+  assert.ok(guardStart > 0 && idx - guardStart < 400, 'the store-root row sits inside the no-web-app guard — the web UI manages per-project stores in its own workspaces')
+})
+
 // ── 6. unit: the gateway relay ───────────────────────────────────────────────
 
 test('unit: gateway module exists and exports the pure relay core', async () => {

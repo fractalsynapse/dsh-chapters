@@ -221,6 +221,13 @@ const { finalResponse } = await gw.run('summarize README.md', { sessionId: 'task
 Usage guide with the four measured caller rules (provider routes, flat event envelope, one-connection
 lifetime, no mid-turn cancel): [CONNECTOR.md](sdk-gateway/CONNECTOR.md).
 
+**Hosted archives are durable (#33).** The chapter store is cwd-relative by design (the `read` tool
+must reach it), so the gateway mounts a named volume (`dsh-chapters-workspace`) at `/workspace` and
+pins the sdk profile's `artifactStoreRoot` to the absolute `/workspace/.dsh-chapters`. Container
+recreate keeps every hosted session's chapters, artifacts, rules, and pool mirror. Linking a knowledge
+pool from a hosted session works the same way as anywhere else (`/chapters-link <path-or-url>` over
+the command surface); the mirror then travels inside the same volume.
+
 Coexistence with the Web UI: run one role per `$DSH_HOME` mount at a time. Sharing sessions/storage
 volumes between a live `dsh-web` and `dsh-agent-api` is not tested; give each stack its own home if
 both must run simultaneously.
@@ -355,6 +362,8 @@ unindexed project).
 | `GATEWAY_TOKEN` | *(empty → refuses clients)* | Shared secret for the SDK gateway |
 | `DSH_ROLE` | `web` | Entrypoint role: `web` (UI) or `gateway` (SDK API service) |
 | `DSH_SDK_PROFILE` | `sdk` | Profile name the gateway spawns (`dsh --profile sdk`) |
+| `DSH_CHAPTERS_STORE_ROOT` | `/workspace/.dsh-chapters` | Absolute chapter-store root for hosted profiles (#33) |
+| `GATEWAY_API_KEYS` | *(empty → bearer off)* | Optional per-consumer Bearer keys, comma-separated (#32) |
 | `GATEWAY_IDLE_MS` | `1800000` | Idle socket TTL before the runtime child is reaped (30 min) |
 | `DSH_HOME_VERSION_PIN` | — | Pin `DSH_HOST_VERSION` to the exact host; the SDK client enforces an exact same-version match with it |
 

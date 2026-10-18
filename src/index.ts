@@ -420,7 +420,7 @@ export function createScheduler(
         return undefined
       }
     },
-    tokenFor: (cwd, projectKey) => readToken(cwd, config.artifactStoreRoot, projectKey),
+    tokenFor: (cwd, projectKey) => readToken(cwd, config.artifactStoreRoot, projectKey), // joins via resolveStoreRoot internally (#33)
     collectionsFor: makeCollectionsReader(store.sessions.bind(store), config.artifactStoreRoot),
   })
 }

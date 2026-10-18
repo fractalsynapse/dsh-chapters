@@ -42,6 +42,10 @@ GATEWAY_TOKEN="${GATEWAY_TOKEN:-}"
 GATEWAY_API_KEYS="${GATEWAY_API_KEYS:-}"
 GATEWAY_IDLE_MS="${GATEWAY_IDLE_MS:-1800000}"
 GATEWAY_INIT_TIMEOUT_MS="${GATEWAY_INIT_TIMEOUT_MS:-30000}"
+# Hosted-archive durability (#33): absolute chapter-store root for non-web
+# profiles; the gateway mounts a named volume at /workspace, so this lands the
+# archive where it survives recreate. Empty is not an option — keep the default.
+DSH_CHAPTERS_STORE_ROOT="${DSH_CHAPTERS_STORE_ROOT:-/workspace/.dsh-chapters}"
 
 # ── Seed the credentials document ─────────────────────────────────────────────
 # credentials-local refuses to load a world-readable .credentials.yaml (mode
@@ -205,6 +209,21 @@ REGROW
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
 SETROW
+    fi
+    # Hosted-archive durability (#33): the chapter store root is cwd-relative
+    # by design (measured: path.join(cwd, artifactStoreRoot) — `read` must reach
+    # it), so persisting the archive means persisting the agent workspace. The
+    # gateway mounts a named volume at /workspace; pointing the store there with
+    # an ABSOLUTE artifactStoreRoot keeps hosted chapters under that volume even
+    # when a session runs in a subdirectory of the workspace. Only for profiles
+    # without a web-app bundle (the web UI manages its own per-project stores).
+    if ! grep -q "dsh-web-app" "$profile_dir/package.json" 2>/dev/null; then
+      cat <<STOREROW
+- id: '@treeseed/dsh-chapters'
+  name: '@treeseed/dsh-chapters'
+  config:
+    artifactStoreRoot: ${DSH_CHAPTERS_STORE_ROOT}
+STOREROW
     fi
     # strip the template's own llm-pi-ai top-level row (id line through the next
     # top-level '- id:' / '- insert:' line)

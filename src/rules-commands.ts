@@ -18,6 +18,7 @@ import {
   type RuleRecord, type RuleStatus,
 } from './rules.ts'
 import type { ProjectRecord } from './sync.ts'
+import { resolveStoreRoot } from './store.ts'
 
 export interface RulesIo {
   cwd(): string
@@ -78,7 +79,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     }
     const title = body.split(/[.!?\n]/)[0]!.trim().slice(0, 60)
     let rel = rulePath(io.storeRoot, io.harnessId, number, category, title)
-    let abs = path.join(cwd, rel)
+    let abs = path.isAbsolute(rel) ? rel : path.join(cwd, rel)
     // The domain may be fresh while disk is not (e2e rebuilds the home every
     // boot; per-machine rule files are write-once): walk past any number the
     // disk already holds rather than refuse. Refusing was the r39-era e2e
@@ -87,7 +88,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     // rule (its title killed, its domain record gone) still owns its number —
     // reusing that number for a different title would mint two files sharing
     // one id (approve-by-id would be ambiguous).
-    const rulesDir = path.join(cwd, io.storeRoot, 'rules', io.harnessId)
+    const rulesDir = path.join(resolveStoreRoot(cwd, io.storeRoot), 'rules', io.harnessId)
     const numberTaken = (n: number): boolean => {
       const prefix = `${String(n).padStart(3, '0')}-`
       try { return fs.readdirSync(rulesDir).some((f) => f.startsWith(prefix)) } catch { return false }
@@ -95,7 +96,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     for (let hops = 0; (numberTaken(number) || fs.existsSync(abs)) && hops < 200; hops += 1) {
       number += 1
       rel = rulePath(io.storeRoot, io.harnessId, number, category, title)
-      abs = path.join(cwd, rel)
+      abs = path.isAbsolute(rel) ? rel : path.join(cwd, rel)
     }
     if (numberTaken(number) || fs.existsSync(abs)) return { kind: 'error', text: `refusing to overwrite ${rel} (rule files are write-once; 200 number slots exhausted?)` }
     const id = `${io.harnessId}/${String(number).padStart(3, '0')}`
