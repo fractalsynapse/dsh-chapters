@@ -1,0 +1,65 @@
+{
+  "round": "47b-listener",
+  "startedAt": "2026-10-18T17:53:07.453Z",
+  "probes": [
+    {
+      "name": "V2-chapter-files-written",
+      "ok": true,
+      "files": [
+        "001-task-1-verify-child-work-0ff5b343-1.md"
+      ],
+      "treeDir": "/tmp/probe47-ws-MhvaLI/.dsh-chapters/8409403e-a0ff-417a-980f-02a703efcfde/chapters"
+    },
+    {
+      "name": "V3-lineage-frontmatter",
+      "ok": true,
+      "head": "---\ntitle: \"task 1: verify child work 0ff5b343 (1)\"\nseqRange: [0, 8]\nevents: 9\ntokens: 55  # chars/4 estimate\nsha256: 19a011dd92b25870326d96fb0fef433cc705aa721706e2eb34ba5812ed159247\ntopics: [\"0ff5b343\", \"child\", \"verify\", \"work\", \"answer\", \"task\"]\nartifacts: 0\nsubagent: true\nparentSession: \"p47b-c584492e\"\nunrenderedSeqs: [0, 1, 2]\n"
+    },
+    {
+      "name": "V4-registry-rows",
+      "ok": true,
+      "chapters": [
+        {
+          "number": 1,
+          "range": [
+            0,
+            8
+          ],
+          "path": ".dsh-chapters/8409403e-a0ff-417a-980f-02a703efcfde/chapters/001-task-1-verify-child-work-0ff5b343-1.md"
+        }
+      ],
+      "rootSession": "8409403e-a0ff-417a-980f-02a703efcfde",
+      "parentSession": null
+    },
+    {
+      "name": "V1-listener-effect",
+      "ok": true,
+      "settled": [
+        "8409403e-a0ff-417a-980f-02a703efcfde",
+        "4a9998ba-adfe-4b5b-b60d-d965172126e1",
+        "97387f9a-b55f-4275-abd8-bcae4e287b66"
+      ]
+    },
+    {
+      "name": "V5-second-child-archives-too",
+      "ok": true,
+      "files2": [
+        "001-task-1-verify-child-work-39284545-1.md"
+      ],
+      "firstChildChaptersBefore": 1
+    },
+    {
+      "name": "V6-non-chapters-child-skipped",
+      "ok": true,
+      "negDir": "/tmp/probe47-ws-MhvaLI/.dsh-chapters/97387f9a-b55f-4275-abd8-bcae4e287b66",
+      "exists": false
+    }
+  ],
+  "notes": [
+    "live handle on child at re-settle: true"
+  ],
+  "dirs": [
+    "/tmp/probe47-ws-MhvaLI"
+  ],
+  "finishedAt": "2026-10-18T17:53:09.490Z"
+}

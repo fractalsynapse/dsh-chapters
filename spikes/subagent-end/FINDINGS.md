@@ -73,3 +73,26 @@ cat spikes/subagent-end/results-47.json
 
 The probe writes `results-47.json` incrementally and exits the process; the scratch home is
 gitignored; nothing touches `~/.dsh`.
+
+
+## Verification round (47b) — PRODUCTION wiring, same zero-token method
+
+`lib/verify.js` (results in `results-47b.json`) drives the SAME real service
+emitter but checks the EFFECT of the shipped plugin mounted in the scratch
+profile — not a test double:
+
+| row | claim | result |
+|---|---|---|
+| V1 | the plugin's `apply()` listener reacts to a real settlement | PASS (observed effect, not a log grep) |
+| V2 | chapters written under the CHILD's own tree | PASS |
+| V3 | frontmatter carries `subagent: true` + `parentSession: "<parent id>"` | PASS |
+| V4 | registry rows committed for the child (search door reads these) | PASS |
+| V5 | a second settling child archives cleanly alongside the first | PASS |
+| V6 | a `standard`-preset child produces NO store directory | PASS |
+
+Live handles were still resolvable at every `end` (handle-on-child at
+re-settle: true), matching the disposal-ordering fact above. The remaining
+arm — the real `subagent` TOOL driving a real model through door 5 — is for
+the tape chain once the host lock moves to 0.2.x (backlog item 0); its
+spawn-path difference from this verification is `childSessionMeta` +
+`resolveChildAgentOptions`, both text-pinned by `tests/unit/host-subagent-seam.test.ts`.
