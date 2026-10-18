@@ -147,8 +147,20 @@ profile: the Alibaba/Qwen token-plan marketplace, the local vLLM provider, and a
 
 ```bash
 cd dev/install
-docker compose -f compose.sdk.yml up -d       # vllm + dsh-agent-api (gateway on :8765)
+# optional — only if no model server is already running on this host:
+docker compose -f compose.vllm.yml up -d                  # shared vLLM (:8080)
+GATEWAY_TOKEN=<secret> docker compose -f compose.sdk.yml up -d   # gateway on :8765
 ```
+
+**The SDK stack owns no vLLM (#27).** The model server is an external dependency:
+boot `compose.vllm.yml` (its own file, its own GPU reservation), or point at a server
+that already exists — another project's vLLM, llama.cpp, any OpenAI-compatible URL —
+with `LLM_BASE_URL` / `SYSTEMONE_BASE_URL` (e.g. `http://host.docker.internal:8080/v1`).
+Both stacks attach to the shared network `dsh-chapters-net`, so the default in-network
+hostname `vllm` resolves across files when the model stack is up. That network must
+exist before the first SDK boot (compose.vllm.yml creates it; or
+`docker network create dsh-chapters-net`) — and `compose down` on either stack never
+removes a network it doesn't own.
 
 The load-bearing fact: **the SDK server is stdio-only by design** — `dsh --profile sdk` speaks
 newline-delimited JSON-RPC over its own stdin/stdout; there is no port or HTTP route anywhere in
@@ -218,15 +230,19 @@ both must run simultaneously.
 └─────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────┐
-│           compose.sdk.yml — SDK API Stack                │
+│        compose.vllm.yml + compose.sdk.yml — SDK Stack    │
 │                                                         │
-│  ┌──────────┐    ┌────────────────────────────┐         │
-│  │  vllm    │◄───│ dsh-agent-api              │         │
-│  │  :8080   │    │  gateway :8765 (WS)        │         │
-│  │          │    │   └─ spawn per connection: │         │
-│  │          │    │      dsh --profile sdk     │         │
-│  │          │    │      (stdio JSON-RPC)      │         │
-│  └──────────┘    └────────────────────────────┘         │
+│  ┌──────────────┐   shared net: dsh-chapters-net        │
+│  │ vllm (opt.)  │◄──┐   (or ANY external OpenAI-compat  │
+│  │ :8080        │   │    server via LLM_BASE_URL)       │
+│  └──────────────┘   │                                   │
+│                 ┌───┴────────────────────────────┐      │
+│                 │ dsh-agent-api                  │      │
+│                 │  gateway :8765 (WS)            │      │
+│                 │   └─ spawn per connection:     │      │
+│                 │      dsh --profile sdk         │      │
+│                 │      (stdio JSON-RPC)          │      │
+│                 └────────────────────────────────┘      │
 │                        ▲                                │
 │        @deepseek-ai/dsh-sdk-client over WS relay        │
 └─────────────────────────────────────────────────────────┘
@@ -330,7 +346,8 @@ dev/install/
 ├── vllm.Dockerfile              ← vLLM model server image
 ├── test.Dockerfile              ← test runner image (Node+Playwright+Chromium)
 ├── compose.yml                  ← compose stack (Web UI + vLLM + test runner)
-├── compose.sdk.yml              ← compose stack (SDK API gateway + vLLM)
+├── compose.vllm.yml             ← standalone vLLM model server (shared, optional — #27)
+├── compose.sdk.yml              ← compose stack (SDK API gateway; consumes any model server)
 ├── sdk-gateway/                 ← WebSocket↔stdio relay for the SDK profile
 │   ├── gateway.ts               ← the gateway server
 │   └── smoke.mts                ← end-to-end smoke client (GPU box only)

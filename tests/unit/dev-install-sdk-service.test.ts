@@ -153,12 +153,26 @@ test('contract: compose.sdk.yml keeps the loopback-bind rule and never sets DSH_
   assert.match(compose, /127\.0\.0\.1|DSH_GATEWAY_BIND/, 'gateway bind must be loopback-in-container')
 })
 
-test('contract: compose.sdk.yml runs the same image and shares the sessions volume', () => {
+test('contract: compose.sdk.yml runs the same image, shares the sessions volume, and owns NO vllm (#27)', () => {
   const compose = read('compose.sdk.yml')
   assert.match(compose, /dockerfile: dev\/install\/Dockerfile/, 'sdk stack must reuse the one service image')
   assert.match(compose, /dsh-agent-api:/, 'service named dsh-agent-api must exist')
   assert.match(compose, /DSH_ROLE:\s*(?:"?gateway"|\$\{DSH_ROLE:-gateway\})/, 'the sdk service must select the gateway role')
-  assert.match(compose, /condition: service_healthy/, 'vllm health must gate the api service (boot-order trap)')
+  // #27: the model server is an EXTERNAL dependency — another project may
+  // already run vLLM on this host. The SDK stack consumes LLM_BASE_URL; it
+  // must not build, gate on, or own a vllm service.
+  assert.doesNotMatch(compose, /^ {2}vllm:/m, 'compose.sdk.yml must not define a vllm service (it lives in compose.vllm.yml)')
+  assert.doesNotMatch(compose, /condition: service_healthy/, 'no owned service may gate the api container — external model servers have no compose health to wait on')
+  assert.match(compose, /LLM_BASE_URL: \$\{LLM_BASE_URL:-/, 'the model server arrives through LLM_BASE_URL (env-configurable for external servers)')
+})
+
+test('contract: compose.vllm.yml boots the model server standalone (#27)', () => {
+  const compose = read('compose.vllm.yml')
+  assert.match(compose, /^ {2}vllm:/m, 'standalone file must carry the vllm service')
+  assert.match(compose, /dockerfile: vllm\.Dockerfile/, 'same vllm.Dockerfile as the web stack (one argv contract, pinned by dev-install-compose.test.ts)')
+  assert.match(compose, /healthcheck[\s\S]{0,200}\/health/, 'vllm keeps its /health probe so `up -d` waits honestly')
+  // the GPU-reservation trap from #21: defaults must stay desktop-shareable
+  assert.match(compose, /GPU_MEMORY_UTILIZATION: \$\{VLLM_GPU_MEM:-0\.75\}/, 'default GPU memory utilization stays 0.75 (#21)')
 })
 
 // ── 6. unit: the gateway relay ───────────────────────────────────────────────
