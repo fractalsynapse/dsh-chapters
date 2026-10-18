@@ -251,6 +251,20 @@ export async function runContinue(
     (g) => `seqs ${g.from}-${g.to} fall outside the supplied ranges — NOT archived (gaps are reported, never silent)`,
   )
 
+  // ---- Seed-vocabulary preflight (issue #43). The live failure sequence was: chapters
+  // rendered and written, THEN the child seed was REFUSED by the kernel (`format v4
+  // message requires a producer-owned source kind`) — orphaned files, a lock-only child
+  // directory (measured: ch-eb3d8927, 2026-10-18), no registry commit. This probe runs
+  // the same boundary `buildTocNotice` will, with throwaway text, BEFORE anything is
+  // written: a refusal here costs zero bytes on disk. It cannot predict a kernel change
+  // (that is the drift gate's job — tests/unit/host-seed-contract.test.ts); it
+  // guarantees the emitter and its own validator can never drift apart into orphaning.
+  try {
+    buildTocNotice('seed-vocabulary probe', { newId: () => 'chapters-preflight', time: ports.now() })
+  } catch (error) {
+    throw new Refusal({ ok: false, reason: `seed vocabulary preflight refused: ${(error as Error).message}` })
+  }
+
   // ---- 2. Render + reserve + write (idempotent per attempt key).
   const callerState = await ports.getState(args.callerSessionId)
   const renderConfig: RenderConfig = {
