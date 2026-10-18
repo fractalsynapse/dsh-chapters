@@ -1,0 +1,175 @@
+{
+  "spike": "47-subagent-end",
+  "startedAt": "2026-10-18T17:27:29.603Z",
+  "probes": [
+    {
+      "name": "subagents-service-present",
+      "ok": true,
+      "methods": [
+        "constructor",
+        "resolveMaxDepth",
+        "startContinuable",
+        "sendMessage",
+        "interrupt",
+        "drainContinuableDescendants",
+        "drainContinuableChildren",
+        "listChildren",
+        "listDescendants",
+        "prompt",
+        "interruptByParent",
+        "registerProvider",
+        "getProvider",
+        "list",
+        "start",
+        "prepareContinuable",
+        "expectProvider",
+        "requireContinuations",
+        "observeActivation",
+        "assertCapabilities",
+        "@deepseek-ai/dsh-typert-protocol/remote-methods"
+      ]
+    },
+    {
+      "name": "host-plane-can-subscribe-lifecycle",
+      "ok": true
+    },
+    {
+      "name": "parent-agent-created",
+      "ok": true
+    },
+    {
+      "name": "provider-registered",
+      "ok": true
+    },
+    {
+      "name": "service-start-fulfilled",
+      "ok": true,
+      "runIdEqualsChildId": true
+    },
+    {
+      "name": "end-emitted-before-dispose",
+      "ok": true,
+      "starts": 1
+    },
+    {
+      "name": "live-handle-at-emit",
+      "ok": true,
+      "snapshot": {
+        "handleResolved": true,
+        "eventCount": 10,
+        "types": {
+          "0": "permission/preset",
+          "1": "sandbox/mode",
+          "2": "approval/policy",
+          "3": "turn/start",
+          "4": "step/start",
+          "5": "user/message",
+          "6": "assistant/message",
+          "7": "step/end",
+          "8": "turn/end",
+          "9": "session/title"
+        },
+        "lastSeq": 9,
+        "header": {
+          "id": "e28a006f-d7cf-4551-b356-c1d91374f927",
+          "parentSession": "p47-0d374e67",
+          "cwd": "/home/adrian/Projects/dsh-chapters",
+          "isSeeded": false,
+          "origin": "subagent",
+          "delegationDepth": 1,
+          "agentPreset": "chapters"
+        }
+      }
+    },
+    {
+      "name": "run-disposed",
+      "ok": true
+    },
+    {
+      "name": "agents-get-after-dispose",
+      "ok": true,
+      "note": "true arm = handle gone (expected)"
+    },
+    {
+      "name": "fallback-listEvents",
+      "ok": true,
+      "shape": {
+        "count": 10,
+        "types": [
+          "permission/preset",
+          "sandbox/mode",
+          "approval/policy",
+          "turn/start",
+          "step/start",
+          "user/message",
+          "assistant/message",
+          "step/end",
+          "turn/end",
+          "session/title"
+        ]
+      }
+    },
+    {
+      "name": "fallback-readSession",
+      "ok": true,
+      "shape": {
+        "count": 10,
+        "types": [
+          "permission/preset",
+          "sandbox/mode",
+          "approval/policy",
+          "turn/start",
+          "step/start",
+          "user/message",
+          "assistant/message",
+          "step/end",
+          "turn/end",
+          "session/title"
+        ]
+      }
+    },
+    {
+      "name": "fallback-read",
+      "ok": false,
+      "note": "surface absent"
+    },
+    {
+      "name": "end-payload-shape",
+      "ok": true,
+      "payload": {
+        "runId": "1d043dd0-f9cb-4c3c-a374-f10dd963238b",
+        "provider": "probe-oneshot-47",
+        "id": "e28a006f-d7cf-4551-b356-c1d91374f927",
+        "local": true,
+        "stopReason": "completed",
+        "lastAssistantMessage": {
+          "0": {
+            "type": "text",
+            "text": "PROBE47-REPORT"
+          }
+        }
+      }
+    }
+  ],
+  "notes": [],
+  "facts": {
+    "childPresetViews": {
+      "selectedEvents": [],
+      "projection:agentPreset": {
+        "value": "chapters"
+      },
+      "projection:preset": {
+        "value": "undefined"
+      },
+      "projection:agent-preset": {
+        "value": "undefined"
+      }
+    },
+    "childHeaderAtStart": {
+      "id": "e28a006f-d7cf-4551-b356-c1d91374f927",
+      "parentSession": "p47-0d374e67",
+      "cwd": "/home/adrian/Projects/dsh-chapters"
+    }
+  },
+  "finishedAt": "2026-10-18T17:27:31.219Z"
+}
