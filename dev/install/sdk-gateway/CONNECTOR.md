@@ -5,6 +5,11 @@ for any TypeScript system. It speaks the same newline-delimited JSON-RPC wire as
 `@deepseek-ai/dsh-sdk-client`, over **one WebSocket** instead of a spawned child process — no pipes,
 no bridging, no version-matching manifest check to satisfy.
 
+## New to the service entirely?
+
+Start at [CONSUMER.md](CONSUMER.md) — the from-an-empty-project recipe (install, auth, streaming,
+lifecycle, gotchas). This file is the API + wire reference once you're connected.
+
 ## Where it lives
 
 Single source of truth: `dev/install/sdk-gateway/connector.ts`. The container image ships the compiled

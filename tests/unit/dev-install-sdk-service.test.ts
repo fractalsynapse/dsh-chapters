@@ -205,6 +205,28 @@ test('contract: sdk profile mounts the workspace-changes recorder (#37)', () => 
   assert.ok(guardStart > 0 && idx - guardStart < 900, 'the mount sits inside the no-web-app guard — web already has it via its bundle')
 })
 
+test('contract: external-consumer recipe exists and names its artifacts (#40)', () => {
+  // CONSUMER.md is the onboarding path for projects OUTSIDE this repo; it promises specific
+  // artifact paths — a rename of connector/smoke without updating it strands every consumer.
+  assert.ok(existsSync(join(DIR, 'sdk-gateway', 'CONSUMER.md')), 'CONSUMER.md must exist next to the connector')
+  const doc = read('sdk-gateway/CONSUMER.md')
+  assert.match(doc, /connector\.ts|connector\.mjs/, 'the recipe must name the connector artifact')
+  assert.match(doc, /connectToGateway/, 'the recipe must show the real entry symbol')
+  assert.match(doc, /\bdocker cp \S*\/gateway\/connector\.mjs\b/, 'the image-extraction command must match what the Dockerfile ships')
+  const dockerfile = read('Dockerfile')
+  assert.match(dockerfile, /COPY --from=gateway-builder \/gw\/connector\.mjs \/gateway\/connector\.mjs/, 'the image must still ship the compiled connector at the promised path')
+})
+
+test('regression: gateway echoes the offered subprotocol — ws rejects un-echoed negotiations (#40 live-found)', async () => {
+  // Every token-auth consumer (connector default, smoke client) offers dsh-auth.<token>.
+  // The `ws` library fails the handshake unless handleProtocols returns one — that was
+  // 'socket hang up' for ALL external consumers while in-container probes (injecting their
+  // own createSocket) sailed past it. Pin the serve() construction contract by source shape.
+  const src = read('sdk-gateway/gateway.ts')
+  assert.match(src, /new WebSocketServer\(\{[^}]*handleProtocols/, 'serve() must pass handleProtocols to WebSocketServer')
+  assert.match(src, /\[\.\.\.protocols\]\[0\]/, 'it must echo a selected offer (any first offered protocol; auth is the fence, not this)')
+})
+
 // ── 6. unit: the gateway relay ───────────────────────────────────────────────
 
 test('unit: gateway module exists and exports the pure relay core', async () => {

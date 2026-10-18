@@ -306,7 +306,10 @@ export async function serve(config: GatewayConfig): Promise<{ close(): void }> {
     res.writeHead(404)
     res.end()
   })
-  const wss = new WebSocketServer({ noServer: true })
+  // handleProtocols: ws by default REJECTS an upgrade whose offered subprotocol is not
+  // echoed back (live finding, #40 — every connector consumer hung at 'socket hang up').
+  // Our auth rode the offer; echo the client's first offer and keep authorization in the fence.
+  const wss = new WebSocketServer({ noServer: true, handleProtocols: (protocols) => [...protocols][0] })
   http.on('upgrade', (req, socket, head) => {
     const offered = req.headers['sec-websocket-protocol']
     const offeredList = Array.isArray(offered) ? offered.join(',') : offered

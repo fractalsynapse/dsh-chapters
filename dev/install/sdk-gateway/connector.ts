@@ -50,7 +50,7 @@ export interface ConnectorOptions {
   /** Default bound on individual requests (session/wait/run legs are exempt; undefined waits indefinitely). */
   requestTimeoutMs?: number
   /** Socket factory seam for tests; production imports 'ws'. */
-  createSocket?: (url: string, opts: { protocols?: string[]; headers?: Record<string, string> }) => SocketLike
+  createSocket?: (url: string, opts: { protocols?: string[]; headers?: Record<string, string> }) => SocketLike | Promise<SocketLike>
 }
 
 /** Minimal surface we need from a WebSocket implementation. */
@@ -109,9 +109,24 @@ export interface NotificationQueue {
 
 const defaultCreateSocket = async (url: string, opts: { protocols?: string[]; headers?: Record<string, string> }): Promise<SocketLike> => {
   const wsMod = await import('ws')
-  const WS = (wsMod as { default?: unknown; WebSocket?: unknown }).WebSocket
-    ?? (wsMod as { default?: { WebSocket?: unknown } }).default
-  if (typeof WS !== 'function') throw new Error('connector: could not load a WebSocket implementation (install `ws` or inject createSocket)')
+  // CJS interop has TWO live shapes (measured): Node's ESM-CJS namespace exposes the
+  // export object under `default`, while an esbuild-bundled connector may already have
+  // unwrapped it. Walk past any `default` layer, then prefer the named WebSocket class.
+  const unwrap = (m: unknown): unknown => {
+    let cur = m
+    for (let i = 0; i < 3 && cur !== null && typeof cur === 'object' && 'default' in (cur as Record<string, unknown>); i++) {
+      cur = (cur as Record<string, unknown>).default
+    }
+    return cur
+  }
+  const ns = wsMod as Record<string, unknown>
+  const candidates = [ns.WebSocket, unwrap(ns), unwrap(ns.default)].flatMap((c) => {
+    if (typeof c === 'function') return [c]
+    if (c !== null && typeof c === 'object' && typeof (c as Record<string, unknown>).WebSocket === 'function') return [(c as Record<string, unknown>).WebSocket]
+    return []
+  })
+  const WS = candidates[0]
+  if (WS === undefined) throw new Error('connector: could not load a WebSocket implementation (install `ws` or inject createSocket)')
   // node ws accepts protocols+headers positionally/options — build like its docs show
   return new (WS as new (u: string, o: Record<string, unknown>) => SocketLike)(url, {
     ...(opts.protocols === undefined || opts.protocols.length === 0 ? {} : { protocols: opts.protocols }),
@@ -202,7 +217,10 @@ async function openSocket(options: ConnectorOptions): Promise<{ socket: SocketLi
     throw new Error('connector: authentication required — pass token (dsh-auth subprotocol) or bearerKey (Authorization header); refusing to connect anonymously')
   }
   const factory = options.createSocket ?? ((url: string, opts: { protocols?: string[]; headers?: Record<string, string> }) => defaultCreateSocket(url, opts))
-  const socket = factory(options.url, { protocols: protocols.length > 0 ? protocols : undefined, headers })
+  // MUST await: the default factory is async (dynamic import of ws); skipping it handed
+  // a Promise to connectToGateway and every .on blew up ('socket.on is not a function',
+  // found by the #40 external recipe — the offline fakes are sync so they could not see this).
+  const socket = await factory(options.url, { protocols: protocols.length > 0 ? protocols : undefined, headers })
   // ws-style sockets start connecting immediately; tests dispatch manually.
   return { socket, opened: () => { /* seam kept simple: handshake success marks ready */ } }
 }

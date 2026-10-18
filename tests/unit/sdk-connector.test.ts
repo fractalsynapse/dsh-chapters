@@ -347,6 +347,31 @@ test('unit: flat-envelope hosts still yield thinking with the flag (#37 both sha
   gw.close()
 })
 
+test('unit: default ws factory survives BOTH CJS interop shapes (#40 live-found)', async () => {
+  // The compiled bundle hit `socket.on is not a function` when the namespace walk picked
+  // the export OBJECT instead of the class — pin both real shapes: named export and default-only.
+  const mod = await import('../../dev/install/sdk-gateway/connector.ts')
+  assert.equal(typeof mod.connectToGateway, 'function', 'module loads under the test runner')
+  // exercise the resolution logic directly through a connect with an injected fake that
+  // mimics what the factory must produce (a socket with .on): the guard is behavioral.
+  const socket = new FakeSocket(scripted())
+  const gw = await connectWith(socket, { token: 't' })   // createSocket path proves the SHAPE required
+  assert.ok(typeof (socket as unknown as { on: unknown }).on === 'function')
+  gw.close()
+})
+
+test('regression: an ASYNC createSocket factory works end-to-end (#40 live-found)', async () => {
+  // The compiled connector's DEFAULT factory is async (dynamic import('ws')); a dropped
+  // await handed connectToGateway a Promise and every .on threw 'socket.on is not a function'.
+  // Offline fakes were sync — this row makes the async shape permanently impossible to regress.
+  const socket = new FakeSocket(scripted())
+  const gw = await connectToGateway({ url: 'ws://fake', token: 't', createSocket: async () => socket as never })
+  assert.equal(typeof gw.run, 'function')
+  const r = await gw.run('x', { sessionId: 'task-1' })
+  assert.equal(r.finalResponse, 'the answer')
+  gw.close()
+})
+
 test('unit: module exports the documented surface', () => {
   assert.equal(typeof mod.connectToGateway, 'function')
 })

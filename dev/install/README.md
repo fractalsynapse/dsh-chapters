@@ -221,7 +221,9 @@ const { finalResponse } = await gw.run('summarize README.md', { sessionId: 'task
 Beyond prompts: every durable runtime fact streams as `session.event` — tool calls with arguments (the
 file-change signal), thinking blocks (`run({includeReasoning:true})` returns them as `thinking`), turn
 outcomes with failure reasons, and per-turn workspace-change announcements (#37 mounts the recorder in
-the sdk profile). Usage guide + full event-capture reference: [CONNECTOR.md](sdk-gateway/CONNECTOR.md).
+the sdk profile). **New consumer (any TS project, any repo)?** The from-empty-directory recipe — install, auth, live
+streaming patterns, session lifecycle, measured gotchas: [CONSUMER.md](sdk-gateway/CONSUMER.md).
+API + wire reference once connected: [CONNECTOR.md](sdk-gateway/CONNECTOR.md).
 
 **Hosted archives are durable (#33).** The chapter store is cwd-relative by design (the `read` tool
 must reach it), so the gateway mounts a named volume (`dsh-chapters-workspace`) at `/workspace` and
