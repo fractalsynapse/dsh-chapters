@@ -40,6 +40,9 @@ class FakeSocket {
     const list = this.handlers.get(event) ?? []
     list.push(handler)
     this.handlers.set(event, list)
+    // a fresh WS reaches OPEN asynchronously; mirror that contract so the
+    // connector's send-gating is exercised, not bypassed
+    if (event === 'open') queueMicrotask(() => handler())
     return this
   }
   off(event: string, handler: (arg?: unknown) => void): this {
@@ -122,6 +125,25 @@ test('regression: flat event envelope — params IS the event, no params.event n
   let next = sub.tryNext()
   while (next !== undefined) { seen.push(String(next.params?.type)); next = sub.tryNext() }
   assert.deepEqual(seen, ['assistant/message'], 'event type readable at params.type directly')
+  gw.close()
+})
+
+test('regression: host 0.2.1+ nests the event under params.event — unwrap reads BOTH shapes (#31 live finding)', async () => {
+  // measured live against 0.2.1-rc.2: session.event params are {sessionId, event:{type,data}};
+  // ≤0.2.0-rc.2 was flat. The connector must not hard-assume either.
+  const responder = (frame: Record<string, unknown>, emit: (o: Record<string, unknown>) => void): void => {
+    const id = frame.id as number
+    if (frame.method === 'initialize') { emit({ jsonrpc: '2.0', id, result: { serverInfo: { name: 'x', version: 'y' } } }); return }
+    if (frame.method === 'session/prompt') {
+      emit({ jsonrpc: '2.0', id, result: { messageId: 'm' } })
+      emit({ jsonrpc: '2.0', method: 'session.event', params: { sessionId: 's', event: { seq: 4, type: 'assistant/message', data: { message: { role: 'assistant', content: [{ type: 'text', text: 'nested answer' }] } } } } })
+      emit({ jsonrpc: '2.0', method: 'session.status', params: { sessionId: 's', status: 'idle' } })
+    }
+  }
+  const socket = new FakeSocket(responder)
+  const gw = await connectWith(socket, { token: 't' })
+  const r = await gw.run('x', { sessionId: 's' })
+  assert.equal(r.finalResponse, 'nested answer', 'nested envelope unwrapped identically to flat')
   gw.close()
 })
 

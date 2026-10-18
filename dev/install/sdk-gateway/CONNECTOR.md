@@ -47,10 +47,12 @@ await gw2.run('what did we decide earlier?')           // answers with continuit
 1. **Provider routes are the profile's names**: `local` (vLLM) or `qwen-token-plan` (Alibaba). Never
    `deepseek-official` — it mounts an adapter with no credential here and fails at first call. The
    connector defaults to `local`/`qwen3-4b-instruct` and passes whatever you give it through.
-2. **The event envelope is FLAT.** A notification arrives as `{ method:'session.event', params:{ seq,
-   type, data } }` — `params` IS the event; there is no `params.event`. Assistant text lives at
-   `params.data.message.content` (array of blocks). Small local models lead with `` reasoning
-   before the answer — fold the whole block list, don't assume index 0.
+2. **The event envelope shape depends on the host version — read both.** Measured live:
+   ≤ 0.2.0-rc.2 sends `{ method:'session.event', params:{ seq, type, data } }` (params IS the event);
+   ≥ 0.2.1-rc.x nests it — `{ params:{ sessionId, event:{ type, seq, data } } }`. The connector's
+   `unwrapEvent()` handles both so callers never branch on it. Assistant text lives at
+   `…data.message.content` (array of blocks); small local models lead with `` reasoning before
+   the answer — fold every block, don't assume index 0.
 3. **One connection owns one runtime process.** The gateway spawns `dsh --profile sdk` on your first
    frame and reaps it when the socket closes (also on protocol `shutdown`, also after the server-side
    idle TTL). There is NO mid-turn cancel on the wire: abandoning a turn means closing the connection;

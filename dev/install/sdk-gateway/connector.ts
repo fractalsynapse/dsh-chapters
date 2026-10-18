@@ -127,9 +127,21 @@ export function foldAssistantText(params: Record<string, unknown>): string {
   return content.filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text!).join('')
 }
 
+/**
+ * Unwrap the session.event envelope across host versions (measured both ways):
+ *   ≤0.2.0-rc.2: params IS the flat event — {seq, type, data}
+ *   ≥0.2.1-rc.x: params wraps it — {sessionId, event:{type, seq, data}}
+ * Read nested-first with flat fallback; never assume one shape on live bytes.
+ */
+export function unwrapEvent(params: Record<string, unknown>): Record<string, unknown> | undefined {
+  const nested = params.event
+  if (nested !== undefined && typeof nested === 'object' && nested !== null) return nested as Record<string, unknown>
+  return typeof params.type === 'string' ? params : undefined
+}
+
 /** True when a notification carries a committed assistant message. */
 function isAssistantMessage(n: GatewayNotification): boolean {
-  return n.method === 'session.event' && n.params.type === 'assistant/message'
+  return n.method === 'session.event' && unwrapEvent(n.params)?.type === 'assistant/message'
 }
 
 function isIdleStatus(n: GatewayNotification, sessionId: string): boolean {
@@ -195,6 +207,13 @@ async function openSocket(options: ConnectorOptions): Promise<{ socket: SocketLi
 /** Connect, perform the initialize handshake, and resolve with a live connection. */
 export async function connectToGateway(options: ConnectorOptions): Promise<GatewayConnection> {
   const { socket } = await openSocket(options)
+  // Real sockets (and the test fakes) emit 'open' once connected; NOTHING may
+  // send before that or ws throws "WebSocket is not open" (measured live).
+  let markOpen!: () => void
+  const opened = new Promise<void>((res) => { markOpen = res })
+  let openSettled = false
+  const settleOpen = (): void => { if (!openSettled) { openSettled = true; markOpen() } }
+  socket.on('open', () => settleOpen())
   const pending = new Map<number, Pending>()
   const queues = new Set<Queue>()
   let nextId = 1
@@ -204,7 +223,7 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
   const sendRaw = (obj: Record<string, unknown>): void => { socket.send(JSON.stringify(obj)) }
 
   const requestOnce = <T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> =>
-    new Promise<T>((resolve, reject) => {
+    opened.then(() => new Promise<T>((resolve, reject) => {
       if (closed) { reject(new Error('connector: transport closed')); return }
       const id = nextId++
       const entry: Pending = {
@@ -216,7 +235,7 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
       }
       pending.set(id, entry)
       sendRaw({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) })
-    })
+    }))
 
   const failAll = (err: Error): void => {
     for (const [, p] of pending) { if (p.timer !== undefined) clearTimeout(p.timer); p.reject(err) }
@@ -227,8 +246,8 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
   // attach listeners BEFORE anything can send; message/close/error drive the machine
   let onMessage: (data: unknown) => void = () => {}
   socket.on('message', (d: unknown) => onMessage(d))
-  socket.on('close', () => { if (!closed) { closed = true; failAll(new Error('connector: gateway connection closed (runtime child reaped — reconnect and resumeSession to continue)')) } })
-  socket.on('error', (e: unknown) => { if (!closed) failAll(new Error(`connector: transport error: ${String(e instanceof Error ? e.message : e)}`)) })
+  socket.on('close', () => { if (!closed) { closed = true; settleOpen(); failAll(new Error('connector: gateway connection closed (runtime child reaped — reconnect and resumeSession to continue)')) } })
+  socket.on('error', (e: unknown) => { if (!closed) { settleOpen(); failAll(new Error(`connector: transport error: ${String(e instanceof Error ? e.message : e)}`)) } })
 
   onMessage = (data: unknown): void => {
     let msg: Record<string, unknown>
@@ -267,7 +286,7 @@ export async function connectToGateway(options: ConnectorOptions): Promise<Gatew
           notifications.push(n)
           runOptions.onNotification?.(n)
           if (n.method === 'session.event') events.push(n)
-          if (isAssistantMessage(n)) lastAssistant = foldAssistantText(n.params)
+          if (isAssistantMessage(n)) { const ev = unwrapEvent(n.params); lastAssistant = foldAssistantText(ev ?? {}) }
           if (isIdleStatus(n, sessionId) && !settled) { settled = true; queue.return(); queues.delete(queue); settleIdle?.() }
         }
       }
