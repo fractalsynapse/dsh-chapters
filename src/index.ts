@@ -32,6 +32,7 @@ import type { ChapterRecord } from './archive.ts'
 import { registerChaptersTools } from './tools.ts'
 import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLike } from './preset.ts'
 import { registerHostCommands } from './commands.ts'
+import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -44,6 +45,8 @@ import { createTreedxProvider } from './treedx/provider.ts'
 interface HostCtx {
   logger?: { info?: (message: string) => void; warn?: (message: string) => void }
   get?: (name: string) => unknown
+  /** Cordis event subscription — door 5 registers the subagent-end listener here. */
+  on?: (name: string, fn: (info: never) => void) => unknown
   effect?: (fn: () => void, label?: string) => void
   agents?: unknown
   tools?: { register(def: unknown): () => void }
@@ -68,6 +71,12 @@ export interface Config {
   continuationBudgetRatio: number
   fallbackPreset: string
   mergeThreshold: number
+  /**
+   * Door 5 (issue #47): archive a chapters-preset subagent's completed turns when
+   * its run settles (`subagent/end`). Save-only — no session, no compaction,
+   * enrichment queued never run. false = the listener never registers.
+   */
+  subagentAutoSave: boolean
   chapterLimit: number
   /** Plans (docs/plans-carriage.md § 7): verbatim plan chars shown in a chapter,
    * the tool-call-argument artifact floor (0 = off), and whether the notice
@@ -146,6 +155,7 @@ export const Config = Schema.object({
   fallbackPreset: Schema.string().default('chapters'),
   // Topic-sequential composition (record §4.2) for the model-free fork path.
   mergeThreshold: Schema.number().default(0.3),
+  subagentAutoSave: Schema.boolean().default(true),
   chapterLimit: Schema.number().default(8000),
   // Plans (docs/plans-carriage.md § 7). A plan's full text is ALWAYS
   // artifact-backed, so planInlineChars is display economy and never a data
@@ -309,6 +319,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     })
     registerHostCommands(ctx as never, domain, {
       artifactStoreRoot: config.artifactStoreRoot,
+      subagentAutoSave: config.subagentAutoSave,
       harnessId: config.harnessId,
       scheduler,
       enrich,
@@ -323,6 +334,38 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         now: () => new Date(),
       } satisfies RulesIo, args),
     })
+
+    // Door 5 (issue #47): the fifth archive moment — subagent settlement. The
+    // host publishes `subagent/end` for every settled child run (one-shot AND
+    // each residency epoch of a continuable child); the wiring reads the live
+    // child synchronously (end strictly precedes disposal — measured, spike #47)
+    // with a durable sessionQuery fallback, gates on the header the HOST stamps
+    // (`origin: subagent`, `agentPreset`), and archives through the SAME
+    // saveSession core as /chapters-save. Enrichment is never run per child.
+    // Save-only: creates no session, so the "no continuation-creating actions
+    // mid-step" rule is not engaged; a settled child's turns are all completed
+    // by construction, and the anchor is its last `turn/end`.
+    if (config.subagentAutoSave) {
+      const autoSaveListener = wireSubagentAutoSave(ctx as never, store, {
+        presetId: CHAPTERS_PRESET_ID,
+        artifactStoreRoot: config.artifactStoreRoot,
+        chapterTokenTarget: config.chapterTokenTarget,
+        toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
+        mergeThreshold: config.mergeThreshold,
+        chapterLimit: config.chapterLimit,
+        planInlineChars: config.planInlineChars,
+        callArgArtifactTokens: config.callArgArtifactTokens,
+        scheduler,
+      })
+      try {
+        ctx.on?.('subagent/end', autoSaveListener as (info: never) => void)
+        ctx.logger?.info?.('dsh-chapters: subagent auto-save armed — chapters-preset children archive at settlement (reported by /chapters-status)')
+      } catch (error) {
+        const message = `dsh-chapters: subagent auto-save registration REFUSED — settling subagents will NOT archive (${String((error as Error)?.message ?? error)})`
+        ctx.logger?.warn?.(message)
+        console.error(message)
+      }
+    }
   } catch (error) {
     // Tools are the whole user-facing surface short of the engine: a failure
     // here is loud, never a silently missing tool. Loud means the operator

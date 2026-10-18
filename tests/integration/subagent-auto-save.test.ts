@@ -106,11 +106,15 @@ test('acceptance: subagent end → verbatim chapters with lineage frontmatter, n
   assert.match(head, /parentSession: "parent-1"/, 'and the parent id, from the durable header')
   assert.match(md, new RegExp(MARK + '-T1'), 'verbatim child text')
 
-  // the archive is SEARCHABLE through the local door — the whole point of #47
+  // the archive is SEARCHABLE through the local door — the whole point of #47.
+  // The index carries title/topics/summary (the body is retrieved by `read` on
+  // the cited path, which the assertion above already proves verbatim), so the
+  // query targets the indexed surface and the hit must name the child's tree.
   const { entries, summaries } = buildLocalCorpus(path.join(w.tmp, '.dsh-chapters'))
   assert.ok(entries.length >= 1, 'corpus sees the child chapter')
-  const hit = rankEntries(entries, summaries, [MARK.toLowerCase()], Date.now(), null, 0, 400)
-  assert.ok(hit.total >= 1, 'the marker query finds the child chapter')
+  const hit = rankEntries(entries, summaries, ['task'], Date.now(), null, 0, 400)
+  assert.ok(hit.total >= 1, 'an indexed-term query finds the child chapter')
+  assert.match(hit.results[0]!.path, /child-1/, 'the citation points into the CHILD tree')
 
   // sync is scheduled (chapters must travel); enrichment is NOT run per child
   assert.equal(w.schedules.length, 1)

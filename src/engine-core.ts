@@ -26,6 +26,7 @@ import type { ChapterRange, RenderedChapter, SessionEventLike } from './types.ts
 import { chapterTopics } from './signature.ts'
 import type { ChapterRecord } from './archive.ts'
 import { estimateTokens, renderChapter, renderIndex } from './render.ts'
+import { lineageOf } from './types.ts'
 import { slugify } from './archive.ts'
 import type { PlanChapter, SessionState } from './registry.ts'
 
@@ -526,6 +527,9 @@ export function buildFinalizedChapter(
   })
   const lo = Math.min(...shadowedSeqs, ...events.map((e) => e.seq))
   const hi = Math.max(...shadowedSeqs, ...events.map((e) => e.seq))
+  // Subagent lineage (issue #47): a compacting child stamps the same header fact
+  // the save doors do — undefined for ordinary sessions, byte-identical output.
+  const lineage = lineageOf((session as { header?: { parentSession?: string } }).header)
   return renderChapter(events, {
     title: plan.chapter.title,
     summary: plan.chapter.summary,
@@ -536,6 +540,7 @@ export function buildFinalizedChapter(
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     planInlineChars: config.planInlineChars,
     callArgArtifactTokens: config.callArgArtifactTokens,
+    ...(lineage !== undefined ? { subagentOf: lineage } : {}),
   }, [], chapterTopics(events, lo, hi))
 }
 
@@ -567,11 +572,13 @@ export function buildFinalizedChapters(
   if (composed[0]!.startSeq > shadowMin || last.endSeq < shadowMax) {
     throw new Error(`buildFinalizedChapters: manifest [${composed[0]!.startSeq}..${last.endSeq}] does not cover shadowed [${shadowMin}..${shadowMax}] — reconstruction drift`)
   }
+  const lineage = lineageOf((session as { header?: { parentSession?: string } }).header)
   const renderCfg = {
     chapterTokenTarget: config.chapterTokenTarget,
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     planInlineChars: config.planInlineChars,
     callArgArtifactTokens: config.callArgArtifactTokens,
+    ...(lineage !== undefined ? { subagentOf: lineage } : {}),
   }
   return composed.map((ch) => {
     const inRange = events.filter((e) => e.seq >= ch.startSeq && e.seq <= ch.endSeq)
