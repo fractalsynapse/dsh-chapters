@@ -73,12 +73,23 @@ identical configuration to the Web UI profile — Alibaba/Qwen token-plan market
 provider, and all three dev plugins including dsh-chapters — so hosted agents get the same tools and
 zero-inference chapter compaction, tuned for small local models.
 
+The model server is NOT part of this stack (#27): boot `compose.vllm.yml` (its own file,
+its own GPU reservation), or point `LLM_BASE_URL` at any OpenAI-compatible server already
+running on the host — another project's vLLM included. The stacks share one network so the
+default `vllm` hostname resolves across files; an external URL works without joining.
+
 ```bash
 cd dev/install
+docker compose -f compose.vllm.yml up -d                    # optional shared model server
 GATEWAY_TOKEN=$(openssl rand -hex 16) docker compose -f compose.sdk.yml up -d
 ```
 
 The serving side is stock host (`@deepseek-ai/dsh-sdk-jsonrpc-server`); only the thin relay is ours.
+Deeper integration is possible and measured: the harness is library-first internally (the SDK server is
+a plugin calling `ctx.agents.create()` on an in-process Cordis tree; `boot()` from app-boot is the
+embedder entry), so a Hono-style Node app can embed the runtime instead of spawning children — shapes,
+costs, and the npm dist-tag pin trap are in
+[`dev/install/sdk-embedding-analysis.md`](https://github.com/treeseed-ai/dsh-chapters/blob/main/dev/install/sdk-embedding-analysis.md).
 Callers use `@deepseek-ai/dsh-sdk-client` with `provider: 'local'` or `'qwen-token-plan'` at
 `initialize` — never `deepseek-official`. One connection owns one runtime process; sessions survive
 reconnection through `session/resume`. Why stdio-shaped hosting looks like this, the alternatives

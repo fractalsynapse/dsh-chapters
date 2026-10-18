@@ -208,6 +208,13 @@ Coexistence with the Web UI: run one role per `$DSH_HOME` mount at a time. Shari
 volumes between a live `dsh-web` and `dsh-agent-api` is not tested; give each stack its own home if
 both must run simultaneously.
 
+**Want deeper than a relay?** The harness is library-first internally — the SDK server itself is just
+a plugin calling `ctx.agents.create()` on an in-process Cordis tree, and `@deepseek-ai/dsh-app-boot`
+exports `boot()` as the documented embedder entry. A Hono (or any Node) app can therefore embed the
+runtime directly instead of spawning children: three integration shapes ranked, the npm dist-tag trap
+that governs them (`latest` tags of the bundle packages are stale — pin every `@deepseek-ai/*` to ONE
+exact version), and what each shape costs: [sdk-embedding-analysis.md](sdk-embedding-analysis.md).
+
 ## Architecture
 
 ```
@@ -353,7 +360,8 @@ dev/install/
 │   └── smoke.mts                ← end-to-end smoke client (GPU box only)
 ├── .env.example                 ← environment variable reference (not required at runtime)
 ├── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
-└── sdk-service-analysis.md      ← SDK integration analysis (host facts, options, effort)
+├── sdk-service-analysis.md      ← SDK integration analysis (host facts, options, effort)
+└── sdk-embedding-analysis.md    ← in-process embedding feasibility (Hono/Cordis as libraries, #28)
 
 .dsh/skills/                     ← all agent skills (see below)
 skills-lock.json                 ← lock file for upstream-installed skills

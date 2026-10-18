@@ -20,7 +20,11 @@ Dev/install platform (compose, containerized web) → `dev/install/README.md` + 
 hosted headless API / gateway** → `dev/install/sdk-service-analysis.md` (measured host facts: SDK server
 is stdio-only; profile-dir `settings.yaml` is read by NOTHING on 0.2.x — config must ride
 `cordis.patch.yml`; provider routes at `initialize` are the profile's names, never
-`deepseek-official`).
+`deepseek-official`). **Embedding DSH in-process (Hono/Cordis as libraries)** →
+`dev/install/sdk-embedding-analysis.md` (no network API ships but `ctx.agents.create/resume` IS the
+in-process seam the SDK server itself uses; `boot()` from app-boot is the documented embedder entry;
+npm `latest` dist-tags of the bundle packages are STALE — pin every `@deepseek-ai/*` to one exact
+version).
 
 **Scope: development only.** This file guides agents developing THIS repository. Nothing shipped —
 runtime behavior, the knowledge corpus, or any test — may depend on it or its contents: every real
