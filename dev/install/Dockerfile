@@ -44,9 +44,11 @@ RUN printf '{"name":"dsh-sdk-gateway","private":true,"type":"module","dependenci
 RUN npm install --omit=dev --no-audit --no-fund
 COPY dev/install/sdk-gateway/gateway.ts ./gateway.ts
 COPY dev/install/sdk-gateway/smoke.mts ./smoke.mts
+COPY dev/install/sdk-gateway/connector.ts ./connector.ts
 RUN npx --yes esbuild@0.25.5 gateway.ts --outfile=gateway.mjs --format=esm --platform=node --target=node22 --bundle --external:ws \
     && npx --yes esbuild@0.25.5 smoke.mts --outfile=smoke.mjs --format=esm --platform=node --target=node22 --bundle --external:ws \
-    && test -s gateway.mjs && test -s smoke.mjs
+    && npx --yes esbuild@0.25.5 connector.ts --outfile=connector.mjs --format=esm --platform=node --target=node22 --bundle --external:ws \
+    && test -s gateway.mjs && test -s smoke.mjs && test -s connector.mjs
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS runtime
@@ -138,6 +140,8 @@ COPY --from=gateway-builder /gw/gateway.mjs /gateway/gateway.mjs
 COPY --from=gateway-builder /gw/node_modules /gateway/node_modules
 # GPU-box smoke client (not a CI gate): docker compose -f compose.sdk.yml exec dsh-agent-api node /gateway/smoke.mjs
 COPY --from=gateway-builder /gw/smoke.mjs /gateway/smoke.mjs
+# Consumer library (#31): in-image consumers import /gateway/connector.mjs; external ones vendor the file
+COPY --from=gateway-builder /gw/connector.mjs /gateway/connector.mjs
 RUN printf '{"type":"module"}' > /gateway/package.json \
     && node --input-type=module -e "import('/gateway/gateway.mjs').catch(e=>{if(String(e).includes('GATEWAY_TOKEN'))process.exit(0);throw e})" 2>/dev/null || true
 
