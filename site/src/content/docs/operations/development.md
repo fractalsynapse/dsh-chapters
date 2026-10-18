@@ -85,6 +85,11 @@ GATEWAY_TOKEN=$(openssl rand -hex 16) docker compose -f compose.sdk.yml up -d
 ```
 
 The serving side is stock host (`@deepseek-ai/dsh-sdk-jsonrpc-server`); only the thin relay is ours.
+TypeScript consumers don't speak the raw wire: the connector (`dev/install/sdk-gateway/connector.ts`)
+offers a `HarnessClient`-shaped `connectToGateway({url, token}).run(prompt)` over one WebSocket, and
+its usage guide records the four measured caller rules (profile provider routes, flat event envelope,
+one-connection runtime lifetime, no mid-turn cancel):
+[`CONNECTOR.md`](https://github.com/treeseed-ai/dsh-chapters/blob/main/dev/install/sdk-gateway/CONNECTOR.md).
 Deeper integration is possible and measured: the harness is library-first internally (the SDK server is
 a plugin calling `ctx.agents.create()` on an in-process Cordis tree; `boot()` from app-boot is the
 embedder entry), so a Hono-style Node app can embed the runtime instead of spawning children — shapes,
