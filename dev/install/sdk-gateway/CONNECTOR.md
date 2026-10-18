@@ -61,6 +61,57 @@ await gw2.run('what did we decide earlier?')           // answers with continuit
    before it succeeds. The connector does this handshake for you; pass `provider`/`model`/
    `reasoningEffort`/`maxTokens` in the options if the defaults are not what you want.
 
+## Event capture reference — what the stream actually carries
+
+You are never limited to "send a prompt and hope". Every durable fact the runtime commits streams as
+`session.event` notifications, and whole-agent lifecycle arrives as `session.status`. Captured live
+against host 0.2.1-rc.2 (a write+read turn emitted, in order):
+
+```
+permission/preset · sandbox/mode · approval/policy · agent/inbox/spliced · turn/start · step/start
+· system/message · user/message · request/header · request/context · session/title · assistant/message
+· tool/call · tool/result · step/end · turn/end          statuses: running → idle
+```
+
+| You want | Subscribe to | Payload pointer |
+|---|---|---|
+| The answer text | `assistant/message` | `data.message.content[]` blocks; small models emit reasoning first — fold or filter by `type` |
+| **Thinking** | same message's `reasoning` blocks, or `assistant/attempt` (discarded retries) | `content[].type === 'reasoning'`; NOTE: `run().finalResponse` folds TEXT ONLY — read raw events for thinking |
+| **Every tool invocation + arguments** | `tool/call` | `{turn, step, callId, name, arguments}` — e.g. `name:"write", arguments:{file_path,…}` is your file-change signal |
+| Tool outcomes | `tool/result` | message with `toolCallId` correlation + content blocks (path/status/errors) |
+| Turn/step boundaries & failure reasons | `turn/end`, `step/end` | `data.reason` (`{kind:'completed'}` / error / max-tokens) — the run-failure signal |
+| Which model/route/cap answered | `request/header` | provider, model, maxTokens, reasoningEffort, adapter defaults |
+| Session title (fallback or LLM-named) | `session/title` | `{title, messageSeqs, source}` |
+| Context compaction activity | `compaction/start/summary/end/prune` | includes our chapters engine (`provider` tag) |
+| Subagent tree | `subagent.started` / `subagent.finished` notifications (separate methods) | child sessionId/lineage; finished carries last assistant text |
+| Plan mode, goals, todos, jobs | `plan/mode`, `goal/change`, `todo/write`, `job/registered/settled` | visible when those tools are used |
+| Approval flow | `approval/asked` / `approval/decided` | present when policy asks (SDK wire has no client→server reply yet — see limits) |
+
+Filter pattern (everything after just awaits idle inside `run`):
+
+```ts
+const sub = gw.subscribe(n => n.method === 'session.event')
+for await (const n of sub) {
+  const ev = (n.params as any).event ?? n.params          // version-tolerant (rule 2)
+  if (ev.type === 'tool/call') console.log('tool:', ev.data.name, ev.data.arguments)
+  if (ev.type === 'turn/end') console.log('reason:', JSON.stringify(ev.data.reason))
+}
+```
+
+### Honest gaps (measured, #36 follow-ups)
+
+- **Per-turn file-diff summaries** (`workspace/changes` event + diff service) exist in the host but are
+  mounted by the **web-app bundle only** — the sdk profile does not have them today. Until that mount
+  lands, reconstruct changed files from `tool/call` arguments (`write`/`edit` name `file_path`) plus
+  `bash` results; it is complete for tool-mediated edits, not for out-of-band writes.
+- **No mid-turn cancel** on the wire: observing a runaway turn means closing the connection (child
+  reaps; resume later).
+- **Approvals are one-way**: `approval/asked` streams out, but client→server notification/reply is
+  unimplemented both ends — hosted runs must use auto-approve policies (`permission/preset` you see at
+  turn start is the effective grant).
+- Full catalog authority: `@deepseek-ai/dsh-session` exports `KNOWN_SESSION_EVENT_TYPES` (~65 types);
+  anything outside it carries an `ignorable` marker rather than breaking reads.
+
 ## API surface
 
 | Member | Wire | Notes |
