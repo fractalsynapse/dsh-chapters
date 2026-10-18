@@ -200,9 +200,15 @@ Two protocol facts callers must know (verified against host 0.2.x sources):
   reaps the child); follow-up work resumes via `session/resume`. Full analysis and alternatives
   (ACP, socat relay): [sdk-service-analysis.md](sdk-service-analysis.md).
 
-Auth: the gateway rejects connections before spawning anything unless the `Sec-WebSocket-Protocol`
-handshake carries `dsh-auth.<token>` matching `GATEWAY_TOKEN` (compose env; keep it private — this is
-a remote-code-execution surface, bind through loopback publishing only).
+Auth: the gateway rejects connections before spawning anything (keep secrets private — this is a
+remote-code-execution surface, bind through loopback publishing only). Two modes:
+
+- **shared token** (default): the `Sec-WebSocket-Protocol` handshake must carry `dsh-auth.<token>`
+  matching `GATEWAY_TOKEN`.
+- **API keys** (#32, optional): set `GATEWAY_API_KEYS=key1,key2` and clients may instead present
+  `Authorization: Bearer <key>` (or the `dsh-bearer.<key>` subprotocol). Per-key identity is logged
+  (never the secret); both paths compare in constant time. The mode is purely additive — unset, the
+  gateway behaves exactly as before.
 
 **Don't hand-roll the wire.** The connector (`sdk-gateway/connector.ts`, shipped compiled in the image
 at `/gateway/connector.mjs`) gives TypeScript consumers a `HarnessClient`-shaped API over one socket:

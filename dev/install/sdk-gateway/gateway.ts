@@ -51,12 +51,72 @@ export function childLineToSocket(chunk: string): string | null {
   return trimmed === '' ? null : trimmed
 }
 
+/** Constant-time string equality over UTF-8 bytes (timing side channels are a
+ * real concern on an RCE surface; lengths differ fast, then byte-wise OR). */
+export function timingSafeEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ba.length !== bb.length) return false
+  let diff = 0
+  for (let i = 0; i < ba.length; i++) diff |= ba[i]! ^ bb[i]!
+  return diff === 0
+}
+
 /** Auth: accept `dsh-auth.<token>` anywhere in the offered protocol list.
  * Fail closed on an empty configured token — refusing service beats serving
  * an RCE surface to the network. */
 export function authorizeProtocol(headerValue: string | undefined, expectedToken: string): boolean {
   if (expectedToken === '' || headerValue === undefined) return false
-  return headerValue.split(',').map((s) => s.trim()).includes(`dsh-auth.${expectedToken}`)
+  return headerValue.split(',').map((s) => s.trim()).some((p) => p.startsWith('dsh-auth.') && timingSafeEqual(p.slice('dsh-auth.'.length), expectedToken))
+}
+
+/** Parse GATEWAY_API_KEYS: comma-separated, blanks dropped (#32). An empty
+ * result means the bearer path is OFF — zero behavior change from #25. */
+export function parseApiKeys(raw: string | undefined): string[] {
+  if (raw === undefined) return []
+  return raw.split(',').map((s) => s.trim()).filter((s) => s !== '')
+}
+
+/** Bearer auth (#32): `Authorization: Bearer <key>` or the `dsh-bearer.<key>`
+ * subprotocol, matched constant-time against the configured key list. Scheme
+ * name is case-insensitive per RFC 7235. Empty key list refuses everything. */
+export function authorizeBearer(
+  authorizationHeader: string | undefined,
+  protocolHeader: string | undefined,
+  keys: readonly string[],
+): boolean {
+  if (keys.length === 0) return false
+  if (authorizationHeader !== undefined) {
+    const m = /^bearer\s+(\S.*)$/i.exec(authorizationHeader.trim())
+    if (m !== null && keys.some((k) => timingSafeEqual(m[1]!, k))) return true
+  }
+  if (protocolHeader !== undefined) {
+    for (const part of protocolHeader.split(',').map((s) => s.trim())) {
+      if (part.startsWith('dsh-bearer.') && keys.some((k) => timingSafeEqual(part.slice('dsh-bearer.'.length), k))) return true
+    }
+  }
+  return false
+}
+
+/** Index of the bearer credential that matched (for honest logs without secrets). */
+export function apiIndexFor(
+  authorizationHeader: string | undefined,
+  protocolHeader: string | undefined,
+  keys: readonly string[],
+): number {
+  if (authorizationHeader !== undefined) {
+    const m = /^bearer\s+(\S.*)$/i.exec(authorizationHeader.trim())
+    if (m !== null) { const i = keys.findIndex((k) => timingSafeEqual(m[1]!, k)); if (i >= 0) return i }
+  }
+  if (protocolHeader !== undefined) {
+    for (const part of protocolHeader.split(',').map((s) => s.trim())) {
+      if (part.startsWith('dsh-bearer.')) {
+        const i = keys.findIndex((k) => timingSafeEqual(part.slice('dsh-bearer.'.length), k))
+        if (i >= 0) return i
+      }
+    }
+  }
+  return -1
 }
 
 /** Minimal view of a spawned runtime child — injectable for tests. */
@@ -155,6 +215,8 @@ export interface GatewayConfig {
   port: number
   host: string
   token: string
+  /** Per-consumer API keys (#32); empty list = bearer path OFF. */
+  apiKeys: string[]
   idleMs: number
   dshBin: string
   profile: string
@@ -166,6 +228,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): GatewayConf
     port: Number(env.GATEWAY_PORT ?? 8765),
     host: env.DSH_GATEWAY_BIND ?? '127.0.0.1',
     token: env.GATEWAY_TOKEN ?? '',
+    apiKeys: parseApiKeys(env.GATEWAY_API_KEYS),
     idleMs: Number(env.GATEWAY_IDLE_MS ?? 1_800_000),
     dshBin: env.DSH_BIN ?? '/usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js',
     profile: env.DSH_SDK_PROFILE ?? 'sdk',
@@ -246,10 +309,19 @@ export async function serve(config: GatewayConfig): Promise<{ close(): void }> {
   const wss = new WebSocketServer({ noServer: true })
   http.on('upgrade', (req, socket, head) => {
     const offered = req.headers['sec-websocket-protocol']
-    if (!authorizeProtocol(Array.isArray(offered) ? offered.join(',') : offered, config.token)) {
+    const offeredList = Array.isArray(offered) ? offered.join(',') : offered
+    const authHeaderRaw = req.headers.authorization
+    const authHeader = Array.isArray(authHeaderRaw) ? authHeaderRaw.join(',') : authHeaderRaw
+    // #32 order: bearer keys first when configured (per-consumer identity), then the shared token.
+    const bearerOk = authorizeBearer(authHeader, offeredList, config.apiKeys)
+    if (!bearerOk && !authorizeProtocol(offeredList, config.token)) {
       socket.destroy()
       process.stderr.write('gateway: refused unauthenticated upgrade\n')
       return
+    }
+    if (bearerOk) {
+      // name WHICH key accepted (index, never the secret) — audit trail without leakage
+      process.stderr.write(`gateway: accepted upgrade via api-key #${apiIndexFor(authHeader, offeredList, config.apiKeys)}\n`)
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
   })
