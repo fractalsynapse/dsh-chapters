@@ -44,9 +44,16 @@ export interface HostCommandsConfig {
   enrich?: EnrichCommandSurface
   /** P3 rule lifecycle family, bound to a workspace (S2 module underneath). */
   rules?: (cwd: string, args: string) => Promise<{ kind: 'success' | 'error'; text: string }>
+  /** Door 5 (issue #47): whether subagent settlements auto-archive. Reported in
+   *  /chapters-status because it runs WITHOUT a human seeing it happen. */
+  subagentAutoSave?: boolean
 }
 
 type CommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string }
+
+/** Door 5 state, stated with its config name so a user can flip it (issue #47). */
+const AUTO_SAVE_LINE = (config: HostCommandsConfig): string =>
+  `\nSubagent auto-save: ${config.subagentAutoSave === false ? 'OFF (subagentAutoSave: false)' : 'ON — chapters-preset children archive their completed turns at settlement'}`
 type CommandsService = { register?: (def: unknown) => (() => void) | unknown } | undefined
 
 const cwdOf = (agent: unknown): string =>
@@ -238,7 +245,7 @@ export function registerHostCommands(
       const project = projectForCwd(domain.table('projects').entries(), cwd)
       const status = readSyncStatus(cwd, config.artifactStoreRoot)
       if (project === undefined && status === null) {
-        return { kind: 'success', text: 'No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token].' }
+        return { kind: 'success', text: 'No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token].' + AUTO_SAVE_LINE(config) }
       }
       const lines: string[] = []
       if (project !== undefined) {
@@ -254,6 +261,7 @@ export function registerHostCommands(
         lines.push(`  ${(status.steps ?? []).join(' \u2192 ')}`)
       }
       if (config.enrich !== undefined) lines.push(config.enrich.statusLine())
+      lines.push(AUTO_SAVE_LINE(config))
       return { kind: 'success', text: lines.join('\n') }
     },
   }

@@ -26,6 +26,7 @@ No hardcoded tunables anywhere the harness can configure them. The table below i
 | `continuationBudgetRatio` | 0.25 | TOC + note share of the window *remaining after the header* |
 | `chapterTokenTarget` / `chapterLimit` | 8000 / 8000 | soft per-chapter size / hard split |
 | `mergeThreshold` | 0.3 | turn→chapter topic-merge τ (archive-time only) |
+| `subagentAutoSave` | true | archive a subagent's completed turns into searchable chapters when its run settles (every settlement of a continuable child; the watermark makes repeats save only what is new). Save-only — creates no session, compacts nothing; enrichment is queued, never run per child. `false` unregisters the behavior entirely |
 | `planInlineChars` | 900 | verbatim plan characters printed in a chapter's Plans block — the plan's **full** text is always an artifact, so this is display economy, never a data decision (`0` = pointer only) |
 | `plansInNotice` | true | carry the plan block into a child's notice; renders **zero bytes** when the path holds no plan, so tape neutrality is the default |
 | `planSeedMode` | true | seed `plan/mode {active:true}` into a **continuation** child when the archived span was still in plan mode, so the gate survives the boundary (measured: kernel accepts the two-event seed, the host's own projection folds it). Never for a branch, never after an approval — approving a plan exits plan mode |

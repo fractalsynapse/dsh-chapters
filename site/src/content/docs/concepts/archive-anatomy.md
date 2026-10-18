@@ -12,7 +12,7 @@ Three durable layers, in three different places on purpose:
 .dsh-chapters/
   artifacts/<aa>/<sha256>.txt   # store-root blobs — content-addressed oversized tool results, shared across every session
   <root-session>/
-    chapters/001-<slug>.md      # verbatim body + YAML frontmatter (title, seq range, body hash, topics)
+    chapters/001-<slug>.md      # verbatim body + YAML frontmatter (title, seq range, body hash, topics; + subagent lineage when the author was a subagent)
     chapters/plan-001-<slug>.md # a session PLAN as its own document (kind: plan) — searchable as a plan
     artifacts/<aa>/<sha256>.txt # the same content-addressed scheme, one level down: what a CHAPTER defers
 ```
@@ -30,6 +30,14 @@ store root (arrival-time stubbing) or inside its own session tree (archive-time 
 plan), and `chapters_artifact` searches both before it searches the pool mirror — measured 2026-10-09,
 because the reader used to look in one place only and a deferred plan was unreachable on the machine that
 wrote it.
+
+A subagent's chapters are ordinary citizens of this layout: the child is its own root session, so its
+archive lands in a tree of its own and nothing links it into the spawner's ancestry. What makes them
+traceable is the frontmatter — `subagent: true` plus `parentSession: <id>`, copied from the child's durable
+session header the host itself writes (`parentSession`, `origin: subagent`, `delegationDepth`,
+`agentPreset`). A reader who finds a chapter by search can therefore tell, from the file alone, whose work
+it was. See [15. Commands](/reference/commands/) for when that archive is written — automatically, at each
+settlement of the child's run.
 
 ### What a chapter's Plans block looks like
 

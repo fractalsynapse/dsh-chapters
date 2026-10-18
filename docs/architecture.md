@@ -49,6 +49,11 @@ What we *do* take from the XML instinct, because it was a real concern:
 
 - **Frontmatter carries the parseable structure** — `chapter`, `session`, `root`, `seqRange`, `sha256`,
   `tokens`, `artifacts`. Queryable with a YAML parser, invisible to the reading experience.
+  Chapters authored by a **subagent** carry two more lines — `subagent: true` and
+  `parentSession: <id>` — copied from the child's durable session header, which the host itself
+  stamps (`childSessionMeta`: `parentSession`, `origin: subagent`, `delegationDepth`, `agentPreset`;
+  measured, `spikes/subagent-end/FINDINGS.md`). Emitted ONLY when the header has `parentSession`,
+  so existing chapter bytes never change — which is also why no tape needs re-recording.
 - **There is one index, not three.** The TOC lists the chapters for reading; the storage domain already
   holds the machine-readable enumeration. A separate `MANIFEST.md` was proposed and **rejected as
   redundant** — a regenerated duplicate that can drift, whose growth becomes a context cost when read
@@ -212,6 +217,31 @@ is **going on**, authored while the model still holds the thread:
   would, and only when the free path failed.
 - Invariant check: the model authors *state*, never archive text (invariant 4 intact); the note rides
   the replacement event append-only; every byte of the conversation still lives in chapters.
+
+## The archive moments
+
+Chapters are written by exactly five doors, and knowledge that trips none of them is knowledge
+that never enters the index. Four are session-facing, all idempotent over a per-session watermark
+(`fromSeq = max(chapter.endSeq) + 1`) and anchored on the last **completed** turn (`turn/end`):
+
+1. `chapters_continue` (tool) and `/chapters-continue` (deterministic door) — archive + child session.
+2. `chapters_fork` (tool) and `/chapters-fork` (door) — archive + branch session (no new bytes).
+3. `/chapters-save` — archive only, parent untouched.
+4. Compaction finalize — the engine's `summarize()` commits a plan pre-durable, and the post-commit
+   finalizer writes the chapter (issue #47 note: the fanout field study shows this is the ONLY one
+   of these that subagents historically reached — 20 child compactions, or nothing).
+5. **Subagent settlement (issue #47, this round)** — a host-plane listener on the published
+   `subagent/end` lifecycle event runs the SAME save pipeline (one implementation, shared with
+   door 3 by extraction — never a second renderer) for children whose header carries
+   `origin: subagent` and `agentPreset === chapters`. The emitter fires `end` synchronously before
+   the holder's dispose continuation (measured, spike), so the fast path is a synchronous
+   `agents.get(info.id).session.snapshotEvents()`; the fallback arm is `sessionQuery.listEvents`
+   over the durable log (ambient-readable — measured); when neither reads, the child is skipped
+   with a loud diagnostic, never guessed. Save-only, so the "no continuation-creating actions
+   mid-step" rule is not engaged: no session is created, no surface is compacted. Enrichment is
+   **queued** per settlement — a 10-child fanout must not `runNow` ten annotator passes. A
+   continuable child settles repeatedly; the watermark makes every repeat after the first a
+   save of only-new-turns. Config: `subagentAutoSave` (default on).
 
 ## Budgets and the Reserve Margin
 

@@ -397,6 +397,13 @@ export function renderChapter(
     ...(codegraphSymbols !== undefined && codegraphSymbols.length > 0
       ? [`codegraphSymbols: [${[...new Set(codegraphSymbols)].map((s) => JSON.stringify(s)).join(', ')}]`]
       : []),
+    // Subagent lineage (issue #47): stamped ONLY when the authoring session's
+    // header carries parentSession — a plain session's file is byte-identical to
+    // the pre-feature shape (verify discipline same as the plans block, P8), and
+    // the value is the host's own durable fact, never an inference.
+    ...(config.subagentOf !== undefined && config.subagentOf !== ''
+      ? ['subagent: true', `parentSession: ${JSON.stringify(config.subagentOf)}`]
+      : []),
     `unrenderedSeqs: [${unrenderedSeqs.join(', ')}]`,
     '---',
     '',
