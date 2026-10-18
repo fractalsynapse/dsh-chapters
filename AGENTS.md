@@ -73,8 +73,11 @@ trap in the original design; do not "helpfully" reuse the fork handler's seed st
   the copy-the-log path is closed to plugins by design. The seed contract, verified by rejection messages:
   contiguous from **seq 0** (the kernel's own `permission/preset`/`sandbox/mode`/`approval/policy` events
   are appended *after* the seed, not before it), and the notice must be
-  `{ id, role: 'user', source: { kind: 'plugin', plugin: 'dsh-chapters', form: 'snapshot', sections: […] }, content: […] }`.
-  `source` is an object; a string is rejected as `invalid source`. See
+  `{ id, role: 'user', source: { kind: 'plugin:dsh-chapters', form: 'snapshot', sections: […] }, content: […] }`
+  — producer-owned kind, NO `plugin` field: session format v4 (host 0.2.x) RETIRED the bare
+  `kind: 'plugin'` wrapper and refuses it at row admission with "format v4 message requires a
+  producer-owned source kind" (measured 2026-10-18 on 0.2.0-rc.2, issue #43, when every
+  continuation started refusing). `source` is an object; a string is rejected as `invalid source`. See
   [spikes/probe/FINDINGS.md](spikes/probe/FINDINGS.md).
 
   **Amendment 2026-10-10, measured before built:** the seed is *one synthetic message* plus, when it
@@ -476,10 +479,11 @@ carriage yes, a model's choice to plan no). **Second round, same day, four decis
   `## Active plan` (+ seeded `plan/mode` while still planning); branch ⇒ zero directive bytes.
   Also measured there: **the turn containing a plan submission does not end until the review is answered**,
   so a session whose only turn is pending has no archive ceiling and the door refuses with its first guard.
-- **The one exception to the injection screen**: the harness's `plugin:'plan-mode'` + `form:'notice'`
-  mode-flip sentence archives verbatim (named by plugin AND form, so it cannot widen). `isHumanAuthored`
-  stays strict on purpose — it drives topic signatures, and the r28 lesson was that injected text moves
-  chapter boundaries.
+- **The one exception to the injection screen**: the harness's `plan-mode` + `form:'notice'`
+  mode-flip sentence archives verbatim (named by producer AND form, so it cannot widen — v3 wrapper
+  `{kind:'plugin', plugin:'plan-mode'}` and v4 `{kind:'plan-mode'}` both match, issue #43).
+  `isHumanAuthored` stays strict on purpose — it drives topic signatures, and the r28 lesson was that
+  injected text moves chapter boundaries.
 **Outstanding: the human verification rows (live `/compact` in a real browser, readability
 judgment), the seeded-gate case OBSERVED in a browser (pinned deterministically; needs a second distilled session — `docs/plans-carriage.md` § 15), per-message anchoring (the button forks at the conversation's end today; `deriveRanges`
 already supports any anchor), and the default-preset shipping policy (opt-in menu vs profile

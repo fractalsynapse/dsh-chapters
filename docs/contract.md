@@ -196,9 +196,16 @@ resumable route. *(Phase 0 confirmed: durable, listed, resumable, byte-identical
 Keep `anchoredBoundaryOf` (`vendor/fork.ts:213`) with its role changed: it yields the **archive ceiling**
 (`boundarySeq`, `cut`) for *what to render*, never for seeding.
 
-Notice event shape — built and vocabulary-pinned by `src/notice.ts` (+ `test/notice.test.ts`): one
-`user/message`, `surfaceOp: 'append'`, at `seq = 0`, `source { kind: 'plugin', plugin: 'dsh-chapters',
-form: 'snapshot', sections: [{ name: 'chapters:toc', text }] }`. Continuity validation in `Session.create`
+Notice event shape — built and vocabulary-pinned by `src/notice.ts` (+ `test/notice.test.ts`, + the
+v4 admission rows in `tests/unit/host-seed-contract.test.ts`): one `user/message`, `surfaceOp: 'append'`,
+at `seq = 0`, `source { kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [{ name: 'chapters:toc', text }] }`
+— **producer-owned kind, no `plugin` field**. Session format v4 (host 0.2.x, measured 2026-10-18 on
+`0.2.0-rc.2`) retired the bare `kind: 'plugin'` wrapper: persistence-row admission refuses it with
+`format v4 message requires a producer-owned source kind`
+(`@deepseek-ai/dsh-session-format-v3-to-v4` `lib/index.js:126`; also
+`dsh-session-persistence-jsonl/lib/worker.cjs:10902`). The v3→v4 migration's own
+`rewritePluginSource` does exactly what we now emit: "kind is the producer's own kind and whose
+`plugin` field is dropped". Continuity validation in `Session.create`
 requires the seq to be the next contiguous seed position (rejection message measured in r5).
 
 ## Compaction Engine Integration (Phase 0b)
