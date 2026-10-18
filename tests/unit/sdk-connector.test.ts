@@ -33,8 +33,9 @@ class FakeSocket {
   readonly sent: string[] = []
   private readonly handlers = new Map<string, ((arg?: unknown) => void)[]>()
   closed = false
+  private responder?: (frame: Record<string, unknown>, emit: (obj: Record<string, unknown>) => void) => void
   /** server-side: decide how to answer each request frame */
-  constructor(private readonly responder?: (frame: Record<string, unknown>, emit: (obj: Record<string, unknown>) => void) => void) {}
+  constructor(responder?: (frame: Record<string, unknown>, emit: (obj: Record<string, unknown>) => void) => void) { this.responder = responder }
   on(event: string, handler: (arg?: unknown) => void): this {
     const list = this.handlers.get(event) ?? []
     list.push(handler)
