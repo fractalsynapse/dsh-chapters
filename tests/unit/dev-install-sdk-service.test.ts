@@ -194,6 +194,41 @@ test('unit: authorizeProtocol accepts dsh-auth.<token> and rejects everything el
   assert.equal(authorizeProtocol('dsh-auth.s3cret', ''), false, 'empty server token must refuse every client (fail closed)')
 })
 
+// ── #32: optional Bearer API-key mode ────────────────────────────────────────
+
+test('unit: parseApiKeys reads a comma-separated env list and drops blanks', async () => {
+  const { parseApiKeys } = await import('../../dev/install/sdk-gateway/gateway.ts')
+  assert.deepEqual(parseApiKeys('a1,a2 , a3'), ['a1', 'a2', 'a3'])
+  assert.deepEqual(parseApiKeys(''), [])
+  assert.deepEqual(parseApiKeys(undefined), [])
+  assert.deepEqual(parseApiKeys(' , '), [], 'whitespace-only entries never become empty keys that accept everyone')
+})
+
+test('unit: authorizeBearer matches listed keys via Authorization or dsh-bearer subprotocol', async () => {
+  const { authorizeBearer } = await import('../../dev/install/sdk-gateway/gateway.ts')
+  const keys = ['key-one', 'key-two']
+  assert.equal(authorizeBearer('Bearer key-one', undefined, keys), true)
+  assert.equal(authorizeBearer('bearer key-two', undefined, keys), true, 'scheme case-insensitive per RFC 7235')
+  assert.equal(authorizeBearer(undefined, 'dsh-bearer.key-two', keys), true, 'subprotocol form for browser-less clients')
+  assert.equal(authorizeBearer('Basic Zm9vOg==', undefined, keys), false, 'other schemes refused')
+  assert.equal(authorizeBearer('Bearer nope', undefined, keys), false)
+  assert.equal(authorizeBearer(undefined, undefined, keys), false)
+  assert.equal(authorizeBearer('Bearer key-one', undefined, []), false, 'feature OFF when no keys configured — zero behavior change')
+})
+
+test('contract: gateway config carries apiKeys from GATEWAY_API_KEYS with empty default', async () => {
+  const { configFromEnv } = await import('../../dev/install/sdk-gateway/gateway.ts')
+  assert.deepEqual(configFromEnv({}).apiKeys, [], 'unset means the bearer path is dead')
+  assert.deepEqual(configFromEnv({ GATEWAY_API_KEYS: 'k1,k2' }).apiKeys, ['k1', 'k2'])
+})
+
+test('contract: compose.sdk.yml passes GATEWAY_API_KEYS and .env.example declares it', () => {
+  const compose = read('compose.sdk.yml')
+  assert.match(compose, /GATEWAY_API_KEYS: \$\{GATEWAY_API_KEYS:-\}/, 'the knob must reach the container env')
+  const example = read('.env.example')
+  assert.match(example, /^GATEWAY_API_KEYS=$/m, '.env.example declares the (empty-default) knob')
+})
+
 test('unit: relayLine forwards verbatim (framing is the protocol, not ours to touch)', async () => {
   const { relayLine } = await import('../../dev/install/sdk-gateway/gateway.ts')
   const frame = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"cwd":"/w","provider":"local","model":"m"}}'

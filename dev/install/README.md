@@ -200,9 +200,26 @@ Two protocol facts callers must know (verified against host 0.2.x sources):
   reaps the child); follow-up work resumes via `session/resume`. Full analysis and alternatives
   (ACP, socat relay): [sdk-service-analysis.md](sdk-service-analysis.md).
 
-Auth: the gateway rejects connections before spawning anything unless the `Sec-WebSocket-Protocol`
-handshake carries `dsh-auth.<token>` matching `GATEWAY_TOKEN` (compose env; keep it private — this is
-a remote-code-execution surface, bind through loopback publishing only).
+Auth: the gateway rejects connections before spawning anything (keep secrets private — this is a
+remote-code-execution surface, bind through loopback publishing only). Two modes:
+
+- **shared token** (default): the `Sec-WebSocket-Protocol` handshake must carry `dsh-auth.<token>`
+  matching `GATEWAY_TOKEN`.
+- **API keys** (#32, optional): set `GATEWAY_API_KEYS=key1,key2` and clients may instead present
+  `Authorization: Bearer <key>` (or the `dsh-bearer.<key>` subprotocol). Per-key identity is logged
+  (never the secret); both paths compare in constant time. The mode is purely additive — unset, the
+  gateway behaves exactly as before.
+
+**Don't hand-roll the wire.** The connector (`sdk-gateway/connector.ts`, shipped compiled in the image
+at `/gateway/connector.mjs`) gives TypeScript consumers a `HarnessClient`-shaped API over one socket:
+
+```ts
+const gw = await connectToGateway({ url: 'ws://localhost:8765', token: process.env.GATEWAY_TOKEN! })
+const { finalResponse } = await gw.run('summarize README.md', { sessionId: 'task-42' })
+```
+
+Usage guide with the four measured caller rules (provider routes, flat event envelope, one-connection
+lifetime, no mid-turn cancel): [CONNECTOR.md](sdk-gateway/CONNECTOR.md).
 
 Coexistence with the Web UI: run one role per `$DSH_HOME` mount at a time. Sharing sessions/storage
 volumes between a live `dsh-web` and `dsh-agent-api` is not tested; give each stack its own home if
@@ -357,6 +374,8 @@ dev/install/
 ├── compose.sdk.yml              ← compose stack (SDK API gateway; consumes any model server)
 ├── sdk-gateway/                 ← WebSocket↔stdio relay for the SDK profile
 │   ├── gateway.ts               ← the gateway server
+│   ├── connector.ts             ← TS client library over one WS connection (#31)
+│   ├── CONNECTOR.md             ← connector usage guide + caller rules (#31)
 │   └── smoke.mts                ← end-to-end smoke client (GPU box only)
 ├── .env.example                 ← environment variable reference (not required at runtime)
 ├── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
