@@ -81,13 +81,6 @@
         apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY
 
 # ── Default Model ──────────────────────────────────────────────────────────────
-- id: agent-default-model
-  name: "@deepseek-ai/dsh-agent-default-model"
-  config:
-    provider: qwen-token-plan
-    model: qwen3.8-max
-
-# ── UI Theme & Chat ───────────────────────────────────────────────────────────
 - id: ui-theme
   name: "@deepseek-ai/dsh-client-ui-theme"
   config:
@@ -125,13 +118,6 @@
     language: en
 
 # ── Preset Registry ───────────────────────────────────────────────────────────
-- id: agent-preset-registry
-  name: "@deepseek-ai/dsh-agent-preset-registry"
-  config:
-    default: standard
-    selectedDefault: chapters
-
-# ── Plugin: dsh-codegraph ─────────────────────────────────────────────────────
 - id: dsh-codegraph
   name: dsh-codegraph
   config:
@@ -142,11 +128,6 @@
 # ── Dev Overrides: Local vLLM Provider ────────────────────────────────────────
 # Points at the bundled vLLM service (Qwen3-4B-AWQ). The inference and systemone
 # endpoints share the same server under different model names.
-- id: agent-default-model
-  config:
-    provider: local
-    model: qwen3-4b-instruct
-
 - id: agent-presets
   config:
     default: chapters

@@ -36,7 +36,7 @@ import { extractPlot } from './engine-core.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
 import type { SessionState } from './registry.ts'
-import { acquireChapterStore, makeAllocator, makeArchiveFs, type ChapterStoreHandle } from './store.ts'
+import { acquireChapterStore, makeAllocator, makeArchiveFs, type ChapterStoreHandle, resolveStoreRoot } from './store.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR } from './sync.ts'
 import { registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
@@ -674,7 +674,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const wrote = await writeArchive({
       fs,
       allocator: makeAllocator(store, session.id),
-      storeRoot: this.chaptersConfig.artifactStoreRoot,
+      storeRoot: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
       rootSessionId: state.rootSession,
       chapters: renderedList,
       attemptId: `compaction:${compactionId}`,

@@ -1,0 +1,124 @@
+# DSH Chapters — SDK API Service Stack (#25, #27)
+#
+# Hosts the Deepseek Harness as an SDK JSON-RPC API (no Web UI) so another
+# system drives it with @deepseek-ai/dsh-sdk-client. Same image as the web
+# stack, DSH_ROLE=gateway: a thin WebSocket↔stdio relay spawns
+# `dsh --profile sdk` children per connection. The sdk profile carries the
+# identical configuration to the Web UI profile — Alibaba/Qwen token-plan
+# marketplace, local vLLM provider, dsh-chapters + codegraph + tinyfish.
+#
+# The MODEL SERVER IS NOT PART OF THIS STACK (#27). A host that already runs
+# vLLM (or any OpenAI-compatible server) from another project points at it; a
+# host that does not boots compose.vllm.yml first:
+#
+#   docker compose -f compose.vllm.yml up -d          # optional, shared GPU
+#   GATEWAY_TOKEN=<secret> docker compose -f compose.sdk.yml up -d
+#
+# Both stacks attach to the EXTERNAL network dsh-chapters-net, so the in-network
+# name `vllm` resolves across files when the model stack is up. Against a
+# server elsewhere, set LLM_BASE_URL (and SYSTEMONE_BASE_URL) to its URL —
+# http://host.docker.internal:8080/v1 for a host-run server, or a LAN address;
+# `extra_hosts` below already maps host.docker.internal on Linux.
+#
+# Usage:
+#   Start:            GATEWAY_TOKEN=<secret> docker compose -f compose.sdk.yml up -d
+#                     (or put GATEWAY_TOKEN in .env — compose reads it)
+#   Health:           curl http://localhost:8765/healthz
+#   Smoke:            docker compose -f compose.sdk.yml exec dsh-agent-api node /gateway/smoke.mjs
+#   Stop:             docker compose -f compose.sdk.yml down
+#
+# Security: this surface executes code. GATEWAY_TOKEN is mandatory (the
+# container refuses to boot without it); publish on loopback only unless you
+# front it with TLS. One role per $DSH_HOME mount at a time — running this
+# alongside a live dsh-web over the same sessions volume is untested; give
+# each stack its own home if both must run.
+#
+# Services:
+#   dsh-agent-api — SDK gateway on port 8765 (WebSocket, token-authenticated)
+
+name: dsh-chapters-sdk
+
+services:
+  # ── DSH SDK API Gateway ────────────────────────────────────────────────────
+  dsh-agent-api:
+    build:
+      context: ../..
+      dockerfile: dev/install/Dockerfile
+      args:
+        DSH_HOST_VERSION: ${DSH_HOST_VERSION:-latest}
+    image: dsh-chapters-dev:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8765}:8765"
+    environment:
+      # This file's whole point is the gateway role; the default here is not
+      # an accident to override — a drifted image cannot silently boot a Web
+      # UI on the SDK port because the entrypoint refuses unknown roles.
+      DSH_ROLE: ${DSH_ROLE:-gateway}
+      # LLM — defaults to the `vllm` service name on the shared network
+      # (compose.vllm.yml). For an external model server, override BOTH urls:
+      #   LLM_BASE_URL=http://host.docker.internal:8080/v1
+      #   SYSTEMONE_BASE_URL=http://host.docker.internal:8080/v1
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://vllm:8080/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3-4b-instruct}
+      LLM_CONTEXT_WINDOW: ${LLM_CONTEXT_WINDOW:-32768}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-15000}
+      LOCAL_API_KEY: ${LOCAL_API_KEY:-sk-local}
+      SYSTEMONE_BASE_URL: ${SYSTEMONE_BASE_URL:-http://vllm:8080/v1}
+      SYSTEMONE_MODEL: ${SYSTEMONE_MODEL:-qwen3-4b-systemone}
+      QWEN_TOKEN_PLAN_API_KEY: ${QWEN_TOKEN_PLAN_API_KEY:-}
+      TINYFISH_API_KEY: ${TINYFISH_API_KEY:-}
+      # Gateway knobs — the listener binds loopback INSIDE the container;
+      # the published mapping above is what makes it reachable from the host.
+      GATEWAY_PORT: "8765"
+      DSH_GATEWAY_BIND: "127.0.0.1"
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-}
+      GATEWAY_API_KEYS: ${GATEWAY_API_KEYS:-}
+      GATEWAY_IDLE_MS: ${GATEWAY_IDLE_MS:-1800000}
+      GATEWAY_INIT_TIMEOUT_MS: ${GATEWAY_INIT_TIMEOUT_MS:-30000}
+      DSH_SDK_PROFILE: ${DSH_SDK_PROFILE:-sdk}
+      DSH_HOME: /dsh-home
+    volumes:
+      - dsh-sessions:/dsh-home/sessions
+      - dsh-storage:/dsh-home/storages
+      # Hosted-agent WORKSPACE (#33): the default agent cwd (/workspace) is a
+      # named volume, so chapter archives written under it survive container
+      # recreate. The archive store root is cwd-relative by design (measured:
+      # path.join(cwd, artifactStoreRoot)) — persisting the cwd IS persisting
+      # the archive. Empty on first boot; agents fill it with their work.
+      - dsh-workspace:/workspace
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # The gateway serves /healthz itself (no dsh dependency by design), so an
+      # HTTP probe is honest here — unlike the web role's TCP-only probe. It
+      # says NOTHING about the model server: reachability of LLM_BASE_URL is
+      # proven by the smoke client, not by container health.
+      test: ["CMD", "bash", "-c", 'curl -fsS http://127.0.0.1:8765/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - dsh-net
+
+volumes:
+  dsh-sessions:
+    name: dsh-chapters-sessions
+  dsh-storage:
+    name: dsh-chapters-storage
+  dsh-workspace:
+    name: dsh-chapters-workspace
+
+networks:
+  # Shared by NAME with compose.vllm.yml (which declares it) and compose.yml —
+  # the in-network `vllm` hostname resolves across stacks when the model server
+  # is up. Marked `external`: this file never creates or removes it, so
+  # `docker compose down` here cannot tear a network another stack owns. The
+  # vllm stack must be up (`docker compose -f compose.vllm.yml up`) before the
+  # first `up` of this one; an external URL-only setup still needs the network
+  # to exist, so either boot compose.vllm.yml once, or
+  # `docker network create dsh-chapters-net`.
+  dsh-net:
+    name: dsh-chapters-net
+    external: true

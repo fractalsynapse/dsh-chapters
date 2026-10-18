@@ -20,7 +20,7 @@ import { projectForCwd } from './sync.ts'
 import { deriveRanges, refusalResult, runContinue, runFork, type BudgetProbe, type ContinueConfig, type ContinuePorts } from './continue-core.ts'
 import { searchKnowledge, searchLocalStore } from './search.ts'
 import { resolveArtifactPath, resolveArtifactWithMirror, buildToc, searchArtifact, readLines } from './artifact-query.ts'
-import { makeArchiveFs, commitChapters, type DomainLike, type RegistryStore } from './store.ts'
+import { makeArchiveFs, commitChapters, type DomainLike, type RegistryStore , resolveStoreRoot } from './store.ts'
 import { reserve, reservePlan as reservePlanNumber, type SessionState } from './registry.ts'
 import { writeArchive, attemptKey } from './archive.ts'
 import { chapterTopics } from './signature.ts'
@@ -598,6 +598,8 @@ export function buildChaptersTools(
               return r.numbers
             },
           },
+          // raw value: makeArchiveFs roots RELATIVE paths at the session cwd and
+          // passes absolute ones through — resolving here would double-root relative stores
           storeRoot: config.artifactStoreRoot,
           rootSessionId: parentState.rootSession,
           chapters: rendered,
@@ -705,7 +707,7 @@ export function buildChaptersTools(
       }
       const localNote = (n: number): string => `searched this machine's store (${String(n)} indexed document(s); ${doorTail()})`
       if (!fs.existsSync(cloneDir)) {
-        const local = searchLocalStore(path.join(cwd, config.artifactStoreRoot), args.query, budget, localOpts())
+        const local = searchLocalStore(resolveStoreRoot(cwd, config.artifactStoreRoot), args.query, budget, localOpts())
         return {
           ok: true as const,
           results: local.results.map((r) => ({ score: r.score, date: r.date, kind: r.kind, title: r.title, path: r.path, topics: r.topics })),
@@ -721,7 +723,7 @@ export function buildChaptersTools(
         ...(config.rulesCoreBonus !== undefined ? { rulesCoreBonus: config.rulesCoreBonus } : {}),
       })
       if (outcome.results.length === 0) {
-        const local = searchLocalStore(path.join(cwd, config.artifactStoreRoot), args.query, budget, localOpts())
+        const local = searchLocalStore(resolveStoreRoot(cwd, config.artifactStoreRoot), args.query, budget, localOpts())
         if (local.results.length > 0) {
           return {
             ok: true as const,
@@ -766,7 +768,7 @@ export function buildChaptersTools(
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
       const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
-      const storeDir = path.join(cwd, config.artifactStoreRoot ?? '.dsh-chapters')
+      const storeDir = resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters')
       let abs: string | null
       try { abs = resolveArtifactWithMirror(storeDir, args.path, path.join(cwd, DEFAULT_CLONE_DIR)) }
       catch (error) { return { ok: false as const, error: String((error as Error)?.message ?? error) } }

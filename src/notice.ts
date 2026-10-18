@@ -6,41 +6,52 @@
  * vocabulary is not a cosmetic bug — stored logs that fail replay refuse to
  * load, retroactively. The kernel's seed validator is not published as a
  * callable, so the vocabulary here is pinned two ways and guarded by
- * test/notice.test.ts:
+ * test/notice.test.ts + the v4 admission rows in tests/unit/host-seed-contract.test.ts:
  *
- *  1. Behaviorally, from the Phase 0 seed probes — every rejection and
- *     acceptance recorded in spikes/probe/FINDINGS.md § The seed contract
- *     (an object `source` with a non-empty string `kind`; `role: 'user'`; a
- *     non-empty string `id`; array `content`; contiguous seq from 0).
- *  2. Structurally, from the installed host's published types —
- *     `@deepseek-ai/dsh-llm/lib/types/message.d.ts` `MessageSourceMap` (kinds
- *     `user | plugin | model | tool`, merge-extensible) and `ContextForm`
- *     (`instructions | catalog | notice | relay | recall | snapshot`), plus
- *     `@deepseek-ai/dsh-session`'s `assertMessageEventShape`
- *     (lib/index.js:927-957 in 0.1.5-rc.1-era builds) for the seed-time checks.
+ *  1. Behaviorally, from the Phase 0 seed probes and the 2026-10-18 v4 drift
+ *     (issue #43) — the retired forms are reproduced as refusals, not dropped:
+ *     a string `source` was rejected as `invalid source`; session format v4
+ *     rejects the bare `kind: 'plugin'` wrapper with the kernel's own words,
+ *     "format v4 message requires a producer-owned source kind"
+ *     (`@deepseek-ai/dsh-session-format-v3-to-v4/lib/index.js:126`,
+ *     `dsh-session-persistence-jsonl/lib/worker.cjs:10902` on 0.2.0-rc.2).
+ *  2. Structurally, against the installed kernel: `role: 'user'`; a non-empty
+ *     string `id`; array `content`; contiguous seed from `seq = 0`;
+ *     `source.kind` a non-empty producer-owned string; `ContextForm` values
+ *     `instructions | catalog | notice | relay | recall | snapshot`
+ *     (`dsh-llm/lib/types/message.d.ts` — verified against 0.2.0-rc.2).
  *
- * `plugin: 'dsh-chapters'` + `form: 'snapshot'` mirrors how
- * `@deepseek-ai/dsh-system-prompt` delivers assembled context in real logs:
- * attributable to its producer, and rendered by whatever the UI already does
- * for snapshots. INVARIANT 2: exactly one event, at seq 0. Never a slice of
- * the parent's log.
+ * v4 source attribution: each producer OWNS its kind. Third-party producers
+ * use the `plugin:<id>` form — measured live, the 0.2.0-rc.2 host writes its
+ * own logs with `plugin:dsh-codegraph` + `form: 'notice'`. So the notice
+ * carries `{ kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [...] }`
+ * and NO `plugin` field (the v3→v4 migration's own `rewritePluginSource`
+ * drops it: "kind is the producer's own kind and whose `plugin` field is
+ * dropped"). `sourceLabel` renders `plugin:dsh-chapters` for BOTH the retired
+ * wrapper and the colon kind — byte-identically — so omission markers in
+ * already-archived chapters keep matching.
+ * INVARIANT 2: exactly one event, at seq 0. Never a slice of the parent's log.
  */
 import type { SessionEventLike } from './types.ts'
 
-/** Our bundle id as it appears in `source.plugin`. Changing this orphans every already-seeded continuation. */
+/** Our producer id. Changing this orphans every already-seeded continuation. */
 export const NOTICE_PLUGIN = 'dsh-chapters'
+
+/** The v4 producer-owned source kind (issue #43). `plugin:<producer>` is the
+ *  form the 0.2.x kernel itself admits for third-party producers; the bare
+ *  `plugin` wrapper it retired. */
+export const NOTICE_SOURCE_KIND = `plugin:${NOTICE_PLUGIN}`
 
 /** The section name our TOC rides under inside the snapshot. */
 export const NOTICE_SECTION = 'chapters:toc'
 
 /**
- * Message source kinds the base vocabulary accepts (installed host,
- * `dsh-llm/lib/types/message.d.ts` `MessageSourceMap`). The map is
- * merge-extensible — other plugins add kinds (`agent-instructions`,
- * `skill-catalog` were observed in production logs) — but WE may only emit
- * kinds from this list, and only via the local validator.
+ * The kinds this plugin may emit, pinned to what the installed v4 kernel
+ * admits (seed/load boundary + persistence row admission). The retired v3
+ * `plugin` wrapper is deliberately NOT in this list — it is refused below
+ * with the kernel's own refusal text.
  */
-export const ACCEPTED_SOURCE_KINDS = ['user', 'plugin', 'model', 'tool'] as const
+export const ACCEPTED_SOURCE_KINDS = ['user', NOTICE_SOURCE_KIND] as const
 
 /** `ContextForm` values, exactly as published (semantic, never visual). */
 export const ACCEPTED_CONTEXT_FORMS = [
@@ -71,8 +82,7 @@ export function buildTocNotice(tocText: string, opts: TocNoticeOptions): Session
       id,
       role: 'user',
       source: {
-        kind: 'plugin' as const,
-        plugin: NOTICE_PLUGIN,
+        kind: NOTICE_SOURCE_KIND,
         form: 'snapshot' as const,
         sections: [{ name: NOTICE_SECTION, text: tocText }],
       },
@@ -86,10 +96,14 @@ export function buildTocNotice(tocText: string, opts: TocNoticeOptions): Session
 }
 
 /**
- * Transcription of the kernel's seed-time checks (assertMessageEventShape +
- * the recorded rejections). Kept as an exported predicate so tests pin our
- * output against the same rules the host applies, and any future notice
- * variant fails HERE, at the boundary of authorship.
+ * Transcription of the kernel's seed-time checks (message-shape + v4 source
+ * admission + the recorded rejections). Kept as an exported predicate so tests
+ * pin our output against the same rules the host applies, and any future
+ * notice variant fails HERE, at the boundary of authorship. The v4 rows are
+ * drift-gated against the kernel's own admission function
+ * (`dsh-session-format-v3-to-v4` `assertV4RowAdmission`) in
+ * tests/unit/host-seed-contract.test.ts — this transcription is the fast lane,
+ * the kernel is the authority.
  */
 export function assertKernelAcceptedUserMessage(event: SessionEventLike): void {
   if (event.type !== 'user/message') throw new Error(`chapters: unexpected notice event type ${event.type}`)
@@ -105,11 +119,13 @@ export function assertKernelAcceptedUserMessage(event: SessionEventLike): void {
   if (source === undefined || typeof source !== 'object' || typeof source.kind !== 'string' || source.kind.length === 0) {
     throw new Error('chapters: seed message has invalid source (object with non-empty string kind required)')
   }
+  // The retired v3 wrapper, refused with the kernel's own v4 words — reproducing
+  // the production refusal at our authorship boundary (issue #43).
+  if (source.kind === 'plugin') {
+    throw new Error('chapters: format v4 message requires a producer-owned source kind (use plugin:dsh-chapters; the bare plugin wrapper was retired)')
+  }
   if (!(ACCEPTED_SOURCE_KINDS as readonly string[]).includes(source.kind)) {
     throw new Error(`chapters: source kind "${source.kind}" is outside the pinned vocabulary`)
-  }
-  if (source.kind === 'plugin' && (typeof source.plugin !== 'string' || source.plugin.length === 0)) {
-    throw new Error('chapters: plugin source must name its producer')
   }
   if (source.form !== undefined && !(ACCEPTED_CONTEXT_FORMS as readonly string[]).includes(source.form as string)) {
     throw new Error(`chapters: context form "${String(source.form)}" is outside the published ContextForm union`)

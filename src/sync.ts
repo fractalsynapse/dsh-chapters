@@ -15,6 +15,7 @@ import { type CommitAuthor, type RemoteSpec } from './gitops.ts'
 import { selectProvider, type ProviderKind, type SyncProvider } from './provider.ts'
 import { buildIndexShards, entryFromChapter, parseCuration, stitchFragments, type CurationFact, type IndexEntry, type IndexManifest } from './indexing.ts'
 import { analyzeTopics, planAppends, type VocabOpts } from './vocabulary.ts'
+import { resolveStoreRoot } from './store.ts'
 
 /** A linked knowledge project (record §2.1, §8): one record per linked
  * workspace cwd; deepest-cwd match resolves the active project. */
@@ -54,7 +55,7 @@ export const tokenPath = (projectKey: string): string =>
 
 /** Pre-move location, migrated on first read (delete after copying). */
 const legacyTokenPath = (cwd: string, storeRoot: string, projectKey: string): string =>
-  path.join(cwd, storeRoot, '.git-auth', projectKey)
+  path.join(resolveStoreRoot(cwd, storeRoot), '.git-auth', projectKey)
 
 export function readToken(cwd: string, storeRoot: string, projectKey: string): string | undefined {
   try {
@@ -241,7 +242,7 @@ function copyNewFiles(cloneDir: string, files: { abs: string; rel: string }[]): 
   return { copied, skipped }
 }
 
-export const statusFilePath = (cwd: string, storeRoot: string): string => path.join(cwd, storeRoot, '.sync-status.json')
+export const statusFilePath = (cwd: string, storeRoot: string): string => path.join(resolveStoreRoot(cwd, storeRoot), '.sync-status.json')
 
 const topicSlug = (topic: string): string =>
   topic.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'topic'
@@ -509,7 +510,7 @@ export function rehydrateStoreFromMirror(cloneDir: string, storeDir: string, pro
 
 export async function runSync(opts: SyncOpts): Promise<SyncResult> {
   const steps: string[] = []
-  const storeDir = path.join(opts.cwd, opts.storeRoot)
+  const storeDir = resolveStoreRoot(opts.cwd, opts.storeRoot)
   const cloneDir = path.join(opts.cwd, opts.cloneDir)
   const record = (ok: boolean, mode: 'synced' | 'local-only', detail: string): SyncResult => {
     const result = { ok, steps, detail, mode }
@@ -685,7 +686,7 @@ export function makeCollectionsReader(
     const out: { sessionId: string; lines: string[] }[] = []
     for (const [sid, st] of sessions()) {
       if (st.collections.length === 0) continue
-      if (!fs.existsSync(path.join(cwd, storeRoot, st.rootSession))) continue
+      if (!fs.existsSync(path.join(resolveStoreRoot(cwd, storeRoot), st.rootSession))) continue
       out.push({ sessionId: sid, lines: st.collections.map((c) => JSON.stringify(c)) })
     }
     return out

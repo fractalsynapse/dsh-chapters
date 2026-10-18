@@ -14,6 +14,7 @@
 import { artifactPath, sha256 } from './render.ts'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { resolveStoreRoot } from './store.ts'
 
 export interface ArrivalSessionShim {
   surface: { nodes: number[] }
@@ -64,7 +65,7 @@ export async function applyArrivalStubs(session: ArrivalSessionShim, opts: Arriv
     if (tokens < opts.floorTokens) continue
     const hash = sha256(text)
     const rel = artifactPath(hash)
-    const abs = path.join(opts.cwd, opts.storeRoot, rel)
+    const abs = path.join(resolveStoreRoot(opts.cwd, opts.storeRoot), rel)
     try {
       await fs.mkdir(path.dirname(abs), { recursive: true, mode: 0o700 })
       // content-addressed: rewriting identical bytes is a no-op by definition

@@ -36,9 +36,9 @@ services:
       - "${VLLM_PORT:-8080}:8080"
     environment:
       MODEL_ID: ${VLLM_MODEL_ID:-Qwen/Qwen3-4B-AWQ}
-      SERVED_NAMES: ${VLLM_SERVED_NAMES:-qwen3-4b-instruct,qwen3-4b-systemone}
+      SERVED_NAMES: ${VLLM_SERVED_NAMES:-qwen3-4b-instruct qwen3-4b-systemone}
       MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-32768}
-      GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEM:-0.90}
+      GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEM:-0.75}
       TENSOR_PARALLEL_SIZE: ${VLLM_TP_SIZE:-1}
       HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
     volumes:
@@ -87,22 +87,34 @@ services:
       # Plugin API keys (optional — marketplace features need these)
       QWEN_TOKEN_PLAN_API_KEY: ${QWEN_TOKEN_PLAN_API_KEY:-}
       TINYFISH_API_KEY: ${TINYFISH_API_KEY:-}
-      # DSH configuration
+      # DSH configuration — the container always binds 3080 INSIDE itself;
+      # DSH_PORT only picks the host-side port of the mapping below.
       DSH_PORT: "3080"
-      DSH_HOST: "0.0.0.0"
+      # 0.2.x refuses --host 0.0.0.0 (RCU safety, startup.js); bind loopback and
+      # reach the UI through the published port mapping instead.
+      DSH_HOST: "127.0.0.1"
       DSH_HOME: /dsh-home
     volumes:
       - dsh-sessions:/dsh-home/sessions
       - dsh-storage:/dsh-home/storages
-      - dsh-credentials:/dsh-home/.credentials.yaml
+      # Credentials are NOT a volume: a named volume mounted at a FILE path is
+      # created as an empty DIRECTORY (mode 755) when the image has no file
+      # there, and credentials-local refuses any world-readable credentials
+      # document — a permanent restart loop. The entrypoint seeds the file with
+      # mode 600 instead; nothing here needs it persisted (API keys ride in via
+      # env: LOCAL_API_KEY / QWEN_TOKEN_PLAN_API_KEY).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:3080/api/health"]
+      # No /api/health route exists on host 0.2.x (measured: 404 even authenticated),
+      # and the SPA index answers 401 until a browser completes the token exchange —
+      # an HTTP-status probe can never go green from inside. TCP connect instead;
+      # node is guaranteed present in this image.
+      test: ["CMD", "node", "-e", "const n=require(\"net\"),s=n.connect(3080,\"127.0.0.1\",()=>{s.end();process.exit(0)});s.on(\"error\",()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     networks:
       - dsh-net
 
@@ -148,8 +160,6 @@ volumes:
     name: dsh-chapters-sessions
   dsh-storage:
     name: dsh-chapters-storage
-  dsh-credentials:
-    name: dsh-chapters-credentials
   vllm-cache:
     name: dsh-vllm-cache
   test-results:

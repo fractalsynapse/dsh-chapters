@@ -1,0 +1,70 @@
+# Standalone vLLM Model Server (#27)
+#
+# The model server is its OWN stack, not a dependency of any harness stack:
+# another project may already run vLLM (or any OpenAI-compatible server) on
+# this host, and the SDK/Web stacks should be able to consume it instead of
+# building a second one onto the GPU. Boot this only when you need a fresh
+# server; otherwise point LLM_BASE_URL at whatever is already up.
+#
+# Usage:
+#   Start:            docker compose -f compose.vllm.yml up -d     (~2 min cold model load)
+#   Stop:             docker compose -f compose.vllm.yml down
+#   Health:           curl http://localhost:${VLLM_PORT:-8080}/health
+#   Models:           curl http://localhost:${VLLM_PORT:-8080}/v1/models
+#
+# Consumers join THIS stack's network (dsh-chapters-net) so the in-network
+# name `vllm` resolves for them — compose.sdk.yml documents the pattern; an
+# external URL (host.docker.internal / LAN address) works without any joining.
+#
+# GPU note (#21): default VLLM_GPU_MEM=0.75 assumes a desktop-shared GPU. On a
+# dedicated card raise it; if boot dies with "Free memory ... less than desired",
+# lower it further.
+
+name: dsh-chapters-vllm
+
+services:
+  # ── vLLM Model Server ──────────────────────────────────────────────────────
+  # Serves Qwen3-4B-AWQ under two model names:
+  #   qwen3-4b-instruct   — general inference / agent conversations
+  #   qwen3-4b-systemone  — decision model endpoint
+  # Both resolve to the same weights; the distinction is semantic routing.
+  vllm:
+    build:
+      context: .
+      dockerfile: vllm.Dockerfile
+    image: dsh-vllm:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "${VLLM_PORT:-8080}:8080"
+    environment:
+      MODEL_ID: ${VLLM_MODEL_ID:-Qwen/Qwen3-4B-AWQ}
+      SERVED_NAMES: ${VLLM_SERVED_NAMES:-qwen3-4b-instruct qwen3-4b-systemone}
+      MAX_MODEL_LEN: ${VLLM_MAX_MODEL_LEN:-32768}
+      GPU_MEMORY_UTILIZATION: ${VLLM_GPU_MEM:-0.75}
+      TENSOR_PARALLEL_SIZE: ${VLLM_TP_SIZE:-1}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - vllm-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    networks:
+      - dsh-net
+
+volumes:
+  vllm-cache:
+    name: dsh-vllm-cache
+
+networks:
+  dsh-net:
+    name: dsh-chapters-net

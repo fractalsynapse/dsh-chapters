@@ -16,6 +16,15 @@ Session plans in chapters / the ACTIVE PLAN line / `kind: plan` documents / seed
 Open items / what a fresh session should pick up next → `docs/backlog.md` (NOTE: `tsconfig.json` excludes `src/client/`, so `npm run typecheck` never checks the client plane — run a strict `tsc` over `src/client/*.ts` when touching it) (scoped, with the traps already fixed on main).
 Numbers from real runs (compaction, cache, retrievals) → site Part V (field study §20, cache §21).
 Releases/incidents → site §26 + git log. Benchmarks → `benchmarks/README.md` + site §19.
+Dev/install platform (compose, containerized web) → `dev/install/README.md` + site §24. **SDK service /
+hosted headless API / gateway** → `dev/install/sdk-service-analysis.md` (measured host facts: SDK server
+is stdio-only; profile-dir `settings.yaml` is read by NOTHING on 0.2.x — config must ride
+`cordis.patch.yml`; provider routes at `initialize` are the profile's names, never
+`deepseek-official`). **Embedding DSH in-process (Hono/Cordis as libraries)** →
+`dev/install/sdk-embedding-analysis.md` (no network API ships but `ctx.agents.create/resume` IS the
+in-process seam the SDK server itself uses; `boot()` from app-boot is the documented embedder entry;
+npm `latest` dist-tags of the bundle packages are STALE — pin every `@deepseek-ai/*` to one exact
+version).
 
 **Scope: development only.** This file guides agents developing THIS repository. Nothing shipped —
 runtime behavior, the knowledge corpus, or any test — may depend on it or its contents: every real
@@ -64,8 +73,11 @@ trap in the original design; do not "helpfully" reuse the fork handler's seed st
   the copy-the-log path is closed to plugins by design. The seed contract, verified by rejection messages:
   contiguous from **seq 0** (the kernel's own `permission/preset`/`sandbox/mode`/`approval/policy` events
   are appended *after* the seed, not before it), and the notice must be
-  `{ id, role: 'user', source: { kind: 'plugin', plugin: 'dsh-chapters', form: 'snapshot', sections: […] }, content: […] }`.
-  `source` is an object; a string is rejected as `invalid source`. See
+  `{ id, role: 'user', source: { kind: 'plugin:dsh-chapters', form: 'snapshot', sections: […] }, content: […] }`
+  — producer-owned kind, NO `plugin` field: session format v4 (host 0.2.x) RETIRED the bare
+  `kind: 'plugin'` wrapper and refuses it at row admission with "format v4 message requires a
+  producer-owned source kind" (measured 2026-10-18 on 0.2.0-rc.2, issue #43, when every
+  continuation started refusing). `source` is an object; a string is rejected as `invalid source`. See
   [spikes/probe/FINDINGS.md](spikes/probe/FINDINGS.md).
 
   **Amendment 2026-10-10, measured before built:** the seed is *one synthetic message* plus, when it
@@ -282,6 +294,13 @@ not a plugin bug.
 - **Always give a tool an `output` schema** — mandatory on every `ToolDefinition`.
 - **Call `next()` in waterfall listeners** unless deliberately short-circuiting, and document why.
 - **No hardcoded tunables.** If `cordis.yml` can change it, it belongs in config.
+- **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
+  with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
+  When a question stalls, change something real: different arguments, a different tool, or state what is
+  established and act on it. Measured against myself 2026-10-17: dozens of byte-identical greps during one
+  debug loop, each justified as "one more check" — the fact that would have ended it (`api/health` 404s even
+  authenticated on host 0.2.x) was already proven several rounds earlier. If you catch a near-verbatim
+  repeat in your own history, STOP the loop and proceed from what is already measured.
 
 ## Start Here
 
@@ -460,10 +479,11 @@ carriage yes, a model's choice to plan no). **Second round, same day, four decis
   `## Active plan` (+ seeded `plan/mode` while still planning); branch ⇒ zero directive bytes.
   Also measured there: **the turn containing a plan submission does not end until the review is answered**,
   so a session whose only turn is pending has no archive ceiling and the door refuses with its first guard.
-- **The one exception to the injection screen**: the harness's `plugin:'plan-mode'` + `form:'notice'`
-  mode-flip sentence archives verbatim (named by plugin AND form, so it cannot widen). `isHumanAuthored`
-  stays strict on purpose — it drives topic signatures, and the r28 lesson was that injected text moves
-  chapter boundaries.
+- **The one exception to the injection screen**: the harness's `plan-mode` + `form:'notice'`
+  mode-flip sentence archives verbatim (named by producer AND form, so it cannot widen — v3 wrapper
+  `{kind:'plugin', plugin:'plan-mode'}` and v4 `{kind:'plan-mode'}` both match, issue #43).
+  `isHumanAuthored` stays strict on purpose — it drives topic signatures, and the r28 lesson was that
+  injected text moves chapter boundaries.
 **Outstanding: the human verification rows (live `/compact` in a real browser, readability
 judgment), the seeded-gate case OBSERVED in a browser (pinned deterministically; needs a second distilled session — `docs/plans-carriage.md` § 15), per-message anchoring (the button forks at the conversation's end today; `deriveRanges`
 already supports any anchor), and the default-preset shipping policy (opt-in menu vs profile

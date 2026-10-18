@@ -24,6 +24,7 @@ import { readState } from './treedx/state.ts'
 import { selectProvider } from './provider.ts'
 import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
+import { resolveStoreRoot } from './store.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
 export interface EnrichCommandSurface {
@@ -106,7 +107,7 @@ export function registerHostCommands(
           const head = treedx ? (tstate?.head !== null && tstate?.head !== undefined ? tstate.head.slice(0, 10) : null) : readMirrorHead(mirrorAbs)
           const origin = treedx ? tstate?.origin ?? null : readOrigin(mirrorAbs)
           const status = readSyncStatus(cwd, config.artifactStoreRoot)
-          const pending = countPending(mirrorAbs, path.join(cwd, config.artifactStoreRoot), rec.projectKey)
+          const pending = countPending(mirrorAbs, resolveStoreRoot(cwd, config.artifactStoreRoot), rec.projectKey)
           const hasToken = readToken(cwd, config.artifactStoreRoot, rec.projectKey) !== undefined
           const local = isLocalUpstreamUrl(rec.remote)
           const lines = [

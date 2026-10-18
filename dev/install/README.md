@@ -45,6 +45,17 @@ This starts three services:
 - **dsh-web** — DSH Web UI on port 3080, pre-configured to use vllm
 - **dsh-test** — Test runner with Node.js + Playwright + Chromium
 
+If the host's own DSH GUI already owns port 3080 (it does on a dev box running this
+harness), start the containerized UI on another host port instead of stopping your session:
+
+```bash
+DSH_PORT=3081 docker compose up -d    # UI published at http://localhost:3081
+```
+
+`DSH_PORT` only picks the host side of the mapping; the container always binds 3080 internally.
+On machines where a local proxy intercepts Docker's published ports (see Troubleshooting), reach
+the UI with `docker exec dsh-chapters-dev curl -s http://127.0.0.1:3080/` or an SSH tunnel.
+
 ### Running Tests
 
 ```bash
@@ -61,6 +72,64 @@ docker compose run --rm dsh-test npm run coverage:ci
 docker compose exec dsh-test bash
 ```
 
+### Troubleshooting
+
+**`dsh-vllm` exits with `invalid human_readable_int_or_auto value: '${MAX_MODEL_LEN}'`.**
+The image was built from an old `vllm.Dockerfile` that passed literal `${VAR}` strings to vLLM
+(exec-form `CMD` does not interpolate). Fixed by rebuilding the image:
+
+```bash
+cd dev/install
+docker compose build --no-cache vllm
+docker compose up -d
+```
+
+Verify the container is serving before starting the dependents:
+
+```bash
+docker compose ps            # vllm should be healthy (model load takes ~2 min)
+curl -s http://localhost:8080/health
+```
+
+If a stale `dsh-vllm` container keeps getting reused, remove it first:
+`docker rm -f dsh-vllm`.
+
+**`dsh-web` restarts with `error: too many arguments ... web`.** The image was built before the
+launcher fix: host 0.2.x boots a profile with `dsh web --host … --port …` (the old
+`dsh --profile web web` form is rejected). Rebuild: `docker compose build dsh-web`.
+
+**The UI binds loopback inside the container.** Host 0.2.x deliberately refuses `--host 0.0.0.0`
+(remote code execution exposure). Normally you reach it through the published port mapping
+(`http://localhost:3080`). On some machines a local proxy intercepts Docker's published ports and
+resets host-side connections (measured on this box 2026-10-17 — even an unrelated test listener was
+unreachable from the host, so this is not a compose bug). Workarounds that always work:
+
+```bash
+docker exec dsh-chapters-dev curl -s http://127.0.0.1:3080/   # from inside the network
+ssh -L 3080:127.0.0.1:3080 <this-host>                        # tunnel to the bind directly
+```
+
+The token URL printed by `docker logs dsh-chapters-dev` (`dsh web: http://…/?token=…`) is what the
+browser opens; the same exchange works over the tunnel.
+
+**`dsh-vllm` exits with `--enable-auto-tool-choice requires --tool-call-parser`.**
+Also the old image: newer vLLM (≥ 0.31) refuses auto tool choice without naming a parser.
+The fixed image passes `--tool-call-parser hermes`, the format Qwen3 emits natively.
+Rebuild as above.
+
+**Server is healthy but `The model 'qwen3-4b-instruct' does not exist`.**
+Model aliases were passed wrong: vLLM's `--served-model-name` is *variadic* — one flag,
+space-separated values. A comma-joined value registers a single alias literally named `"a,b"`,
+and repeated flags keep only the last value. The fixed image and `.env.example` use
+`VLLM_SERVED_NAMES=qwen3-4b-instruct qwen3-4b-systemone`; rebuild and confirm both ids appear
+under `curl localhost:8080/v1/models`.
+
+**`Free memory on device cuda:0 ... less than desired GPU memory utilization`.**
+vLLM reserves a fraction of the GPU's *free* memory at startup; on a GPU shared with the desktop
+compositor even 0.75 can be too much when other apps hold VRAM. Lower it further (e.g. `0.6`) or
+close the competing GPU users. The stack default is already `0.75` (chosen for a 16 GB GPU under a
+desktop session); if you carried an older `.env` with `VLLM_GPU_MEM=0.90`, bring it down.
+
 ### Uninstall
 
 ```bash
@@ -68,6 +137,111 @@ docker compose exec dsh-test bash
 ./dev/install/uninstall.sh --full   # also remove DSH host installation
 ./dev/install/uninstall.sh --purge-home  # nuclear: remove entire $DSH_HOME
 ```
+
+### SDK API Service (headless, for external systems)
+
+A second Compose definition hosts the harness as an **SDK JSON-RPC API** — no Web UI — so another
+system drives it with `@deepseek-ai/dsh-sdk-client`. It carries the same configuration as the Web UI
+profile: the Alibaba/Qwen token-plan marketplace, the local vLLM provider, and all dev plugins
+(`dsh-chapters`, `dsh-codegraph`, `dsh-tinyfish-search`). Tuned for small local models.
+
+```bash
+cd dev/install
+# optional — only if no model server is already running on this host:
+docker compose -f compose.vllm.yml up -d                  # shared vLLM (:8080)
+GATEWAY_TOKEN=<secret> docker compose -f compose.sdk.yml up -d   # gateway on :8765
+```
+
+**The SDK stack owns no vLLM (#27).** The model server is an external dependency:
+boot `compose.vllm.yml` (its own file, its own GPU reservation), or point at a server
+that already exists — another project's vLLM, llama.cpp, any OpenAI-compatible URL —
+with `LLM_BASE_URL` / `SYSTEMONE_BASE_URL` (e.g. `http://host.docker.internal:8080/v1`).
+Both stacks attach to the shared network `dsh-chapters-net`, so the default in-network
+hostname `vllm` resolves across files when the model stack is up. That network must
+exist before the first SDK boot (compose.vllm.yml creates it; or
+`docker network create dsh-chapters-net`) — and `compose down` on either stack never
+removes a network it doesn't own.
+
+The load-bearing fact: **the SDK server is stdio-only by design** — `dsh --profile sdk` speaks
+newline-delimited JSON-RPC over its own stdin/stdout; there is no port or HTTP route anywhere in
+`@deepseek-ai/dsh-sdk-jsonrpc-server`. The `dsh-agent-api` service therefore runs a thin **gateway**:
+one WebSocket listener that, per connection, spawns a `dsh --profile sdk` child via the official
+`HarnessClient({ dshBin })` and relays frames verbatim. One connection = one runtime lifetime;
+`shutdown` or socket loss ends that child. Sessions persist under `$DSH_HOME/sessions` (shared volume),
+so a fresh connection recovers any session with `session/resume`.
+
+Caller example (any machine that can reach the published port):
+
+```ts
+import { HarnessClient } from '@deepseek-ai/dsh-sdk-client'
+
+// connector(): spawn a local pipe process whose stdout feeds the WS and whose
+// stdin is written by the WS messages — HarnessClient speaks to the pipes.
+const client = new HarnessClient({ /* transport wired to the WS relay */ })
+client.start()
+await client.initialize({
+  cwd: '/workspace',
+  provider: 'local',                 // NOT 'deepseek-official' — see below
+  model: 'qwen3-4b-instruct',
+})
+const { messageId } = await client.request('session/prompt', {
+  sessionId: 'my-task-1',
+  contentBlocks: [{ type: 'text', text: 'summarize README.md' }],
+})
+// notifications stream as session.event / session.status until the agent idles
+```
+
+Two protocol facts callers must know (verified against host 0.2.x sources):
+
+- **Provider routes are the profile's configured names** — `local` (vLLM) or `qwen-token-plan`
+  (Alibaba). `initialize` validates them against registered adapters; `deepseek-official` falls back
+  to a DeepSeek adapter that has no credential here and fails at first call.
+- **No mid-turn cancel exists on the wire.** Abandoning a turn means closing the connection (which
+  reaps the child); follow-up work resumes via `session/resume`. Full analysis and alternatives
+  (ACP, socat relay): [sdk-service-analysis.md](sdk-service-analysis.md).
+
+Auth: the gateway rejects connections before spawning anything (keep secrets private — this is a
+remote-code-execution surface, bind through loopback publishing only). Two modes:
+
+- **shared token** (default): the `Sec-WebSocket-Protocol` handshake must carry `dsh-auth.<token>`
+  matching `GATEWAY_TOKEN`.
+- **API keys** (#32, optional): set `GATEWAY_API_KEYS=key1,key2` and clients may instead present
+  `Authorization: Bearer <key>` (or the `dsh-bearer.<key>` subprotocol). Per-key identity is logged
+  (never the secret); both paths compare in constant time. The mode is purely additive — unset, the
+  gateway behaves exactly as before.
+
+**Don't hand-roll the wire.** The connector (`sdk-gateway/connector.ts`, shipped compiled in the image
+at `/gateway/connector.mjs`) gives TypeScript consumers a `HarnessClient`-shaped API over one socket:
+
+```ts
+const gw = await connectToGateway({ url: 'ws://localhost:8765', token: process.env.GATEWAY_TOKEN! })
+const { finalResponse } = await gw.run('summarize README.md', { sessionId: 'task-42' })
+```
+
+Beyond prompts: every durable runtime fact streams as `session.event` — tool calls with arguments (the
+file-change signal), thinking blocks (`run({includeReasoning:true})` returns them as `thinking`), turn
+outcomes with failure reasons, and per-turn workspace-change announcements (#37 mounts the recorder in
+the sdk profile). **New consumer (any TS project, any repo)?** The from-empty-directory recipe — install, auth, live
+streaming patterns, session lifecycle, measured gotchas: [CONSUMER.md](sdk-gateway/CONSUMER.md).
+API + wire reference once connected: [CONNECTOR.md](sdk-gateway/CONNECTOR.md).
+
+**Hosted archives are durable (#33).** The chapter store is cwd-relative by design (the `read` tool
+must reach it), so the gateway mounts a named volume (`dsh-chapters-workspace`) at `/workspace` and
+pins the sdk profile's `artifactStoreRoot` to the absolute `/workspace/.dsh-chapters`. Container
+recreate keeps every hosted session's chapters, artifacts, rules, and pool mirror. Linking a knowledge
+pool from a hosted session works the same way as anywhere else (`/chapters-link <path-or-url>` over
+the command surface); the mirror then travels inside the same volume.
+
+Coexistence with the Web UI: run one role per `$DSH_HOME` mount at a time. Sharing sessions/storage
+volumes between a live `dsh-web` and `dsh-agent-api` is not tested; give each stack its own home if
+both must run simultaneously.
+
+**Want deeper than a relay?** The harness is library-first internally — the SDK server itself is just
+a plugin calling `ctx.agents.create()` on an in-process Cordis tree, and `@deepseek-ai/dsh-app-boot`
+exports `boot()` as the documented embedder entry. A Hono (or any Node) app can therefore embed the
+runtime directly instead of spawning children: three integration shapes ranked, the npm dist-tag trap
+that governs them (`latest` tags of the bundle packages are stale — pin every `@deepseek-ai/*` to ONE
+exact version), and what each shape costs: [sdk-embedding-analysis.md](sdk-embedding-analysis.md).
 
 ## Architecture
 
@@ -88,6 +262,24 @@ docker compose exec dsh-test bash
 │                  └──────────┘                            │
 │                        ▲                                 │
 │                   Browser :3080                          │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│        compose.vllm.yml + compose.sdk.yml — SDK Stack    │
+│                                                         │
+│  ┌──────────────┐   shared net: dsh-chapters-net        │
+│  │ vllm (opt.)  │◄──┐   (or ANY external OpenAI-compat  │
+│  │ :8080        │   │    server via LLM_BASE_URL)       │
+│  └──────────────┘   │                                   │
+│                 ┌───┴────────────────────────────┐      │
+│                 │ dsh-agent-api                  │      │
+│                 │  gateway :8765 (WS)            │      │
+│                 │   └─ spawn per connection:     │      │
+│                 │      dsh --profile sdk         │      │
+│                 │      (stdio JSON-RPC)          │      │
+│                 └────────────────────────────────┘      │
+│                        ▲                                │
+│        @deepseek-ai/dsh-sdk-client over WS relay        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -165,11 +357,19 @@ unindexed project).
 | `VLLM_PORT` | `8080` | vLLM model server port |
 | `VLLM_MODEL_ID` | `Qwen/Qwen3-4B-AWQ` | HuggingFace model |
 | `VLLM_MAX_MODEL_LEN` | `32768` | Context window |
-| `VLLM_GPU_MEM` | `0.90` | GPU memory utilization |
+| `VLLM_GPU_MEM` | `0.75` | GPU memory utilization (raise to 0.90 on a dedicated GPU) |
 | `LLM_MODEL` | `qwen3-4b-instruct` | Default model for DSH |
 | `SYSTEMONE_MODEL` | `qwen3-4b-systemone` | Decision model name |
 | `QWEN_TOKEN_PLAN_API_KEY` | *(empty)* | Cloud marketplace key (optional) |
 | `TINYFISH_API_KEY` | *(empty)* | Search plugin key (optional) |
+| `GATEWAY_PORT` | `8765` | SDK gateway WebSocket port (compose.sdk.yml) |
+| `GATEWAY_TOKEN` | *(empty → refuses clients)* | Shared secret for the SDK gateway |
+| `DSH_ROLE` | `web` | Entrypoint role: `web` (UI) or `gateway` (SDK API service) |
+| `DSH_SDK_PROFILE` | `sdk` | Profile name the gateway spawns (`dsh --profile sdk`) |
+| `DSH_CHAPTERS_STORE_ROOT` | `/workspace/.dsh-chapters` | Absolute chapter-store root for hosted profiles (#33) |
+| `GATEWAY_API_KEYS` | *(empty → bearer off)* | Optional per-consumer Bearer keys, comma-separated (#32) |
+| `GATEWAY_IDLE_MS` | `1800000` | Idle socket TTL before the runtime child is reaped (30 min) |
+| `DSH_HOME_VERSION_PIN` | — | Pin `DSH_HOST_VERSION` to the exact host; the SDK client enforces an exact same-version match with it |
 
 ## Directory Layout
 
@@ -178,13 +378,22 @@ dev/install/
 ├── README.md                    ← this file
 ├── install.sh                   ← native installer (targets web profile)
 ├── uninstall.sh                 ← removal script
-├── Dockerfile                   ← DSH Web UI service image
-├── docker-entrypoint.sh         ← container entrypoint
+├── Dockerfile                   ← DSH service image (web UI + SDK gateway roles)
+├── docker-entrypoint.sh         ← container entrypoint (generates profiles; role dispatch)
 ├── vllm.Dockerfile              ← vLLM model server image
 ├── test.Dockerfile              ← test runner image (Node+Playwright+Chromium)
 ├── compose.yml                  ← compose stack (Web UI + vLLM + test runner)
+├── compose.vllm.yml             ← standalone vLLM model server (shared, optional — #27)
+├── compose.sdk.yml              ← compose stack (SDK API gateway; consumes any model server)
+├── sdk-gateway/                 ← WebSocket↔stdio relay for the SDK profile
+│   ├── gateway.ts               ← the gateway server
+│   ├── connector.ts             ← TS client library over one WS connection (#31)
+│   ├── CONNECTOR.md             ← connector usage guide + caller rules (#31)
+│   └── smoke.mts                ← end-to-end smoke client (GPU box only)
 ├── .env.example                 ← environment variable reference (not required at runtime)
-└── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
+├── profile-cordis.patch.yml     ← full Cordis patch (marketplace + plugins + dev)
+├── sdk-service-analysis.md      ← SDK integration analysis (host facts, options, effort)
+└── sdk-embedding-analysis.md    ← in-process embedding feasibility (Hono/Cordis as libraries, #28)
 
 .dsh/skills/                     ← all agent skills (see below)
 skills-lock.json                 ← lock file for upstream-installed skills

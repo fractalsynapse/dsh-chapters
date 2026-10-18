@@ -15,6 +15,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
+import { buildTocNotice } from '../../src/notice.ts'
+
 const KERNEL = '@deepseek-ai/dsh-session'
 
 const kernel = await import(KERNEL).catch(() => null)
@@ -58,4 +60,46 @@ test(`${guard} — a plugin-authored synthetic event is a permitted shape`, { sk
   // synthetic plan/mode, the seed contract is gone and the child is not gated.
   const adopted = kernel.adoptSessionEvent({ type: 'plan/mode', seq: 1, data: { active: true } } as never)
   assert.equal(adopted?.type, 'plan/mode')
+})
+
+// ------------------------------------------------------ v4 source admission (issue #43)
+//
+// Session format v4 (host 0.2.x) RETIRED the bare `source.kind: 'plugin'` wrapper:
+// the kernel refuses it at persistence-row admission with
+// "format v4 message requires a producer-owned source kind". This gate measures the
+// refusal AND the admission against the kernel's OWN migration module
+// (`@deepseek-ai/dsh-session-format-v3-to-v4`, devDependency pinned to the live
+// host line) — not against our transcription in src/notice.ts. If the kernel's
+// vocabulary moves again, these rows go red while the continuation still works
+// or breaks LOUDLY — never silently the way 0.2.0-rc.2 broke every seed in the dark.
+
+const FORMAT = '@deepseek-ai/dsh-session-format-v3-to-v4'
+const format = await import(FORMAT).catch(() => null)
+const fguard = format === null ? 'SKIP' : 'RUN'
+
+test(`${fguard} — the v4 kernel ADMITS the notice as our builder emits it`, {
+  skip: format === null ? `${FORMAT} not installed (bump devDependencies to the live host line)` : false,
+}, () => {
+  assert.ok(format !== null)
+  const event = buildTocNotice('## Conversation TOC\n\n1. [Probe](p/001.md) — pin row.', {
+    newId: () => 'gate-notice-1', time: 1700000000000,
+  })
+  // Throws SessionFormatError on any retired shape; silent return = admitted.
+  format.assertV4RowAdmission(event as never)
+})
+
+test(`${fguard} — the v4 kernel REFUSES the retired plugin wrapper we no longer emit`, {
+  skip: format === null ? `${FORMAT} not installed` : false,
+}, () => {
+  assert.ok(format !== null)
+  const retired = {
+    type: 'user/message', seq: 0, time: 1700000000000, surfaceOp: 'append',
+    data: {
+      id: 'gate-notice-2', role: 'user',
+      source: { kind: 'plugin', plugin: 'dsh-chapters', form: 'snapshot', sections: [{ name: 'chapters:toc', text: 'x' }] },
+      content: [{ type: 'text', text: 'x' }],
+    },
+  }
+  assert.throws(() => format.assertV4RowAdmission(retired as never), /producer-owned source kind/,
+    'the kernel stopped refusing the retired wrapper: our refusal text in src/notice.ts is a transcription that must be re-anchored together with this row')
 })

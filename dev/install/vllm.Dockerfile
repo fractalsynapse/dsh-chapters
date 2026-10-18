@@ -15,7 +15,7 @@ FROM vllm/vllm-openai:latest
 
 # Model configuration
 ENV MODEL_ID=Qwen/Qwen3-4B-AWQ
-ENV SERVED_NAMES="qwen3-4b-instruct,qwen3-4b-systemone"
+ENV SERVED_NAMES="qwen3-4b-instruct qwen3-4b-systemone"
 ENV MAX_MODEL_LEN=32768
 ENV GPU_MEMORY_UTILIZATION=0.90
 ENV TENSOR_PARALLEL_SIZE=1
@@ -28,15 +28,27 @@ EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --retries=20 --start-period=120s \
   CMD curl -fsS http://localhost:8080/health 2>/dev/null || exit 1
 
-ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]
-CMD [ \
-  "--model", "${MODEL_ID}", \
-  "--served-model-name", "${SERVED_NAMES}", \
-  "--max-model-len", "${MAX_MODEL_LEN}", \
-  "--gpu-memory-utilization", "${GPU_MEMORY_UTILIZATION}", \
-  "--tensor-parallel-size", "${TENSOR_PARALLEL_SIZE}", \
-  "--host", "0.0.0.0", \
-  "--port", "8080", \
-  "--trust-remote-code", \
-  "--enable-auto-tool-choice" \
-]
+# No ENTRYPOINT: the base image's `ENTRYPOINT ["vllm","serve"]` would swallow a
+# CMD and its argv, so we override it with our own launcher.
+# Shell-form CMD only: Docker runs it through /bin/sh so ${VAR} expands from the
+# container environment (compose sets it per service). Exec-form JSON arrays are
+# NOT interpolated — the old form handed vLLM the literal string "${MAX_MODEL_LEN}"
+# and argparse killed every boot (#19).
+ENTRYPOINT []
+# --served-model-name is VARIADIC (nargs="+"), NOT append. Measured on vLLM 0.31:
+#   repeated flags  -> argparse keeps only the LAST value (one alias served);
+#   one "a,b" value -> a single alias literally named "a,b";
+# both make the other bare name 404. The correct form is ONE flag with
+# space-separated values, so SERVED_NAMES is space-separated and expands
+# unquoted into argv words (shell-form CMD gives us /bin/sh).
+CMD python3 -m vllm.entrypoints.openai.api_server \
+  --model "$MODEL_ID" \
+  --served-model-name $SERVED_NAMES \
+  --max-model-len "$MAX_MODEL_LEN" \
+  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+  --tensor-parallel-size "$TENSOR_PARALLEL_SIZE" \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --trust-remote-code \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes

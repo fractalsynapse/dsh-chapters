@@ -94,6 +94,20 @@ and `frontload: true` (structural context injected into prompts). After editing 
 `codegraph_sync` so subsequent queries reflect the new code. The index is gitignored and persists
 across sessions.
 
+### The `docs/superpowers/` plan directory
+
+The upstream `writing-plans` / `brainstorming` skills (`.dsh/skills/`, from obra/superpowers — see
+dev/install README § Skills) default their artifacts to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`
+and `docs/superpowers/specs/…`. Those files are **tracked**: they are per-feature design records, and a
+later session may re-reference them for the *why* behind an implementation. Two rules keep them honest:
+
+1. A plan is stamped with a `**Status:**` header when its work lands (implemented → commit refs +
+   pointers to the shipped code/tests/site docs), so nobody executes a spent to-do list.
+2. The durable cross-session record remains the chapters store and `docs/` proper; a superpowers plan
+   is a working artifact of one pre-implementation session, not a second index. If it rots into
+   contradiction with the shipped code, update or supersede it in place via git history — never rewrite
+   silently.
+
 ### Three test layers (and why the third exists)
 
 | Layer | Command | Runs | Covers |

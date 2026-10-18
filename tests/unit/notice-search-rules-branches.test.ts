@@ -32,7 +32,9 @@ test('assertKernelAcceptedUserMessage: the valid notice passes, every deviation 
   assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { role: string }).role = 'assistant' })), /role "user"/)
   assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { source: unknown }).source = 'string-source' })), /invalid source/)
   assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { source: { kind: string } }).source.kind = 'alien' })), /outside the pinned vocabulary/)
-  assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { source: { plugin?: string } }).source.plugin = '' })), /must name its producer/)
+  // issue #43: the notice carries no `plugin` field — re-adding the retired wrapper
+  // shape must hit the v4 producer-owned refusal instead of the v3 naming check.
+  assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { source: { kind?: string; plugin?: string } }).source.kind = 'plugin'; (e.data as { source: { plugin?: string } }).source.plugin = 'dsh-chapters' })), /producer-owned source kind/)
   assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { source: { form?: string } }).source.form = 'wild-form' })), /ContextForm union/)
   assert.throws(() => assertKernelAcceptedUserMessage(bad((e) => { (e.data as { content: unknown[] }).content = [] })), /invalid content/)
 })
