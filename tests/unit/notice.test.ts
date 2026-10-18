@@ -17,7 +17,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import {
-  ACCEPTED_CONTEXT_FORMS, ACCEPTED_SOURCE_KINDS, NOTICE_PLUGIN, NOTICE_SECTION,
+  ACCEPTED_CONTEXT_FORMS, ACCEPTED_SOURCE_KINDS, NOTICE_PLUGIN, NOTICE_SECTION, NOTICE_SOURCE_KIND,
   assertKernelAcceptedUserMessage, buildTocNotice,
 } from '../../src/notice.ts'
 
@@ -38,8 +38,13 @@ test('the notice is one user/message at seq 0, appended, kernel-shaped', () => {
   // source is an OBJECT. The Phase 0 rejections that taught this:
   //   { source: 'user' }  ->  "message has invalid source"
   assert.equal(typeof data.source, 'object')
-  assert.equal(data.source.kind, 'plugin')
-  assert.equal(data.source.plugin, NOTICE_PLUGIN)
+  // v4 (issue #43): the producer owns the kind — `plugin:dsh-chapters` — and the
+  // retired `plugin` wrapper field is ABSENT. Measured admission:
+  // dsh-session-format-v3-to-v4 assertV4RowAdmission accepts this exact shape
+  // and refuses `{ kind: 'plugin' }` with "format v4 message requires a
+  // producer-owned source kind" (0.2.0-rc.2, 2026-10-18).
+  assert.equal(data.source.kind, NOTICE_SOURCE_KIND)
+  assert.equal('plugin' in data.source, false, 'attribution rides in the kind, not a wrapper field')
   assert.equal(data.source.form, 'snapshot')
   assert.deepEqual(data.source.sections, [{ name: NOTICE_SECTION, text: TOC }])
 })
@@ -72,7 +77,7 @@ test('a missing role reproduces the kernels rejection (role "user")', () => {
   assert.throws(
     () => assertKernelAcceptedUserMessage({
       type: 'user/message', seq: 0,
-      data: { id: 'm', content: [], source: { kind: 'plugin', plugin: NOTICE_PLUGIN } },
+      data: { id: 'm', content: [], source: { kind: NOTICE_SOURCE_KIND } },
     }),
     /must have role "user"/,
   )
@@ -88,13 +93,16 @@ test('a STRING source reproduces the most expensive possible mistake', () => {
   )
 })
 
-test('a plugin source without a producer name is refused', () => {
+test('the retired v3 plugin wrapper is refused with the kernel v4 words (issue #43)', () => {
+  // The refusal text is the LIVE kernel's, reproduced verbatim:
+  // "format v4 message requires a producer-owned source kind"
+  // (dsh-session-format-v3-to-v4/lib/index.js:126 on 0.2.0-rc.2).
   assert.throws(
     () => assertKernelAcceptedUserMessage({
       type: 'user/message', seq: 0,
-      data: { id: 'm', role: 'user', source: { kind: 'plugin' }, content: [{ type: 'text', text: 'x' }] },
+      data: { id: 'm', role: 'user', source: { kind: 'plugin', plugin: NOTICE_PLUGIN, form: 'snapshot' }, content: [{ type: 'text', text: 'x' }] },
     }),
-    /must name its producer/,
+    /producer-owned source kind/,
   )
 })
 
@@ -112,7 +120,7 @@ test('context forms outside the published ContextForm union are refused', () => 
   assert.throws(
     () => assertKernelAcceptedUserMessage({
       type: 'user/message', seq: 0,
-      data: { id: 'm', role: 'user', source: { kind: 'plugin', plugin: NOTICE_PLUGIN, form: 'archive' }, content: [{ type: 'text', text: 'x' }] },
+      data: { id: 'm', role: 'user', source: { kind: NOTICE_SOURCE_KIND, form: 'archive' }, content: [{ type: 'text', text: 'x' }] },
     }),
     /outside the published ContextForm union/,
   )
@@ -121,25 +129,40 @@ test('context forms outside the published ContextForm union are refused', () => 
 // ------------------------------------------------------------------ drift guard against the installed host
 
 const MESSAGE_DTS = '/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm/lib/types/message.d.ts'
+// v4 hosts install @deepseek-ai/* flat under the global npm root, not nested
+// under dsh — discover it rather than hardcode a machine (2026-10-18, issue #43:
+// the old path silently did not exist on this box, which is why the drift guard
+// skipped while the live kernel moved v3→v4 underneath it).
+const ALT_DTS = [
+  process.env.DSH_GLOBAL_ROOT !== undefined
+    ? `${process.env.DSH_GLOBAL_ROOT}/@deepseek-ai/dsh-llm/lib/types/message.d.ts` : '',
+  `${process.env.HOME ?? ''}/node_modules/@deepseek-ai/dsh-llm/lib/types/message.d.ts`,
+].filter((p) => p !== '')
 
 test('pinned vocabulary still matches the installed host types (drift => re-anchor, never relax)', (t) => {
-  if (!existsSync(MESSAGE_DTS)) {
-    t.skip(`installed host types not readable at ${MESSAGE_DTS}; the pin above still stands`)
+  const dts = [MESSAGE_DTS, ...ALT_DTS].find((p) => existsSync(p))
+  if (dts === undefined) {
+    t.skip('installed host types not readable (checked the dsh-nested and global-flat paths); the pin above still stands')
     return
   }
-  const src = readFileSync(MESSAGE_DTS, 'utf8')
-  // MessageSourceMap must still carry all four base kinds...
-  for (const kind of ACCEPTED_SOURCE_KINDS) {
+  const src = readFileSync(dts, 'utf8')
+  // MessageSourceMap must still carry the base kinds the kernel composes around.
+  for (const kind of ['user', 'model', 'tool']) {
     assert.match(src, new RegExp(`kind: '${kind}'`), `host MessageSourceMap no longer mentions kind '${kind}'`)
   }
-  // ...and ContextForm must still carry every pinned form. A REMOVED form is
+  // v4 markers: if the host map names the v4 producers, the bare `plugin`
+  // wrapper must be GONE from it — its presence is the retired shape our
+  // notice no longer emits (and our refusal above must keep refusing it).
+  if (src.includes(`'compact-checkpoint'`)) {
+    assert.doesNotMatch(src, /kind: 'plugin'/, 'host is v4-shaped yet still declares the retired plugin wrapper — re-anchor the notice vocabulary and this row together')
+    assert.ok(!ACCEPTED_SOURCE_KINDS.includes('plugin' as never), 'our pinned list must never re-admit the retired wrapper')
+    assert.ok(ACCEPTED_SOURCE_KINDS.includes(NOTICE_SOURCE_KIND), 'our producer-owned kind is the pinned emit')
+  }
+  // ContextForm must still carry every pinned form. A REMOVED form is
   // the 66-log class of event and must fail here (the map only ever ADDS).
   for (const form of ACCEPTED_CONTEXT_FORMS) {
     assert.ok(src.includes(`'${form}'`), `ContextForm no longer includes '${form}'`)
   }
-  // The seed validator's core rules we transcribe (assertMessageEventShape):
-  // kind must be a non-empty string; system/message additionally requires plugin sources.
-  assert.match(src, /Merge-extensible sum type/)
 })
 
 // ------------------------------------------- notice v2 (§7.3): counts + project line

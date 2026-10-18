@@ -280,7 +280,7 @@ test('an approved plan is archived whole, a continuation carries it as a directi
   expect(continuedSeed, 'an approved plan means no seeded gate').not.toMatch(/Plan mode is ACTIVE in this session/)
   const contEvents = logEvents(sessionLogTextById(continuedId))
   expect(contEvents.filter((e) => e.type === 'plan/mode').length, 'no plan/mode seeded into an implementing child').toBe(0)
-  expect(contEvents.filter((e) => e.type === 'user/message' && e.raw.includes('"plugin":"dsh-chapters"')).length,
+  expect(contEvents.filter((e) => e.type === 'user/message' && e.raw.includes('"kind":"plugin:dsh-chapters"')).length,
     'one synthetic notice, nothing copied from the parent (invariant 2)').toBe(1)
 
   const fork = page.locator('button[aria-label="Fork with chapters"]').first()
@@ -344,7 +344,7 @@ test('an approved plan is archived whole, a continuation carries it as a directi
 
   // ---- invariant 2, both children: one seeded message, no parent history copied.
   for (const childId of [branchId]) {
-    const seeded = logEvents(sessionLogTextById(childId)).filter((e) => e.type === 'user/message' && e.raw.includes('"plugin":"dsh-chapters"'))
+    const seeded = logEvents(sessionLogTextById(childId)).filter((e) => e.type === 'user/message' && e.raw.includes('"kind":"plugin:dsh-chapters"'))
     expect(seeded.length, `${childId} inherits exactly one synthetic notice`).toBe(1)
   }
   expect(branchSeed).toMatch(/Ancestry:/, 'and both cite the archive they were born from')
