@@ -99,6 +99,28 @@ export interface RenderConfig {
    * Absent → the built-in conservative set. Extensible per deployment.
    */
   redactions?: readonly import('./redact.ts').RedactPattern[]
+  /**
+   * Lineage stamp (issue #47): the id of the PARENT session when the authoring
+   * session is a subagent child. Copied verbatim from the durable
+   * `session.header.parentSession` the HOST writes (`childSessionMeta`), never
+   * inferred. Emitted ONLY when a non-empty string — a session without a parent
+   * renders byte-identically to the pre-feature shape, which is what keeps every
+   * existing chapter file and every model tape un-re-recorded (same discipline
+   * as the plans block, verify.md P8).
+   */
+  subagentOf?: string
+}
+
+/**
+ * Read the lineage the kernel stamped into a session header, or undefined.
+ * The ONE sanctioned reader of `parentSession` for chapter rendering — every
+ * archive door (save, auto-save, compaction finalize) passes its output into
+ * `RenderConfig.subagentOf`, so the field is stamped the same way everywhere.
+ */
+export function lineageOf(header: { parentSession?: string } | undefined): string | undefined {
+  if (header === undefined) return undefined
+  const p = header.parentSession
+  return typeof p === 'string' && p !== '' ? p : undefined
 }
 
 export interface ArtifactRef {

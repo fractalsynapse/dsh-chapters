@@ -178,6 +178,14 @@ agent turn ──► chapters_segment ──► {archiveCeiling, chapters:[{titl
 The two things the model never does: produce archived text, and traverse the ancestry graph. Both are
 the plugin's job. See [docs/architecture.md](docs/architecture.md).
 
+**The archive moments are exactly five** (docs/architecture.md § The archive moments): continue, fork,
+save, compaction finalize, and **subagent settlement** (#47: a host-plane listener on the host's
+`subagent/end` event runs the *same* save pipeline for chapters-preset children — save-only, so it
+creates no session and engages no mid-step rule; watermark-idempotent across repeated settlements of a
+continuable child; chapters land in the child's own tree with `subagent`/`parentSession` frontmatter
+from the durable header the host stamps). Knowledge that trips none of the five never enters the
+index — when adding a sixth door, extend the list, never copy the pipeline.
+
 ## Continuation Budget, Not a Handoff Cap
 
 There is **no cap on the handoff note.** The real invariant is a ceiling on the *newly added* context of a

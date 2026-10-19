@@ -1,0 +1,17 @@
+{
+  "name": "dsh-chapters-probe-subagent-end",
+  "version": "0.0.0",
+  "description": "Issue #47 spike: what a host-plane plugin observes at subagent/end \u2014 child-handle liveness vs the disposal race, durable fallback read access, preset identification.",
+  "type": "module",
+  "main": "./lib/verify.js",
+  "license": "Apache-2.0",
+  "private": true,
+  "exports": {
+    ".": "./lib/verify.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

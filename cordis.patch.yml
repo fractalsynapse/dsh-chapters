@@ -59,6 +59,11 @@
 #   mergeThreshold: 0.3            # τ for merging turns into one chapter at
 #                                  # archive time. Composition is archive-time
 #                                  # only: tune for future archives.
+#   subagentAutoSave: true         # archive a subagent's completed turns into
+#                                  # searchable chapters when its run settles
+#                                  # (save-only: no session, no compaction;
+#                                  # enrichment queued, never per-child).
+#                                  # false = listener never registers.
 #
 #   # ---- context economy -------------------------------------------------
 #   toolResultDeferFloorTokens: 200        # archive-time inline floor

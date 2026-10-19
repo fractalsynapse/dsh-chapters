@@ -1,0 +1,5 @@
+# Issue #47 spike bundle patch — mounts the subagent-end probe into a SCRATCH profile.
+# Never install into ~/.dsh/profiles/web (the live home this work runs inside).
+- insert:
+    - id: dsh-chapters-probe-subagent-end
+      name: 'dsh-chapters-probe-subagent-end'
