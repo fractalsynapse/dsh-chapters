@@ -25,7 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   renderRuleFile, rulePath, collectMirrorRules, appendRuleStatusFact, appendRulePinFact, loadRulePins,
-  collectStoreRules, parseRuleFile, sessionRuleActive, buildRulesSection, revokedRuleIds,
+  collectStoreRules, sessionRuleActive, buildRulesSection, revokedRuleIds,
   type RuleRecord, type RuleStatus,
 } from './rules.ts'
 import type { ProjectRecord } from './sync.ts'
@@ -282,9 +282,4 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
   }
 
   return { kind: 'success', text: HELP }
-}
-
-/** read one rule's body from disk for the promotion hint (best effort) */
-export function ruleBodyAt(absPath: string): string {
-  try { return parseRuleFile(fs.readFileSync(absPath, 'utf8'))?.body.trim() ?? '' } catch { return '' }
 }

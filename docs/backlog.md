@@ -205,3 +205,27 @@ system prompt out, and E3/r23-r28 show a head-position replacement reuses nothin
 hardware. Carriage happens at the two moments a head is actually rebuilt, plus `chapters_rules` on
 demand. If someone revisits this, the honest argument is "small models drift mid-window", and the
 answer is the pinned class + the withheld-count line, not more injection.
+
+## #50 two-tier rules — what the next session inherits (2026-10-20)
+
+The round landed green on the deterministic plane (640 unit / 137 integration rows, coverage gate
+held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and none is a surprise:
+
+1. **`rulesEnrichment` (§7.5's model half) is not built.** The tier ships on the deterministic
+   `ADD RULE:` marker alone, which is the zero-token path the invariants demand. Building it means:
+   a `rules: [{text, category, quote}]` field on the §6.1 pass, validation-before-commit, and the
+   rule that **only a verbatim quote of human bytes may auto-activate**. Do not add a per-turn model
+   call — the server is single-slot (§6.2) and the critical path is zero-inference (§1.1).
+2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
+   the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
+   `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round
+   added a tool (`chapters_rules`), which changes the header of every recorded session. Extending
+   `rules.spec.ts` with the checkpoint-carriage and continue-vs-fork assertions is part of that job;
+   writing spec assertions that cannot execute would be a false witness.
+3. **R10 is only partly proven.** Marker rules re-derive off the durable log and dedupe against
+   disk, but there is no end-to-end wipe-and-replay row yet.
+
+Two local truths to save the next agent an hour: the suites need **Node ≥ 24** (on 22 every file
+fails for a reason that looks like your diff), and `coverage:ci` intermittently reddens
+`git-auth-classification`/`sync-remote` on this box under parallel load — **verified pre-existing** by
+running it in a worktree at the last docs-only commit. Re-run before blaming the change.

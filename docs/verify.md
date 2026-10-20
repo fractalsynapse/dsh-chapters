@@ -167,22 +167,35 @@ renderer, the segmentation tool, and the child's notice.
 | P17 | The one injection-screen exception is named, not open-ended | `kind:'plugin' + plugin:'plan-mode' + form:'notice'` archives verbatim; any other plugin notice, snapshot or instruction shape still screens; `isHumanAuthored` (which drives topic signatures and `(N msgs)`) is unchanged | unit `injections.test.ts` (two rows, incl. wrong-form and wrong-plugin negatives) |
 ## Two-Tier Rules — SPEC (record §7.1, §7.3–§7.9; issue #50)
 
-**Nothing below is verified yet.** This is the checklist written ahead of the code, docs-first, so
-that each row can be proven to fail on the mutation it guards before anyone calls it a fact. The
-P3 rows above stay the shipped-behavior record; these extend it with the session tier.
+Rows **R1–R10 verified 2026-10-20** except **R-e2e**, which this host cannot run (see the last row
+and §13 P3c). Each row below was written docs-first and then proven to fail on the mutation it
+guards — the mutation runs are named per row so a future reader can repeat them. The P3 rows above
+stay the shipped-behavior record; these extend it with the session tier.
 
-| # | Claim to be proven | What makes it true | How it is witnessed |
+| # | Claim | Status | How it is witnessed (and the mutation that proves it) |
 |---|---|---|---|
-| R1 | A rule survives an in-place compaction | `rulesCarry` is the third lead section in `planSummarize`, on BOTH the composed and legacy paths, beside `planCarry`/`plot` | unit over a real `summarize()` input; assertion on the checkpoint text itself, not on a mock — this row is the reason the round exists |
-| R2 | Continue carries both tiers; fork carries project only | `intent` filtering at the four door sites, one helper | the existing "both doors archive identically" row must still pass (same ranges, titles, plan facts) while the rules bytes DIFFER — that asymmetry is the guard |
-| R3 | `ADD RULE:` is deterministic and free | parse at the existing `turn/end` listener; no model call on the path | unit + a row that fails if any model token is spent (the meter is never exempted — same doctrine as plans carriage) |
-| R4 | Session rules never reach the pool | one filter in `planStoreToRepo` | integration over a real git remote **and** the TreeDX stub, two machines: machine B sees the file list without session paths |
-| R5 | A model-derived rule activates only on a verbatim quote | `derivedFrom: model` + quote match against human bytes in the archived span | unit rows in both directions: quoted ⇒ active, inferred ⇒ `proposed` and renders nothing |
-| R6 | Selection is deterministic and announced | pure function of (files, stored topics, caps) — no clock, no readdir order | two runs with shuffled input order byte-identical; withheld line present whenever `shown < active`, including `withheld: 0` |
-| R7 | Empty ruleset ⇒ zero bytes | `kind:'none'` short-circuit retained on the checkpoint path too | golden row; and the tape chain replays without re-recording for the notice-side change (measured license) with **one** re-record paid for the new tool schema |
-| R8 | Ungoverned never looks like governed | the zero-rules line names `projectKeySource` + the remote/path used | unit rows for all four divergences of record §7.8 (path-derived, fork-listed-first, TreeDX-keyed, unlinked) |
-| R9 | A conflict is reported, never resolved | `/chapters-rule conflicts` writes nothing | unit: rule file bytes + `sha256` unchanged after the call; refusal path covered |
-| R10 | Session loss is re-derivation, not corruption | marker rules replay off the durable log | integration: wipe the store, replay the parser over the log, same rule set (the enrichment half re-runs through the existing ladder) |
+| R0 | The empty tier still renders **zero bytes**, and the pre-#50 option shape renders **byte-identically** to the previous builder | ✅ verified | The golden literal was captured by running **HEAD's** `buildRulesSection` over the same fixture and diffing it against the new one (text-equal, kind-equal, only the non-rendered `withheld` field added). On the checkpoint path an empty set asserts neither header nor announcement appears |
+| R1 | A rule survives an in-place compaction | ✅ verified | `rules-checkpoint.test.ts` drives the **REAL realm engine** through `summarize()` and reads the text that would be prefilled next: project rule + session rule verbatim, project before session (positional precedence); a parent's rule rides the child's checkpoint (R1b — the tier binds the TREE); over budget the omission is announced. Mutation: dropping `rulesSection` from `leadSections` breaks 3 of 4 rows |
+| R2 | `chapters_continue` carries both tiers; `chapters_fork` carries project and **zero session bytes** | ✅ verified | `rules-doors.test.ts` asserts the asymmetry through the shared renderer, and a **source-shape row** fails if `tools.ts` or `engine.ts` calls `buildRulesSection` directly — two rule-pickers would drift apart invisibly (the same argument that pins `rankEntries` and `doors.ts`) |
+| R3 | `ADD RULE:` is deterministic and free | ✅ verified | `session-rules.test.ts` (8 rows): line-start-only, minimum length, dedupe; the two injection screens (`isHumanAuthored`, `stripReminderSpans`) each with a positive and a negative; assistant-restatement never captures (the amplification path); idempotent across repeated turn/ends; numbers honor registry **and** disk; §9 credential screen; listener containment (disabled / missing cwd / throwing store). The module holds no `ctx.llm` reference at all |
+| R4 | Session rules never reach the shared pool, on **either** provider | ✅ verified | `rules-transport.test.ts`: a real git pool (A stages project only, B pulls and never sees the session file, A still renders it locally — exclusion ≠ invisibility) and the TreeDX stub's commit tree. Mutation: deleting the single `isSessionRuleFile` skip reddens both |
+| R5 | A model-derived rule auto-activates **only** on a verbatim human quote | ❌ not implemented | The §6.1 `rules: []` field and its quote gate are the P3c remainder. The tier ships on the deterministic marker path alone — recorded as missing, not quietly dropped |
+| R6 | Selection is deterministic and announced | ✅ verified | Shuffled input order yields byte-identical selection; two identical runs render identical text; the withheld line appears exactly when `shown < active`, and its ABSENCE is asserted when no cap is set. `active`/`chapters_rules` return the counts even when nothing was withheld, so "you are seeing all of it" is a fact |
+| R7 | Nothing was silently clipped anywhere the budget bites | ✅ verified | Token ceiling still returns `refusal` with per-rule numbers and now counts **both** tiers; the checkpoint announces the omission instead of squeezing; the door path still refuses the continuation with numbers (§1.2) |
+| R8 | Ungoverned never looks like governed | ✅ verified | `/chapters-status` prints an `Identity:` line with the divergence warning — and this repo's own non-git test workspace hit that branch during verification, which is the honest evidence the warning is not theoretical; `chapters_rules` answers "no linked project" separately from "nothing approved on this machine" separately from "nothing captured this session"; the head states the zero-project tier only when session rules are actually governing it |
+| R9 | A conflict is reported, never resolved | ✅ verified | `conflicts` wrote no file (directory listing asserted unchanged), the prompt explicitly forbids rewriting, and with no conversation route the verb refuses rather than half-answering |
+| R10 | Losing a checkout is re-derivation, not corruption | 🟡 partial | `parseRuleMarkers` is deterministic over message text and capture dedupes against disk, so a replay fills gaps without duplicating — but the **end-to-end wipe-and-replay row is not written**, and the enrichment half cannot be re-derived until R5 exists |
+| R-e2e | The browser plane: a live model, the `rules` journey, the new tool in the header | ❌ cannot run on this host | `npm run test:e2e:replay` **refuses by name** (`tests/e2e/boot.ts:130`: the pinned host predates preset declaration rows). The re-record this feature owes is queued with the `dev/dsh-host-lock` move in `docs/backlog.md` — stated, not skipped silently |
+
+**Two environmental facts, learned the hard way on 2026-10-20 and worth repeating.** (1) The
+deterministic suites need **Node ≥ 24** (`package.json` engines); on Node 22 every test file fails
+with `ERR_NO_TYPESCRIPT`/unknown-extension, which looks exactly like a broken change and is not one.
+(2) Under `npm run coverage:ci`'s parallel load the real-HTTP-git files
+(`git-auth-classification`, `sync-remote`) intermittently fail with an EPIPE in their `before` hook —
+**proven pre-existing** by running the same command in a worktree at the last docs-only commit, where
+`git-auth-classification` fails identically. Hosted CI is green, so this is a box-level flake, not a
+regression; anyone chasing a red `coverage:ci` locally should re-run before blaming the diff.
+Ledger on this branch: **93.16% statements / 85.53% branches / 90.01% functions** — the gate holds.
 
 ## The Cache Metric, Before You Trust a Number
 

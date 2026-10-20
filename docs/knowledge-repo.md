@@ -886,10 +886,11 @@ over a real pool), e2e (`rules` project: UI add → approve → fork → the chi
 carries the rule verbatim). §7.4 selection was left unbuilt in that round by design — the corpus
 of active rules did not yet grow on its own.
 
-**P3c — Two-tier rules (issue #50): SPECIFIED, NOT YET BUILT.** §7.1's `scope`/`session`/
+**P3c — Two-tier rules (issue #50): BUILT except the model-capture half (2026-10-20).** §7.1's `scope`/`session`/
 `derivedFrom`/`pinned` frontmatter (absent `scope` ⇒ `project`, so every pre-existing rule record
 keeps working byte-identically); `ADD RULE:` capture at the existing `turn/end` listener;
-optional `rulesEnrichment` capture behind the verbatim-quote gate; session-scope exclusion in
+**remaining:** optional `rulesEnrichment` capture behind the verbatim-quote gate (§7.5's second
+speed — no key exists yet, and nothing in the shipped tier depends on it); session-scope exclusion in
 `planStoreToRepo`; the three render classes and per-tier caps in `buildRulesSection`; the third
 checkpoint lead section; `intent` filtering at the four door sites; `chapters_rules`; the
 `active`/`pin`/`conflicts` verbs; and §7.8's loud-identity lines.
@@ -899,9 +900,21 @@ rules verbatim into the checkpoint; `chapters_continue` carries project **+ sess
 no session rule file appears in the pool over **either** provider; an unlinked or `path-derived`
 checkout says it rendered zero rules; the empty set still renders byte-identical ABSENT; selection
 is byte-stable across two machines with the same inputs.
-Sequencing note: the tool-schema edits here change every replay prefix, so the e2e work is **one**
-whole-project re-record, not a series of per-spec ones (the 2026-09-23 lesson: a tape records the
-context it was distilled in).
+Build status, honestly split (each ✅ is a red-then-green row, not an intention):
+✅ `scope`/`session`/`derivedFrom`/`pinned` frontmatter with absent-means-`project` byte-compat;
+✅ tier-aware `buildRulesSection` with pinned→relevance→category/id selection, per-tier caps and the
+announced withheld count; ✅ `ADD RULE:` capture at the existing `turn/end` listener (zero model
+tokens); ✅ the one `planStoreToRepo` exclusion over **both** providers; ✅ `rulesCarry` as the third
+checkpoint lead section on both paths; ✅ `intent` filtering at the doors through one
+`renderRulesBlock`, with a source-shape row forbidding a door-local picker; ✅ `chapters_rules`;
+✅ `active`/`pin`/`unpin`/`--scope`/`conflicts` and revoke-on-session; ✅ §7.8 identity lines at
+`/chapters-status` and `/chapters-link`. ❌ the §6.1 `rules: []` enrichment field and its quote gate.
+❌ the browser plane: `npm run test:e2e:replay` **refuses by name** on the pinned host (it predates
+preset declaration rows — `tests/e2e/boot.ts:130`), so the `rules` journey and the R-rows over a
+live model are unverified, and the new tool schema is a standing re-record owed the moment
+`dev/dsh-host-lock` moves to 0.2.x. Sequencing then stays as planned: **one** whole-project
+re-record, never a series of per-spec ones (the 2026-09-23 lesson: a tape records the context it was
+distilled in).
 
 ## 14. Open risks (honest register)
 
@@ -1078,7 +1091,8 @@ Six decisions, each narrowing a temptation the discussion produced:
    does not belong there. The 2026-09-20 amendment (approval is a per-machine fact, never a file
    rewrite) is **not** relaxed: it still governs every byte of the shared tier.
 4. **Model-captured rules may auto-activate, and only on a verbatim quote** (§7.5, behind
-   `rulesEnrichment`, default off). The rejected framing was "the model writes its own governing
+   `rulesEnrichment`, default off — *decided and specified; the P3c build shipped the marker path
+   first, so this half is still ahead of the code*). The rejected framing was "the model writes its own governing
    rules with no human gate"; the accepted one is that the machine-local, one-command-reversible,
    never-staged scope makes the blast radius one session tree — so the gate moves from *who clicks*
    to *what the rule is derived from*. An inferred rule with no human sentence behind it waits in
