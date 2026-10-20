@@ -174,3 +174,34 @@ pin the pair deliberately in the profile patch (`disabled: true` on `directory-p
 `@deepseek-ai/dsh-host-directory-picker-browse` + `@deepseek-ai/dsh-client-ui-directory-picker-browse`).
 Upstream ask: compat aliases for the renamed icon exports, or a boot-time shell↔plugin version handshake
 that rejects a mismatched bundle instead of crashing at render.
+
+## Two-tier rules — specified, deliberately not built (2026-10-20, #50)
+
+The design round that produced record §7.1 + §7.3–§7.9 and Amendment 2026-10-20 started from one
+measured hole: `planSummarize` composes `leadSections = [planSection, plotSection]`, so a plan and a
+plot survive an in-place compaction and a **rule does not**. Docs are committed ahead of code
+(docs-first); `docs/verify.md § Two-Tier Rules — SPEC` rows R1–R10 are the checklist, and each one is
+supposed to be provable-red before it is called a fact. A fresh session should start at the tests, not
+at the implementation.
+
+Two things the round decided **not** to do, so they don't get rediscovered as oversights:
+
+**1. Team-identity curation facts (multi-human collective approval) — deferred, and it is a real
+design question, not a gap.** Approval is per-machine by the 2026-09-20 amendment, and that boundary
+was NOT relaxed: a rule a teammate approves is not `core` on your machine. For checkouts on *one*
+machine that is invisible (`harnessId` = hostname, so they share one facts file) — which is exactly the
+use case that asked for it. For **several humans on one project**, the cost is re-reviewing a growing
+list. The clean way to buy it back without reopening the bug the amendment closed: keep facts namespaced
+by *writer* and let a machine read **more** namespaces — my own `edits/<harness>/curation.jsonl` ∪ a
+recognized team identity's `edits/<teamId>/curation.jsonl`, still one writer per file (§3.3 survives),
+no file rewrite, and "primary architect" becomes whoever holds the team credentials rather than a role
+people are trusted to respect. Local `revoke` must still win over a team fact (last-write-wins by
+namespace precedence, stated explicitly). Needs a decision first: is the population one team, or can
+unrelated projects share a TreeDX instance? The second turns this from a feature into governance.
+
+**2. Per-request rule injection — rejected on measurement, not taste.** Invariant 3 keeps the global
+system prompt out, and E3/r23-r28 show a head-position replacement reuses nothing on llama.cpp
+(`cacheReuse 0`) — a ruleset that churns mid-session would be a cache-wipe machine on the target
+hardware. Carriage happens at the two moments a head is actually rebuilt, plus `chapters_rules` on
+demand. If someone revisits this, the honest argument is "small models drift mid-window", and the
+answer is the pinned class + the withheld-count line, not more injection.

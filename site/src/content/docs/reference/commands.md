@@ -38,6 +38,21 @@ Per linked project: `Project` / `Remote` / `Provider` lines, then `Sync: a push 
 /chapters-rule approve <id> | revoke <id>                  # YOUR machine's curation fact — never a shared rewrite
 ```
 
+Specified in [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50) (two-tier rules; **not yet
+shipped**) — the session tier and the audit surface that makes the shared tier's caps checkable:
+
+```
+/chapters-rule list --scope project|session               # which tier a rule belongs to
+/chapters-rule active                                     # exactly what is / will be rendered, + withheld count and why
+/chapters-rule pin <id> | unpin <id>                       # the always-rendered class (human-set only)
+/chapters-rule conflicts [--model <pin>]                  # report contradictory pairs — never edits a rule
+```
+
+`ADD RULE: <text>` at the start of a line in your own message is the capture path — deterministic,
+zero model tokens, active for your session tree. It is deliberately **not** a command: nothing to
+remember, no review step that must happen before it takes effect. See
+[Rules & governance](/knowledge/rules/).
+
 ## The deterministic door: `/chapters-fork [title]` and `/chapters-continue [title]`
 
 **One door, two intents — not two mechanisms.** Both commands come from the same builder

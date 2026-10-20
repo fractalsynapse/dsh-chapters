@@ -415,7 +415,33 @@ search, and sync. Frontmatter: `kind: rule`, plus `category`, `status`, and prov
 plugin's modularity is what makes this nearly free — the chapter code paths are parameterized
 by `kind`, not duplicated.
 
-### 7.2 Lifecycle: proposed → core, approved in-session
+**Two scopes, one store, one format** (Amendment 2026-10-20, §15). Session rules are *not* a
+second subsystem: they are `kind: rule` files in the same `rules/<harness>/` tree, with the same
+write-once immutability, the same `list` surface, the same search index. What differs is **how
+they get authored and how they become active**:
+
+| Tier | Authored by | Activation | Transport | Carried by |
+|---|---|---|---|---|
+| **project** | `/chapters-rule add`, `chapters_rule_propose` (agent) | human `approve` → per-machine curation fact (§7.2) | synced to the pool | continue **and** fork |
+| **session** | `ADD RULE:` marker (deterministic), enrichment (optional) | **derived** (§7.5) — no fact, no approval | local only; never staged (§7.5) | continue only — dropped by fork (§7.6) |
+
+Extra frontmatter on every rule file: `scope: project | session` (absent ⇒ `project`, so every
+pre-existing record keeps working byte-identically), `session: <sessionId>` (session tier only),
+`derivedFrom: human | marker | model`, `pinned: true` (§7.4). Same `category`, `status`,
+`sha256`, provenance chain as before.
+
+**Why the split is safe.** A rule that only ever governs one machine's session tree is not shared
+state, so §11.3's blast-radius argument does not apply to it — and the per-machine approval
+boundary of §7.2 is left exactly as the 2026-09-20 amendment set it. Cross-checkout carry of
+*project* rules needed no new mechanism: `projectKey` is UUIDv5 over the canonicalized remote
+(§2.3) and `harnessId` defaults to the hostname, so several checkouts of one repository already
+resolve to one rule namespace on one machine. §7.8 is about making the cases where that identity
+*diverges* loud, not about building propagation.
+
+### 7.2 Lifecycle: proposed → core, approved in-session *(the project tier)*
+
+This section governs `scope: project` — the shared, team-visible tier. The session tier's
+activation is derived and needs no approval (§7.5).
 
 - **Proposal:** a user command (`/chapters-rule add <category> <text>`) or an agent's async
   derivation from a completed session (P3, always `status: proposed`, provenance-tagged with
@@ -439,14 +465,29 @@ by `kind`, not duplicated.
   in the loop is the one who types `approve`; the git diff of the rule file is the audit
   trail. This is the trust boundary for shared state (§11.3).
 
-### 7.3 The rules section of the continuation notice
+### 7.3 The rules block: what a rebuilt head shows
 
-The notice carries (all O(1), §1 invariant 6):
+One builder renders the rules block (`buildRulesSection`), and **both** places a head is rebuilt
+use it — the continuation notice and the in-place compaction checkpoint (§7.6). The block is O(1)
+in corpus size (§1 invariant 6) and, on an empty or unlinked corpus, renders **zero bytes**
+(`kind: 'none'` → nothing at the call site): load-bearing for the tape corpus, which contains no
+rules block anywhere (§13 P3).
 
-- **Core rules:** the `status: core` set, rendered verbatim, **size-capped** by the same
-  refuse-don't-truncate rule — if core rules exceed their budget, the notice names the
-  overflow with numbers and the user curates (`revoke`, or split a category). Never silent
-  clipping.
+Contents (all O(1), §1 invariant 6):
+
+- **Active rules, verbatim,** selected by the three classes of §7.4 — pinned, then
+  relevance-selected, then index-only. Project tier and session tier render under their own
+  headers so the model can tell whose order it is reading.
+- **A withheld line — mandatory.** When the caps drop anything, the block says so with numbers:
+  `9 project rules active, 4 shown — /chapters-rule list`. Selection by relevance is legitimate
+  (§7.4); *silent* selection is the exact failure this feature exists to remove, because a rule
+  the human believes is active and is not, is worse than a rule that was never captured.
+- **The token ceiling stays refuse-don't-truncate:** if the selected set exceeds
+  `coreRulesBudgetTokens`, the builder returns `refusal` with per-rule token numbers, the caller
+  omits the block rather than clipping (§1.2), and the refusal is reported — never swallowed.
+  Omission stays non-blocking: rules are additive, and a broken mirror or an overflowing ruleset
+  must not stop a continuation or a compaction.
+- **Precedence line** (§7.7): session rules refine and add; they never override a project rule.
 - **Rules category index:** category names + one-line essence + paths, with the instruction
   *load a rule category when this session's topics overlap a category* — i.e., the agent
   reads the full category from the repo when (and only when) relevant.
@@ -458,11 +499,160 @@ The notice carries (all O(1), §1 invariant 6):
   **message count** — not token count, since tokenization is not comparable across models —
   and parent/fork links) unchanged.
 
-### 7.4 Later: topic-matched auto-inclusion
+### 7.4 Topic-matched selection (raised from the old P3b sketch)
 
-When a continuation is created, the plugin can compute topic overlap between the archived
-span's topics and rule categories and inline matching *category-level* rules within the same
-budget. P3b; gated by the same cap-and-refuse rule.
+The record deferred "topic-matched auto-inclusion" because always-render-everything does not scale
+against an O(1) head. With automatic capture the corpus of *active* rules now grows on its own, so
+selection moves from garnish to requirement, and it is built here on machinery that already existed
+purely for pull-based search.
+
+Three render classes, in this order, under `projectRulesDisplayCap` / `sessionRulesDisplayCap`
+(count) and `coreRulesBudgetTokens` (tokens):
+
+1. **Pinned** (`pinned: true`, human-set via `/chapters-rule pin`) — always rendered, first.
+   Ground rules are *old* by definition, so any scheme that ranks by recency or topicality evicts
+   them first; the pinned class is the floor that keeps that from being a surprise.
+2. **Relevance-selected** — the existing scorer (`search.rankEntries` over `kind: rule` entries,
+   `rulesCoreBonus` for this machine's core set) applied to the archived span's stored topic
+   signatures and, for the on-demand path, to the caller's query. Same scorer as §8, never a
+   second ranking implementation.
+3. **Index-only** — everything else: category + one-line essence + path, loadable. The corpus
+   grows without bound; the head does not.
+
+`rulesRelevance: false` falls back to the pre-existing deterministic order (category, then id),
+which is what the tapes were distilled against.
+
+**Determinism is a requirement, not a preference.** Selection must be a pure function of (rule
+files, stored topic signatures, caps, query) — no wall-clock timestamps, no map-iteration or
+filesystem-readdir order — or two machines disagree about what the agent was told *and* every
+replay prefix becomes unstable. Ranked-by-recency was rejected partly for this reason: recency
+reads the clock.
+
+### 7.5 Session rules: capture and derived activation
+
+Two capture paths, deliberately different speeds (this is §6.2's single-slot constraint applied to
+rules, not a new policy):
+
+- **Marker — deterministic, instant, zero model tokens (§1 invariant 1).** A line in a
+  *human-authored* message beginning `ADD RULE:` (§12 `rulesMarkerPrefix`) becomes an active
+  session rule at the existing `turn/end` listener — the same one the topic signatures collect on
+  (r35j). It is not a new archive door (§12 of `docs/architecture.md`: five moments, extended in
+  place, never copied). The rule body is the human's own words, verbatim.
+- **Enrichment — optional, idle-batched, `rulesEnrichment` default off.** The §6.1 pass gains a
+  `rules: [{ text, category, quote }]` output field, riding that pass's existing ladder:
+  validation-before-commit, one retry, deterministic fallback, provenance chain, and the
+  body-hash guard (it writes frontmatter-adjacent records, never chapter prose). **Only a rule
+  whose `quote` matches verbatim human bytes in the archived span may auto-activate**; anything
+  the model inferred without a quote lands `derivedFrom: model`, `status: proposed`, and waits in
+  `list`. That is the §1.4 division — model proposes, plugin commits — with the activation gate
+  moved to machine-local, where a wrong guess costs one session and not a team's corpus.
+
+**Activation is derived, never a curation fact.** A session rule is active iff `scope: session` ∧
+its `session` is on the current session's ancestor path ∧ it is not revoked. No
+`rule-status` entry is written for it: `edits/<harness>/curation.jsonl` travels in the pool, and
+machine-local activation volume does not belong in a file reserved for human status decisions —
+nor should it, since another machine reads only its own harness directory and would see nothing.
+`revoke` on a session rule writes the one exception: a local fact, because the store is write-once
+(§1.3) and a delete would be a rewrite.
+
+**Transport exclusion happens at one point.** `planStoreToRepo` is the single store→repo path
+mapper (`rules/<harness>/*.md → rules/<projectKey>/<harness>/*.md`), so it is the single place that
+skips `scope: session`. No provider verb, no sync-loop edit, no second filter — proven over the
+git integration *and* the TreeDX stub, because §5's exit criterion is transport-grade or it is
+nothing. Session bytes therefore never become another machine's `proposed` noise, which is what
+keeps §7.2's "stop re-reviewing a growing list" goal intact for teammates.
+
+**Loss is expected and re-derivable.** The store root is gitignored inside a re-clonable directory
+(`docs/architecture.md § Storage`), so deleting a checkout destroys its session rules with
+everything else in it. The marker half re-derives deterministically by replaying the parser over
+the durable log (invariant 1 is what makes that possible); the enrichment half re-derives by
+re-running the pass. The correct description of that event is "the ruleset was rebuilt", never
+"sessions were corrupted".
+
+### 7.6 Carriage: where rules reach the model
+
+Rules are delivered at the moments the head is rebuilt, plus on demand — **not** per request:
+
+| Door | What renders | Mechanism |
+|---|---|---|
+| Continuation notice | project + session | `rulesSection` at the four door call sites (tools) — already shipped for project |
+| Fork / branch notice | project only | the same `intent` axis that already decides plan bytes (§9–13 of `docs/plans-carriage.md`): `branch` ⇒ zero session bytes |
+| In-place checkpoint | project + session | `rulesCarry`, the third lead section in `planSummarize`, beside `planCarry` and `plot` — both the composed and legacy paths |
+| On demand | assembled set | `chapters_rules` tool (§8): verbatim text within budget + the withheld line |
+
+**Why not "bundled with every request".** Two measured reasons, not stylistic. (a) Invariant 3:
+the system prompt is process-global and `systemPrompt` is excluded from our injection list on
+purpose — a per-session block cannot ride it, and the append-as-section precedent (`dsh-session-fork`)
+was reviewed and rejected here. (b) Cache: on llama.cpp, the target hardware, a head-position
+replacement reuses **nothing** (E3, r23/r28: `cacheReuse 0`), so a ruleset that churns mid-session
+is a cache-wipe machine. Between rebuilds the human's original bytes are still live in the surface
+anyway — they only genuinely die when the surface is replaced, and that is where they are now
+re-stated. Plans arrived at the same conclusion for the same reason.
+
+Empty set ⇒ the checkpoint carries zero rule bytes, which is what protects every already-committed
+plot-carrying checkpoint (`src/engine-core.ts` records exactly that hazard).
+
+### 7.7 Precedence and conflicts
+
+Two live tiers means two sources of "must", and a small model degrades badly on a contradiction,
+so precedence is stated in the block rather than left to the reader:
+
+- **Project rules are the team's order. Session rules refine and add; they never override.**
+- A session rule that conflicts with an active project rule is *rendered and flagged*, not
+  resolved silently — the human's options are to promote a fix to the project rule or revoke the
+  session rule.
+- **`/chapters-rule conflicts`** spends one bounded `ctx.llm` stream call over the assembled set,
+  reusing the conversation's own system prompt as the cache-friendly prefix (`docs/contract.md`),
+  and returns a **report** of contradictory pairs with rule ids. Like `elicitedPlot`, this is an
+  explicit, config-gated exception to zero-inference. It is never a mutation: rules are write-once
+  (§1.3) and the only sanctioned change is a curation fact. Enrichment may flag the same pairs in
+  its own pass; neither path edits a rule.
+- Command output never enters the context window (§7.2 verified), so reviewing conflicts costs a
+  human no session tokens.
+
+### 7.8 Identity must fail loudly
+
+The design goal "project rules carry across my checkouts of this repo" holds because identity is
+remote-derived (§2.3). Where it does *not* hold, silence is the bug — ungoverned must never look
+like governed:
+
+| Divergence | Consequence | What the plugin must say |
+|---|---|---|
+| No readable remote ⇒ `path-derived` key | that checkout has a **private** rule namespace | `0 project rules — this checkout resolves project <key> from path <cwd>; link it with /chapters-link` |
+| No `origin`, another remote listed first | key derives from the fork ⇒ a forked pool | report the remote string actually used |
+| Linked via TreeDX rather than git | key is the **pool location** (`treedx/<host>/<repo>`), not the workspace remote | report `projectKeySource` so git/treedx keyed checkouts are visibly different projects |
+| Fresh checkout, unlinked or not yet synced | no project ⇒ no rules at all | same explicit zero line, plus `/chapters-status` sync state |
+
+`projectKeySource` (`override | remote | path-derived`) rides `/chapters-status`, `/chapters-rule
+active`, and the zero-rules line. A session-scoped archive is unaffected by all of this — session
+rules never depend on remote identity.
+
+### 7.9 Command surface, and what the agent is told
+
+**Principle: the machinery is invisible; the query is encouraged.** Capture, activation, budgeting
+and carriage happen without the agent doing anything — no tool it must remember to call, no
+command it must issue, no bookkeeping it can get wrong. What it *is* told, in every rebuilt head,
+is to **look the rules up before starting a task**: `chapters_rules` with the task description,
+named in the notice's `## Finding things` block (§8). Everything else about rules reaches it as
+prose it simply reads.
+
+| Surface | Tier | Notes |
+|---|---|---|
+| `/chapters-rule add <category> <text>` | project | unchanged — the only human door that writes shared rule bytes |
+| `/chapters-rule list [--scope project\|session] [--proposed] [--category <c>]` | both | table: id, scope, status, category, one-line text, provenance, source seq |
+| `/chapters-rule active` | both | **exactly what is or will be rendered**, with the withheld count and why — the command that makes §7.3's honesty checkable |
+| `/chapters-rule approve / revoke <id>` | project (approve) · both (revoke) | per-machine curation facts (§7.2, §15 2026-09-20) |
+| `/chapters-rule pin / unpin <id>` | both | the §7.4 always-shown class; **human-set only** — an auto-pinned rule is an ungoverned always-shown rule |
+| `/chapters-rule conflicts [--model <pin>]` | both | report-only (§7.7) |
+| `chapters_rule_propose` (tool) | project | agent-facing, stays `proposed` and machine-inert until a human approves — unchanged contract, do not widen |
+| `chapters_rules` (tool) | both | the assembly door: verbatim selected set within budget + the withheld line |
+
+Encouragement lives in the **notice**, deliberately: notice prose costs nothing against the tape
+corpus (measured 2026-10-11 — no committed tape prefix contains a seeded notice), while a persona
+or tool-description edit forces a re-record of every affected project (§13). A new tool or tool
+parameter does change the header, so this feature's schema edits are sequenced into **one**
+re-record rather than scattered across several.
+
 
 ## 8. Search: `chapters_search`
 
@@ -490,6 +680,21 @@ chapters_search { query: string, maxTokens?: number, topic?: string, crossProjec
 - **Zero new trust surface:** every `path` returned is a plain file the existing `read` tool
   opens (chapters in `.dsh-chapters/`, shards in `.dsh-knowledge/index/`). The search tool
   adds a scorer and a formatter; it adds no new way to read.
+
+**`chapters_rules` — the same scorer, assembled (§7.4, §7.9).** One door whose output is *the text
+of the rules that apply to this task*, verbatim, within budget, plus the withheld count. It reuses
+`search.rankEntries` and nothing else; a second rule-ranking implementation is forbidden by the
+same argument that made `exit_plan_mode` and `chapters_continue` share one builder.
+
+- **It reads both corpora, which is where the trap is.** Project rules come from the pool mirror
+  under `rules/<projectKey>/<harness>/`; session rules live in the **workspace store** under
+  `rules/<harness>/` and are never staged (§7.5), so they carry no `projectKey` path prefix. The
+  `projectKey` prefix filter above must therefore not be the only scope for the session tier, or
+  session rules become invisible to the very door whose job is to find them — a silent zero, the
+  failure class §7.8 exists to eliminate. Scoping for session rules is by the ancestor-path
+  activation predicate instead, never by path prefix.
+- **It is the encouraged step, not a required one.** Capture and carriage never depend on it
+  (§7.9); the notice names it in `## Finding things` as the thing to run before starting a task.
 
 ## 9. Redaction: minimal, deterministic, marked
 
@@ -572,6 +777,13 @@ needs a human gate:
   git-visible curation entries (§6.3).
 - **Rules:** high — they are prompts by another name, shared across machines. **Human
   `approve` is mandatory** (§7.2). A proposed rule that is never approved affects nothing.
+- **Session rules** (§15 amendment 2026-10-20) are the deliberate exception, and the exception is
+  *narrowed by scope, not by gate*: machine-local, never staged to the pool (§7.5), permanently
+  active for one session tree, and visible/reversible with one command (`active`, `revoke`).
+  Blast radius is that tree. Two properties keep it honest: model-derived rules auto-activate
+  **only** when they quote human bytes verbatim, and a session rule never overrides a project rule
+  (§7.7). What is *not* permitted is a session rule migrating into the shared tier on its own —
+  promotion is a human act, exactly as approval is.
 
 Git history + provenance makes every tier auditable and every mistake revertible.
 
@@ -594,6 +806,12 @@ No hardcoded tunables (existing hard rule). New config, all with defaults docume
 | `enrichment.trigger` / `.idleMs` / `.batchCap` | P2 queue policy seam (built: `enrichmentTrigger/enrichmentIdleMs/enrichmentBatchCap`); realm owns auto, host plane is manual-only; `/chapters-enrich model` overrides durably | both / 60000 / 5 |
 | `vocabulary.*` | built flat: `vocabApply` (false = **shadow**: candidates reported in the sync status line, nothing written), `vocabCoMin` (3), `vocabOverlapMin` (0.5); applied merges land as §10.1 `topic-alias` facts under `edits/<harness>/`; `topics/vocabulary.json` derived | shadow / 3 / 0.5 |
 | `coreRulesBudgetTokens` | P3 §7.3 cap on the notice's core-rules block; overflow refuses with per-rule numbers | 1200 |
+| `sessionRulesEnabled` | §7.5: the deterministic `ADD RULE:` capture path (zero model tokens) | true |
+| `rulesMarkerPrefix` | §7.5 capture marker; matched at line start of **human-authored** messages only | `ADD RULE:` |
+| `rulesEnrichment` | §7.5 model-derived capture; rides the §6.2 idle batch, never per-turn; activation still requires a verbatim human quote | false |
+| `projectRulesDisplayCap` / `sessionRulesDisplayCap` | §7.4 per-tier count caps on rules **rendered** into a rebuilt head; anything dropped is announced by count, never silently | 12 / 12 |
+| `rulesRelevance` | §7.4 relevance selection on; off ⇒ deterministic category→id order (the order tapes were distilled against) | true |
+| `rulesConflictsModel` / `rulesConflictsEnabled` | §7.7 one bounded stream call, report-only; the `elicitedPlot` family — an explicit exception to zero-inference | conversation model / true |
 | `rulesCoreBonus` | P3 §8 query-time rank bonus for rules effective-core on this machine (never baked into shared shards) | 0.15 |
 | `redaction.patterns` | additive to the built-in list (§9) | built-ins |
 | `search.defaultMaxTokens` | default pack size for `chapters_search` | small, config |
@@ -632,7 +850,8 @@ e2e project replays the whole ladder through the model tape. CLOSED 2026-09-20: 
 Rules-as-chapters (`kind: rule`); the in-session command family `/chapters-rule
 list|add|approve|revoke` (§7.2 — command output verified context-free); core-rules section +
 category index in the notice (§7.3); agent-side rule proposals (async, always `proposed`);
-`/chapters-topic` escape hatch; P3b topic-matched auto-inclusion (§7.4).
+`/chapters-topic` escape hatch; topic-matched selection (§7.4 — deferred as P3b in this draft,
+built later under P3c, not by design but by sequencing).
 *Exit criterion: a rule proposed by a machine affects no other machine until a human types
 `approve`; the core set overflows by refusing with numbers, never clipping.*
 
@@ -645,7 +864,25 @@ attempted even at copied===0 so fact-only passes travel — the change that made
 shareable) + scorer (category 1.5, rule bodies, per-machine core bonus at query time).
 Exit-criterion tests: unit ('machine B sees nothing core'), transport-grade (three machines
 over a real pool), e2e (`rules` project: UI add → approve → fork → the child's own log
-carries the rule verbatim). §7.4 auto-inclusion remains P3b, unbuilt by design.
+carries the rule verbatim). §7.4 selection was left unbuilt in that round by design — the corpus
+of active rules did not yet grow on its own.
+
+**P3c — Two-tier rules (issue #50): SPECIFIED, NOT YET BUILT.** §7.1's `scope`/`session`/
+`derivedFrom`/`pinned` frontmatter (absent `scope` ⇒ `project`, so every pre-existing rule record
+keeps working byte-identically); `ADD RULE:` capture at the existing `turn/end` listener;
+optional `rulesEnrichment` capture behind the verbatim-quote gate; session-scope exclusion in
+`planStoreToRepo`; the three render classes and per-tier caps in `buildRulesSection`; the third
+checkpoint lead section; `intent` filtering at the four door sites; `chapters_rules`; the
+`active`/`pin`/`conflicts` verbs; and §7.8's loud-identity lines.
+*Exit criteria (each must be a red row before it is a fact):* an in-place compaction renders active
+rules verbatim into the checkpoint; `chapters_continue` carries project **+ session** while
+`chapters_fork` carries project only; `ADD RULE:` yields an active rule at **zero** model tokens;
+no session rule file appears in the pool over **either** provider; an unlinked or `path-derived`
+checkout says it rendered zero rules; the empty set still renders byte-identical ABSENT; selection
+is byte-stable across two machines with the same inputs.
+Sequencing note: the tool-schema edits here change every replay prefix, so the e2e work is **one**
+whole-project re-record, not a series of per-spec ones (the 2026-09-23 lesson: a tape records the
+context it was distilled in).
 
 ## 14. Open risks (honest register)
 
@@ -659,6 +896,10 @@ carries the rule verbatim). §7.4 auto-inclusion remains P3b, unbuilt by design.
 | `mergeThreshold` mis-tune at archive time (composition is archive-time-only, §4.4) | signatures are stored with provenance; tune for future archives, inspect past ones |
 | TreeDX service down or token expired (Amendment 2026-09-21, transport) | same §5.3 degradation (offline mirror, deferred push, auth re-link surfaced with numbers); no corpus loss |
 | TreeDX corpus pull is per-file (`paths/list` + `files/read`): N+1 requests at large pools | acceptable at per-project corpus sizes (the record's own scaling premise); snapshot/`context` APIs are the Phase-F optimization |
+| P3c: a model-captured rule encodes a **mis-generalization** permanently for the session tree ("never run two GPU suites at once" → "never run tests concurrently") | narrowed by the verbatim-quote activation gate (§7.5), by scope (local, never the shared tier), and by one-command visibility (`active`, `revoke`); the residual risk is a wrong rule you did not look at — which is why the count is capped and the withheld line is mandatory |
+| P3c: relevance selection **ranks out the load-bearing rule**, reintroducing "lost in the noise" inside the fix for it | the pinned class is never subject to selection (§7.4); the withheld count renders even when nothing is selected |
+| P3c: a new tool/param changes every replay prefix | one whole-project re-record, sequenced deliberately; notice prose stays free (measured 2026-10-11) |
+| P3c: per-checkout identity divergence silently forks a project's rule namespace (§7.8) | stated, not assumed: `projectKeySource` reported in the zero-rules line, `active`, and `/chapters-status` |
 
 ## 15. Amendments
 
@@ -791,6 +1032,71 @@ Also landed: **the kernel-drift gate** (`tests/unit/host-seed-contract.test.ts`)
 kernel's own exported predicates (`KNOWN_SESSION_EVENT_TYPES`, `isSurfaceEligibleType`,
 `isAppendSurfaceEvent`) rather than reimplemented, so a kernel change surfaces as a red row instead of a
 child that silently stops being gated.
+
+### Amendment 2026-10-20 — rules become two tiers: project (shared, approved) and session (local, derived)
+
+Human directive, in the round that planned it: *"I end up giving the AI agent a bunch of rules
+embedded in my requests… these rules just get lost in the noise."* Auditing where they actually get
+lost found one concrete hole, not a vague one: the in-place checkpoint composes
+`leadSections = [planSection, plotSection]` (`src/engine-core.ts`). **A plan survives a compaction
+and a plot survives a compaction; a rule does not.** That, plus a rule set that only ever reaches a
+child through the continuation notice with no relevance selection, is the whole motivation.
+
+Six decisions, each narrowing a temptation the discussion produced:
+
+1. **Two tiers, one store** (§7.1). Session rules are `kind: rule` files in the same tree with
+   `scope: session` — same numbering, same write-once immutability, same `list`, same index. Absent
+   `scope` means `project`, so every rule record on disk before this amendment keeps working with
+   unchanged bytes. There is no second rules subsystem to drift.
+2. **The global tier was not built, because it already existed.** The request was "carry across my
+   checkouts of this repository", and `projectKey` is UUIDv5 over the *canonicalized remote* (§2.3)
+   with `harnessId` defaulting to the hostname — so several checkouts of one repo already resolve to
+   one rule namespace on one machine. The work became making the four ways that identity silently
+   diverges say so (§7.8) instead of inventing a third namespace with a much larger blast radius.
+3. **Session activation is derived, never a curation fact** (§7.5). Active iff `scope: session` ∧
+   its session is on the current ancestor path ∧ not revoked. `edits/<harness>/curation.jsonl` is
+   reserved for human status decisions *and it travels in the pool* — machine-local activation volume
+   does not belong there. The 2026-09-20 amendment (approval is a per-machine fact, never a file
+   rewrite) is **not** relaxed: it still governs every byte of the shared tier.
+4. **Model-captured rules may auto-activate, and only on a verbatim quote** (§7.5, behind
+   `rulesEnrichment`, default off). The rejected framing was "the model writes its own governing
+   rules with no human gate"; the accepted one is that the machine-local, one-command-reversible,
+   never-staged scope makes the blast radius one session tree — so the gate moves from *who clicks*
+   to *what the rule is derived from*. An inferred rule with no human sentence behind it waits in
+   `list --proposed`. And capture stays off the critical path entirely: the `ADD RULE:` marker is
+   deterministic and costs zero model tokens (invariant 1), while the model pass rides §6.2's idle
+   batch, because the local server is single-slot and per-turn work queues against the user's own
+   turns.
+5. **Rules are carried at the moments the head is rebuilt, never injected per request** (§7.6).
+   Two measured reasons, not taste: invariant 3 (the system prompt is process-global and
+   `systemPrompt` is excluded from our injections on purpose), and the llama.cpp number from
+   E3/r23-r28 — a head-position replacement reuses **nothing** (`cacheReuse 0`), so a ruleset that
+   churns mid-session is a cache-wipe machine on exactly the target hardware. Between rebuilds the
+   human's own bytes are still in the surface; they die only when the surface is replaced, which is
+   where they are now re-stated. `chapters_continue` carries both tiers, `chapters_fork` carries
+   project only — the *same* `intent` axis that already decides plan bytes (`docs/plans-carriage.md`
+   §§ 9–13), not a new distinction.
+6. **§7.4 selection is raised from "P3b later" to required, with a floor.** Automatic capture means
+   the active set now grows without a human noticing, so always-render-everything stops being
+   affordable: pinned (human-set, always) → relevance-selected (the existing `search.rankEntries`,
+   never a second ranker) → index-only. Per-tier count caps are **announced**, because selection
+   that can silently drop the load-bearing rule would rebuild the original bug inside the fix —
+   and a cap that *truncates* would violate §1.2, so the token ceiling still refuses with numbers
+   and the count ceiling selects with a visible count. Selection must be a pure function of stored
+   inputs (no clock, no readdir order) or two machines disagree about what the agent was told and
+   the tape corpus cannot be stable.
+
+Also recorded as accepted consequences: session-scope exclusion happens at the one store→repo mapper
+(`planStoreToRepo`) and is proven over **both** providers; a session rule never overrides a project
+rule, and conflicts are reported (`/chapters-rule conflicts`, one bounded stream call in the
+`elicitedPlot` family) rather than resolved (§7.7); losing a checkout loses its session rules, which
+is *re-derivation*, not corruption (§7.5, and the storage warning in `AGENTS.md`); and the agent-
+facing surface stays minimal by decision — capture and carriage are invisible to the model, and the
+one thing it is told to do is **look the rules up before starting a task** (§7.9), because a tool an
+instruction never names does not exist to a small model.
+
+Specification: §7.1 and §7.3–§7.9. Build status and exit criteria: §13 P3c (specified, not yet
+built at the time of this amendment — this entry is the decision record, not a claim of behavior).
 
 ---
 

@@ -165,6 +165,25 @@ renderer, the segmentation tool, and the child's notice.
 | P15 | Plan mode survives a continuation only when it should | seeded `plan/mode` ONLY for `intent: 'continue'` while the fold says active (measured: kernel accepts the two-event seed, host projection folds it to `active:true`, one-event control does not); never for a branch, never after an approval — because approving a plan EXITS plan mode | unit `continue-plans.test.ts` (four rows: seed shape, approved-no-seed, branch-no-seed, `planSeedMode:false`) against the installed-kernel probe recorded in docs/plans-carriage.md § 10 |
 | P16 | The notice reads the intent, not just the log | continuation → `## Active plan` + `## Previous plans on this path` (marked history); branch → zero bytes, plans live in the cited chapters and as documents; the mode statement is either "the directive above is live" or "this child starts OUTSIDE plan mode", never both | unit `plans.test.ts` (seeded/unseeded/branch rows) |
 | P17 | The one injection-screen exception is named, not open-ended | `kind:'plugin' + plugin:'plan-mode' + form:'notice'` archives verbatim; any other plugin notice, snapshot or instruction shape still screens; `isHumanAuthored` (which drives topic signatures and `(N msgs)`) is unchanged | unit `injections.test.ts` (two rows, incl. wrong-form and wrong-plugin negatives) |
+## Two-Tier Rules — SPEC (record §7.1, §7.3–§7.9; issue #50)
+
+**Nothing below is verified yet.** This is the checklist written ahead of the code, docs-first, so
+that each row can be proven to fail on the mutation it guards before anyone calls it a fact. The
+P3 rows above stay the shipped-behavior record; these extend it with the session tier.
+
+| # | Claim to be proven | What makes it true | How it is witnessed |
+|---|---|---|---|
+| R1 | A rule survives an in-place compaction | `rulesCarry` is the third lead section in `planSummarize`, on BOTH the composed and legacy paths, beside `planCarry`/`plot` | unit over a real `summarize()` input; assertion on the checkpoint text itself, not on a mock — this row is the reason the round exists |
+| R2 | Continue carries both tiers; fork carries project only | `intent` filtering at the four door sites, one helper | the existing "both doors archive identically" row must still pass (same ranges, titles, plan facts) while the rules bytes DIFFER — that asymmetry is the guard |
+| R3 | `ADD RULE:` is deterministic and free | parse at the existing `turn/end` listener; no model call on the path | unit + a row that fails if any model token is spent (the meter is never exempted — same doctrine as plans carriage) |
+| R4 | Session rules never reach the pool | one filter in `planStoreToRepo` | integration over a real git remote **and** the TreeDX stub, two machines: machine B sees the file list without session paths |
+| R5 | A model-derived rule activates only on a verbatim quote | `derivedFrom: model` + quote match against human bytes in the archived span | unit rows in both directions: quoted ⇒ active, inferred ⇒ `proposed` and renders nothing |
+| R6 | Selection is deterministic and announced | pure function of (files, stored topics, caps) — no clock, no readdir order | two runs with shuffled input order byte-identical; withheld line present whenever `shown < active`, including `withheld: 0` |
+| R7 | Empty ruleset ⇒ zero bytes | `kind:'none'` short-circuit retained on the checkpoint path too | golden row; and the tape chain replays without re-recording for the notice-side change (measured license) with **one** re-record paid for the new tool schema |
+| R8 | Ungoverned never looks like governed | the zero-rules line names `projectKeySource` + the remote/path used | unit rows for all four divergences of record §7.8 (path-derived, fork-listed-first, TreeDX-keyed, unlinked) |
+| R9 | A conflict is reported, never resolved | `/chapters-rule conflicts` writes nothing | unit: rule file bytes + `sha256` unchanged after the call; refusal path covered |
+| R10 | Session loss is re-derivation, not corruption | marker rules replay off the durable log | integration: wipe the store, replay the parser over the log, same rule set (the enrichment half re-runs through the existing ladder) |
+
 ## The Cache Metric, Before You Trust a Number
 
 `usage.inputTokens` is the **uncached delta** and `usage.cacheReadTokens` is the cached prefix, so:

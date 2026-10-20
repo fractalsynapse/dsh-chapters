@@ -8,6 +8,11 @@ No hardcoded tunables anywhere the harness can configure them. The table below i
 
 **Two planes.** `config` (below) is the *host plane* — your profile's plugin entry. The compaction *engine* lives on the *realm plane*: the `chapters` agent-preset row (the `preset-chapters` declaration row at the foot of the bundle's `cordis.patch.yml`, mounted by `src/preset.ts`), which owns `thresholdRatio`, `retainRatio/retainTokens`, `maxTokens`, `compactionRetries/maxOverflowRetries`, `summarizationProvider/summarizationModel` (legacy override), `enrichmentTrigger` (`afterPush|idle|both|manual`), `elicitedPlot`, and `toolResultArtifactTokens`. Shared names behave per plane — design record §12.
 
+The `#50` rule keys below are declared on the **host plane** only; the three the compaction checkpoint
+also needs (`projectRulesDisplayCap`, `sessionRulesDisplayCap`, `rulesRelevance`) are *mirrored* into
+the engine's `chaptersConfig` the way `elicitedPlot` and `enrichmentEnabled` already are — one
+declaration read by both planes, so a head rebuilt by either path selects the same rules.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `harnessId` | hostname | this machine's identity: commit author, curation partition, rule authorship |
@@ -23,6 +28,12 @@ No hardcoded tunables anywhere the harness can configure them. The table below i
 | `vocabCoMin` / `vocabOverlapMin` | 3 / 0.5 | trust thresholds for emergent vocabulary |
 | `coreRulesBudgetTokens` | 1200 | the CORE RULES block in notices — **refuses with numbers, never clips** |
 | `rulesCoreBonus` | 0.15 | per-machine rank bonus for core-approved rules |
+| `sessionRulesEnabled` *(#50)* | true | deterministic `ADD RULE:` capture into the local session tier — zero model tokens, never staged to the pool |
+| `rulesMarkerPrefix` *(#50)* | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
+| `rulesEnrichment` *(#50)* | false | model-derived capture, riding the idle-batched enrichment pass; auto-activates **only** on a verbatim quote of your own bytes |
+| `projectRulesDisplayCap` / `sessionRulesDisplayCap` *(#50)* | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
+| `rulesRelevance` *(#50)* | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
+| `rulesConflictsEnabled` / `rulesConflictsModel` *(#50)* | true / `''` (conversation route) | `/chapters-rule conflicts` — one bounded stream call, **report-only**, never edits a rule |
 | `continuationBudgetRatio` | 0.25 | TOC + note share of the window *remaining after the header* |
 | `chapterTokenTarget` / `chapterLimit` | 8000 / 8000 | soft per-chapter size / hard split |
 | `mergeThreshold` | 0.3 | turn→chapter topic-merge τ (archive-time only) |
