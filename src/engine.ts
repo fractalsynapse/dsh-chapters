@@ -42,6 +42,8 @@ import { registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
 import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
+import { hostname } from 'node:os'
+import { makeRuleCaptureListener } from './session-rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
@@ -61,6 +63,17 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   plansInCheckpoint?: boolean
   planCheckpointChars?: number
   elicitedPlot?: boolean
+  // #50 §7/§7.5 rules. Declared on the HOST plane (src/index.ts) and mirrored
+  // into this row exactly the way `elicitedPlot`/`enrichmentEnabled` already
+  // are, so a head rebuilt by the notice path and one rebuilt by the compaction
+  // path select the same rules from the same numbers.
+  harnessId?: string
+  sessionRulesEnabled?: boolean
+  rulesMarkerPrefix?: string
+  coreRulesBudgetTokens?: number
+  projectRulesDisplayCap?: number
+  sessionRulesDisplayCap?: number
+  rulesRelevance?: boolean
   // P2 enrichment (record §6): the realm plane owns the AUTO triggers.
   enrichmentEnabled?: boolean
   enrichmentModel?: string
@@ -195,6 +208,13 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     syncDebounceMs: z.number().step(1).min(0).default(30000),
     toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
     elicitedPlot: z.boolean().default(true),
+    harnessId: z.string().default(''),
+    sessionRulesEnabled: z.boolean().default(true),
+    rulesMarkerPrefix: z.string().default('ADD RULE:'),
+    coreRulesBudgetTokens: z.number().step(1).min(1).default(1200),
+    projectRulesDisplayCap: z.number().step(1).min(0).default(12),
+    sessionRulesDisplayCap: z.number().step(1).min(0).default(12),
+    rulesRelevance: z.boolean().default(true),
     enrichmentEnabled: z.boolean().default(true),
     enrichmentModel: z.string().default(''),
     enrichmentTrigger: z.string().default('both'),
@@ -212,6 +232,16 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   })
 
   private readonly chaptersConfig: EngineConfig
+  /** #50 §7.5/§7.3: capture + rendering numbers, host plane mirrored in. */
+  private ruleCfg: {
+    harnessId: string
+    captureEnabled: boolean
+    markerPrefix: string
+    budgetTokens: number
+    projectCap: number
+    sessionCap: number
+    relevance: boolean
+  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true }
   private storePromise: Promise<ChapterStoreHandle> | null = null
 
   constructor(ctx: Context, config: ChaptersRowConfig = {}) {
@@ -223,6 +253,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       artifactStoreRoot, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
+      harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+      projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
       enrichmentEnabled, enrichmentModel, enrichmentTrigger, enrichmentIdleMs, enrichmentBatchCap,
       vocabApply, vocabCoMin, vocabOverlapMin,
       treedxFetchTimeoutMs, treedxWorkspaceTtlSeconds, treedxLeaseRetries, treedxLeaseRetryDelayMs,
@@ -261,7 +293,17 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       idleMs: enrichmentIdleMs ?? 60000,
       batchCap: enrichmentBatchCap ?? 5,
     }
+    this.ruleCfg = {
+      harnessId: harnessId ?? '',
+      captureEnabled: sessionRulesEnabled ?? true,
+      markerPrefix: rulesMarkerPrefix ?? 'ADD RULE:',
+      budgetTokens: coreRulesBudgetTokens ?? 1200,
+      projectCap: projectRulesDisplayCap ?? 12,
+      sessionCap: sessionRulesDisplayCap ?? 12,
+      relevance: rulesRelevance ?? true,
+    }
     this.#listenForSignatures()
+    this.#listenForRuleCapture()
     this.#listenForFirstTurnPull()
     ctx.logger?.info?.('dsh-chapters: engine constructed for a mount (signature listener live)')
   }
@@ -382,6 +424,37 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     } catch {
       // A non-cordis ctx (L0 construction) has no event bus — signatures are
       // optional there by design; the compaction path is unaffected.
+    }
+  }
+
+  /**
+   * #50 §7.5: capture `ADD RULE:` markers at the SAME `turn/end` boundary the
+   * topic signatures use — this extends an existing door, it is not a sixth
+   * archive moment. Deterministic and model-free (invariant 1): no marker in the
+   * turn costs one string scan and nothing else. Gated off when `harnessId` is
+   * absent, because a rule with no author partition is a rule nothing can
+   * revoke.
+   */
+  #listenForRuleCapture(): void {
+    try {
+      this.ctx.on('session/event', makeRuleCaptureListener({
+        enabled: () => this.ruleCfg.captureEnabled,
+        prefix: () => this.ruleCfg.markerPrefix,
+        // The realm row's harnessId, or the same default the host plane's config
+        // uses (`hostname()`). A custom host-plane override does NOT strand the
+        // rule: the directory is only an author partition, and rendering walks
+        // every dir under `rules/` and activates by scope+ancestry (§7.5) — the
+        // id prefix differs, nothing else.
+        harnessId: () => (this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()),
+        storeRoot: (cwd) => resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+        store: async () => ({ store: (await this.store()).store as RegistryStore }),
+        warn: (error) => { this.ctx.logger?.warn?.(`dsh-chapters: session-rule capture failed (${String(error)})`) },
+        onCaptured: (sessionId, ids) => {
+          this.ctx.logger?.info?.(`dsh-chapters: ${ids.length} session rule(s) captured for ${sessionId} (${ids.join(', ')})`)
+        },
+      }))
+    } catch {
+      // same containment as signatures: a non-cordis ctx has no event bus
     }
   }
 

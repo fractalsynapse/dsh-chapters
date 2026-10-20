@@ -115,6 +115,16 @@ export interface Config {
   coreRulesBudgetTokens: number
   /** P3 §8: search bonus for effective-core rules (per-machine status). */
   rulesCoreBonus: number
+  /** #50 §7.5: deterministic `ADD RULE:` capture into the local session tier. */
+  sessionRulesEnabled: boolean
+  /** #50 §7.5: the capture marker, matched at line start of human messages. */
+  rulesMarkerPrefix: string
+  /** #50 §7.4: per-tier count caps on rules rendered into a rebuilt head. */
+  projectRulesDisplayCap: number
+  /** #50 §7.4: session-tier display cap. */
+  sessionRulesDisplayCap: number
+  /** #50 §7.4: topic-overlap selection on; off ⇒ deterministic category→id order. */
+  rulesRelevance: boolean
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -194,6 +204,13 @@ export const Config = Schema.object({
   vocabOverlapMin: Schema.number().default(0.5),
   coreRulesBudgetTokens: Schema.number().default(1200),
   rulesCoreBonus: Schema.number().default(0.15),
+  // #50 §7.3–§7.5: the session tier + per-tier display caps. The three the
+  // checkpoint also needs are mirrored into the engine row (docs/configuration).
+  sessionRulesEnabled: Schema.boolean().default(true),
+  rulesMarkerPrefix: Schema.string().default('ADD RULE:'),
+  projectRulesDisplayCap: Schema.number().default(12),
+  sessionRulesDisplayCap: Schema.number().default(12),
+  rulesRelevance: Schema.boolean().default(true),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
