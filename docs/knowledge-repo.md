@@ -740,7 +740,10 @@ ever** (§3.3), zero conflicts by construction:
 
 Fact types: `topic-alias` (merge/rename), `topic-pin`, `group` (sibling chapters that
 belong together — the semantic grouping that composition cannot do alone), `weight`,
-`note`. Authors are `plugin` or `user` (user entries via commands, P3). This is the
+`note`, and the two rule facts (§7.2, §7.4): `rule-status` — per-machine approve/revoke,
+the 2026-09-20 amendment's whole mechanism — and `rule-pin`, the always-rendered class,
+which rides a fact for the same reason status does: a rule file is write-once and the
+append-only rule has no exceptions. Authors are `plugin` or `user` (user entries via commands, P3). This is the
 "improve over time" layer: curation accumulates as facts, and the derived index reflects
 them — performance improves without anyone hand-editing, and every fact is inspectable and
 revertable in git.

@@ -43,7 +43,7 @@ export interface HostCommandsConfig {
   /** P2 enrichment command surface (host plane; manual-drain semantics). */
   enrich?: EnrichCommandSurface
   /** P3 rule lifecycle family, bound to a workspace (S2 module underneath). */
-  rules?: (cwd: string, args: string) => Promise<{ kind: 'success' | 'error'; text: string }>
+  rules?: (cwd: string, args: string, sessionId?: string) => Promise<{ kind: 'success' | 'error'; text: string }>
   /** Door 5 (issue #47): whether subagent settlements auto-archive. Reported in
    *  /chapters-status because it runs WITHOUT a human seeing it happen. */
   subagentAutoSave?: boolean
@@ -309,10 +309,14 @@ export function registerHostCommands(
       const rulesFn = config.rules
       const rulesCommandDef = {
         name: 'chapters-rule',
-        description: 'Project rules (record \u00A77): propose, review, approve per machine, revoke.',
-        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>] | approve <id> | revoke <id>' },
+        description: 'Rules (record \u00A77): project tier propose/approve/revoke per machine; session tier review, pin, conflict report.',
+        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts' },
         async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
-          const r = await rulesFn(cwdOf(invocation.agent), invocation.rawInput ?? '')
+          // the session id reaches the resolver because the SESSION tier activates
+          // by ancestry (§7.5): `active` cannot answer without knowing which tree
+          // is asking. Command output never enters the model context (§7.2).
+          const sessionId = (invocation.agent as { session?: { id?: string } } | undefined)?.session?.id
+          const r = await rulesFn(cwdOf(invocation.agent), invocation.rawInput ?? '', sessionId)
           return { kind: r.kind, text: r.text }
         },
       }

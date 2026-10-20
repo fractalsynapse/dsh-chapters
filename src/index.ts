@@ -35,6 +35,7 @@ import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
+import { ancestorSessionIds } from './session-rules.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -347,7 +348,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       harnessId: config.harnessId,
       scheduler,
       enrich,
-      rules: (cwd, args) => rulesCommand({
+      rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,
         storeRoot: config.artifactStoreRoot,
         harnessId: config.harnessId,
@@ -356,6 +357,34 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         mirrorDir: (c) => join(c, DEFAULT_CLONE_DIR),
         syncNow: async (c) => { try { await scheduler.run(c, 'rules') } catch { /* status file records it */ } },
         now: () => new Date(),
+        // #50 §7.5: the session tier activates by ancestry, so the surface needs
+        // the tree the caller is sitting on. No sessionId ⇒ `active` reports the
+        // session tier UNRESOLVED rather than guessing an empty path.
+        ...(sessionId !== undefined ? {
+          ancestors: async () => new Set(await ancestorSessionIds(async (id) => await store.get(id), sessionId)),
+        } : {}),
+        // §7.3/§7.4: the SAME numbers the doors render with, so `active` can never
+        // describe a view the head will not show.
+        budgetTokens: config.coreRulesBudgetTokens,
+        projectCap: config.projectRulesDisplayCap,
+        sessionCap: config.sessionRulesDisplayCap,
+        // §7.7: ONE bounded call, report-only, reusing the conversation route (and
+        // therefore the conversation's own cached prefix). An explicit exception to
+        // zero-inference in the elicitedPlot family — never a mutation.
+        ask: async (prompt) => {
+          const route = hostRoute
+          if (route === null) throw new Error('no conversation route yet — run a turn first')
+          const llm = ctx.llm
+          if (llm?.stream === undefined) throw new Error('llm.stream absent')
+          const assembler = new BlockAssembler()
+          for await (const chunk of llm.stream({
+            provider: route.provider, model: route.model,
+            messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+            maxTokens: 600,
+            purpose: 'compaction',
+          })) assembler.push(chunk as never)
+          return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+        },
       } satisfies RulesIo, args),
     })
 

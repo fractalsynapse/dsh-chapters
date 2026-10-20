@@ -94,6 +94,8 @@ export type CurationFact =
   | { type: 'note'; topic: string; text: string; at: string }
   /** P3 §15 amendment: per-machine rule status; index layers ignore it (only rules.ts + the scorer consume it) */
   | { type: 'rule-status'; rule: string; status: string; at: string }
+  /** #50 §7.4: a rule pin — per-machine, last-write-wins, never a file rewrite */
+  | { type: 'rule-pin'; rule: string; pinned: boolean; at: string }
 
 export interface IndexManifest {
   [inputPath: string]: { hash: string; at: string }

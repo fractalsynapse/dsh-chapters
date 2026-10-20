@@ -76,7 +76,9 @@ test('approve writes a fact to the OWN edits dir (even for another machine\u2019
   const listed = await rulesCommand(h.io, 'list')
   assert.ok(!listed.text.includes('hX/004'), 'revoked hides from default list')
   const all = await rulesCommand(h.io, 'list --all')
-  assert.match(all.text, /hX\/004\s+revoked/, all.text)
+  // #50 widened the table to `id scope status pin category title` (record §7.9),
+  // so this row names the tier as well as the status.
+  assert.match(all.text, /hX\/004\s+project\s+revoked/, all.text)
   h.dispose()
 })
 
@@ -127,5 +129,123 @@ test('approve reports failure honestly when the mirror edits dir cannot be writt
   } finally {
     fs.chmodSync(mirror, 0o700)
   }
+  h.dispose()
+})
+
+// -------------------------------------- #50 §7.5/§7.9: the session tier joins the surface
+
+function twoTierIo(over: Partial<RulesIo> = {}) {
+  const h = harness(over)
+  // an authored-and-pushed PROJECT rule: it lives in the mirror, which is where
+  // effective status resolves from (§7.2). A rule that never synced is proposed
+  // by construction — the other rows above cover that case.
+  const mdir = path.join(h.cwd, '.dsh-knowledge', 'rules', 'PKC', 'hA')
+  fs.mkdirSync(mdir, { recursive: true })
+  fs.writeFileSync(path.join(mdir, '001-deploy.md'), renderRuleFile({
+    number: 1, category: 'deploy', title: 'Blue-green only', sourceSession: 's', at: '2026-10-01',
+    body: 'Deploy via blue-green only, never stop-start.\n',
+  }))
+  // a session rule written where the capture path writes it
+  const dir = path.join(h.cwd, '.dsh-chapters', 'rules', 'hA')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, '009-general-run-the-tape.md'), renderRuleFile({
+    number: 9, category: 'general', title: 'Run the tape', sourceSession: 'sess-me', at: '2026-10-20',
+    body: 'Run the tape replay before cutting a tag.\n', scope: 'session', session: 'sess-me', derivedFrom: 'marker',
+  }))
+  fs.writeFileSync(path.join(dir, '010-general-inherited.md'), renderRuleFile({
+    number: 10, category: 'general', title: 'Inherited order', sourceSession: 'sess-parent', at: '2026-10-19',
+    body: 'Merge staging into the feature branch before opening a PR.\n', scope: 'session', session: 'sess-parent', derivedFrom: 'marker',
+  }))
+  const base: Partial<RulesIo> = {
+    ancestors: async () => new Set(['sess-parent', 'sess-me']),
+    budgetTokens: 1200,
+  }
+  return { ...h, io: { ...h.io, ...base, ...over } as RulesIo }
+}
+
+test('§7.9 list --scope separates the tiers and shows derived activation', async () => {
+  const h = twoTierIo()
+  const sess = await rulesCommand(h.io, 'list --scope session')
+  assert.match(sess.text, /009\s+session\s+active/, sess.text)
+  assert.match(sess.text, /010\s+session\s+active/, sess.text, 'inherited from the tree (§7.5)')
+  const proj = await rulesCommand(h.io, 'list --scope project')
+  assert.ok(!proj.text.includes('009'), proj.text)
+  const bad = await rulesCommand(h.io, 'list --scope global')
+  assert.equal(bad.kind, 'error', 'an invented tier is refused, not silently ignored')
+  h.dispose()
+})
+
+test('§7.9 active reports exactly what a rebuilt head will render — counts and withheld', async () => {
+  const h = twoTierIo({ projectCap: 1, sessionCap: 1 })
+  const add = await rulesCommand(h.io, 'approve hA/001')
+  assert.equal(add.kind, 'success', add.text)
+  const r = await rulesCommand(h.io, 'active')
+  assert.equal(r.kind, 'success', r.text)
+  assert.match(r.text, /project tier: 1 approved-core on THIS machine/, r.text)
+  assert.match(r.text, /session tier: 2 active for this session tree/, r.text)
+  assert.match(r.text, /RENDERED: 1 project \+ 1 session rule\(s\), withheld 0 \+ 1/, r.text)
+  h.dispose()
+})
+
+test('§7.1 a SESSION rule cannot be approved — and the answer names the promotion path', async () => {
+  const h = twoTierIo()
+  const r = await rulesCommand(h.io, 'approve hA/009')
+  assert.equal(r.kind, 'error', r.text)
+  assert.match(r.text, /already active for this session tree/, r.text)
+  assert.match(r.text, /chapters-rule add/, r.text, 'promotion is the human door it points at')
+  // and revoke DOES work on the session tier (§7.5: the one fact it writes)
+  const rev = await rulesCommand(h.io, 'revoke hA/009')
+  assert.equal(rev.kind, 'success', rev.text)
+  const after = await rulesCommand(h.io, 'list --scope session')
+  assert.match(after.text, /009\s+session\s+inactive/, after.text)
+  h.dispose()
+})
+
+test('§7.4 pin rides a curation FACT — the write-once file is never rewritten', async () => {
+  const h = twoTierIo()
+  const file = path.join(h.cwd, '.dsh-chapters', 'rules', 'hA', '009-general-run-the-tape.md')
+  const before = fs.readFileSync(file, 'utf8')
+  const r = await rulesCommand(h.io, 'pin hA/009')
+  assert.equal(r.kind, 'success', r.text)
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'not one byte of the rule file changed (§1.3)')
+  const facts = fs.readFileSync(path.join(h.cwd, '.dsh-knowledge', 'edits', 'hA', 'curation.jsonl'), 'utf8')
+  assert.ok(facts.includes('"type":"rule-pin"'), facts)
+  const listed = await rulesCommand(h.io, 'list --scope session')
+  assert.match(listed.text, /pin/, listed.text)
+  const un = await rulesCommand(h.io, 'unpin hA/009')
+  assert.equal(un.kind, 'success')
+  const after = await rulesCommand(h.io, 'list --scope session')
+  assert.ok(!/009\s+session\s+active\s+pin/.test(after.text), after.text)
+  h.dispose()
+})
+
+test('§7.7 conflicts reports and mutates NOTHING; without a route it refuses honestly', async () => {
+  let asked = ''
+  const h = twoTierIo({
+    ask: async (p) => { asked = p; return 'CONFLICT: hA/001 vs hA/009 — one says deploy blue-green only, the other says stop the fleet first.' },
+  })
+  const ap = await rulesCommand(h.io, 'approve hA/001')
+  assert.equal(ap.kind, 'success', ap.text)
+  const r = await rulesCommand(h.io, 'conflicts')
+  assert.equal(r.kind, 'success', r.text)
+  assert.match(r.text, /CONFLICT: hA\/001 vs hA\/009/, r.text)
+  assert.match(r.text, /nothing was changed/)
+  assert.ok(asked.includes('Do not rewrite or merge any rule'), asked.slice(0, 200))
+  // one line per active rule, both tiers, in the prompt
+  assert.ok(asked.includes('session/general'), asked)
+  const dir = path.join(h.cwd, '.dsh-chapters', 'rules', 'hA')
+  const names = fs.readdirSync(dir).join(',')
+  assert.ok(!names.includes('011'), `conflicts wrote a file: ${names}`)
+  const noRoute = twoTierIo()
+  const refused = await rulesCommand(noRoute.io, 'conflicts')
+  assert.equal(refused.kind, 'error'); assert.match(refused.text, /conversation model route/)
+  h.dispose(); noRoute.dispose()
+})
+
+test('§7.9 without a session context the session tier is reported UNRESOLVED, never guessed', async () => {
+  const h = twoTierIo({ ancestors: undefined })
+  const r = await rulesCommand(h.io, 'active')
+  assert.match(r.text, /reported unresolved, never guessed/, r.text)
+  assert.match(r.text, /session tier: 0/, r.text)
   h.dispose()
 })

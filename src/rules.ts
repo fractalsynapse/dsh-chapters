@@ -200,6 +200,35 @@ export function effectiveStatus(ruleId: string, facts: Map<string, RuleStatusFac
   return facts.get(ruleId)?.status ?? fileStatus
 }
 
+/**
+ * §7.4: a PIN is a curation fact, never a rewrite. Rule files are write-once
+ * (§1.3) and the append-only rule has no exceptions, so "always show this one"
+ * rides `edits/<harness>/curation.jsonl` as its own fact type — one writer per
+ * file, per-machine by construction, and a git-revertable line.
+ */
+export interface RulePinFact { rule: string; pinned: boolean; at: string }
+
+export function appendRulePinFact(mirrorDir: string, harnessId: string, fact: RulePinFact): void {
+  const dir = path.join(mirrorDir, 'edits', harnessId)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.appendFileSync(path.join(dir, 'curation.jsonl'), JSON.stringify({ type: 'rule-pin', ...fact }) + '\n')
+}
+
+/** the machine's pins, last-write-wins (so `unpin` is a later fact, not a delete) */
+export function loadRulePins(mirrorDir: string, harnessId: string): Set<string> {
+  const out = new Set<string>()
+  const file = path.join(mirrorDir, 'edits', harnessId, 'curation.jsonl')
+  if (!fs.existsSync(file)) return out
+  for (const f of parseCuration(fs.readFileSync(file, 'utf8'))) {
+    if (f.type !== 'rule-pin') continue
+    const f2 = f as unknown as { rule?: string; pinned?: boolean }
+    if (typeof f2.rule !== 'string') continue
+    if (f2.pinned === true) out.add(f2.rule)
+    else out.delete(f2.rule)
+  }
+  return out
+}
+
 export interface MirrorRule {
   id: string // '<harness>/<NNN>' as authored
   relPath: string
@@ -223,6 +252,7 @@ export function collectMirrorRules(mirrorDir: string, projectKey: string, harnes
   const root = path.join(mirrorDir, 'rules', projectKey)
   if (!fs.existsSync(root)) return []
   const facts = loadRuleStatusFacts(mirrorDir, harnessId)
+  const pins = loadRulePins(mirrorDir, harnessId)
   const out: MirrorRule[] = []
   const walk = (dir: string, rel: string): void => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -238,7 +268,9 @@ export function collectMirrorRules(mirrorDir: string, projectKey: string, harnes
       out.push({
         id, relPath, status, category: rule.category, title: rule.title,
         body: rule.body.trim(), bodyTokens: estimateTokens(rule.body.trim()),
-        scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom, pinned: rule.pinned,
+        scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom,
+        // file-level pin (an authored default) OR this machine's pin fact (§7.4)
+        pinned: rule.pinned || pins.has(id),
       })
     }
   }
