@@ -4,7 +4,7 @@
  * One structured call per ARCHIVED chapter, input = the cheap slice the user
  * specified (user requests + first/last assistant message, capped, plus the
  * first ~200 tokens of the chapter body), output = validated JSON:
- *   {"title": "...", "summary": "...", "topics": ["...", ...]}
+ *   {"title": "...", "summary": "...", "topics": ["...", ...], "rules": [{"text","category","quote"}]?}
  *
  * No fs, no harness, no model here — the queue (S2) wires the fetcher. This
  * module guarantees the properties the record stakes:
@@ -23,6 +23,20 @@ export interface EnrichResult {
   title: string
   summary: string
   topics: string[]
+  /**
+   * #50 §7.5 — rules mined from this chapter. OPTIONAL: a model that returns the
+   * old three-field shape still validates, so every existing stub, fake and tape
+   * keeps passing. Each entry carries the human's own words as `quote`, and the
+   * quote is what gates activation (`session-rules.quoteIsHuman`) — the pass may
+   * PROPOSE a standing order, it may not make one on inference alone.
+   */
+  rules: MinedRuleOut[]
+}
+
+export interface MinedRuleOut {
+  text: string
+  category: string
+  quote: string
 }
 
 export type GeneratedMark =
@@ -41,17 +55,32 @@ const TITLE_CAP = 160
 const SUMMARY_CAP = 600
 const TOPIC_MAX = 10
 const TOPIC_LEN = 48
+// §7.5 mining bounds: few, short, and traceable. One chapter is not allowed to
+// mint a dozen standing orders for a session tree.
+const RULE_MAX = 3
+const RULE_TEXT_MIN = 10
+const RULE_TEXT_CAP = 320
+const RULE_QUOTE_CAP = 200
 const PART_CAP = 1200
 const TOTAL_IN_CAP = 8000
 const BODY_HEAD_TOKENS = 200
 
-export const ENRICH_MAX_TOKENS = 350
+// 350 was sized for three fields; §7.5 adds up to three mined rules with quotes.
+// Bound the ANSWER rather than let the model truncate mid-JSON (an invalid parse
+// costs the chapter its annotation; the retry is cheap but not free).
+export const ENRICH_MAX_TOKENS = 900
 
 const INSTRUCTION =
   'You annotate one archived chapter of a coding-agent conversation for retrieval. '
   + 'Reply with ONLY one JSON object, no prose, no code fences, shaped exactly: '
-  + '{"title": "<one descriptive sentence, <=120 chars>", "summary": "<2-3 informative sentences>", "topics": ["<lowercase short labels, 3 to 10>"]}. '
-  + 'Topics are semantic labels (concepts, not file paths). Base everything strictly on the material below.'
+  + '{"title": "<one descriptive sentence, <=120 chars>", "summary": "<2-3 informative sentences>", '
+  + '"topics": ["<lowercase short labels, 3 to 10>"], "rules": [{"text": "<one imperative standing instruction>", "category": "<short slug>", "quote": "<the user\u0027s own words verbatim>"}]}. '
+  + 'Topics are semantic labels (concepts, not file paths). Base everything strictly on the material below.\n'
+  + 'rules is OPTIONAL and for durable steering only: a convention, invariant or pitfall the USER stated '
+  + 'that should keep applying to future work in this project (e.g. "run the tape replay before tagging"). '
+  + 'Do NOT report one-off task details, preferences about this chapter only, or anything you inferred. '
+  + 'Every rule MUST quote the user\u0027s own words verbatim in "quote"; if no rule is backed by a literal user '
+  + 'sentence, omit "rules" or send []. At most 3. They are reviewed and usually invisible to the model that wrote them.'
 
 /** cap a piece of the slice; truncation is EXPLICIT, never silent. */
 function cap(text: string, n: number): string {
@@ -136,10 +165,30 @@ export function parseEnrichResult(text: string): EnrichResult | null {
     if (topics.length >= TOPIC_MAX) break
   }
   if (topics.length === 0) return null
+  // rules are additive: absent, malformed or empty ⇒ no mined rules, and the
+  // annotation itself still commits. A bad `rules` array must never cost a
+  // chapter its title/summary/topics (the ladder's never-blank guarantee).
+  const rules: MinedRuleOut[] = []
+  if (Array.isArray(o.rules)) {
+    for (const raw of o.rules) {
+      if (typeof raw !== 'object' || raw === null) continue
+      const r = raw as Record<string, unknown>
+      if (typeof r.text !== 'string' || typeof r.quote !== 'string') continue
+      const text = r.text.trim()
+      const quote = r.quote.trim().replace(/^["'`]+|["'`]+$/g, '')
+      if (text.length < RULE_TEXT_MIN || text.length > RULE_TEXT_CAP * 3 || quote.length === 0) continue
+      const category = typeof r.category === 'string'
+        ? r.category.trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24)
+        : ''
+      rules.push({ text: text.slice(0, RULE_TEXT_CAP), category, quote: quote.slice(0, RULE_QUOTE_CAP) })
+      if (rules.length >= RULE_MAX) break
+    }
+  }
   return {
     title: title.slice(0, TITLE_CAP),
     summary: summary.slice(0, SUMMARY_CAP),
     topics,
+    rules,
   }
 }
 

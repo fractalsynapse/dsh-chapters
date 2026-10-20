@@ -26,7 +26,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { isHumanAuthored, stripReminderSpans } from './injections.ts'
 import { turnSpanOf } from './signature.ts'
-import { buildRulesSection, parseRuleFile, parseRuleMarkers, renderRuleFile, ruleSlug, type RuleRecord, type RulesSectionResult } from './rules.ts'
+import {
+  buildRulesSection, collectStoreRules, parseRuleFile, parseRuleMarkers, renderRuleFile, ruleSlug,
+  type RuleRecord, type RulesSectionResult, type RuleDerivedFrom,
+} from './rules.ts'
 import { redactText } from './redact.ts'
 import type { SessionEventLike } from './types.ts'
 
@@ -197,6 +200,86 @@ export async function ancestorSessionIds(
     cursor = state.parentSession ?? undefined
   }
   return out.reverse()
+}
+
+/** One mined rule candidate, as the enrichment pass proposes it (§7.5). */
+export interface MinedRule {
+  text: string
+  category: string
+  /** the human's own words this rule came from — the quote IS the gate */
+  quote: string
+}
+
+const normQuote = (t: string): string => t.toLowerCase().replace(/\s+/g, ' ').replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').trim()
+
+/**
+ * THE verbatim-quote gate (§7.5). A mined rule activates only when its quote is
+ * the human's own words, present verbatim (whitespace-normalized) in the
+ * chapter's USER text. Assistant prose is deliberately NOT admissible evidence:
+ * the model restating an instruction it was given is the amplification path, and
+ * a quote it invented is a guess wearing a citation.
+ */
+export function quoteIsHuman(humanText: string, quote: string): boolean {
+  const q = normQuote(quote)
+  if (q.length < 3) return false
+  return normQuote(humanText).includes(q)
+}
+
+export interface MineDeps {
+  storeDir: string
+  harnessId: string
+  /** the session whose tree the mined rules bind — the chapter's OWN session */
+  sessionId: string
+  records: Iterable<[string, RuleRecord]>
+  /** the chapter's human-authored bytes (its `**User…:**` chunks joined) */
+  humanText: string
+  rules: readonly MinedRule[]
+  /** per-chapter cap: one conversation must not mint a dozen standing orders */
+  maxPerChapter: number
+  now?: () => string
+}
+
+/**
+ * Write the mined candidates. Verified quotes activate; everything else is
+ * written `suggested: true` — reviewable in `list --scope session`, inert in
+ * every head until a human approves it (§7.5). Deduped by normalized body
+ * against what the machine already holds, so re-running the ladder (or a
+ * chapter annotated by a newer model) fills gaps and never duplicates.
+ */
+export function captureMinedRules(deps: MineDeps): { ids: string[]; activated: number; suggested: number } {
+  const rulesDir = path.join(deps.storeDir, 'rules', deps.harnessId)
+  const existing = new Set<string>()
+  for (const r of collectStoreRules(deps.storeDir, deps.harnessId)) existing.add(norm(r.body))
+  const written: string[] = []
+  let activated = 0
+  let suggested = 0
+  const cap = Math.max(0, deps.maxPerChapter)
+  for (const m of deps.rules) {
+    // the cap counts rules WRITTEN, not candidates examined: a duplicate or an
+    // over-short candidate must not eat a chapter's budget
+    if (written.length >= cap) break
+    const body = redactText(m.text.trim().replace(/\s+/g, ' ')).text
+    if (body.length < 10 || existing.has(norm(body))) continue
+    const verified = quoteIsHuman(deps.humanText, m.quote)
+    const number = nextRuleNumber({ records: deps.records, harnessId: deps.harnessId, rulesDir })
+    const category = (m.category || 'general').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) || 'general'
+    const title = body.split(/[.!?]/)[0]!.trim().slice(0, 60)
+    const name = `${String(number).padStart(3, '0')}-${ruleSlug(category, title)}.md`
+    fs.mkdirSync(rulesDir, { recursive: true })
+    const derivedFrom: RuleDerivedFrom = 'model'
+    fs.writeFileSync(path.join(rulesDir, name), renderRuleFile({
+      number, category, title, sourceSession: deps.sessionId,
+      at: (deps.now !== undefined ? deps.now() : new Date().toISOString()),
+      body: `${body}\n`,
+      scope: 'session', session: deps.sessionId, derivedFrom,
+      suggested: !verified,
+    }), { flag: 'wx' })
+    written.push(`${deps.harnessId}/${String(number).padStart(3, '0')}`)
+    existing.add(norm(body))
+    if (verified) activated += 1
+    else suggested += 1
+  }
+  return { ids: written, activated, suggested }
 }
 
 /** Turn a task description into the relevance term set §7.4 selects on — the same

@@ -197,7 +197,12 @@ test('§7.1 a SESSION rule cannot be approved — and the answer names the promo
   const rev = await rulesCommand(h.io, 'revoke hA/009')
   assert.equal(rev.kind, 'success', rev.text)
   const after = await rulesCommand(h.io, 'list --scope session')
-  assert.match(after.text, /009\s+session\s+inactive/, after.text)
+  // applying status facts to the store collector (§7.5 approve-of-a-suggestion)
+  // also means a revoked session rule now behaves like a revoked project rule in
+  // the default view: hidden, because `status` is resolved, not read off the file.
+  assert.ok(!after.text.includes('hA/009'), after.text)
+  const all = await rulesCommand(h.io, 'list --scope session --all')
+  assert.match(all.text, /009\s+session\s+revoked/, all.text)
   h.dispose()
 })
 

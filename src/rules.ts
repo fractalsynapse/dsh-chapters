@@ -61,6 +61,9 @@ export interface RuleRecord {
   derivedFrom?: RuleDerivedFrom | undefined
   /** §7.4 always-rendered class; human-set only. */
   pinned?: boolean | undefined
+  /** §7.5: a model-mined rule with NO verbatim human quote — inert until a
+   * human approves it. `suggested` is how the quote gate is enforced on disk. */
+  suggested?: boolean | undefined
 }
 
 export const ruleRecordSchema = z.object({
@@ -76,6 +79,7 @@ export const ruleRecordSchema = z.object({
   session: z.string().optional(),
   derivedFrom: z.enum(RULE_DERIVED_FROM).optional(),
   pinned: z.boolean().optional(),
+  suggested: z.boolean().optional(),
 })
 
 export const ruleSlug = (category: string, title: string): string => {
@@ -98,6 +102,7 @@ export function renderRuleFile(input: {
   session?: string | undefined
   derivedFrom?: RuleDerivedFrom | undefined
   pinned?: boolean | undefined
+  suggested?: boolean | undefined
 }): string {
   // §7.1 byte-compatibility: a project rule derived from a human and unpinned
   // emits NOTHING extra, so every rule file written before #50 keeps rendering
@@ -107,6 +112,7 @@ export function renderRuleFile(input: {
   if (input.session !== undefined && input.session !== '') extras.push(`session: ${JSON.stringify(input.session)}`)
   if (input.derivedFrom !== undefined && input.derivedFrom !== 'human') extras.push(`derivedFrom: ${input.derivedFrom}`)
   if (input.pinned === true) extras.push('pinned: true')
+  if (input.suggested === true) extras.push('suggested: true')
   return [
     '---',
     `number: ${input.number}`,
@@ -134,6 +140,7 @@ export interface ParsedRule {
   session: string
   derivedFrom: RuleDerivedFrom
   pinned: boolean
+  suggested: boolean
 }
 
 export function parseRuleFile(text: string): ParsedRule | null {
@@ -162,6 +169,7 @@ export function parseRuleFile(text: string): ParsedRule | null {
       session: unq(fm.get('session'), ''),
       derivedFrom: (RULE_DERIVED_FROM as readonly string[]).includes(rawDerived) ? rawDerived as RuleDerivedFrom : 'human',
       pinned: unq(fm.get('pinned'), '') === 'true',
+      suggested: unq(fm.get('suggested'), '') === 'true',
     }
   } catch {
     return null
@@ -245,6 +253,8 @@ export interface MirrorRule {
   session: string
   derivedFrom: RuleDerivedFrom
   pinned: boolean
+  /** §7.5: inert model guess (no verbatim quote) until this machine approves it */
+  suggested: boolean
 }
 
 /** every rule file the mirror knows for one project, with THIS machine's effective status */
@@ -271,6 +281,7 @@ export function collectMirrorRules(mirrorDir: string, projectKey: string, harnes
         scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom,
         // file-level pin (an authored default) OR this machine's pin fact (§7.4)
         pinned: rule.pinned || pins.has(id),
+        suggested: rule.suggested,
       })
     }
   }
@@ -342,7 +353,13 @@ export function revokedRuleIds(mirrorDir: string, harnessId: string): Set<string
  * same id shape, so `list`, numbering and search stay one mechanism for both
  * tiers.
  */
-export function collectStoreRules(storeDir: string, harnessId: string): MirrorRule[] {
+export function collectStoreRules(
+  storeDir: string,
+  harnessId: string,
+  /** §7.5: this machine's `rule-status` facts, so a human `approve` can switch a
+   * SUGGESTED model rule on without rewriting the write-once file. */
+  facts?: Map<string, RuleStatusFact> | undefined,
+): MirrorRule[] {
   const root = path.join(storeDir, 'rules')
   if (!fs.existsSync(root)) return []
   const out: MirrorRule[] = []
@@ -357,9 +374,11 @@ export function collectStoreRules(storeDir: string, harnessId: string): MirrorRu
       const harness = rel === '' ? harnessId : path.basename(path.dirname(p))
       const id = `${harness}/${String(rule.number).padStart(3, '0')}`
       out.push({
-        id, relPath, status: rule.fileStatus, category: rule.category, title: rule.title,
+        id, relPath, status: facts === undefined ? rule.fileStatus : effectiveStatus(id, facts, rule.fileStatus),
+        category: rule.category, title: rule.title,
         body: rule.body.trim(), bodyTokens: estimateTokens(rule.body.trim()),
-        scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom, pinned: rule.pinned,
+        scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom,
+        pinned: rule.pinned, suggested: rule.suggested,
       })
     }
   }
@@ -391,11 +410,18 @@ export function isSessionRuleFile(absPath: string): boolean {
  */
 export function sessionRuleActive(
   rule: MirrorRule,
-  opts: { ancestorSessions: ReadonlySet<string>; revoked: ReadonlySet<string> },
+  /** `facts` is unused here (the caller resolves status into `rule.status`); it is
+   * accepted so both collectors and callers pass ONE options object around. */
+  opts: { ancestorSessions: ReadonlySet<string>; revoked: ReadonlySet<string>; facts?: Map<string, RuleStatusFact> | undefined },
 ): boolean {
   if (rule.scope !== 'session') return false
   if (rule.session === '') return false
   if (opts.revoked.has(rule.id)) return false
+  // The SUGGESTED arm IS the verbatim-quote gate enforced where it matters — at
+  // activation. An unquoted model guess is written so it can be reviewed, but it
+  // governs nothing until this machine approves it: the ladder may PROPOSE a
+  // standing order, it may not make one on inference alone.
+  if (rule.suggested && rule.status !== 'core') return false
   return opts.ancestorSessions.has(rule.session)
 }
 
@@ -403,9 +429,9 @@ export function sessionRuleActive(
 export function collectActiveSessionRules(
   storeDir: string,
   harnessId: string,
-  opts: { ancestorSessions: ReadonlySet<string>; revoked: ReadonlySet<string> },
+  opts: { ancestorSessions: ReadonlySet<string>; revoked: ReadonlySet<string>; facts?: Map<string, RuleStatusFact> | undefined },
 ): MirrorRule[] {
-  return collectStoreRules(storeDir, harnessId).filter((r) => sessionRuleActive(r, opts))
+  return collectStoreRules(storeDir, harnessId, opts.facts).filter((r) => sessionRuleActive(r, opts))
 }
 
 /**
@@ -446,11 +472,12 @@ export function buildRulesSection(
   mirrorDir: string,
   opts: RulesSectionOptions,
 ): RulesSectionResult {
-  const revoked = revokedRuleIds(mirrorDir, opts.harnessId)
+  const statusFacts = loadRuleStatusFacts(mirrorDir, opts.harnessId)
+  const revoked = new Set<string>([...statusFacts].filter(([, f]) => f.status === 'revoked').map(([id]) => id))
   const all = collectMirrorRules(mirrorDir, opts.projectKey, opts.harnessId)
   const projectActive = all.filter((r) => r.scope === 'project' && r.status === 'core')
   const sessionActive = opts.storeDir !== undefined && opts.ancestorSessions !== undefined
-    ? collectActiveSessionRules(opts.storeDir, opts.harnessId, { ancestorSessions: opts.ancestorSessions, revoked })
+    ? collectActiveSessionRules(opts.storeDir, opts.harnessId, { ancestorSessions: opts.ancestorSessions, revoked, facts: statusFacts })
     : []
 
   const categories = new Map<string, { count: number; essence: string; samplePath: string }>()

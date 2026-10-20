@@ -35,7 +35,7 @@ import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
-import { ancestorSessionIds } from './session-rules.ts'
+import { ancestorSessionIds, captureMinedRules } from './session-rules.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -126,6 +126,12 @@ export interface Config {
   sessionRulesDisplayCap: number
   /** #50 §7.4: topic-overlap selection on; off ⇒ deterministic category→id order. */
   rulesRelevance: boolean
+  /** #50 §7.5: mine standing orders during enrichment. Default ON — background
+   * capture is the whole point; the verbatim-quote gate (not a click) is what
+   * keeps a guess from steering a session. */
+  rulesEnrichment: boolean
+  /** #50 §7.5: per-chapter cap on mined rules. */
+  rulesMinedPerChapter: number
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -212,6 +218,8 @@ export const Config = Schema.object({
   projectRulesDisplayCap: Schema.number().default(12),
   sessionRulesDisplayCap: Schema.number().default(12),
   rulesRelevance: Schema.boolean().default(true),
+  rulesEnrichment: Schema.boolean().default(true),
+  rulesMinedPerChapter: Schema.number().default(3),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -289,6 +297,23 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         trigger: 'manual',
         idleMs: config.enrichmentIdleMs,
         batchCap: config.enrichmentBatchCap,
+        mineRules: config.rulesEnrichment,
+        mineCap: config.rulesMinedPerChapter,
+      },
+      // §7.5 host-plane sink: `/chapters-enrich run` drains here, so a manual run
+      // mines exactly like the realm's auto pass. Local files only — nothing is
+      // armed on the scheduler, because session rules never travel (§7.5).
+      onMinedRules: async ({ cwd, sessionId, humanText, rules, max }) => {
+        const res = captureMinedRules({
+          storeDir: join(cwd, config.artifactStoreRoot),
+          harnessId: config.harnessId,
+          sessionId,
+          records: store.rules(),
+          humanText,
+          rules,
+          maxPerChapter: max,
+        })
+        return { written: res.ids.length, activated: res.activated, suggested: res.suggested }
       },
       fetch: async (prompt, route) => {
         if (route === null) throw new Error('no enrichment route resolvable (set /chapters-enrich model … or run a turn first)')

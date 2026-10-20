@@ -25,7 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   renderRuleFile, rulePath, collectMirrorRules, appendRuleStatusFact, appendRulePinFact, loadRulePins,
-  collectStoreRules, sessionRuleActive, buildRulesSection, revokedRuleIds,
+  collectStoreRules, loadRuleStatusFacts, sessionRuleActive, buildRulesSection, revokedRuleIds,
   type RuleRecord, type RuleStatus,
 } from './rules.ts'
 import type { ProjectRecord } from './sync.ts'
@@ -78,6 +78,8 @@ interface RuleRow {
   pinned: boolean
   body: string
   sourceSession: string
+  /** §7.5: an inert model guess awaiting this machine's approve */
+  suggested?: boolean | undefined
 }
 
 export async function rulesCommand(io: RulesIo, args: string): Promise<RulesReply> {
@@ -98,6 +100,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
   const known = async (): Promise<RuleRow[]> => {
     const byId = new Map<string, RuleRow>()
     const ancestorSet = io.ancestors !== undefined ? await io.ancestors() : new Set<string>()
+    const statusFacts = loadRuleStatusFacts(mirror, io.harnessId)
     // §7.5: `revoke` is the one fact the session tier writes, and it lives in
     // curation.jsonl — the FILE stays `proposed` forever (write-once). Reading
     // file status instead of facts would keep a revoked rule rendering.
@@ -118,12 +121,13 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
       })
     }
     // the session tier comes off disk, activated by the ancestor predicate
-    for (const r of collectStoreRules(storeDir, io.harnessId)) {
+    for (const r of collectStoreRules(storeDir, io.harnessId, statusFacts)) {
       if (r.scope !== 'session') continue
       byId.set(r.id, {
         id: r.id, scope: 'session', category: r.category, title: r.title, status: r.status,
-        active: sessionRuleActive(r, { ancestorSessions: ancestorSet, revoked: revokedHere }),
+        active: sessionRuleActive(r, { ancestorSessions: ancestorSet, revoked: revokedHere, facts: statusFacts }),
         pinned: r.pinned || pins.has(r.id), body: r.body, sourceSession: r.session,
+        suggested: r.suggested,
       })
     }
     return [...byId.values()].sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : a.id < b.id ? -1 : 1))
@@ -194,8 +198,8 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     if (!all && !proposedOnly) rows = rows.filter((r) => r.status !== 'revoked')
     if (proposedOnly) rows = rows.filter((r) => r.status === 'proposed')
     if (rows.length === 0) return { kind: 'success', text: scope === 'all' ? 'no rules match' : `no ${scope}-tier rules match` }
-    const text = rows.map((r) => `${r.id.padEnd(12)} ${r.scope.padEnd(8)} ${(r.scope === 'session' ? (r.active === true ? 'active' : 'inactive') : r.status).padEnd(9)} ${(r.pinned ? 'pin ' : '    ')}${r.category.padEnd(14)} ${r.title}`).join('\n')
-    return { kind: 'success', text: `id           scope    status    pin   category       title\n${text}` }
+    const text = rows.map((r) => `${r.id.padEnd(12)} ${r.scope.padEnd(8)} ${(r.scope === 'session' ? (r.status === 'revoked' ? 'revoked' : (r.active === true ? 'active' : (r.suggested === true ? 'suggested' : 'inactive'))) : r.status).padEnd(10)} ${(r.pinned ? 'pin ' : '    ')}${r.category.padEnd(14)} ${r.title}`).join('\n')
+    return { kind: 'success', text: `id           scope    status     pin   category       title\n${text}` }
   }
 
   if (verb === 'active') {
@@ -228,10 +232,12 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     const rows = await known()
     const row = rows.find((r) => r.id === id)
     if (row === undefined) return { kind: 'error', text: `no rule ${id} in project ${project.slug} — unknown id (list shows what exists)` }
-    if (verb === 'approve' && row.scope === 'session') {
+    // §7.5: a SUGGESTED model rule is exactly what approve is FOR; a marker rule
+    // is already active, so approving it would be theatre.
+    if (verb === 'approve' && row.scope === 'session' && row.suggested !== true) {
       // §7.1: the session tier does not approve. Promoting it to the shared tier
       // is the human act, and it is a NEW rule file with its own id (§1.3).
-      return { kind: 'error', text: `${id} is a SESSION rule — it is already active for this session tree and cannot be approved. To make it bind your team: /chapters-rule add ${row.category} "${row.body.replace(/\s+/g, ' ').slice(0, 160)}"` }
+      return { kind: 'error', text: `${id} is a SESSION rule already active for this session tree — there is nothing to approve. To make it bind your team: /chapters-rule add ${row.category} "${row.body.replace(/\s+/g, ' ').slice(0, 160)}"` }
     }
     try {
       // 'approve' is the verb; 'core' is the status — conflating them writes a
@@ -242,7 +248,9 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     }
     await io.syncNow(cwd)
     return { kind: 'success', text: verb === 'approve'
-      ? `rule ${id} is CORE on THIS machine (other machines approve independently) — it will render into continuations from this workspace`
+      ? row.scope === 'session'
+        ? `suggested rule ${id} approved — it now governs this session tree (and stays LOCAL: session rules are never staged to the pool)`
+        : `rule ${id} is CORE on THIS machine (other machines approve independently) — it will render into continuations from this workspace`
       : row.scope === 'session'
         ? `session rule ${id} revoked on this machine — out of every head in this tree, file bytes untouched (write-once)`
         : `rule ${id} revoked on this machine (out of the notice, still in the repo)` }

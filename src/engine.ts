@@ -44,7 +44,7 @@ import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
 import { hostname } from 'node:os'
 import path from 'node:path'
-import { makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
+import { captureMinedRules, makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
@@ -75,6 +75,11 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   projectRulesDisplayCap?: number
   sessionRulesDisplayCap?: number
   rulesRelevance?: boolean
+  /** §7.5 model-mined rules; default ON (undefined). The quote gate, not this
+   * switch, is what keeps a guess from steering a session. */
+  rulesEnrichment?: boolean
+  /** §7.5 per-chapter cap on mined rules */
+  rulesMinedPerChapter?: number
   // P2 enrichment (record §6): the realm plane owns the AUTO triggers.
   enrichmentEnabled?: boolean
   enrichmentModel?: string
@@ -216,6 +221,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     projectRulesDisplayCap: z.number().step(1).min(0).default(12),
     sessionRulesDisplayCap: z.number().step(1).min(0).default(12),
     rulesRelevance: z.boolean().default(true),
+    rulesEnrichment: z.boolean().default(true),
+    rulesMinedPerChapter: z.number().step(1).min(0).default(3),
     enrichmentEnabled: z.boolean().default(true),
     enrichmentModel: z.string().default(''),
     enrichmentTrigger: z.string().default('both'),
@@ -242,7 +249,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     projectCap: number
     sessionCap: number
     relevance: boolean
-  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true }
+    /** §7.5 model-mined rules (the background half); default true from the row */
+    mine?: boolean | undefined
+    mineCap?: number | undefined
+  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true, mine: true, mineCap: 3 }
   private storePromise: Promise<ChapterStoreHandle> | null = null
 
   constructor(ctx: Context, config: ChaptersRowConfig = {}) {
@@ -256,6 +266,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
       harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
       projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
+      rulesEnrichment, rulesMinedPerChapter,
       enrichmentEnabled, enrichmentModel, enrichmentTrigger, enrichmentIdleMs, enrichmentBatchCap,
       vocabApply, vocabCoMin, vocabOverlapMin,
       treedxFetchTimeoutMs, treedxWorkspaceTtlSeconds, treedxLeaseRetries, treedxLeaseRetryDelayMs,
@@ -290,6 +301,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.enrichCfg = {
       enabled: enrichmentEnabled ?? true,
       model: enrichmentModel ?? '',
+      mineRules: rulesEnrichment ?? true,
+      mineCap: rulesMinedPerChapter ?? 3,
       trigger: (enrichmentTrigger ?? 'both') as 'afterPush' | 'idle' | 'both' | 'manual',
       idleMs: enrichmentIdleMs ?? 60000,
       batchCap: enrichmentBatchCap ?? 5,
@@ -302,6 +315,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       projectCap: projectRulesDisplayCap ?? 12,
       sessionCap: sessionRulesDisplayCap ?? 12,
       relevance: rulesRelevance ?? true,
+      mine: rulesEnrichment ?? true,
+      mineCap: rulesMinedPerChapter ?? 3,
     }
     this.#listenForSignatures()
     this.#listenForRuleCapture()
@@ -320,8 +335,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * lock and debounce keep the two honest against each other. */
   private syncDebounceMs = 30000
   private vocabCfg: { apply: boolean; coMin: number; overlapMin: number } = { apply: false, coMin: 3, overlapMin: 0.5 }
-  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number } =
-    { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5 }
+  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; mineRules?: boolean | undefined; mineCap?: number | undefined } =
+    { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5, mineRules: true, mineCap: 3 }
   private enrichPromise: Promise<EnrichWiring> | null = null
   private lastCwd: string | null = null
   private lastRoute: { provider: string; model: string } | null = null
@@ -360,6 +375,24 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         return await this.#auxComplete(prompt, r, 900)
       },
       conversationRoute: () => this.lastRoute,
+      // §7.5 the sink: the realm plane owns disk, identity and the registry, so it
+      // writes what the pass mined. Session rules are LOCAL — nothing is armed on
+      // the scheduler here, because the pool never carries them.
+      onMinedRules: async ({ sessionId, humanText, rules, max }) => {
+        const cwd = this.lastCwd ?? undefined
+        if (cwd === undefined) return { written: 0, activated: 0, suggested: 0 }
+        const { store } = await this.store()
+        const res = captureMinedRules({
+          storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+          harnessId: (this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()),
+          sessionId,
+          records: store.rules(),
+          humanText,
+          rules,
+          maxPerChapter: max,
+        })
+        return { written: res.ids.length, activated: res.activated, suggested: res.suggested }
+      },
       scheduler: { schedule: (cwd, why) => { void this.#scheduler().then((s) => s.schedule(cwd, why)).catch(() => undefined) } },
       log: (m) => this.ctx.logger?.info?.(`dsh-chapters: ${m}`),
       warn: (m) => this.ctx.logger?.warn?.(`dsh-chapters: ${m}`),

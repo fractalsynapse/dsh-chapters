@@ -21,7 +21,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
-import { buildEnrichInput, parseEnrichResult, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark } from './enrich.ts'
+import { buildEnrichInput, parseEnrichResult, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
 
 export interface EnrichConfig {
@@ -31,6 +31,15 @@ export interface EnrichConfig {
   trigger: 'afterPush' | 'idle' | 'both' | 'manual'
   idleMs: number
   batchCap: number
+  /**
+   * #50 §7.5: mine standing orders out of each annotated chapter. `undefined`
+   * means ON — the point of the tier is that the human does not have to think
+   * about it; what a mined rule needs is not a click but a VERBATIM QUOTE of the
+   * human's own words, enforced at activation, and a list one command away.
+   */
+  mineRules?: boolean | undefined
+  /** per-chapter cap on mined rules (§7.5: few, short, traceable) */
+  mineCap?: number | undefined
 }
 
 export interface EnrichWiringDeps {
@@ -47,6 +56,13 @@ export interface EnrichWiringDeps {
   fetch(prompt: string, route: { provider: string, model: string } | null): Promise<string>
   /** route resolution when neither override nor config names one (realm: live agent; host: persisted) */
   conversationRoute(): { provider: string, model: string } | null
+  /**
+   * #50 §7.5 sink: the plane that owns disk + identity + the registry writes the
+   * mined candidates. enrich-wire stays model-plumbing only — it hands over the
+   * chapter's human bytes and the candidates and reports what happened. Absent ⇒
+   * mining is WARNED as unwired, never silently dropped.
+   */
+  onMinedRules?: ((args: { cwd: string; sessionId: string; chapterNumber: number; humanText: string; rules: readonly MinedRuleOut[]; max: number }) => Promise<{ written: number; activated: number; suggested: number }>) | undefined
   scheduler?: { schedule(cwd: string, why: string): void }
   log(m: string): void
   warn(m: string): void
@@ -87,6 +103,32 @@ export function renderGeneratedBlock(gen: GeneratedProvenance): string {
     }
   }
   return '\n' + lines.join('\n')
+}
+
+/**
+ * The HUMAN bytes of a chapter, and only these. The annotator input splits the
+ * body on user-role markers and slices(1) — which leaves every chunk RUNNING ON
+ * into the
+ * assistant reply that follows it, so it is not a set of user turns. For the
+ * verbatim-quote gate (§7.5) that distinction is the whole mechanism: a quote
+ * found in assistant prose is the model restating an instruction (the
+ * amplification path), never evidence a human gave one. So each chunk is cut at
+ * the next role marker before it is offered as evidence.
+ */
+export function humanBytesOf(body: string): string {
+  const out: string[] = []
+  // walk: a role label, then its text until the NEXT label
+  const re = /\*\*(User|Assistant)[^*\n]*:\*\*/g
+  let m: RegExpExecArray | null
+  const marks: { role: string; start: number; end: number }[] = []
+  while ((m = re.exec(body)) !== null) marks.push({ role: m[1]!, start: m.index, end: m.index + m[0].length })
+  for (let i = 0; i < marks.length; i += 1) {
+    if (marks[i]!.role !== 'User') continue
+    const next = i + 1 < marks.length ? marks[i + 1]!.start : body.length
+    const text = body.slice(marks[i]!.end, next)
+    if (text.trim() !== '') out.push(text.trim())
+  }
+  return out.join('\n')
 }
 
 type ChapterLike = { number: number; title: string; generated?: Record<string, { by: string; model?: string }[]> }
@@ -169,6 +211,38 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       if (result === null) {
         // one retry with a nudge; garbage stays non-fatal (record §6.1)
         result = parseEnrichResult(await deps.fetch(input + '\nRemember: reply with ONLY the JSON object, no other text.', route))
+      }
+      // #50 §7.5 mining runs BEFORE the "already enriched" short-circuit: a chapter
+      // that needs no new title may still be full of standing orders, and skipping
+      // them because the annotation was a no-op is exactly the kind of silence this
+      // round is about. Failures are contained — mining must never cost a chapter
+      // its annotation or break the ladder.
+      if (result !== null && result.rules.length > 0) {
+        if (deps.config.mineRules === false) {
+          deps.log(`rule mining skipped for ${sid}#${num}: ${result.rules.length} candidate(s) dropped (rulesEnrichment off)`)
+        } else if (deps.onMinedRules === undefined) {
+          deps.warn(`rule mining UNWIRED on this plane: ${result.rules.length} candidate(s) for ${sid}#${num} were not recorded — the sink owns disk + identity`)
+        } else {
+          try {
+            const mined = await deps.onMinedRules({
+              cwd,
+              sessionId: sid,
+              chapterNumber: num,
+              // ONLY the human's own bytes, cut at the next role marker: the chunks
+              // the annotator input uses run ON into the assistant reply, and that
+              // leaked assistant prose into the quote gate's evidence (§7.5).
+              humanText: humanBytesOf(body),
+              rules: result.rules,
+              max: deps.config.mineCap ?? 3,
+            })
+            if (mined.written > 0) {
+              deps.log(`rule mining ${sid}#${num}: ${mined.written} recorded (${mined.activated} activated on a verbatim quote, ${mined.suggested} awaiting review — /chapters-rule list --scope session)`)
+              // session rules are LOCAL (§7.5): never staged, so no sync is armed
+            }
+          } catch (error) {
+            deps.warn(`rule mining failed for ${sid}#${num}: ${String((error as Error)?.message ?? error).slice(0, 140)} — the annotation itself is unaffected`)
+          }
+        }
       }
       const current: CurrentValues = { title: rec.title, summary: rec.summary, topics: rec.topics, ...(rec.generated !== undefined ? { generated: rec.generated as Partial<GeneratedProvenance> } : {}) }
       const applied = applyEnrich(current, result, key2, new Date().toISOString())
@@ -259,7 +333,8 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const heartbeat = deps.store.getSetting(STATE_KEY)
       let last = ''
       try { last = ` · last: ${(JSON.parse(heartbeat ?? '{}') as { line?: string }).line ?? 'idle'}` } catch { /* cosmetic */ }
-      return `enrichment: ${deps.config.trigger}, model ${model}${last}`
+      const mine = deps.config.mineRules === false ? ' · rule mining OFF' : ` · rule mining ON (≤${deps.config.mineCap ?? 3}/chapter, verbatim-quote gated)`
+      return `enrichment: ${deps.config.trigger}, model ${model}${mine}${last}`
     },
     dispose() { queue.dispose() },
   }
