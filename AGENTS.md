@@ -302,6 +302,11 @@ not a plugin bug.
 - **Always give a tool an `output` schema** — mandatory on every `ToolDefinition`.
 - **Call `next()` in waterfall listeners** unless deliberately short-circuiting, and document why.
 - **No hardcoded tunables.** If `cordis.yml` can change it, it belongs in config.
+- **Back up a file before a throwaway mutation, then restore from that copy.** Proving a row
+  fails on its mutation is standard practice here, but `git checkout <file>` / `git restore <file>`
+  reverts to HEAD and DESTROYS every uncommitted change in it. Measured against myself 2026-10-20:
+  twice in one session, each costing a full re-application of ~14 edits to `src/rules.ts`. `cp f f.bak`
+  first; restore from `f.bak`. Never reach for `git` to undo a mutation you made by hand.
 - **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
   with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
   When a question stalls, change something real: different arguments, a different tool, or state what is
