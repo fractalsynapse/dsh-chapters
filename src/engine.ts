@@ -44,8 +44,7 @@ import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
 import { hostname } from 'node:os'
 import path from 'node:path'
-import { makeRuleCaptureListener, ancestorSessionIds } from './session-rules.ts'
-import { buildRulesSection } from './rules.ts'
+import { makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
@@ -725,20 +724,19 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const { store } = await this.store()
     const harness = this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()
     const project = projectForCwd(store.projects(), cwd)
-    const state = await store.get(session.id)
-    const ids = await ancestorSessionIds(async (id) => await store.get(id), session.id)
-    const topics = this.ruleCfg.relevance && state !== undefined
-      ? state.collections.slice(-6).flatMap((c) => c.terms).slice(0, 40)
-      : undefined
-    const built = buildRulesSection(path.join(cwd, DEFAULT_CLONE_DIR), {
+    // the SAME renderer the doors use — one builder for every rebuilt head (§7.3)
+    const built = await renderRulesBlock({
+      mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+      storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
       projectKey: project?.projectKey ?? '',
       harnessId: harness,
       budgetTokens: this.ruleCfg.budgetTokens,
-      storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
-      ancestorSessions: new Set(ids),
       projectCap: this.ruleCfg.projectCap,
       sessionCap: this.ruleCfg.sessionCap,
-      ...(topics !== undefined ? { relevanceTopics: topics } : {}),
+      relevance: this.ruleCfg.relevance,
+      includeSession: true,
+      store,
+      sessionId: session.id,
     })
     if (built.kind === 'none') return null
     if (built.kind === 'refusal') {

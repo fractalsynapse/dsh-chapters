@@ -115,6 +115,11 @@
 #   treedxLeaseRetryDelayMs: 1000  # delay between lease retries
 #
 # Realm-row-only keys (in the preset's engine row, not this patch):
+#   harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance  (#50 §7/§7.5 —
+#   the realm plane owns what an in-place checkpoint renders; the host plugin config
+#   owns what a continuation notice renders; same names, same defaults, set both to
+#   diverge from the default)
 #   thresholdRatio, retainRatio, retainTokens, maxTokens, compactionRetries,
 #   maxOverflowRetries, auto, summarizationProvider/summarizationModel (legacy
 #   override), enrichmentTrigger (afterPush|idle|both|manual),

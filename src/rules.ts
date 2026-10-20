@@ -248,7 +248,7 @@ export function collectMirrorRules(mirrorDir: string, projectKey: string, harnes
 
 export type RulesSectionResult =
   | { kind: 'none' }
-  | { kind: 'ok'; text: string; tokens: number; withheld: { project: number; session: number } }
+  | { kind: 'ok'; text: string; tokens: number; shown: { project: number; session: number }; withheld: { project: number; session: number } }
   | { kind: 'refusal'; reason: string; perRule: Array<{ id: string; tokens: number }>; cap: number; total: number }
 
 /** §7.3 options. Every #50 field is optional: with none of them supplied the
@@ -473,5 +473,5 @@ export function buildRulesSection(
     }
   }
   const text = lines.join('\n').trimEnd()
-  return { kind: 'ok', text, tokens: estimateTokens(text), withheld }
+  return { kind: 'ok', text, tokens: estimateTokens(text), shown: { project: pShown.length, session: sShown.length }, withheld }
 }

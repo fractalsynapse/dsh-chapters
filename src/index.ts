@@ -327,6 +327,13 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       harnessId: config.harnessId,
       coreRulesBudgetTokens: config.coreRulesBudgetTokens,
       rulesCoreBonus: config.rulesCoreBonus,
+      // #50 §7.4 — the doors read the HOST plane; the compaction checkpoint reads
+      // the realm row (same names, same defaults). There is no cross-plane channel
+      // to inject host config into a preset row, so a profile that overrides a cap
+      // sets it in both places; leaving one unset keeps the documented default.
+      projectRulesDisplayCap: config.projectRulesDisplayCap,
+      sessionRulesDisplayCap: config.sessionRulesDisplayCap,
+      rulesRelevance: config.rulesRelevance,
       scheduler,
       noteRoute: (r) => {
         hostRoute = r

@@ -301,12 +301,20 @@ test('registerChaptersTools registers every surface and disposes all of it', asy
     void ctx2
     // rebuild ctx pieces the registrar needs: reuse the world's shape via opts
     const registrar = { tools: { register: (d: { name: string }) => { registered.push(d.name); return () => { registered.splice(Math.max(0, registered.indexOf(d.name)), 1) } } } }
-    void registerChaptersTools(
+    const disposeAll = registerChaptersTools(
       { ...({ llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) }, agents: { create: async () => ({}) }, get: () => undefined, sessionProjections: { stateOf: () => 'chapters' }, logger: { warn: () => undefined } }), ...registrar } as never,
       w.store as never,
       { artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, toolResultDeferFloorTokens: 200, continuationBudgetRatio: 0.25, fallbackPreset: 'chapters' } as never,
     )
-    assert.deepEqual(registered.sort(), ['chapters_artifact', 'chapters_continue', 'chapters_fork', 'chapters_rule_propose', 'chapters_search', 'chapters_segment'].sort())
+    // THE pinned model surface. #50 added `chapters_rules` here and this row went
+    // red first — which is the point: a tool that reaches the model must be added
+    // deliberately (it changes every replay prefix, so the tape re-record is a
+    // decision, not a surprise).
+    assert.deepEqual(registered.sort(), ['chapters_artifact', 'chapters_continue', 'chapters_fork', 'chapters_rule_propose', 'chapters_rules', 'chapters_search', 'chapters_segment'].sort())
     assert.ok(registered.includes('chapters_segment'))
+    // "and disposes all of it" was in the title; now it is in the assertions — a
+    // leaked disposer only shows up after a profile reload doubles the surface
+    disposeAll()
+    assert.deepEqual(registered, [], 'every registration has a disposer on the unload path')
   } finally { w.dispose() }
 })

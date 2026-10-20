@@ -11,7 +11,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
-import { buildRulesSection } from './rules.ts'
+import { queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
 import { DEFAULT_CLONE_DIR } from './sync.ts'
 import { lineageOf, type ChapterRange, type SessionEventLike, type ToolResultOverride } from './types.ts'
@@ -69,6 +69,14 @@ export interface ToolsConfig extends ContinueConfig {
    * => the rules section is never composed (off, no magic default). */
   harnessId?: string
   coreRulesBudgetTokens?: number
+  /** #50 §7.4: per-tier display caps on rules rendered into a rebuilt head.
+   * Absent (a profile predating the keys) ⇒ no cap, i.e. the pre-#50 door
+   * behavior — never a number invented here (no hardcoded tunables). */
+  projectRulesDisplayCap?: number
+  /** #50 §7.4: session-tier display cap. */
+  sessionRulesDisplayCap?: number
+  /** #50 §7.4: topic-overlap selection on; off ⇒ category→id order. */
+  rulesRelevance?: boolean
   /** P3 §8: search bonus for effective-core rules on this machine. */
   rulesCoreBonus?: number
   /** The caller's routed model on every tool use — feeds the enrichment
@@ -94,7 +102,7 @@ export function buildChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
   config: ToolsConfig,
-): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand } {
+): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand } {
 
   const portsFor = async (caller: CallerAgent): Promise<ContinuePorts> => {
     const cwd = caller.session.header.cwd ?? ''
@@ -311,7 +319,7 @@ export function buildChaptersTools(
           await config.scheduler.pullFor(cwd).catch(() => undefined) // §5.1: pull → archive → push
         }
         const line = projectLineFor(caller)
-        const rs = rulesSectionFor(caller)
+        const rs = await rulesSectionFor(caller, 'continue')
         if (rs.refusal !== undefined) return { ok: false as const, reason: rs.refusal }
         const result = await runContinue(ports, {
           callerSessionId: caller.session.id,
@@ -372,7 +380,7 @@ export function buildChaptersTools(
           await config.scheduler.pullFor(cwd).catch(() => undefined)
         }
         const line = projectLineFor(caller)
-        const rs = rulesSectionFor(caller)
+        const rs = await rulesSectionFor(caller, 'branch')
         if (rs.refusal !== undefined) return { ok: false as const, reason: rs.refusal }
         const result = await runFork(ports, {
           callerSessionId: caller.session.id,
@@ -457,7 +465,7 @@ export function buildChaptersTools(
         const parentTitle = [...events].reverse()
           .find((e) => e.type === 'session/title')?.data?.title as string | undefined
         const title = trimmed !== '' ? trimmed : `${parentTitle ?? `Chapters ${door.noun}`} \u2014 ${door.noun}`
-        const rsCmd = rulesSectionFor(agent)
+        const rsCmd = await rulesSectionFor(agent, door.intent)
         if (rsCmd.refusal !== undefined) return { kind: 'error' as const, text: `${door.name} refused: ${rsCmd.refusal}` }
         const callerArgs = {
           callerSessionId: agent.session.id,
@@ -611,15 +619,37 @@ export function buildChaptersTools(
     }
   }
 
-  /** P3 §7.3: this machine's rules block for a continuation notice. */
-  const rulesSectionFor = (agent: CallerAgent): { section?: string; refusal?: string } => {
+  /**
+   * §7.3/§7.6: the rules block for a head this door is about to build, through
+   * the ONE renderer the compaction checkpoint also uses
+   * (`session-rules.renderRulesBlock`) — a session must never see two rule sets
+   * depending on which path rebuilt its head.
+   *
+   * `intent` is the whole semantic difference between the two doors, and it was
+   * already the axis that decides plan bytes (docs/plans-carriage.md §§ 9–13): a
+   * CONTINUATION extends the same stream of work, so it inherits the session
+   * tier; a BRANCH splits a new direction, so it gets the project tier and ZERO
+   * session bytes — a branch is not an order.
+   */
+  const rulesSectionFor = async (agent: CallerAgent, intent: 'continue' | 'branch'): Promise<{ section?: string; refusal?: string }> => {
     try {
       if (config.harnessId === undefined || config.coreRulesBudgetTokens === undefined) return {}
       const cwd: string = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+      if (cwd === '') return {}
       const best = projectForCwd(store.projects(), cwd)
       if (best === undefined) return {}
-      const built = buildRulesSection(path.join(cwd, DEFAULT_CLONE_DIR), {
-        projectKey: best.projectKey, harnessId: config.harnessId, budgetTokens: config.coreRulesBudgetTokens,
+      const built = await renderRulesBlock({
+        mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+        storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),
+        projectKey: best.projectKey,
+        harnessId: config.harnessId,
+        budgetTokens: config.coreRulesBudgetTokens,
+        ...(config.projectRulesDisplayCap !== undefined ? { projectCap: config.projectRulesDisplayCap } : {}),
+        ...(config.sessionRulesDisplayCap !== undefined ? { sessionCap: config.sessionRulesDisplayCap } : {}),
+        relevance: config.rulesRelevance ?? true,
+        includeSession: intent === 'continue',
+        store,
+        sessionId: agent.session.id,
       })
       if (built.kind === 'none') return {}
       if (built.kind === 'refusal') {
@@ -798,7 +828,75 @@ export function buildChaptersTools(
     },
   })
 
-  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, forkCommand, continueCommand, saveCommand }
+  // ------------------------------------------------- #50 §7.9: the assembly door
+  //
+  // The ONE rule verb a session is told to reach for. Capture and carriage are
+  // invisible to the model (§7.9); this is the exception, because a tool an
+  // instruction never names does not exist to a small model — and because the
+  // head can only show a capped, relevance-selected subset, so "what actually
+  // applies to THIS task" needs a door that answers with the text.
+
+  const chaptersRules = defineTool({
+    name: 'chapters_rules',
+    description:
+      'Assemble the rules that govern a task: the approved project tier plus this session tree\u2019s '
+      + 'captured session rules, verbatim, within budget. Run it BEFORE starting a task. The answer '
+      + 'names what it withheld, so "you are seeing all of them" is a fact rather than a guess.',
+    parameters: {
+      query: { type: 'string', required: true, description: 'What the session is about to do, in a sentence or two \u2014 it selects relevance.' },
+      scope: { type: 'string', description: "'all' (default) or 'project' to see only the shared tier a branch would inherit." },
+      maxTokens: { type: 'number', description: 'Token ceiling for this answer (defaults to coreRulesBudgetTokens).' },
+    },
+    output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
+    async execute(args: { query: string; scope?: string; maxTokens?: number }, exec: ToolRunContext) {
+      const caller = callerOf(exec)
+      if ('reason' in caller) return { ...CALLER_MISSING }
+      if (config.harnessId === undefined || config.coreRulesBudgetTokens === undefined) {
+        return { ok: false as const, error: 'rules surface not configured (harnessId/budget absent)' }
+      }
+      const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+      const best = cwd === '' ? undefined : projectForCwd(store.projects(), cwd)
+      try {
+        const built = await renderRulesBlock({
+          mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+          storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),
+          projectKey: best?.projectKey ?? '',
+          harnessId: config.harnessId,
+          budgetTokens: args.maxTokens ?? config.coreRulesBudgetTokens,
+          ...(config.projectRulesDisplayCap !== undefined ? { projectCap: config.projectRulesDisplayCap } : {}),
+          ...(config.sessionRulesDisplayCap !== undefined ? { sessionCap: config.sessionRulesDisplayCap } : {}),
+          relevance: config.rulesRelevance ?? true,
+          includeSession: args.scope !== 'project',
+          // the QUERY selects here (that is the door's whole job), not the session's
+          // own recent signatures — which is what a rebuilt head selects on
+          topicsOverride: queryTopics(args.query),
+          store,
+          sessionId: caller.session.id,
+        })
+        if (built.kind === 'refusal') return { ok: false as const, error: built.reason }
+        if (built.kind === 'none') {
+          // §7.8: "nothing applies" and "nothing is reachable" are different answers
+          return {
+            ok: true as const, shown: { project: 0, session: 0 }, withheld: { project: 0, session: 0 }, text: '',
+            note: best === undefined
+              ? `no knowledge project resolves for ${cwd} \u2014 nothing is approved here AND no pool is linked (/chapters-link); session rules still apply once captured`
+              : 'no active rules: approved project rules need a human approve ON THIS MACHINE (/chapters-rule list --all), and this session tree has captured none',
+          }
+        }
+        const note = [
+          built.withheld.project + built.withheld.session > 0
+            ? `withheld ${built.withheld.project} project / ${built.withheld.session} session rule(s) over the display caps \u2014 /chapters-rule active lists all, pin one to keep it in every head`
+            : 'nothing withheld: this is the complete active set',
+          ...(best === undefined ? ['no linked project for this cwd \u2014 the project tier is empty by construction (/chapters-link)'] : []),
+        ]
+        return { ok: true as const, shown: built.shown, withheld: built.withheld, text: built.text, tokens: built.tokens, note: note.join('; ') }
+      } catch (error) {
+        return { ok: false as const, error: `chapters_rules failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+      }
+    },
+  })
+
+  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand }
 }
 
 export function registerChaptersTools(
@@ -813,6 +911,7 @@ export function registerChaptersTools(
   const disposeSearch = ctx.tools.register(built.chaptersSearch)
   const disposeArtifact = ctx.tools.register(built.chaptersArtifact)
   const disposeRulePropose = ctx.tools.register(built.chaptersRulePropose)
+  const disposeRules = ctx.tools.register(built.chaptersRules)
   let disposeCommand: (() => void) | null = null
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
   if (commands?.register !== undefined) {
@@ -834,5 +933,5 @@ export function registerChaptersTools(
   // so behaviour was right — but it reads as a typo and would silently break if anyone
   // reordered the line. Semicolons, since this is the unload path a test cannot cover.
   return () => { disposeSegment(); disposeContinue(); disposeFork(); disposeSearch();
-    disposeArtifact(); disposeRulePropose(); disposeCommand?.() }
+    disposeArtifact(); disposeRulePropose(); disposeRules(); disposeCommand?.() }
 }

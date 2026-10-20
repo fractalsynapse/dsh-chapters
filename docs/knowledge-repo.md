@@ -512,10 +512,15 @@ Three render classes, in this order, under `projectRulesDisplayCap` / `sessionRu
 1. **Pinned** (`pinned: true`, human-set via `/chapters-rule pin`) — always rendered, first.
    Ground rules are *old* by definition, so any scheme that ranks by recency or topicality evicts
    them first; the pinned class is the floor that keeps that from being a surprise.
-2. **Relevance-selected** — the existing scorer (`search.rankEntries` over `kind: rule` entries,
-   `rulesCoreBonus` for this machine's core set) applied to the archived span's stored topic
-   signatures and, for the on-demand path, to the caller's query. Same scorer as §8, never a
-   second ranking implementation.
+2. **Relevance-selected** — `rules.selectRules`, the ONE selector for what a head shows:
+   pinned first, then topicality against a term bag, then the pre-#50 category→id order. The term
+   bag is the archived span's stored turn signatures for a rebuilt head and the task query for
+   the `chapters_rules` door — both paths share the selector, so the head and the door can never
+   disagree about what applies. `search.rankEntries` stays the *corpus* scorer (§8): ranking an
+   unbounded archive against a query and selecting a bounded set for one head are different jobs,
+   and this round kept one implementation of each rather than bending a rebuilt head to read index
+   shards. What is forbidden is a **third** rule-picker living in a door or a checkpoint — a
+   source-shape row fails if either stops calling the shared builder.
 3. **Index-only** — everything else: category + one-line essence + path, loadable. The corpus
    grows without bound; the head does not.
 
@@ -681,10 +686,13 @@ chapters_search { query: string, maxTokens?: number, topic?: string, crossProjec
   opens (chapters in `.dsh-chapters/`, shards in `.dsh-knowledge/index/`). The search tool
   adds a scorer and a formatter; it adds no new way to read.
 
-**`chapters_rules` — the same scorer, assembled (§7.4, §7.9).** One door whose output is *the text
-of the rules that apply to this task*, verbatim, within budget, plus the withheld count. It reuses
-`search.rankEntries` and nothing else; a second rule-ranking implementation is forbidden by the
-same argument that made `exit_plan_mode` and `chapters_continue` share one builder.
+**`chapters_rules` — the head's selector, assembled (§7.4, §7.9).** One door whose output is *the
+text of the rules that apply to this task*, verbatim, within budget, plus the per-tier counts it
+withheld. It calls `renderRulesBlock` — the renderer the continuation notice and the compaction
+checkpoint also use — and nothing else; a rule-picker living in a door or a checkpoint is forbidden
+by the same argument that made `exit_plan_mode` and `chapters_continue` share one builder. §7.4
+keeps `rankEntries` (corpus ranking) and `selectRules` (head selection) as one implementation of
+each genuinely different job.
 
 - **It reads both corpora, which is where the trap is.** Project rules come from the pool mirror
   under `rules/<projectKey>/<harness>/`; session rules live in the **workspace store** under

@@ -185,6 +185,11 @@ export function assembleNotice(input: {
       '- Chapter detail: open its path above with the read tool.',
       "- A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — action 'toc' | 'search' | 'read'.",
       "- Anything else on this project — other sessions' work, archived plans (`kind: plan`), curated rules: chapters_search.",
+      // #50 §7.9: the one rule verb a session is told to reach for, and WHEN to
+      // reach for it. This line lives in the notice, not the persona, on purpose:
+      // notice prose costs the tape corpus nothing (measured 2026-10-11), while a
+      // persona edit forces a re-record of every affected project.
+      '- Before starting a task: chapters_rules with the task description — it returns the rules that actually apply, and says what it withheld.',
     )
   }
   // NOTE: CodeGraph integration is INVISIBLE to the model. It enriches

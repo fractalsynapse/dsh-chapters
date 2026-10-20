@@ -26,7 +26,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { isHumanAuthored, stripReminderSpans } from './injections.ts'
 import { turnSpanOf } from './signature.ts'
-import { parseRuleFile, parseRuleMarkers, renderRuleFile, ruleSlug, type RuleRecord } from './rules.ts'
+import { buildRulesSection, parseRuleFile, parseRuleMarkers, renderRuleFile, ruleSlug, type RuleRecord, type RulesSectionResult } from './rules.ts'
 import { redactText } from './redact.ts'
 import type { SessionEventLike } from './types.ts'
 
@@ -197,6 +197,72 @@ export async function ancestorSessionIds(
     cursor = state.parentSession ?? undefined
   }
   return out.reverse()
+}
+
+/** Turn a task description into the relevance term set §7.4 selects on — the same
+ * normalization the rule-term index uses, so a query and a rule body meet in one
+ * vocabulary instead of two. */
+export function queryTopics(query: string): string[] {
+  const out: string[] = []
+  for (const tok of query.toLowerCase().split(/[^a-z0-9]+/)) {
+    if (tok.length < 3 || tok.length > 28 || out.includes(tok)) continue
+    out.push(tok)
+  }
+  return out.slice(0, 40)
+}
+
+/** The registry view the renderer needs — kept structural so tests can hand it a map. */
+export interface RulesStoreLike {
+  get(id: string): Promise<{ parentSession: string | null; collections: { terms: string[] }[] } | undefined>
+}
+
+export interface RenderRulesOpts {
+  mirrorDir: string
+  storeDir: string
+  projectKey: string
+  harnessId: string
+  budgetTokens: number
+  projectCap?: number | undefined
+  sessionCap?: number | undefined
+  /** §7.4 relevance on; off ⇒ deterministic category→id order (the tape order). */
+  relevance: boolean
+  /** §7.6: a BRANCH head carries the project tier only — zero session bytes. */
+  includeSession: boolean
+  /** When supplied, selection uses THESE terms (the assembly door passes the
+   * task query) instead of the session's own recent signatures. */
+  topicsOverride?: readonly string[] | undefined
+  store: RulesStoreLike
+  sessionId: string
+}
+
+/**
+ * THE one rules renderer for a rebuilt head. Both doors (continue / fork) and the
+ * compaction checkpoint call this and nothing else, so the same session can never
+ * see two different rule sets depending on which path rebuilt its head — the same
+ * one-builder discipline as `search.rankEntries` and `deterministicCommand`.
+ *
+ * Relevance topics come from the session’s OWN stored turn signatures:
+ * deterministic, already on disk, zero model tokens (§1 invariant 1).
+ */
+export async function renderRulesBlock(opts: RenderRulesOpts): Promise<RulesSectionResult> {
+  const ancestors = opts.includeSession
+    ? new Set(await ancestorSessionIds(async (id) => await opts.store.get(id), opts.sessionId))
+    : new Set<string>()
+  const state = opts.relevance ? await opts.store.get(opts.sessionId) : undefined
+  const topics = opts.topicsOverride !== undefined && opts.topicsOverride.length > 0
+    ? opts.topicsOverride
+    : opts.relevance && state !== undefined
+      ? state.collections.slice(-6).flatMap((c) => c.terms).slice(0, 40)
+      : undefined
+  return buildRulesSection(opts.mirrorDir, {
+    projectKey: opts.projectKey,
+    harnessId: opts.harnessId,
+    budgetTokens: opts.budgetTokens,
+    projectCap: opts.projectCap,
+    sessionCap: opts.sessionCap,
+    ...(opts.includeSession ? { storeDir: opts.storeDir, ancestorSessions: ancestors } : {}),
+    ...(topics !== undefined ? { relevanceTopics: topics } : {}),
+  })
 }
 
 /**
