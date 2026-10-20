@@ -637,7 +637,27 @@ export function buildChaptersTools(
       const cwd: string = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? ''
       if (cwd === '') return {}
       const best = projectForCwd(store.projects(), cwd)
-      if (best === undefined) return {}
+      // §7.8: a session with NO project resolves normally renders zero rule bytes —
+      // and silence is exactly what this round exists to remove. But adding a
+      // "nothing is linked" line to EVERY unlinked workspace's head would spend real
+      // bytes on a warning most sessions do not need, so the line appears only when
+      // the session tier IS governing the head: then "0 project rules" is a fact the
+      // child must not misread as "the team approved nothing".
+      if (best === undefined) {
+        const orphan = await renderRulesBlock({
+          mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+          storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),
+          projectKey: '',
+          harnessId: config.harnessId,
+          budgetTokens: config.coreRulesBudgetTokens,
+          relevance: config.rulesRelevance ?? true,
+          includeSession: intent === 'continue',
+          store,
+          sessionId: agent.session.id,
+        })
+        if (orphan.kind !== 'ok' || orphan.shown.session === 0) return {}
+        return { section: `0 project rules — this checkout resolves no knowledge project (${cwd}); your session rules below are local only. Link one with /chapters-link to inherit the team's.\n\n${orphan.kind === 'ok' ? orphan.text : ''}` }
+      }
       const built = await renderRulesBlock({
         mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
         storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),

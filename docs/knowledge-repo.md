@@ -543,7 +543,7 @@ rules, not a new policy):
   session rule at the existing `turn/end` listener — the same one the topic signatures collect on
   (r35j). It is not a new archive door (§12 of `docs/architecture.md`: five moments, extended in
   place, never copied). The rule body is the human's own words, verbatim.
-- **Enrichment — optional, idle-batched, `rulesEnrichment` default off.** The §6.1 pass gains a
+- **Enrichment — optional, idle-batched, `rulesEnrichment` default off** *(specified; the P3c remainder — the deterministic marker path above is what shipped)*. The §6.1 pass gains a
   `rules: [{ text, category, quote }]` output field, riding that pass's existing ladder:
   validation-before-commit, one retry, deterministic fallback, provenance chain, and the
   body-hash guard (it writes frontmatter-adjacent records, never chapter prose). **Only a rule
@@ -628,9 +628,17 @@ like governed:
 | Linked via TreeDX rather than git | key is the **pool location** (`treedx/<host>/<repo>`), not the workspace remote | report `projectKeySource` so git/treedx keyed checkouts are visibly different projects |
 | Fresh checkout, unlinked or not yet synced | no project ⇒ no rules at all | same explicit zero line, plus `/chapters-status` sync state |
 
-`projectKeySource` (`override | remote | path-derived`) rides `/chapters-status`, `/chapters-rule
-active`, and the zero-rules line. A session-scoped archive is unaffected by all of this — session
-rules never depend on remote identity.
+`projectKeySource` (`override | remote | path-derived`) rides **`/chapters-status`** as an
+`Identity:` line — naming the source AND where it came from (remote string / override / literal
+path) — and the divergence branch is its own warning: `⚠ THIS CHECKOUT RESOLVES A DIFFERENT
+PROJECT KEY … rules and chapters approved elsewhere will NOT appear here`. `/chapters-link`'s view
+reports the same fact. The continuation head carries the zero-rules statement **only when the
+session tier is governing that head**: bolting an "unlinked" line onto every unlinked workspace's
+notice would spend real bytes on a warning most sessions do not need, while a head that already
+carries local rules is exactly where a silent zero gets misread as "the team approved nothing".
+`/chapters-rule active` prints the tier counts on demand, and `chapters_rules` names a missing
+project in its note. A session-scoped archive depends on none of this — which is why an unlinked
+checkout still gets its own rules.
 
 ### 7.9 Command surface, and what the agent is told
 
@@ -819,10 +827,10 @@ No hardcoded tunables (existing hard rule). New config, all with defaults docume
 | `coreRulesBudgetTokens` | P3 §7.3 cap on the notice's core-rules block; overflow refuses with per-rule numbers | 1200 |
 | `sessionRulesEnabled` | §7.5: the deterministic `ADD RULE:` capture path (zero model tokens) | true |
 | `rulesMarkerPrefix` | §7.5 capture marker; matched at line start of **human-authored** messages only | `ADD RULE:` |
-| `rulesEnrichment` | §7.5 model-derived capture; rides the §6.2 idle batch, never per-turn; activation still requires a verbatim human quote | false |
+| `rulesEnrichment` | §7.5 model-derived capture — **SPECIFIED, NOT IMPLEMENTED** (P3c remainder). Would ride the §6.2 idle batch, never per-turn, and still require a verbatim human quote to activate | — (no key exists yet) |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | §7.4 per-tier count caps on rules **rendered** into a rebuilt head; anything dropped is announced by count, never silently | 12 / 12 |
 | `rulesRelevance` | §7.4 relevance selection on; off ⇒ deterministic category→id order (the order tapes were distilled against) | true |
-| `rulesConflictsModel` / `rulesConflictsEnabled` | §7.7 one bounded stream call, report-only; the `elicitedPlot` family — an explicit exception to zero-inference | conversation model / true |
+| — | §7.7 `/chapters-rule conflicts` has **no key of its own**: one bounded stream call on the conversation route the session already has (so it rides that route's cached prefix), report-only. No route yet ⇒ the verb refuses honestly. A gate of its own was rejected: a human types the verb, so `elicitedPlot`'s reason for a switch does not apply | — |
 | `rulesCoreBonus` | P3 §8 query-time rank bonus for rules effective-core on this machine (never baked into shared shards) | 0.15 |
 | `redaction.patterns` | additive to the built-in list (§9) | built-ins |
 | `search.defaultMaxTokens` | default pack size for `chapters_search` | small, config |

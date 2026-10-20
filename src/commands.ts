@@ -47,6 +47,9 @@ export interface HostCommandsConfig {
   /** Door 5 (issue #47): whether subagent settlements auto-archive. Reported in
    *  /chapters-status because it runs WITHOUT a human seeing it happen. */
   subagentAutoSave?: boolean
+  /** §7.8: fed to `resolveProject` so the identity line reports the SAME key the
+   * plugin binds by, not a naive re-derivation. */
+  projectKeyOverride?: string
 }
 
 type CommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string }
@@ -121,6 +124,20 @@ export function registerHostCommands(
             `Provider: ${rec.kind ?? 'git'}`,
             `Upstream: ${rec.remote}`,
             `Bound:    ${rec.slug} · key ${rec.projectKey} · since ${rec.linkedAt}`,
+            // §7.8 IDENTITY MUST FAIL LOUDLY. Project rules carry across checkouts
+            // because the key derives from the canonicalized REMOTE — so the four
+            // ways it can diverge (no remote ⇒ path-derived, a fork listed first,
+            // a TreeDX link keyed on the pool, an unlinked clone) are reported here
+            // rather than leaving a checkout silently owning its own namespace.
+            (() => {
+              const derived = resolveProject(cwd, config.projectKeyOverride !== undefined && config.projectKeyOverride !== '' ? config.projectKeyOverride : undefined)
+              const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
+                : derived.projectKeySource === 'override' ? 'config override'
+                  : `PATH ${cwd} (not the remote — unstable across machines)`
+              return derived.projectKey === rec.projectKey
+                ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
+                : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${rec.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`
+            })(),
             `Mirror:   ${fs.existsSync(mirrorAbs) ? DEFAULT_CLONE_DIR : '(not created yet)'}` +
               (treedx ? `  head ${head ?? (tstate === null ? 'not cloned' : 'empty repo')}${tstate?.offline === true ? ' · OFFLINE (push deferred)' : ''}` : `  branch ${head ?? 'main'}`) +
               (origin !== null && origin !== (treedx ? rec.remote : local ? resolveLocalUpstreamPath(rec.remote, cwd) : rec.remote) ? `  [origin drift: ${origin} — will rebuild]` : ''),
@@ -254,6 +271,21 @@ export function registerHostCommands(
         lines.push(`Remote: ${project.remote}`)
         try { lines.push(`Provider: ${selectProvider(project).describe(project)}`) }
         catch { lines.push('Provider: (kind unrecognized — sync will refuse loudly, nothing silently reroutes)') }
+        // #50 §7.8 IDENTITY MUST FAIL LOUDLY. Project rules carry across checkouts
+        // because the key is UUIDv5 over the canonicalized REMOTE — so the ways it
+        // can silently diverge (no readable remote ⇒ path-derived, a fork listed
+        // before origin, a TreeDX link keyed on the pool location) are reported
+        // here instead of leaving a checkout owning a private rules namespace while
+        // its developer believes the team's rules apply.
+        {
+          const derived = resolveProject(cwd, config.projectKeyOverride !== undefined && config.projectKeyOverride !== '' ? config.projectKeyOverride : undefined)
+          const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
+            : derived.projectKeySource === 'override' ? 'config override'
+              : `PATH ${cwd} (not the remote — unstable across machines)`
+          lines.push(derived.projectKey === project.projectKey
+            ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
+            : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${project.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`)
+        }
         lines.push(pending ? 'Sync: a push is pending (debounced)' : `Sync: ${status?.mode ?? 'never run'}${pending ? '' : ''}`)
       }
       if (status !== null) {

@@ -174,3 +174,30 @@ test('one builder: neither the doors nor the checkpoint calls buildRulesSection 
     assert.ok(!/buildRulesSection\s*\(/.test(src), `${file} calls buildRulesSection directly — two selection paths`)
   }
 })
+
+test('#50 §7.8 the assembly door with NO linked project still shows and names the session tier', async () => {
+  const f = fixture()
+  try {
+    const store = {
+      get: async (id: string) => ({ parentSession: id === 'sess-d' ? 'sess-parent' : null, collections: [] }),
+      put: async () => {},
+      projects: () => [] as Iterable<[string, never]>,
+      sessions: () => [].entries(),
+      getSetting: () => undefined, putSetting: async () => {},
+      rules: () => new Map<string, RuleRecord>().entries(), getRule: () => undefined, putRule: async () => {},
+    }
+    const ctx = { get: () => undefined, sessionProjections: { stateOf: () => undefined }, logger: { warn: () => () => {} } }
+    const config = {
+      artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, toolResultDeferFloorTokens: 200,
+      continuationBudgetRatio: 0.25, fallbackPreset: 'chapters', harnessId: 'hD', coreRulesBudgetTokens: 1200,
+      scheduler: { schedule: () => {}, run: async () => ({}), pullFor: async () => ({ ok: true, detail: '' }), hasPending: () => false, drain: async () => {} },
+    }
+    const built = buildChaptersTools(ctx as never, store as never, config as never)
+    // the CALLER sits in the fixture cwd, where a session rule exists but no project is bound
+    const caller = { id: 'sess-d', session: { id: 'sess-d', header: { cwd: f.cwd }, snapshotEvents: () => [] } }
+    const r = await built.chaptersRules.execute({ query: 'anything at all here' }, { agent: caller } as never) as { ok: boolean; text?: string; note?: string }
+    assert.equal(r.ok, true)
+    assert.ok((r.text ?? '').includes(SESSION_BODY), 'the local tier governs an unlinked checkout — that is the point of it')
+    assert.match(r.note ?? '', /no linked project/, r.note ?? '')
+  } finally { f.dispose() }
+})

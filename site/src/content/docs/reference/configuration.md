@@ -28,12 +28,12 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `vocabCoMin` / `vocabOverlapMin` | 3 / 0.5 | trust thresholds for emergent vocabulary |
 | `coreRulesBudgetTokens` | 1200 | the CORE RULES block in notices — **refuses with numbers, never clips** |
 | `rulesCoreBonus` | 0.15 | per-machine rank bonus for core-approved rules |
-| `sessionRulesEnabled` *(#50)* | true | deterministic `ADD RULE:` capture into the local session tier — zero model tokens, never staged to the pool |
-| `rulesMarkerPrefix` *(#50)* | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
-| `rulesEnrichment` *(#50)* | false | model-derived capture, riding the idle-batched enrichment pass; auto-activates **only** on a verbatim quote of your own bytes |
-| `projectRulesDisplayCap` / `sessionRulesDisplayCap` *(#50)* | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
-| `rulesRelevance` *(#50)* | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
-| `rulesConflictsEnabled` / `rulesConflictsModel` *(#50)* | true / `''` (conversation route) | `/chapters-rule conflicts` — one bounded stream call, **report-only**, never edits a rule |
+| `sessionRulesEnabled` | true | deterministic `ADD RULE:` capture into the local session tier — zero model tokens, never staged to the pool |
+| `rulesMarkerPrefix` | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
+| `rulesEnrichment` | — | model-derived capture (**specified in #50, not implemented yet**) — would ride the idle-batched enrichment pass and auto-activate **only** on a verbatim quote of your own bytes |
+| `projectRulesDisplayCap` / `sessionRulesDisplayCap` | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
+| `rulesRelevance` | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
+| — | — | `/chapters-rule conflicts` has **no key of its own**: it runs one bounded stream call on the conversation route the session already has, **report-only**, never edits a rule. No route ⇒ the verb refuses honestly |
 | `continuationBudgetRatio` | 0.25 | TOC + note share of the window *remaining after the header* |
 | `chapterTokenTarget` / `chapterLimit` | 8000 / 8000 | soft per-chapter size / hard split |
 | `mergeThreshold` | 0.3 | turn→chapter topic-merge τ (archive-time only) |

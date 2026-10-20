@@ -346,6 +346,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       artifactStoreRoot: config.artifactStoreRoot,
       subagentAutoSave: config.subagentAutoSave,
       harnessId: config.harnessId,
+      projectKeyOverride: config.projectKeyOverride,
       scheduler,
       enrich,
       rules: (cwd, args, sessionId) => rulesCommand({
