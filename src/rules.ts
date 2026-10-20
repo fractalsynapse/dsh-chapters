@@ -336,6 +336,22 @@ export function collectStoreRules(storeDir: string, harnessId: string): MirrorRu
 }
 
 /**
+ * §7.5 transport predicate: is this authored rule file part of the machine-local
+ * session tier? Reads it through the SAME parser the collectors use — one
+ * definition of `scope`, never a second lightweight guess that can drift from it.
+ * An unreadable or non-rule file is treated as project (staged), because the
+ * exclusion must be a decision about the session tier specifically, not a
+ * side-effect of a parse miss.
+ */
+export function isSessionRuleFile(absPath: string): boolean {
+  try {
+    return parseRuleFile(fs.readFileSync(absPath, 'utf8'))?.scope === 'session'
+  } catch {
+    return false
+  }
+}
+
+/**
  * §7.5 activation, DERIVED rather than approved: a session rule binds exactly
  * one session tree — its own session must be on the current session's ancestor
  * path — and a human `revoke` is the one fact that can switch it off (files are

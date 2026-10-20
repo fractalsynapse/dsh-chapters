@@ -16,6 +16,7 @@ import { selectProvider, type ProviderKind, type SyncProvider } from './provider
 import { buildIndexShards, entryFromChapter, parseCuration, stitchFragments, type CurationFact, type IndexEntry, type IndexManifest } from './indexing.ts'
 import { analyzeTopics, planAppends, type VocabOpts } from './vocabulary.ts'
 import { resolveStoreRoot } from './store.ts'
+import { isSessionRuleFile } from './rules.ts'
 
 /** A linked knowledge project (record §2.1, §8): one record per linked
  * workspace cwd; deepest-cwd match resolves the active project. */
@@ -202,13 +203,23 @@ export function planStoreToRepo(storeDir: string, projectKey: string): { abs: st
   }
   // rules/<harness>/*.md -> rules/<projectKey>/<harness>/*.md (record §7.1:
   // rules are chapters of a different kind, same transport, author-partitioned)
+  //
+  // §7.5 (issue #50): the SESSION tier is skipped HERE and nowhere else. Session
+  // rules are machine-local directives captured from one person's chat; the pool
+  // is a team's memory. Staging them would put one machine's mis-generalizations
+  // in everyone else's review queue — the exact "growing list of potential
+  // rules" pain the tier exists to avoid. This is the single store→repo path
+  // mapper, so no provider verb and no second filter: git and TreeDX both get
+  // the exclusion for free (both proven in integration).
   const rulesRoot = path.join(storeDir, 'rules')
   if (fs.existsSync(rulesRoot)) {
     for (const h of fs.readdirSync(rulesRoot, { withFileTypes: true })) {
       if (!h.isDirectory()) continue
       for (const f of fs.readdirSync(path.join(rulesRoot, h.name))) {
         if (!f.endsWith('.md')) continue
-        push(path.join(rulesRoot, h.name, f), path.join('rules', projectKey, h.name, f))
+        const abs = path.join(rulesRoot, h.name, f)
+        if (isSessionRuleFile(abs)) continue
+        push(abs, path.join('rules', projectKey, h.name, f))
       }
     }
   }
