@@ -174,6 +174,32 @@ export function captureSessionRules(deps: CaptureDeps): CaptureResult {
 }
 
 /**
+ * The current session's ancestor path, root-first — the async mirror of
+ * `registry.ancestorPath`, which takes a synchronous getter the realm does not
+ * have. §7.5 activation is "this rule's session is on MY path", so every render
+ * site needs this walk; a missing parent stops the walk instead of throwing,
+ * because a rules render must never break a compaction (the same containment
+ * the notice path uses).
+ */
+export async function ancestorSessionIds(
+  get: (id: string) => Promise<{ parentSession: string | null } | undefined>,
+  sessionId: string,
+  maxDepth = 1000,
+): Promise<string[]> {
+  const out: string[] = []
+  const seen = new Set<string>()
+  let cursor: string | undefined = sessionId
+  while (cursor !== undefined && !seen.has(cursor) && seen.size < maxDepth) {
+    seen.add(cursor)
+    out.push(cursor)
+    const state = await get(cursor)
+    if (state === undefined) break
+    cursor = state.parentSession ?? undefined
+  }
+  return out.reverse()
+}
+
+/**
  * The `turn/end` listener (the same boundary the topic signatures collect on —
  * §7.5: this extends the existing door, it is not a sixth archive moment).
  *

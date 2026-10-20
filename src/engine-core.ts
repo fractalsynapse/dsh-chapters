@@ -379,10 +379,21 @@ export function planSummarize(
    * session — i.e. the committed tapes. Plans are new, so carrying them is free.
    */
   planCarry: string | null = null,
+  /**
+   * #50 §7.6 — the rules block carried across this checkpoint, already rendered
+   * by the ONE builder that renders it for the notice too (`rules.buildRulesSection`).
+   * This is the hole the round exists to close: `leadSections` was
+   * `[planSection, plotSection]`, so a plan and a plot survived a compaction and a
+   * RULE did not. Null (nothing active, or the corpus unreadable) renders ZERO
+   * bytes — which is what keeps every committed plot-carrying checkpoint intact.
+   */
+  rulesCarry: string | null = null,
 ): { plan: SummarizePlan; state: SessionState } {
   const planSection = planCarry !== null && planCarry.trim() !== ''
     ? `Active plan — carried across this checkpoint (it is STILL the work directive):\n\n${planCarry.trim()}`
     : null
+  const rulesSection = rulesCarry !== null && rulesCarry.trim() !== '' ? rulesCarry.trim() : null
+  const leadSections0 = [planSection, rulesSection].filter((x): x is string => x !== null && x !== '')
   const blocks = extractCheckpointBlocks(input.messages)
   const { bullets, carriedProse } = parseTocState(blocks)
   const identity = deriveIdentity(input.messages, blocks.length > 0)
@@ -413,7 +424,9 @@ export function planSummarize(
     }
     return {
       plan: {
-        tocText: planSection === null ? composedParts.join('\n\n') : `${planSection}\n\n${composedParts.join('\n\n')}`,
+        tocText: leadSections0.length === 0
+          ? composedParts.join('\n\n')
+          : `${leadSections0.join('\n\n')}\n\n${composedParts.join('\n\n')}`,
         numbers: reserved.numbers,
         chapter: { title: chapters[0]!.title, summary: chapters[0]!.summary, path: chapters[0]!.path },
         chapters,
@@ -439,7 +452,7 @@ export function planSummarize(
   const plotSection = plot !== null && plot.trim() !== ''
     ? `Working plot (model-authored, carried across this checkpoint):\n\nPLOT: ${plot.trim()}\n\n(If it has gone stale, revise it in your next reply.)`
     : null
-  const leadSections = [planSection, plotSection].filter((x): x is string => x !== null && x !== '')
+  const leadSections = [planSection, rulesSection, plotSection].filter((x): x is string => x !== null && x !== '')
   const tocText = leadSections.length === 0 ? parts.join('\n\n') : `${leadSections.join('\n\n')}\n\n${parts.join('\n\n')}`
 
   return {

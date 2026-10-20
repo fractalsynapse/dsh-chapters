@@ -43,7 +43,9 @@ import { createTreedxProvider } from './treedx/provider.ts'
 import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
 import { hostname } from 'node:os'
-import { makeRuleCaptureListener } from './session-rules.ts'
+import path from 'node:path'
+import { makeRuleCaptureListener, ancestorSessionIds } from './session-rules.ts'
+import { buildRulesSection } from './rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
@@ -551,7 +553,18 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       }
     }
 
-    const { plan, state: next } = planSummarize(session, state, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry)
+    // #50 §7.6: the rules ride the checkpoint the way the plot and the plan do.
+    // Anything that goes wrong here DEGRADES TO NOTHING and is reported on the
+    // operator channel — the compaction critical path stays zero-model-token and
+    // never fails because of a rules read (§1 invariant 1, §7.3's non-blocking rule).
+    let rulesCarry: string | null = null
+    try {
+      rulesCarry = await this.#rulesForCheckpoint(session)
+    } catch (error) {
+      this.#diagnostic(`dsh-chapters: rule carriage skipped (${String(error)}) — the archive still holds every rule`)
+    }
+
+    const { plan, state: next } = planSummarize(session, state, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry, rulesCarry)
     const stored = rememberPlan(next, cid, {
       number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
       ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
@@ -693,6 +706,48 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     } catch (error) {
       this.#diagnostic(`dsh-chapters: chapter finalization deferred (session ${session.id}): ${String((error as Error)?.stack ?? error)}`)
     }
+  }
+
+  /**
+   * §7.3/§7.6: the block this session's rebuilt head should carry, from the ONE
+   * builder that renders it for the notice too — a second rule-ranking or
+   * rule-selecting implementation is forbidden (record §8: two doors, one
+   * scorer). Zero bytes when nothing is active.
+   *
+   * Relevance topics come from the session's OWN stored turn signatures
+   * (deterministic, already on disk, no model call), newest last. With
+   * `rulesRelevance` off the selection falls back to category→id order, which is
+   * the order the tapes were distilled against.
+   */
+  async #rulesForCheckpoint(session: EngineSession): Promise<string | null> {
+    const cwd = (session as { header?: { cwd?: string } }).header?.cwd
+    if (cwd === undefined || cwd === '') return null
+    const { store } = await this.store()
+    const harness = this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()
+    const project = projectForCwd(store.projects(), cwd)
+    const state = await store.get(session.id)
+    const ids = await ancestorSessionIds(async (id) => await store.get(id), session.id)
+    const topics = this.ruleCfg.relevance && state !== undefined
+      ? state.collections.slice(-6).flatMap((c) => c.terms).slice(0, 40)
+      : undefined
+    const built = buildRulesSection(path.join(cwd, DEFAULT_CLONE_DIR), {
+      projectKey: project?.projectKey ?? '',
+      harnessId: harness,
+      budgetTokens: this.ruleCfg.budgetTokens,
+      storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+      ancestorSessions: new Set(ids),
+      projectCap: this.ruleCfg.projectCap,
+      sessionCap: this.ruleCfg.sessionCap,
+      ...(topics !== undefined ? { relevanceTopics: topics } : {}),
+    })
+    if (built.kind === 'none') return null
+    if (built.kind === 'refusal') {
+      // announced, never clipped: the head says the rules did not fit rather
+      // than silently carrying none of them
+      this.#diagnostic(`dsh-chapters: rules over budget at this checkpoint — ${built.reason}`)
+      return `Rules NOT carried into this checkpoint (their token budget was exceeded, so nothing was clipped): ${built.reason}`
+    }
+    return built.text
   }
 
   /**
