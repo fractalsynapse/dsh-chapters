@@ -4,11 +4,12 @@ description: Two tiers of durable agent steering — team-approved project rules
 lastUpdated: true
 ---
 
-> **Status.** Everything under *Project rules* ships today. Everything under *Session rules* is the
-> design approved in [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50) and specified in
-> [the record §7](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md) —
-> it is documented here first because the docs are the interface lock, not because the behavior is
-> live. Where the two differ, this page says which is which.
+> **Status.** Both tiers ship. The *project* tier is what has been running since P3; the *session*
+> tier is [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50), specified in
+> [the record §7](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md).
+> What is **not** yet witnessed anywhere is a live small model doing the mining on real hardware —
+> the gate is proven against fixtures, and the browser-plane acceptance is blocked on a host-lock
+> move (see `docs/backlog.md`). Nothing on this page depends on that being done.
 
 Rules are short, category-tagged instructions — "check the archive before starting", "always run the
 tape replay before tagging" — the steering wheel for agent behavior on a project. They are **chapters
@@ -63,19 +64,22 @@ fresh clone that has not been linked or synced has no rules at all. Those four a
 inferred: the head states `0 project rules — this checkout resolves project … from …`, and
 `/chapters-status` reports `projectKeySource`. Ungoverned must never look like governed.
 
-## Session rules *(specified in #50)*
+## Session rules
 
 ### Capture, at two deliberate speeds
 
 - **`ADD RULE: <text>`** at the start of a line in one of your own messages becomes an active
   session rule immediately, with **zero model tokens** — a deterministic parse on the same turn
   boundary the topic signatures use. The rule body is your sentence, verbatim.
-- **Model capture** is a setting (`rulesEnrichment`, off by default) riding the existing
-  idle-batched enrichment pass. It runs *after* a chapter is archived, so a model-derived rule
-  arrives at the next boundary, not mid-turn — the local model server is single-slot, and per-turn
-  work would queue against your own conversation. **A model-derived rule only auto-activates when it
-  quotes your own words verbatim**; anything it inferred with no sentence behind it waits as
-  proposed. The model never writes to the store: it proposes, the plugin commits.
+- **Model capture** is a setting (`rulesEnrichment`, **on** by default) riding the existing
+  idle-batched enrichment pass. It runs *after* a chapter is archived, so a mined rule arrives at
+  the next boundary, not mid-turn — the local model server is single-slot, and per-turn work would
+  queue against your own conversation. **A mined rule activates only when its quote appears
+  verbatim in your own words** in that chapter. Everything the model inferred without a sentence
+  behind it is written as a *suggestion*: listed by `list --scope session`, and inert in every head
+  until you `approve` it. So the model can propose a standing order, but it cannot give itself one.
+  A handful of suggestions is the expected steady state with a small model — that is the safety
+  working, not the feature failing.
 
 Activation for this tier is **derived, not approved**: a session rule is active when it is scoped
 `session`, belongs to a session on your current ancestry, and has not been revoked. No approval step,
@@ -102,6 +106,14 @@ drop is **announced with numbers** — `9 project rules active, 4 shown — /cha
 Selection that could silently drop the load-bearing rule would just rebuild the original bug inside
 the fix. The token ceiling keeps the old doctrine: over budget it refuses with per-rule numbers, it
 never clips.
+
+### Suggestions
+
+The ladder mines at most three rules per chapter (`rulesMinedPerChapter`), and the cap counts
+rules *written*, not candidates examined, so a duplicate can't eat a chapter's budget. Approved
+suggestions stay local — session rules are never staged to the pool, which is what lets this half
+run in the background without a human approving each one and without one machine's bad guess
+becoming another machine's instruction.
 
 ## Conflicts
 

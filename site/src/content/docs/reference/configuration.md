@@ -29,8 +29,9 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `coreRulesBudgetTokens` | 1200 | the CORE RULES block in notices — **refuses with numbers, never clips** |
 | `rulesCoreBonus` | 0.15 | per-machine rank bonus for core-approved rules |
 | `sessionRulesEnabled` | true | deterministic `ADD RULE:` capture into the local session tier — zero model tokens, never staged to the pool |
+| `rulesMinedPerChapter` | 3 | cap on mined rules per chapter; the cap counts rules **written**, so a duplicate cannot consume a chapter's budget |
 | `rulesMarkerPrefix` | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
-| `rulesEnrichment` | — | model-derived capture (**specified in #50, not implemented yet**) — would ride the idle-batched enrichment pass and auto-activate **only** on a verbatim quote of your own bytes |
+| `rulesEnrichment` | true | model-derived capture: rides the idle-batched enrichment pass (never per-turn), and **no mined rule activates without a verbatim quote of your own words** — anything else is written as an inert *suggestion* until you approve it |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
 | `rulesRelevance` | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
 | — | — | `/chapters-rule conflicts` has **no key of its own**: it runs one bounded stream call on the conversation route the session already has, **report-only**, never edits a rule. No route ⇒ the verb refuses honestly |

@@ -543,13 +543,23 @@ rules, not a new policy):
   session rule at the existing `turn/end` listener — the same one the topic signatures collect on
   (r35j). It is not a new archive door (§12 of `docs/architecture.md`: five moments, extended in
   place, never copied). The rule body is the human's own words, verbatim.
-- **Enrichment — optional, idle-batched, `rulesEnrichment` default off** *(specified; the P3c remainder — the deterministic marker path above is what shipped)*. The §6.1 pass gains a
-  `rules: [{ text, category, quote }]` output field, riding that pass's existing ladder:
-  validation-before-commit, one retry, deterministic fallback, provenance chain, and the
-  body-hash guard (it writes frontmatter-adjacent records, never chapter prose). **Only a rule
-  whose `quote` matches verbatim human bytes in the archived span may auto-activate**; anything
-  the model inferred without a quote lands `derivedFrom: model`, `status: proposed`, and waits in
-  `list`. That is the §1.4 division — model proposes, plugin commits — with the activation gate
+- **Enrichment — idle-batched, `rulesEnrichment` default ON.** The §6.1 pass carries a
+  `rules: [{ text, category, quote }]` field through that pass's existing ladder: validation
+  before commit, one retry, deterministic fallback, provenance chain, and the body-hash guard
+  (mining writes its own rule files; it never touches chapter prose). `rules` is **optional in the
+  output contract**, so every pre-existing stub, fake and tape still validates, and a malformed
+  `rules` value cannot cost a chapter its annotation.
+  **The gate is evidence, not a click: a mined rule activates only when its `quote` appears
+  verbatim (case/whitespace-normalized) in the chapter's HUMAN bytes.** Assistant prose is
+  inadmissible — the model restating an instruction it was handed is the amplification path, and
+  an invented quote is a guess wearing a citation. Everything else is written `suggested: true`:
+  reviewable in `list --scope session`, **inert in every head** until this machine's status fact
+  says core, which is what `approve` is for on this tier. Activation rides a curation fact; the
+  write-once file is never rewritten (§1.3).
+  Two properties worth stating, because they were the design's point: a small model will produce
+  mostly *suggestions* (exact quotes are hard for a 4B), so the tier degrades to a review queue
+  rather than to unearned authority; and mining runs **before** the hash-guarded annotation write,
+  so a chapter whose enrichment is refused still contributes its standing orders. That is the §1.4 division — model proposes, plugin commits — with the activation gate
   moved to machine-local, where a wrong guess costs one session and not a team's corpus.
 
 **Activation is derived, never a curation fact.** A session rule is active iff `scope: session` ∧
@@ -827,7 +837,8 @@ No hardcoded tunables (existing hard rule). New config, all with defaults docume
 | `coreRulesBudgetTokens` | P3 §7.3 cap on the notice's core-rules block; overflow refuses with per-rule numbers | 1200 |
 | `sessionRulesEnabled` | §7.5: the deterministic `ADD RULE:` capture path (zero model tokens) | true |
 | `rulesMarkerPrefix` | §7.5 capture marker; matched at line start of **human-authored** messages only | `ADD RULE:` |
-| `rulesEnrichment` | §7.5 model-derived capture — **SPECIFIED, NOT IMPLEMENTED** (P3c remainder). Would ride the §6.2 idle batch, never per-turn, and still require a verbatim human quote to activate | — (no key exists yet) |
+| `rulesEnrichment` | §7.5 model-derived capture: rides the §6.2 idle batch, never per-turn, and no mined rule activates without a verbatim human quote (unverified candidates are `suggested`, i.e. inert) | true |
+| `rulesMinedPerChapter` | §7.5 cap on mined rules per chapter — the cap counts rules **written**, not candidates examined, so a duplicate cannot eat a chapter's budget | 3 |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | §7.4 per-tier count caps on rules **rendered** into a rebuilt head; anything dropped is announced by count, never silently | 12 / 12 |
 | `rulesRelevance` | §7.4 relevance selection on; off ⇒ deterministic category→id order (the order tapes were distilled against) | true |
 | — | §7.7 `/chapters-rule conflicts` has **no key of its own**: one bounded stream call on the conversation route the session already has (so it rides that route's cached prefix), report-only. No route yet ⇒ the verb refuses honestly. A gate of its own was rejected: a human types the verb, so `elicitedPlot`'s reason for a switch does not apply | — |
@@ -886,11 +897,11 @@ over a real pool), e2e (`rules` project: UI add → approve → fork → the chi
 carries the rule verbatim). §7.4 selection was left unbuilt in that round by design — the corpus
 of active rules did not yet grow on its own.
 
-**P3c — Two-tier rules (issue #50): BUILT except the model-capture half (2026-10-20).** §7.1's `scope`/`session`/
+**P3c — Two-tier rules (issue #50): BUILT, both capture speeds (2026-10-20).** §7.1's `scope`/`session`/
 `derivedFrom`/`pinned` frontmatter (absent `scope` ⇒ `project`, so every pre-existing rule record
 keeps working byte-identically); `ADD RULE:` capture at the existing `turn/end` listener;
-**remaining:** optional `rulesEnrichment` capture behind the verbatim-quote gate (§7.5's second
-speed — no key exists yet, and nothing in the shipped tier depends on it); session-scope exclusion in
+`rulesEnrichment` capture behind the verbatim-quote gate (§7.5's second speed, default on,
+unverified candidates inert); session-scope exclusion in
 `planStoreToRepo`; the three render classes and per-tier caps in `buildRulesSection`; the third
 checkpoint lead section; `intent` filtering at the four door sites; `chapters_rules`; the
 `active`/`pin`/`conflicts` verbs; and §7.8's loud-identity lines.

@@ -116,6 +116,8 @@
 #
 # Realm-row-only keys (in the preset's engine row, not this patch):
 #   harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   rulesEnrichment (true — the ladder mines, verbatim-quote gated),
+#   rulesMinedPerChapter (3),
 #   projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance  (#50 §7/§7.5 —
 #   the realm plane owns what an in-place checkpoint renders; the host plugin config
 #   owns what a continuation notice renders; same names, same defaults, set both to
