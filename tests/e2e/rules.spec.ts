@@ -10,13 +10,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, typeComposer, E2E_SESS_DIR, sessionLogFileFor } from './session.ts'
 
 const RULE_TEXT = 'Never log raw tokens or bearer headers anywhere in command output'
 
 function childLogWithRule(after: Set<string>): string {
   // r39 mystery, solved 2026-09-22: session logs are DIRECTORIES containing a
-  // zstd-compressed session.v3.jsonl.zstd — the original readFileSync of a
+  // zstd-compressed session.v<N>.jsonl.zstd (resolved, not hardcoded — #54) — the original readFileSync of a
   // directory entry always threw, so this poll could never succeed regardless
   // of product behavior. Decompress via the same zstd route session.ts uses.
   let dirs: string[] = []
@@ -24,7 +24,9 @@ function childLogWithRule(after: Set<string>): string {
   for (const dir of dirs) {
     if (after.has(dir) || !dir.startsWith('ch-')) continue
     try {
-      const t = execFileSync('zstd', ['-dc', path.join(E2E_SESS_DIR, dir, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+      const f = sessionLogFileFor(path.join(E2E_SESS_DIR, dir))
+      if (f === null) continue
+      const t = execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
       if (t.includes('CORE RULES') && t.includes(RULE_TEXT)) return dir
     } catch { /* not flushed yet */ }
   }
@@ -58,7 +60,9 @@ test('a rule proposed and approved in the UI renders verbatim into the next cont
   await page.locator('button[aria-label="Fork with chapters"]').first().click({ force: true })
   let childDir = ''
   await expect.poll(() => { childDir = childLogWithRule(before); return childDir; }, { timeout: 600_000, intervals: [3000] }).not.toBe('')
-  const text = execFileSync('zstd', ['-dc', path.join(E2E_SESS_DIR, childDir, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  const childFile = sessionLogFileFor(path.join(E2E_SESS_DIR, childDir))
+  expect(childFile, `no durable session log under ${childDir} — the rig cannot read the host's log format`).not.toBeNull()
+  const text = execFileSync('zstd', ['-dc', childFile as string], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   expect(text).toContain('CORE RULES')
   expect(text).toContain(RULE_TEXT)
   fs.rmSync(pool, { recursive: true, force: true })

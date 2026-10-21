@@ -68,13 +68,40 @@ export async function openApp(page: Page): Promise<void> {
  * saga of 2026-09-18). Dismissing it is the FIRST thing any browser flow
  * must do.
  */
+/**
+ * Dismiss every notice dialog the host puts up, WHICHEVER one it shows.
+ *
+ * These dialogs are FOCUS TRAPS: while one is open, every click on the composer,
+ * the sidebar and 'New session' silently bounces and `activeElement` stays on the
+ * dialog (the whole 2026-09-18 saga was exactly this, with 'Internal Testing
+ * Notice'). #54 found the second member of the family: host 0.2.x opens a
+ * **Preview Notice**, and a rig that dismisses one by name is a rig that stops
+ * working the moment the host ships a second one — the failure showed up as
+ * 'composer did not take focus (active: Preview Notice)', hundreds of lines away
+ * from the cause.
+ *
+ * So: match the FAMILY (any dialog whose text ends in 'Notice'), press the
+ * acknowledgement control by its label, and repeat — a host that stacks two
+ * notices must be cleared of both. Unknown button labels are a loud no-op rather
+ * than a silent pass: if the host renames 'continue', the focus assert downstream
+ * still fires, and this comment is where the reader learns why.
+ */
 export async function dismissTestingNotice(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const dlg = Array.from(document.querySelectorAll('div')).find((d) => (d.textContent ?? '').includes('Internal Testing Notice') && d.querySelector('button'))
-    const btn = Array.from(dlg?.querySelectorAll('button') ?? []).find((b) => /^continue$/i.test((b.textContent ?? '').trim()))
-    ;(btn as HTMLButtonElement | undefined)?.click()
-  })
-  await page.waitForTimeout(1000)
+  for (let i = 0; i < 3; i++) {
+    const dismissed = await page.evaluate(() => {
+      const dialogs = Array.from(document.querySelectorAll('div')).filter((d) =>
+        /\bnotice\b/i.test(d.textContent ?? '') && d.querySelector('button') !== null
+        && (d.textContent ?? '').replace(/\s+/g, ' ').trim().length < 4000)
+      for (const dlg of dialogs) {
+        const btn = Array.from(dlg.querySelectorAll('button'))
+          .find((b) => /^(continue|close|got it|acknowledge|dismiss|ok|i understand)$/i.test((b.textContent ?? '').trim()))
+        if (btn !== undefined) { (btn as HTMLButtonElement).click(); return true }
+      }
+      return false
+    })
+    if (!dismissed) return
+    await page.waitForTimeout(800)
+  }
 }
 
 /**
@@ -182,13 +209,36 @@ export async function currentSessionId(page: Page): Promise<string | null> {
 
 const SESS_DIR = E2E_SESS_DIR
 
+/**
+ * The durable session log inside one session dir, WHICHEVER format the host writes.
+ *
+ * #54: 0.2.x persists `session.v4.jsonl.zstd`; the rig hardcoded `session.v3…` and every
+ * log-reading assertion silently returned '' — which reads as "the archive never landed"
+ * and sends you hunting a product bug that lives in a filename. The resolver takes the
+ * HIGHEST version present and refuses to guess when there is none.
+ */
+export function sessionLogFileFor(dir: string): string | null {
+  let best: { file: string; v: number } | null = null
+  let names: string[] = []
+  try { names = fs.readdirSync(dir) } catch { return null }
+  for (const n of names) {
+    const m = /^session\.v(\d+)\.jsonl\.zstd$/.exec(n)
+    if (m === null) continue
+    const v = Number(m[1])
+    if (best === null || v > best.v) best = { file: path.join(dir, n), v }
+  }
+  return best === null ? null : best.file
+}
+
 const sessDirs = (): string[] => { try { return fs.readdirSync(SESS_DIR) } catch { return [] } }
 
 /** full decoded session log for a session id ('' until the file exists). */
 export function sessionLogTextById(id: string): string {
   for (const dir of sessDirs()) {
     if (!dir.includes(id)) continue
-    try { return execFileSync('zstd', ['-dc', path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
+    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    if (f === null) return '' // no durable log yet — an empty answer is honest here, a guess is not
+    try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
       if (!zstdWarned) { zstdWarned = true; console.error(`e2e: zstd failed reading session log ${dir}: ${String((e as Error)?.message ?? e).slice(0, 160)}`) }
       return ''
     }
@@ -222,8 +272,8 @@ export function findSessionIdWhoseLogContains(fragment: string, prefix = ''): st
 function sessionLogFile(sid: string): string | null {
   for (const dir of sessDirs()) {
     if (!dir.includes(sid)) continue
-    const f = path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')
-    return fs.existsSync(f) ? f : null
+    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    return f !== null && fs.existsSync(f) ? f : null
   }
   return null
 }
@@ -233,7 +283,9 @@ function sessionLogFile(sid: string): string | null {
 export function freshestSessionLog(): { dir: string; file: string } | null {
   let best: { dir: string; file: string; m: number } | null = null
   for (const dir of sessDirs()) {
-    const file = path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')
+    const file0 = sessionLogFileFor(path.join(SESS_DIR, dir))
+    if (file0 === null) continue
+    const file = file0
     let m: number
     try { m = fs.statSync(file).mtimeMs } catch { continue }
     if (best === null || m > best.m) best = { dir, file, m }

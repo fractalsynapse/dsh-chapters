@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
 
 /**
  * The assistant-row door actions, on a session this spec CREATES through the
@@ -50,7 +50,9 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
       .sort((a, b) => b.t - a.t)
     for (const k of kids.slice(0, 3)) {
       try {
-        const log = execFileSync('zstd', ['-dc', path.join(sessDir, k.d, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+        const f = sessionLogFileFor(path.join(sessDir, k.d))
+        if (f === null) continue
+        const log = execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
         if (log.includes('chapters:toc') && log.includes('.dsh-chapters/')) return true
       } catch { /* partial */ }
     }
