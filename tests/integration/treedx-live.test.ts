@@ -36,7 +36,14 @@ if ((BASE === '' || TOKEN === '') && fs.existsSync(ENV_FILE)) {
 }
 
 const configured = BASE !== '' && TOKEN !== ''
-const SKIP = configured ? false : 'not configured — run scripts/treedx-local.sh up && scripts/treedx-local.sh token (docs/development.md § TreeDX dev loop)'
+// The message names the WHOLE prerequisite, because the loop used to stop at
+// "no TreeDX checkout" and leave a human to find the repo URL themselves; `up` now
+// clones treeseed-ai/treedx into examples/treedx on its own (#54), so one command is
+// genuinely all that is missing here.
+const SKIP = configured
+  ? false
+  : 'not configured — run scripts/treedx-local.sh up && scripts/treedx-local.sh token '
+    + '(clones examples/treedx from https://github.com/treeseed-ai/treedx.git if absent, builds the dev-auth image, writes var/treedx-dev.env; docs/development.md § TreeDX dev loop)'
 let root = ''
 const REPO = 'dsh-kb-live'
 const RUN = Date.now().toString(36) // unique file names per run; the pool accumulates
