@@ -46,6 +46,26 @@ export async function localModelUp(): Promise<boolean> {
   // without any 8080 must still RUN the suite, and it must FAIL if a tape is
   // missing. Only live/record runs ask the server the question.
   if ((process.env.E2E_MODEL ?? 'live') === 'replay') return true
+  const base = (process.env.E2E_UPSTREAM ?? '').trim().replace(/\/+$/, '')
+  // #54: RECORD against a REMOTE endpoint. The guard asks "is the model this run talks
+  // to reachable?" — and answering it by probing port 8080 alone made every remote
+  // distill SKIP six of the eight projects silently (measured: the fork journey came
+  // back as `1 skipped`, which reads like a pass to anyone scanning a log). A spec that
+  // skips because it is looking at the wrong endpoint is a spec that is not run.
+  if (base !== '' && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(base)) {
+    const key = (process.env.E2E_UPSTREAM_KEY ?? process.env.LOCAL_API_KEY ?? '').trim()
+    try {
+      const r = await fetch(`${base}/v1/models`, {
+        ...(key !== '' ? { headers: { authorization: `Bearer ${key}` } } : {}),
+        signal: AbortSignal.timeout(8000),
+      })
+      // ANY HTTP answer means an endpoint is there; 5xx means it is not usable. A 401
+      // would already have been refused at boot when the key is missing.
+      return r.status < 500
+    } catch {
+      return false
+    }
+  }
   try {
     const r = await fetch('http://localhost:8080/v1/models', { signal: AbortSignal.timeout(3000) })
     return r.ok
@@ -126,6 +146,59 @@ export async function focusComposer(page: Page): Promise<void> {
     const ae = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? 'none')
     throw new Error(`composer did not take focus (active: ${ae})`)
   }
+}
+
+/**
+ * Does a session have a durable log on disk yet? (#54)
+ *
+ * Host 0.2.x persists a created-but-never-started child as a directory holding only
+ * `session.lock`. Specs that assert on a child's notice bytes therefore cannot just
+ * poll the file — the file is a fact about whether the session was STARTED, not about
+ * what the child was seeded with. This helper names the distinction so each journey can
+ * decide, explicitly, to open the child rather than wait for a write that will not come.
+ */
+export function durableLogExists(sessionId: string): boolean {
+  for (const dir of sessDirs()) {
+    if (!dir.includes(sessionId)) continue
+    return sessionLogFileFor(path.join(SESS_DIR, dir)) !== null
+  }
+  return false
+}
+
+/**
+ * Open a session the way the product does: click its sidebar row.
+ *
+ * Same selector the client door uses (`src/client/doors.ts` openBranchRow —
+ * role=treeitem matched by text, 'more sessions' expanded when the list is folded),
+ * so the rig is exercising the real affordance instead of inventing one. Returns false
+ * when no row matched — callers must say which child they could not open, never proceed
+ * as if it had.
+ */
+export async function openSessionByRow(page: Page, needles: readonly string[]): Promise<boolean> {
+  const clean = needles.filter((n) => n !== '').map((n) => n.toLowerCase())
+  if (clean.length === 0) return false
+  const rows = page.locator('[role="treeitem"]')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const n = await rows.count()
+    for (let i = 0; i < n; i++) {
+      const t = ((await rows.nth(i).textContent()) ?? '').toLowerCase()
+      if (clean.some((needle) => t.includes(needle))) {
+        await rows.nth(i).click()
+        await page.waitForTimeout(1200)
+        return true
+      }
+    }
+    // the list can be folded; the door clicks the expander before giving up
+    const expanded = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>('button'))
+        .filter((b) => /more sessions|ungrouped/i.test(b.textContent ?? '') && b.getAttribute('aria-expanded') !== 'true')
+      for (const b of buttons) b.click()
+      return buttons.length
+    })
+    if (expanded === 0) break
+    await page.waitForTimeout(400)
+  }
+  return false
 }
 
 /**

@@ -16,6 +16,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import http from 'node:http'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { startModelProxy } from '../e2e/model-proxy.ts'
@@ -171,5 +172,63 @@ test('the upstream model name is rewritten on the way out, and the tape keeps th
     await proxy.close()
     await new Promise<void>((r) => { upstream.close(() => r()) })
     fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/**
+ * A non-loopback IPv4 this machine serves on, or null. `localModelUp()`'s remote branch is
+ * keyed on "not loopback" BY DESIGN (loopback is how the local stress server is addressed),
+ * so the branch can only be exercised through a real host interface — 0.0.0.0 binding plus
+ * this address is what makes that happen without pretending localhost is remote.
+ */
+async function nonLoopbackAddress(): Promise<string | null> {
+  const os = await import('node:os')
+  for (const group of Object.values(os.networkInterfaces())) {
+    for (const i of group ?? []) {
+      if (i.family !== 'IPv4' || i.address === '127.0.0.1' || i.address.startsWith('169.254.')) continue
+      return i.address
+    }
+  }
+  return null
+}
+
+/**
+ * `localModelUp()` decides whether a browser journey RUNS or SKIPS. #54 found it
+ * answering that question by probing port 8080 even when the run was pointed at a
+ * remote distill target — so a remote `E2E_MODEL=record` pass came back as
+ * `1 skipped`, which is the worst possible green: silent, and indistinguishable
+ * from success in a summary line.
+ */
+test('a remote distill target answers the reachability question, a dead one does not', async () => {
+  const { localModelUp } = await import('../e2e/session.ts')
+  const wide = http.createServer((_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"data":[]}') })
+  const widePort = await new Promise<number>((r) => wide.listen(0, '0.0.0.0', () => r((wide.address() as { port: number }).port)))
+  const host = await nonLoopbackAddress()
+  const saved = { up: process.env.E2E_UPSTREAM, key: process.env.E2E_UPSTREAM_KEY, mode: process.env.E2E_MODEL }
+  try {
+    process.env.E2E_MODEL = 'record'
+    // no quiet pass: without a non-loopback address the branch is UNCOVERED, and a row
+    // that nods along is the row that lets the skip come back
+    assert.ok(host !== null, 'this machine exposes no non-loopback IPv4 — the remote branch of localModelUp() is UNCOVERED, not passing')
+    const h = host as string
+    process.env.E2E_UPSTREAM = `http://${h}:${widePort}`
+    process.env.E2E_UPSTREAM_KEY = 'k'
+    assert.equal(await localModelUp(), true, 'a reachable remote distill target must RUN the journey, not skip it')
+    // a REFUSED port on the same host: an unroutable address (10.255.255.1) does not
+    // fail fast, it black-holes the SYN and the row sat for two minutes — a test that
+    // cannot finish is a test that does not exist.
+    const dead = await new Promise<number>((r) => { const srv = net.createServer(); srv.listen(0, h, () => { const p = (srv.address() as { port: number }).port; srv.close(() => r(p)) }) })
+    process.env.E2E_UPSTREAM = `http://${h}:${dead}`
+    assert.equal(await localModelUp(), false, 'an unreachable remote must be a NO, never an assumed yes')
+    process.env.E2E_UPSTREAM = `http://127.0.0.1:${widePort}`
+    assert.equal(await localModelUp(), false, 'loopback stays the LOCAL stress regime: it is answered on :8080, not by E2E_UPSTREAM')
+    process.env.E2E_MODEL = 'replay'
+    assert.equal(await localModelUp(), true, 'replay IS the model: reachability never enters it, or a tape miss becomes a skip')
+  } finally {
+    for (const [k, v] of [['E2E_UPSTREAM', saved.up], ['E2E_UPSTREAM_KEY', saved.key], ['E2E_MODEL', saved.mode]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v
+    }
+    wide.closeAllConnections()
+    await new Promise<void>((r) => { wide.close(() => r()) })
   }
 })
