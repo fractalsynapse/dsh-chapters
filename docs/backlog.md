@@ -119,9 +119,15 @@ NEW host too (measured). Full record: `docs/contract.md` § Presets are declarat
 
 **Open, in order:**
 
-0. **Re-anchor the e2e host, then re-distill the tapes.** `tests/e2e/boot.ts` now refuses by name
-   while `dev/dsh-host-lock` pins a pre-0.2.0 host, and the refusal lifts itself when the lock moves —
-   that is the upgrade path, not a TODO. `ci.yml`'s `host-capability` job reads that same lock and
+0. **Re-anchor the e2e host, then re-distill the tapes — IN PROGRESS (#54).** The lock now
+   resolves `@deepseek-ai/dsh` **0.2.0-rc.2** (chosen by witness: the host this box has been running
+   the plugin on, not npm's latest), `hostSupportsPresetRows()` answers true, and the boot's named
+   refusal has lifted itself exactly as designed. Three 0.2.x rig drifts were found by booting rather
+   than guessing and are fixed — the `session.v4` log format, the Preview Notice focus trap, and the
+   provider block that 0.2.x reads only from `cordis.patch.yml`. Distillation no longer needs the GPU
+   box (see `docs/development.md` § Distilling tapes WITHOUT the GPU box). REMAINING: re-distill all
+   eight projects on the new host, re-run `npm run test:e2e:replay` strict and `coverage:e2e`, and
+   re-measure the browser ledger before ANY browser-plane claim is made. `ci.yml`'s `host-capability` job reads that same lock and
    SKIPS the acceptance job with a step-summary reason plus a `::warning::` while the pinned host
    predates declaration rows: visibly skipped, never red-by-accident, never green-by-omission.
    Publishing is unaffected — the release gate is the deterministic suite. The per-boot row pins (`thresholdRatio`, `enrichmentEnabled`,

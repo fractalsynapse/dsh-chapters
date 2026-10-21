@@ -59,8 +59,10 @@ jobs:
   # ──────────────────────── acceptance plane: model-tape replay ─────────────────────────
   # Does the PINNED host even support the mechanism the plugin now uses? A preset is a
   # registered declaration row from @deepseek-ai/dsh 0.1.7-alpha.1 (0.2.0 is the support
-  # floor), and the e2e chain pins 0.1.5-rc.1 for tape bytes — so the chain cannot run
-  # until the lock moves AND the tapes are re-distilled (docs/backlog.md). This job says
+  # floor), and the e2e chain pins whatever dev/dsh-host-lock resolves — the chain runs
+  # only when that pin is >= 0.2.0 AND the tapes were distilled against it (docs/backlog.md).
+  # The version is READ from the lock (#54: a second literal here and in scripts/ci-replay.sh
+  # is how the pin went stale in three places at once). This job says
   # so in the run log; the acceptance job below is SKIPPED-BY-DECISION, visibly, rather
   # than silently red or silently green over a preset it never mounted.
   host-capability:

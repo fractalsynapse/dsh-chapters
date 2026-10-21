@@ -220,14 +220,63 @@ ship; `0.1.0` itself carries no attestation.
   failing-test lines and c8's threshold verdicts as `::error::`, because on the
   0.1.6 tag a red gate left nothing behind but "exit code 1" while every local
   reproduction of the same SHA was green; the summary step now runs
-  `if: always()`). `e2e-replay`: installs the pinned
-  host (`npm i -g @deepseek-ai/dsh@0.1.5-rc.1` — the SAME version as the
-  gate line in `scripts/ci-replay.sh`, which fails loudly on mismatch) plus
-  chromium's apt libs, then `scripts/ci-replay.sh` — eight browser segments
-  served entirely from the committed tapes. **No LLM, no key, no GPU:** in
+  `if: always()`). `e2e-replay`: materializes the pinned host from
+  `dev/dsh-host-lock` (`npm ci`, hermetic — `npm i -g` rewrites the plugin tree and the
+  host's caret ranges float), plus chromium's apt libs, then `scripts/ci-replay.sh`, which
+  READS the version out of that lock rather than repeating it (#54 removed the second
+  literal; three copies of a pin is how it goes stale in three places) — eight browser
+  segments served entirely from the committed tapes. **No LLM, no key, no GPU:** in
   replay mode `localModelUp()` short-circuits to true (specs RUN, they do not
   skip) and a tape miss is a loud proxy 503, so a scenario that legitimately
   changed fails the job instead of silently passing.
+### Distilling tapes WITHOUT the GPU box (#54)
+
+`E2E_MODEL=record` drives the real model once per scenario to make a tape. Until #54 that
+meant the local vLLM server had to be up. It no longer does, because the tape proxy
+translates on the way out instead of asking the fixture to change:
+
+```bash
+E2E_MODEL=record E2E_TAPE=rules E2E_PORT=41735 E2E_THRESHOLD=0.9 \
+  E2E_UPSTREAM=https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode \
+  E2E_UPSTREAM_MODEL=qwen3.8-flash PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright \
+  E2E_UPSTREAM_KEY="$(node -e "import('./scripts/llm.mjs').then(m=>process.stdout.write(m.apiKey()||''))")" \
+  npx playwright test -c tests/e2e/playwright.config.ts --project=rules
+```
+
+- `E2E_UPSTREAM` is the endpoint WITHOUT the `/v1` suffix (the proxy appends the request
+  path, which already carries it).
+- `E2E_UPSTREAM_KEY` is the credential the PROXY presents. The profile keeps `apiKeyEnv:
+  LOCAL_API_KEY` and the boot still injects its `e2e-tape-proxy-dummy` when none is
+  configured — a real secret never enters a fixture profile.
+- `E2E_UPSTREAM_MODEL` rewrites the requested id, so the profile can keep pinning
+  `qwen3.8-flash-next` (the 32K stress-regime name) while a hosted endpoint is addressed by
+  the id it serves. **The tape records the profile's name**, because a tape is a fixture of
+  this rig, not of whatever service distilled it.
+- A remote `E2E_UPSTREAM` in record mode with no key refuses at boot in one line, instead of
+  discovering it 401 times across eight projects.
+- `scripts/llm.mjs` is the same resolution the dev scripts use (local server preferred, hosted
+  fallback, credential resolved from env → key file → profile export → harness store, value
+  never printed).
+
+Three 0.2.x host drifts the first boots found, all rig-side, all now handled — each is the
+kind that produces a wrong conclusion instead of an error:
+
+1. **the durable log is `session.v4.jsonl.zstd`.** Five places hardcoded `session.v3…`, so
+   every log-backed assertion decoded nothing and reported "the archive never landed".
+   `sessionLogFileFor()` resolves the highest `session.v<N>.jsonl.zstd`; a row scans
+   `tests/e2e/` for a hand-built versioned path (comment lines excluded — prose may name the
+   formats it explains).
+2. **the host opens a Preview Notice, and it is a focus trap** — the 2026-09-18 saga with a
+   new member. Dismissal now targets `[role=dialog]`-shaped elements and presses the control
+   that acknowledges *that* dialog; matching "any div mentioning a notice" matched the app
+   wrapper and pressed an unrelated 'Close'.
+3. **provider config must ride `cordis.patch.yml`.** A profile-dir `settings.yaml` is read by
+   nothing on 0.2.x, so `dev/settings.yaml`'s `llm-pi-ai` block was invisible: the host had no
+   `local` provider and the browser opened on "Add an API key to get started" with the
+   composer never reachable. `dev/profile-cordis.patch.yml` now defines the provider, and
+   `tests/e2e/boot.ts` guarantees the block in the copied home before rewriting the window
+   pins and the proxy `baseURL`.
+
 - **`release.yml`** — bare-semver tag (`0.1.0`, matching the Production
      environment's `*.*.*` tag protection) or manual dispatch → the full
      gated deterministic suite as publish blocker → `npm publish
