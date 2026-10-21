@@ -36,7 +36,7 @@ import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
-import { ancestorSessionIds, captureMinedRules } from './session-rules.ts'
+import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -402,9 +402,28 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         // #50 §7.5: the session tier activates by ancestry, so the surface needs
         // the tree the caller is sitting on. No sessionId ⇒ `active` reports the
         // session tier UNRESOLVED rather than guessing an empty path.
-        ...(sessionId !== undefined ? {
-          ancestors: async () => new Set(await ancestorSessionIds(async (id) => await store.get(id), sessionId)),
-        } : {}),
+        // #52: the SAME walk every door renders with — registry links plus the host
+        // header's delegation edge — so `active` can never describe a view the head
+        // will not show. One walk, memoized: two answers about one ancestry is how
+        // a surface starts disagreeing with itself.
+        ...(sessionId !== undefined ? (() => {
+          const parentOf = makeHeaderParentReader((name) => { try { return ctx.get?.(name) } catch { return undefined } })
+          let once: Promise<{ ancestors: Set<string>; truncated: boolean }> | null = null
+          const walk = async () => {
+            if (once === null) {
+              once = ruleAncestorSet({
+                seeds: [sessionId],
+                registryAncestors: async (id) => await ancestorSessionIds(async (s) => await store.get(s), id),
+                ...(parentOf !== undefined ? { parentOf } : {}),
+              })
+            }
+            return await once
+          }
+          return {
+            ancestors: async () => (await walk()).ancestors,
+            ancestryTruncated: async () => (await walk()).truncated,
+          }
+        })() : {}),
         // §7.3/§7.4: the SAME numbers the doors render with, so `active` can never
         // describe a view the head will not show.
         budgetTokens: config.coreRulesBudgetTokens,

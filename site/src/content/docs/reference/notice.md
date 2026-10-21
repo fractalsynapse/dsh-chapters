@@ -69,6 +69,17 @@ agent's framing of "here's what's happening now".>   ← budget-checked TOGETHER
                                                        machine. ⚠ marks a chapter missing or modified
                                                        since archived — flagged, never trusted
 
+## The preset says it out loud
+
+A notice can only teach the session it creates, so a brand-new session and a delegated subagent would
+never be told these doors exist. The instruction therefore rides the `chapters` preset's own persona
+row — the same mechanism that carries the `PLOT:` discipline, and per-composition rather than global,
+which is what makes it allowed. It says, briefly: before a task run `chapters_rules` with the task
+description and name the rules you followed (or say none); for earlier work, decisions, or bug history
+run `chapters_search` first instead of re-reading files or asking the human; `chapters_artifact` holds
+the oversized tool outputs; a delegated child is covered by the same rules and the same archive.
+Sessions on the standard preset see none of it.
+
 ## Finding things
 - Chapter detail: open its path above with the read tool.
 - A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — 'toc' | 'search' | 'read'.

@@ -34,7 +34,7 @@ that pain comes from:
 | | **Project rules** | **Session rules** |
 |---|---|---|
 | Who writes them | a person, with `/chapters-rule add` (or an agent proposing) | captured for you — the `ADD RULE:` marker, optionally the model |
-| Who they bind | this machine, after a human here approves | your session tree only |
+| Who they bind | this machine, after a human here approves | your session tree — and any subagent delegated from it |
 | Where they live | the shared pool (git or TreeDX) | the local store — **never staged to the pool** |
 | Reach a branch (`chapters_fork`) | yes | no — a branch is a new direction, not an order |
 | Reach a continuation / compaction | yes | yes |
@@ -100,6 +100,15 @@ you, who can revoke it in one command.
 Two caps bound the damage regardless: at most 3 mined rules per chapter, and a per-tier display
 cap on how many rules any head shows (with the withheld count announced, so you always know the
 ceiling is what limited it, not the store running dry).
+
+### Ancestry crosses the delegation edge
+
+A rule you set in a session also governs the work that session delegates. Rule ancestry walks BOTH
+lineage edges — the continuation chain the plugin keeps, and the harness header's delegation parent —
+transitively and **read-only**, so a subagent inherits its delegator's standing orders without the
+archive's lineage bookkeeping changing shape. The walk only goes upward: a subagent's rules never
+steer the session that delegated it, and the parent keeps the authority to revoke what the child
+picked up. Where an ancestry walk has to stop at a bound, the head says so instead of looking complete.
 
 ### Carried at the moments the head is rebuilt
 

@@ -1168,6 +1168,41 @@ instruction never names does not exist to a small model.
 Specification: §7.1 and §7.3–§7.9. Build status and exit criteria: §13 P3c (specified, not yet
 built at the time of this amendment — this entry is the decision record, not a claim of behavior).
 
+### Amendment 2026-10-21 (b) — rules reach agents, and agents reach rules (#52)
+
+Two user decisions in the same review round, both about the gap between "the rule exists" and
+"the agent in front of the work is told about it".
+
+**1. The preset persona is the instruction channel.** Nothing told a brand-new session, or a delegated
+subagent, to use `chapters_rules` / `chapters_search`: a plugin must not contribute a system-prompt
+section (§1.3 / invariant 3), and the continuation notice only exists for continuation children. The
+sanctioned per-composition channel is the preset's OWN persona row — `@deepseek-ai/dsh-persona`,
+prefix/suffix — the mechanism already carrying the `PLOT:` discipline. The shipped suffix now adds a
+short "Chapters memory and rules" section: run `chapters_rules` with the task description before a
+task and NAME the rules you followed (or say none); for earlier work, decisions, or bug history run
+`chapters_search` FIRST instead of re-reading files or asking the human; `chapters_artifact` holds the
+oversized bytes; and a delegated child is covered by the same rules and the same archive. It is
+per-preset, so a session on `standard` sees none of it. Two couplings are pinned by behaviour, not
+comment: the suffix must remain matched by the plot template-echo guard (else every session inherits
+its own instruction as a "plot"), and no new prompt variable may appear (`{{model}}` only — an
+unregistered variable throws at assembly and kills every turn of every chapters session).
+
+**2. Rule ancestry crosses the delegation edge.** The registry is the sole authority on continuation
+lineage and deliberately ignores the kernel header's `parentSession` — correct for numbering and the
+TOC, and it left a whole session shape with ZERO rules: a delegated subagent was an unrelated root by
+that view. So `session-rules.ruleAncestorSet` walks BOTH edges (registry `parentSession` ∪ header
+`parentSession`) transitively, READ-ONLY, writing nothing, and still only UPWARD — a child's
+inferences never govern the session that delegated them. Bounded (64 expansions) and loud when the
+cap bites (`lineage walk hit its cap…` inside the block, `LINEAGE TRUNCATED:` in `/chapters-rule
+active`); an unreadable header contributes no edge rather than breaking a turn. One walk, one builder:
+every door, the checkpoint and the surface call `ruleAncestorSet`, and an anti-drift row fails if a
+plane computes ancestry by hand again — hand-built ancestry is precisely how the gap appeared.
+
+Consequence, recorded before anyone is surprised by it: this changes a PRODUCT PROMPT (the persona
+suffix) and adds a tool, so the browser-plane tapes owe one whole-project re-distill when the host
+lock moves to 0.2.x — one re-record pays both debts. Until that runs, no claim about browser-plane
+rule carriage is verified.
+
 ### Amendment 2026-10-21 — a mined rule is governed by POLICY, not by proof that a human said it
 
 Human directive, one day after the previous entry and against the feature as built: *"I don't like
