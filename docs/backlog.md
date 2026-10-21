@@ -237,6 +237,21 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
    alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
    that starts working at the alias is used with no edit.
+2a. **Client-plane drift on the new host: a forked child is created but never OPENED.**
+   Measured twice on 0.2.0-rc.2 (#54): the fork door's click produces a `ch-…` session
+   directory holding only a 0-byte `session.lock`; `storages/session_projcache/sessions/`
+   gains no entry for it, so the sidebar has no row to click, and the rules journey's
+   assertion on the child's durable notice can never be satisfied. The door's own text never
+   even reaches the page before the next step (`textContent` has no `is session ch-…` yet),
+   and `button[aria-label="Fork with chapters"]` is present in the DOM but NOT visible —
+   `fork-button.spec.ts` fails on `toBeVisible`, while a `force: true` click still works,
+   which is how the child got created at all in the other journey. Both facts point at the
+   client plane (`src/client/doors.ts` open path + the assistant-actions row's visibility on
+   the 0.2.x client), not at the rule tier. Start by dumping the DOM with the door's slot
+   mounted (`scripts/e2e-dom-probe.ts` does the boot-and-dump part) and comparing the slot
+   surface the 0.2.x client actually renders. Until it is understood, NO browser-plane rule
+   claim can be verified — the journeys that end on a child session cannot complete.
+   Do not "fix" this by weakening an assertion: the visible door is a real requirement.
 2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
    the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
    `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round

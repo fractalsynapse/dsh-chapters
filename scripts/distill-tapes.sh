@@ -1,66 +1,63 @@
 #!/usr/bin/env bash
-# distill-tapes — one whole-project re-record per acceptance project (#54).
+# distill-tapes — re-record the acceptance corpus, one project at a time (#54).
 #
-# Why a script: `npm run test:e2e:record` chains EIGHT projects with && , which means the
-# first failure hides the other seven, and a re-distill is exactly the run where you want to
-# know what every project does. Each project boots its own server on its own port with its
-# own pins (the same env the npm script uses), archives its own tape, and reports.
+# Why a script instead of `npm run test:e2e:record`: that target chains eight projects with
+# `&&`, so the FIRST failure hides the other seven and the run tells you nothing about the
+# rest. A re-distill is exactly the run where you want every project's verdict. Each project
+# gets its own boot, port and pins (the same env the npm script uses), and its tape directory
+# is cleared first — a stale entry from another host is a prefix collision waiting to happen.
 #
-#   scripts/distill-tapes.sh                 # every project, hosted endpoint, sequential
-#   scripts/distill-tapes.sh fork suite      # just these
-#   LOCAL_LLM_UP=1 scripts/distill-tapes.sh  # prefer the local :8080 stress server
+#   scripts/distill-tapes.sh                     # all eight, sequential
+#   scripts/distill-tapes.sh fork rules          # just these
+#   KEEP_TAPES=1 scripts/distill-tapes.sh rules  # archive onto the existing tape, don't clear
 #
-# SEQUENTIAL ON PURPOSE: never two boots at once (measured 2026-09-23 — a live loop that
-# records mid-test can be OOM-killed, and same-home sibling boots have corrupted captures).
-# plans is special: its upstream is the SCRIPTED stub (tests/e2e/stub-model.ts), because
-# a tape must not freeze one model's decision to plan (see its PROVENANCE.md). That leg is
-# unchanged by this script — run it with the stub, as documented.
+# SEQUENTIAL ON PURPOSE: never two boots at once (measured 2026-09-23 — a live loop recording
+# mid-test can be OOM-killed; same-home sibling boots have corrupted captures).
+#
+# plans is a special case the script does NOT paper over: its upstream is the SCRIPTED stub
+# (tests/e2e/stub-model.ts), because a tape must not freeze one model's decision to plan
+# (tests/fixtures/model-tape/plans/PROVENANCE.md). Run that leg with the stub serving
+# E2E_UPSTREAM, or it distills a different fact than the one the journey claims.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
-NODE_BIN="${NODE_BIN:-$ROOT/var/toolchain/node-v24.22.0-linux-x64/bin}"
-export PATH="$NODE_BIN:$PATH"
-export PLAYWRIGHT_BROWSERS_PATH="$ROOT/var/ms-playwright"
+export PATH="${NODE_BIN:-$ROOT/var/toolchain/node-v24.22.0-linux-x64/bin}:$PATH"
+export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$ROOT/var/ms-playwright}"
 
-HOSTED="${E2E_UPSTREAM:-https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode}"
-HOSTED_MODEL="${E2E_UPSTREAM_MODEL:-qwen3.8-flash}"
-if [[ "${LOCAL_LLM_UP:-}" == "1" ]]; then HOSTED="http://localhost:8080"; HOSTED_MODEL=""; fi
-if [[ -z "${E2E_UPSTREAM_KEY:-}" && "$HOSTED" != http://localhost* ]]; then
-  E2E_UPSTREAM_KEY="$(node -e "import('./scripts/llm.mjs').then(m=>process.stdout.write(m.apiKey()||''))" 2>/dev/null || true)"
+# endpoint resolution: local stress server if it answers, hosted otherwise (scripts/llm.mjs
+# owns the credential; nothing here prints it)
+if [[ -z "${E2E_UPSTREAM:-}" ]]; then
+  if curl -s --max-time 2 http://localhost:8080/v1/models >/dev/null 2>&1; then
+    export E2E_UPSTREAM="http://localhost:8080"
+  else
+    export E2E_UPSTREAM="https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode"
+    export E2E_UPSTREAM_MODEL="${E2E_UPSTREAM_MODEL:-qwen3.8-flash}"
+    export E2E_UPSTREAM_KEY="${E2E_UPSTREAM_KEY:-$(node -e "import('./scripts/llm.mjs').then(m=>process.stdout.write(m.apiKey()||''))" 2>/dev/null || true)}"
+    [[ -z "${E2E_UPSTREAM_KEY:-}" ]] && { echo "distill: no credential for the hosted endpoint (scripts/llm.mjs found none)" >&2; exit 2; }
+  fi
 fi
-export E2E_UPSTREAM="$HOSTED"
-[[ -n "${E2E_UPSTREAM_KEY:-}" ]] && export E2E_UPSTREAM_KEY
-[[ -n "$HOSTED_MODEL" ]] && export E2E_UPSTREAM_MODEL
 
-# project | port | threshold | extra env | arrival floor
-specs=(
-  "suite|41731|0.75|E2E_TAPE=suite|"
-  "heavy|41733|0.5|E2E_TAPE=heavy|E2E_FLOOR=1000000"
-  "arrival|41732|0.9|E2E_TAPE=arrival|E2E_FLOOR=500"
-  "enrich|41734|0.9|E2E_TAPE=enrich;E2E_ENRICH=1|"
-  "fanout|41736|0.75|E2E_TAPE=fanout|"
-  "rules|41735|0.9|E2E_TAPE=rules|"
-  "fork|41737|0.75|E2E_TAPE=fork|"
-  "plans|41738|0.99|E2E_TAPE=plans;E2E_NO_AUX_MODEL=1|"
-)
-want=("$@"); [[ ${#want[@]} -eq 0 ]] && want=(suite heavy arrival enrich fanout rules fork plans)
+# project:port:threshold:extra — mirrors `npm run test:e2e`'s pins exactly
+declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738)
+declare -A THRESH=([suite]=0.75 [heavy]=0.5 [arrival]=0.9 [enrich]=0.9 [fanout]=0.75 [rules]=0.9 [fork]=0.75 [plans]=0.99)
+declare -A EXTRA=([heavy]="E2E_FLOOR=1000000" [arrival]="E2E_FLOOR=500" [enrich]="E2E_ENRICH=1" [plans]="E2E_NO_AUX_MODEL=1")
+ORDER=(suite heavy arrival enrich fanout rules fork plans)
+want=("${@:-}")
+[[ -z "${want[0]:-}" ]] && want=("${ORDER[@]}")
 
-rmrf_tape() { [[ "${KEEP_TAPES:-}" == "1" ]] || rm -rf "tests/fixtures/model-tape/$1"; }
 declare -a failed=()
-for entry in "${specs[@]}"; do
-  IFS='|' read -r proj port thr extra floor <<< "$entry"
-  printf '%s' "${want[@]}" | grep -qw "$proj" || continue
-  echo "=== distill $proj (port $port, threshold $thr) ==="
-  rmrf_tape "$proj"
+for proj in "${want[@]}"; do
+  if [[ -z "${PORTS[$proj]:-}" ]]; then
+    echo "distill: unknown project '$proj' (known: ${ORDER[*]})" >&2; failed+=("$proj:unknown"); continue
+  fi
+  echo "=== distill $proj — port ${PORTS[$proj]}, threshold ${THRESH[$proj]} ${EXTRA[$proj]:-} ==="
+  [[ "${KEEP_TAPES:-}" == "1" ]] || rm -rf "tests/fixtures/model-tape/$proj"
   # shellcheck disable=SC2086
-  env E2E_MODEL=record E2E_PORT="$port" E2E_THRESHOLD="$thr" \
-    $( [[ -n "$floor" ]] && echo "$floor" ) \
-    $( [[ "$extra" == *";"* ]] && echo "E2E_ENRICH=1" ) \
-    E2E_TAPE="$proj" \
-    timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" 2>&1 | tail -12
+  env E2E_MODEL=record E2E_PORT="${PORTS[$proj]}" E2E_THRESHOLD="${THRESH[$proj]}" E2E_TAPE="$proj" ${EXTRA[$proj]:-} \
+    timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" 2>&1 | tail -10
   rc=${PIPESTATUS[0]}
-  count=$(ls "tests/fixtures/model-tape/$proj" 2>/dev/null | grep -c json || true)
-  echo "--- $proj: rc=$rc, tape entries=$count"
+  n=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+  echo "--- $proj: exit=$rc tapeEntries=$n"
   [[ "$rc" -ne 0 ]] && failed+=("$proj")
 done
 echo
