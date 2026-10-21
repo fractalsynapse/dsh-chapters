@@ -237,21 +237,33 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
    alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
    that starts working at the alias is used with no edit.
-2a. **Client-plane drift on the new host: a forked child is created but never OPENED.**
-   Measured twice on 0.2.0-rc.2 (#54): the fork door's click produces a `ch-…` session
-   directory holding only a 0-byte `session.lock`; `storages/session_projcache/sessions/`
-   gains no entry for it, so the sidebar has no row to click, and the rules journey's
-   assertion on the child's durable notice can never be satisfied. The door's own text never
-   even reaches the page before the next step (`textContent` has no `is session ch-…` yet),
-   and `button[aria-label="Fork with chapters"]` is present in the DOM but NOT visible —
-   `fork-button.spec.ts` fails on `toBeVisible`, while a `force: true` click still works,
-   which is how the child got created at all in the other journey. Both facts point at the
-   client plane (`src/client/doors.ts` open path + the assistant-actions row's visibility on
-   the 0.2.x client), not at the rule tier. Start by dumping the DOM with the door's slot
-   mounted (`scripts/e2e-dom-probe.ts` does the boot-and-dump part) and comparing the slot
-   surface the 0.2.x client actually renders. Until it is understood, NO browser-plane rule
-   claim can be verified — the journeys that end on a child session cannot complete.
-   Do not "fix" this by weakening an assertion: the visible door is a real requirement.
+2a. **On 0.2.x, creating a child session is REFUSED — the acceptance chain stops here.**
+   Captured verbatim from the UI of a live 0.2.0-rc.2 boot, after one clean assistant turn,
+   clicking the fork door: `chapters-fork refused: child creation refused: format v4 message
+   requires a producer-owned source kind`. The child directory is created (a 0-byte
+   `session.lock`) and NOTHING is written into it: no durable log, no projection-cache entry,
+   no sidebar row even after a full reload. Every journey that asserts on a child's seeded
+   notice — `rules`, `fork`, `plans`, the knowledge-loop's carry check — is therefore blocked
+   by this, and none of them is telling you anything about rules or plans.
+   **What this is NOT** (each was my working hypothesis and each is dead on evidence):
+   - NOT a client-plane door problem. Both door rows mount and are visible (`28x28`,
+     `inDocument: true`, inside the host's own `EvIC1a_flowItem > TS9iAW_actions`); the earlier
+     "door not visible" failure was the *consequence* of a turn that never completed
+     (see the fork prompt fix), and the probe reached the refusal only after clicking successfully.
+   - NOT our notice's shape. `buildTocNotice` emits
+     `source.kind: 'plugin:dsh-chapters'`, and the installed kernel's own
+     `assertV4RowAdmission` ADMITS it — `tests/unit/host-seed-contract.test.ts` runs 6/6, 0 skips,
+     including "the v4 kernel REFUSES the retired plugin wrapper we no longer emit".
+   - NOT a version skew: the repo's `@deepseek-ai/dsh-session-format-v3-to-v4` is `0.2.0-rc.2`,
+     the same line as the pinned host.
+   So the refusing row is one the HOST adds to the child's first rows (its own setup/injected
+   messages) and the plugin's create call inherits the blame. Next step: reproduce it outside
+   the browser by creating a session through the host API with our seed and nothing else — if
+   it still refuses, the seed is not the problem and the host is; if it admits, the difference is
+   one of the rows the host appends, and the fix is to file it upstream with the reproduction.
+   The plugin's diagnostic sink (`DSH_CHAPTERS_ENGINE_ERRORS`) captured NOTHING for this path,
+   which is itself a gap worth closing: a refusal this consequential should leave a trace the
+   next agent can read without a browser.
 2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
    the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
    `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round

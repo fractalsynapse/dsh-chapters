@@ -180,6 +180,25 @@ try {
       return 'clicked'
     })
     await page.waitForTimeout(12000)
+    // What did the door ANSWER? Our component renders its result into a note span
+    // (.dsh-chapters_forkNote); an error text there is the difference between "the host
+    // lost the child" and "the plugin refused to fork".
+    dump.doorSaid = await page.evaluate(() => {
+      const notes = Array.from(document.querySelectorAll('[class*="forkNote"], [class*="dsh-chapters"]'))
+        .map((e) => (e.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 200))
+        .filter((t) => t !== '')
+      return { notes, bodyTail: (document.body.textContent ?? '').replace(/\s+/g, ' ').trim().slice(-300) }
+    })
+    // Does a RELOAD make the child visible? That is the question the journeys hinge on:
+    // if the sidebar lists it after a refetch, the rig (and the door) can open it; if a
+    // reload changes nothing, the session is invisible to the UI as well as to disk, and
+    // the honest conclusion is that 0.2.x will not show a created-but-never-started child.
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(6000)
+    await dismissTestingNotice(page)
+    dump.afterReload = await page.evaluate(() => ({
+      rows: Array.from(document.querySelectorAll('[role="treeitem"]')).map((r) => (r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 42)),
+    }))
     const kids = (() => { try { return fs.readdirSync(E2E_SESS_DIR).filter((d) => d.startsWith('ch-')) } catch { return [] } })()
     dump.child = {
       clicked, dirs: kids.length,
