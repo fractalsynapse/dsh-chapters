@@ -203,6 +203,112 @@ export async function ancestorSessionIds(
 }
 
 /** One mined rule candidate, as the enrichment pass proposes it (§7.5). */
+/**
+ * Rule ancestry crosses BOTH lineage edges (#52, user decision 2026-10-21).
+ *
+ * Our registry is the sole authority on CONTINUATION lineage and deliberately
+ * ignores the kernel header's `parentSession` — right for chapter numbering and
+ * the TOC, and it left a whole session shape uncovered: a delegated subagent is an
+ * unrelated root by that view, so it inherited no activated rules from ANY door.
+ * The rule tier now walks both edges, READ-ONLY, writing nothing:
+ *
+ *   registry parentSession (ours)  ∪  header parentSession (the host's)
+ *
+ * transitively, so a subagent of a continuation child of a delegating parent sees
+ * the whole chain — and still walks UP only, which keeps the direction one-way: a
+ * child's inferences never govern the session that delegated them. Two bounds,
+ * because this runs inside a head rebuild: an expansion cap, and a reader that
+ * throws contributes no edge — a rule walk must never break a turn.
+ */
+export const RULE_LINEAGE_MAX_EXPANSIONS = 64
+
+export interface RuleAncestryWalk { ancestors: Set<string>; truncated: boolean }
+
+export async function ruleAncestorSet(opts: {
+  /** Usually [sessionId]; the session always belongs to its own ancestry. */
+  seeds: readonly string[]
+  /** Our registry chain (continuation lineage). */
+  registryAncestors?: ((id: string) => Promise<readonly string[]>) | undefined
+  /** The host header's delegation edge, for any session id. */
+  parentOf?: ((id: string) => Promise<string | null | undefined>) | undefined
+  maxExpansions?: number
+}): Promise<RuleAncestryWalk> {
+  const cap = opts.maxExpansions ?? RULE_LINEAGE_MAX_EXPANSIONS
+  const ancestors = new Set<string>()
+  for (const s of opts.seeds) if (s !== '') ancestors.add(s)
+  const queue = [...ancestors]
+  let expansions = 0
+  let truncated = false
+  while (queue.length > 0) {
+    if (expansions >= cap) { truncated = true; break }
+    const id = queue.shift() as string
+    expansions += 1
+    const edges: string[] = []
+    if (opts.parentOf !== undefined) {
+      try {
+        const p = await opts.parentOf(id)
+        if (typeof p === 'string' && p !== '') edges.push(p)
+      } catch { /* unreadable header ⇒ not an ancestor */ }
+    }
+    if (opts.registryAncestors !== undefined) {
+      try { edges.push(...(await opts.registryAncestors(id))) } catch { /* shrink, never fail */ }
+    }
+    for (const e of edges) if (e !== '' && !ancestors.has(e)) { ancestors.add(e); queue.push(e) }
+  }
+  return { ancestors, truncated }
+}
+
+/**
+ * A `parentOf` from whatever session views this plane can reach: a live agent
+ * handle first, then `sessionQuery`'s durable headers. undefined when NEITHER
+ * exists — which degrades the walk to registry edges only.
+ *
+ * Cordis `ctx.get` THROWS for an unregistered service and a plugin plane may have
+ * neither, so every lookup is guarded (the #43 lesson: a strict host makes a
+ * plausible service name throw).
+ */
+export function makeHeaderParentReader(get?: (name: string) => unknown): ((id: string) => Promise<string | null | undefined>) | undefined {
+  if (get === undefined) return undefined
+  // `agents` is a SERVICE: ctx.get('agents').get(id) hands back the live handle —
+  // the same two-step auto-save uses, and the only way to read a session other
+  // than the one currently rendering.
+  const liveParent = (id: string): string | null => {
+    try {
+      const svc = get('agents') as { get?(id: string): unknown } | undefined
+      const handle = svc?.get?.(id) as { agent?: { session?: { header?: { parentSession?: string } } }; session?: { header?: { parentSession?: string } } } | undefined
+      const session = handle?.agent?.session ?? handle?.session
+      const p = session?.header?.parentSession
+      return typeof p === 'string' && p !== '' ? p : null
+    } catch { return null }
+  }
+  let durable: Map<string, string | null> | null = null
+  const durableParent = async (id: string): Promise<string | null> => {
+    if (durable === null) {
+      try {
+        const sq = get('sessionQuery') as { listSessions?(signal?: unknown): Promise<Array<{ header?: { id?: string; parentSession?: string } }>> } | undefined
+        if (sq?.listSessions === undefined) return null
+        const m = new Map<string, string | null>()
+        for (const r of await sq.listSessions() ?? []) {
+          const sid = r?.header?.id
+          if (typeof sid === 'string' && sid !== '') {
+            const p = r.header?.parentSession
+            m.set(sid, typeof p === 'string' && p !== '' ? p : null)
+          }
+        }
+        durable = m
+      } catch { return null }
+    }
+    return durable.get(id) ?? null
+  }
+  return async (id: string) => {
+    // live handle first: it is the current session's own edge, and the freshest
+    // answer for any session still open in this process
+    const live = liveParent(id)
+    if (live !== null) return live
+    return durableParent(id)
+  }
+}
+
 export interface MinedRule {
   text: string
   category: string
@@ -334,6 +440,9 @@ export interface RenderRulesOpts {
   topicsOverride?: readonly string[] | undefined
   store: RulesStoreLike
   sessionId: string
+  /** #52: reads the host header's parentSession for any id in the chain. Absent
+   * ⇒ the walk follows registry edges only, so delegation contributes nothing. */
+  parentOf?: ((id: string) => Promise<string | null | undefined>) | undefined
 }
 
 /**
@@ -346,9 +455,14 @@ export interface RenderRulesOpts {
  * deterministic, already on disk, zero model tokens (§1 invariant 1).
  */
 export async function renderRulesBlock(opts: RenderRulesOpts): Promise<RulesSectionResult> {
-  const ancestors = opts.includeSession
-    ? new Set(await ancestorSessionIds(async (id) => await opts.store.get(id), opts.sessionId))
-    : new Set<string>()
+  const walk = opts.includeSession
+    ? await ruleAncestorSet({
+        seeds: [opts.sessionId],
+        registryAncestors: async (id) => await ancestorSessionIds(async (s) => await opts.store.get(s), id),
+        ...(opts.parentOf !== undefined ? { parentOf: opts.parentOf } : {}),
+      })
+    : { ancestors: new Set<string>(), truncated: false }
+  const ancestors = walk.ancestors
   const state = opts.relevance ? await opts.store.get(opts.sessionId) : undefined
   const topics = opts.topicsOverride !== undefined && opts.topicsOverride.length > 0
     ? opts.topicsOverride
@@ -363,6 +477,7 @@ export async function renderRulesBlock(opts: RenderRulesOpts): Promise<RulesSect
     sessionCap: opts.sessionCap,
     ...(opts.includeSession ? { storeDir: opts.storeDir, ancestorSessions: ancestors } : {}),
     ...(topics !== undefined ? { relevanceTopics: topics } : {}),
+    ...(walk.truncated ? { lineageTruncated: true } : {}),
   })
 }
 

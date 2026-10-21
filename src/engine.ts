@@ -45,7 +45,7 @@ import { writeArchive } from './archive.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { hostname } from 'node:os'
 import path from 'node:path'
-import { captureMinedRules, makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
+import { captureMinedRules, makeHeaderParentReader, makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
@@ -269,6 +269,21 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     model?: string | undefined
   } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true, mine: true, mineCap: 3, autoActivate: true, model: '' }
   private storePromise: Promise<ChapterStoreHandle> | null = null
+
+  /** #52: the delegation-edge reader, built lazily because a field initializer
+   * cannot see the constructor parameter and the realm may hold neither service.
+   * null = not built yet; undefined = built and unavailable (registry edges only). */
+  private parentOfReader: ((id: string) => Promise<string | null | undefined>) | undefined | null = null
+
+  /** The reader the rule-ancestry walk uses. Absent ⇒ delegation contributes no edge. */
+  private ruleParentOf(): ((id: string) => Promise<string | null | undefined>) | undefined {
+    if (this.parentOfReader === null) {
+      this.parentOfReader = makeHeaderParentReader((name: string) => {
+        try { return this.ctx.get?.(name) } catch { return undefined }
+      })
+    }
+    return this.parentOfReader ?? undefined
+  }
 
   constructor(ctx: Context, config: ChaptersRowConfig = {}) {
     // The base's resolveConfig rejects unknown keys at runtime (measured r18:
@@ -792,6 +807,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       includeSession: true,
       store,
       sessionId: session.id,
+      // #52: the delegation edge. A subagent that compacts in place must see the
+      // rules of the session that delegated it, or the whole point of the tier is
+      // lost exactly where the work actually happens.
+      ...(() => { const p = this.ruleParentOf(); return p !== undefined ? { parentOf: p } : {} })(),
     })
     if (built.kind === 'none') return null
     if (built.kind === 'refusal') {

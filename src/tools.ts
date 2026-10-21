@@ -11,7 +11,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
-import { queryTopics, renderRulesBlock } from './session-rules.ts'
+import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
 import { DEFAULT_CLONE_DIR } from './sync.ts'
 import { lineageOf, type ChapterRange, type SessionEventLike, type ToolResultOverride } from './types.ts'
@@ -103,6 +103,11 @@ export function buildChaptersTools(
   store: RegistryStore,
   config: ToolsConfig,
 ): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand } {
+
+  // #52: the delegation edge for rule ancestry, read from whatever this plane can
+  // reach (live handles, else the durable session query). undefined ⇒ the walk
+  // follows registry edges only, and a block that truncated says so.
+  const ruleParentOf = makeHeaderParentReader((name) => { try { return ctx.get?.(name) } catch { return undefined } })
 
   const portsFor = async (caller: CallerAgent): Promise<ContinuePorts> => {
     const cwd = caller.session.header.cwd ?? ''
@@ -654,6 +659,7 @@ export function buildChaptersTools(
           includeSession: intent === 'continue',
           store,
           sessionId: agent.session.id,
+          ...(ruleParentOf !== undefined ? { parentOf: ruleParentOf } : {}),
         })
         if (orphan.kind !== 'ok' || orphan.shown.session === 0) return {}
         return { section: `0 project rules — this checkout resolves no knowledge project (${cwd}); your session rules below are local only. Link one with /chapters-link to inherit the team's.\n\n${orphan.kind === 'ok' ? orphan.text : ''}` }
@@ -670,6 +676,7 @@ export function buildChaptersTools(
         includeSession: intent === 'continue',
         store,
         sessionId: agent.session.id,
+        ...(ruleParentOf !== undefined ? { parentOf: ruleParentOf } : {}),
       })
       if (built.kind === 'none') return {}
       if (built.kind === 'refusal') {
@@ -890,6 +897,7 @@ export function buildChaptersTools(
           // the QUERY selects here (that is the door's whole job), not the session's
           // own recent signatures — which is what a rebuilt head selects on
           topicsOverride: queryTopics(args.query),
+          ...(ruleParentOf !== undefined ? { parentOf: ruleParentOf } : {}),
           store,
           sessionId: caller.session.id,
         })

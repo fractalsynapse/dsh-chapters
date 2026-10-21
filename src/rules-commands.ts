@@ -53,6 +53,8 @@ export interface RulesIo {
    * Absent ⇒ the session tier is reported as unresolved, never guessed.
    */
   ancestors?: () => Promise<ReadonlySet<string>>
+  /** #52: true when the ancestry walk hit its cap (delegation or continuation). */
+  ancestryTruncated?: () => Promise<boolean>
   /** #50 §7.7: ONE bounded model call, report-only. Absent ⇒ the verb refuses. */
   ask?: (prompt: string) => Promise<string>
   /** §7.3/§7.4 numbers the answer is measured with — the SAME config the doors
@@ -106,6 +108,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
   const known = async (): Promise<RuleRow[]> => {
     const byId = new Map<string, RuleRow>()
     const ancestorSet = io.ancestors !== undefined ? await io.ancestors() : new Set<string>()
+    const lineageTruncated = io.ancestryTruncated !== undefined && await io.ancestryTruncated()
     const statusFacts = loadRuleStatusFacts(mirror, io.harnessId)
     // §7.5: `revoke` is the one fact the session tier writes, and it lives in
     // curation.jsonl — the FILE stays `proposed` forever (write-once). Reading
@@ -212,11 +215,16 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     const rows = await known()
     const ancestorsNote = io.ancestors === undefined ? ' (no session context — the session tier is reported unresolved, never guessed)' : ''
     if (io.harnessId === undefined) return { kind: 'error', text: 'rules surface not configured (harnessId absent)' }
+    // #52: one walk, two answers — the set the block renders with and whether it
+    // had to give up. Both come from the SAME ancestry the doors use.
+    const activeAncestors = io.ancestors !== undefined ? await io.ancestors() : new Set<string>()
+    const lineageTruncated = io.ancestryTruncated !== undefined && await io.ancestryTruncated()
     const built = buildRulesSection(mirror, {
       projectKey: project.projectKey, harnessId: io.harnessId,
       budgetTokens: io.budgetTokens ?? 1200,
       storeDir,
-      ...(io.ancestors !== undefined ? { ancestorSessions: await io.ancestors() } : { ancestorSessions: new Set<string>() }),
+      ...(io.ancestors !== undefined ? { ancestorSessions: activeAncestors } : { ancestorSessions: new Set<string>() }),
+      ...(lineageTruncated ? { lineageTruncated: true } : {}),
       ...(io.projectCap !== undefined ? { projectCap: io.projectCap } : {}),
       ...(io.sessionCap !== undefined ? { sessionCap: io.sessionCap } : {}),
     })
@@ -224,6 +232,8 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
       + `session tier: ${rows.filter((r) => r.scope === 'session' && r.active === true).length} active for this session tree`
       + ` (${rows.filter((r) => r.scope === 'session' && (r.basis ?? '') === 'inferred').length} of them inferred by the model, never said by you)`
       + `\nmining posture: ${io.autoActivate === false ? 'REVIEW — mined rules stay inert until you approve them' : 'AUTO — mined rules govern on arrival (revoke is the undo)'}${ancestorsNote}\n`
+      + `activation: a session rule reaches its own tree, its continuation children, and its delegated subagents (#52); a parent never inherits from a child\n`
+      + `${lineageTruncated ? 'LINEAGE TRUNCATED: the ancestry walk hit its cap, so some ancestors were not consulted\n' : ''}\n`
     if (built.kind === 'refusal') return { kind: 'success', text: `${head}RENDERED: nothing — ${built.reason}` }
     if (built.kind === 'none') return { kind: 'success', text: `${head}RENDERED: zero rule bytes (an empty tier injects NOTHING — the tape-safe shape)` }
     return {
