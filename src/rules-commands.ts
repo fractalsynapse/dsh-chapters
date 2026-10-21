@@ -60,11 +60,15 @@ export interface RulesIo {
   budgetTokens?: number
   projectCap?: number
   sessionCap?: number
+  /** §7.5: reported by `active`, and drives whether mined rules govern on arrival */
+  autoActivate?: boolean | undefined
+  /** the shared settings table (`rules.model` lives beside `enrichment.model`) */
+  settings?: { get(key: string): string | undefined; put(key: string, value: string): Promise<void> } | undefined
 }
 
 export interface RulesReply { kind: 'success' | 'error'; text: string }
 
-const HELP = 'usage: /chapters-rule add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts'
+const HELP = 'usage: /chapters-rule add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | active | approve <id> | revoke <id> | pin <id> | unpin <id> | model [<provider/model|clear>] | conflicts'
 
 /** one row per rule, both tiers, with the effective status of THIS machine */
 interface RuleRow {
@@ -78,8 +82,10 @@ interface RuleRow {
   pinned: boolean
   body: string
   sourceSession: string
-  /** §7.5: an inert model guess awaiting this machine's approve */
-  suggested?: boolean | undefined
+  /** §7.5: held for review by policy — inert until this machine approves it */
+  reviewOnly?: boolean | undefined
+  /** §7.5 warrant shown to the human: stated (a human sentence) vs inferred */
+  basis?: string | undefined
 }
 
 export async function rulesCommand(io: RulesIo, args: string): Promise<RulesReply> {
@@ -127,7 +133,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
         id: r.id, scope: 'session', category: r.category, title: r.title, status: r.status,
         active: sessionRuleActive(r, { ancestorSessions: ancestorSet, revoked: revokedHere, facts: statusFacts }),
         pinned: r.pinned || pins.has(r.id), body: r.body, sourceSession: r.session,
-        suggested: r.suggested,
+        reviewOnly: r.reviewOnly, basis: r.basis,
       })
     }
     return [...byId.values()].sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : a.id < b.id ? -1 : 1))
@@ -198,7 +204,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     if (!all && !proposedOnly) rows = rows.filter((r) => r.status !== 'revoked')
     if (proposedOnly) rows = rows.filter((r) => r.status === 'proposed')
     if (rows.length === 0) return { kind: 'success', text: scope === 'all' ? 'no rules match' : `no ${scope}-tier rules match` }
-    const text = rows.map((r) => `${r.id.padEnd(12)} ${r.scope.padEnd(8)} ${(r.scope === 'session' ? (r.status === 'revoked' ? 'revoked' : (r.active === true ? 'active' : (r.suggested === true ? 'suggested' : 'inactive'))) : r.status).padEnd(10)} ${(r.pinned ? 'pin ' : '    ')}${r.category.padEnd(14)} ${r.title}`).join('\n')
+    const text = rows.map((r) => `${r.id.padEnd(12)} ${r.scope.padEnd(8)} ${(r.scope === 'session' ? (r.status === 'revoked' ? 'revoked' : (r.active === true ? 'active' : (r.reviewOnly === true ? 'review   ' : 'inactive'))) : r.status).padEnd(10)} ${(r.pinned ? 'pin ' : '    ')}${r.category.padEnd(14)} ${r.title}`).join('\n')
     return { kind: 'success', text: `id           scope    status     pin   category       title\n${text}` }
   }
 
@@ -215,7 +221,9 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
       ...(io.sessionCap !== undefined ? { sessionCap: io.sessionCap } : {}),
     })
     const head = `project tier: ${rows.filter((r) => r.scope === 'project' && r.status === 'core').length} approved-core on THIS machine, ${rows.filter((r) => r.scope === 'project' && r.status === 'proposed').length} proposed\n`
-      + `session tier: ${rows.filter((r) => r.scope === 'session' && r.active === true).length} active for this session tree${ancestorsNote}\n`
+      + `session tier: ${rows.filter((r) => r.scope === 'session' && r.active === true).length} active for this session tree`
+      + ` (${rows.filter((r) => r.scope === 'session' && (r.basis ?? '') === 'inferred').length} of them inferred by the model, never said by you)`
+      + `\nmining posture: ${io.autoActivate === false ? 'REVIEW — mined rules stay inert until you approve them' : 'AUTO — mined rules govern on arrival (revoke is the undo)'}${ancestorsNote}\n`
     if (built.kind === 'refusal') return { kind: 'success', text: `${head}RENDERED: nothing — ${built.reason}` }
     if (built.kind === 'none') return { kind: 'success', text: `${head}RENDERED: zero rule bytes (an empty tier injects NOTHING — the tape-safe shape)` }
     return {
@@ -234,7 +242,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     if (row === undefined) return { kind: 'error', text: `no rule ${id} in project ${project.slug} — unknown id (list shows what exists)` }
     // §7.5: a SUGGESTED model rule is exactly what approve is FOR; a marker rule
     // is already active, so approving it would be theatre.
-    if (verb === 'approve' && row.scope === 'session' && row.suggested !== true) {
+    if (verb === 'approve' && row.scope === 'session' && row.reviewOnly !== true) {
       // §7.1: the session tier does not approve. Promoting it to the shared tier
       // is the human act, and it is a NEW rule file with its own id (§1.3).
       return { kind: 'error', text: `${id} is a SESSION rule already active for this session tree — there is nothing to approve. To make it bind your team: /chapters-rule add ${row.category} "${row.body.replace(/\s+/g, ' ').slice(0, 160)}"` }
@@ -249,7 +257,7 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     await io.syncNow(cwd)
     return { kind: 'success', text: verb === 'approve'
       ? row.scope === 'session'
-        ? `suggested rule ${id} approved — it now governs this session tree (and stays LOCAL: session rules are never staged to the pool)`
+        ? `mined rule ${id} approved — it now governs this session tree (and stays LOCAL: session rules are never staged to the pool)`
         : `rule ${id} is CORE on THIS machine (other machines approve independently) — it will render into continuations from this workspace`
       : row.scope === 'session'
         ? `session rule ${id} revoked on this machine — out of every head in this tree, file bytes untouched (write-once)`
@@ -272,6 +280,33 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     return { kind: 'success', text: verb === 'pin'
       ? `rule ${id} pinned on this machine — it is rendered into every rebuilt head regardless of caps or topicality (ground rules are OLD; ranking would evict them)`
       : `rule ${id} unpinned on this machine — it now competes for a capped slot by relevance` }
+  }
+
+  const depsRoute = (): string => {
+    const cur = io.settings?.get('enrichment.route') ?? ''
+    return cur === '' ? 'the conversation route' : `the ${cur} route`
+  }
+
+  if (verb === 'model') {
+    // §7.5: rule mining may deserve a better model than annotation does. Persisted
+    // in the shared settings table so both planes see it, exactly like the
+    // enrichment override; `clear` falls back to riding the annotation call.
+    if (io.settings === undefined) return { kind: 'error', text: 'the settings table is unavailable on this plane' }
+    const arg = parts[1] ?? ''
+    if (arg === '') {
+      const cur = io.settings.get('rules.model') ?? ''
+      return { kind: 'success', text: cur === ''
+        ? `rules.model: (unset) — mining rides the enrichment call (${depsRoute()}), costing no extra inference`
+        : `rules.model: ${cur} — one extra bounded call per chapter` }
+    }
+    try {
+      await io.settings.put('rules.model', arg === 'clear' ? '' : arg)
+    } catch (error) {
+      return { kind: 'error', text: `model failed: ${String((error as Error)?.message ?? error).slice(0, 160)}` }
+    }
+    return { kind: 'success', text: arg === 'clear'
+      ? 'rules.model cleared — mining rides the enrichment call again'
+      : `rules.model set to ${arg} — each chapter now costs one extra bounded call to mine its rules` }
   }
 
   if (verb === 'conflicts') {

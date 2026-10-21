@@ -21,7 +21,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
-import { buildEnrichInput, parseEnrichResult, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
+import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
 
 export interface EnrichConfig {
@@ -40,6 +40,20 @@ export interface EnrichConfig {
   mineRules?: boolean | undefined
   /** per-chapter cap on mined rules (§7.5: few, short, traceable) */
   mineCap?: number | undefined
+  /**
+   * §7.5 policy (amended 2026-10-21): may a mined rule govern on arrival? Default
+   * TRUE — inferring a standing order nobody spelled out is the point of the tier.
+   * False holds every mined rule as `reviewOnly` until a human approves it here.
+   */
+  rulesAutoActivate?: boolean | undefined
+  /**
+   * §7.5: a model of its own for rule mining ('provider/model', or a bare model
+   * name on the current provider). Empty ⇒ mine inside the SAME annotation call,
+   * which costs no extra inference. Set it and mining becomes a second bounded call
+   * per chapter — the honest way to say governance deserves a better model than
+   * annotation does.
+   */
+  rulesModel?: string | undefined
 }
 
 export interface EnrichWiringDeps {
@@ -62,7 +76,7 @@ export interface EnrichWiringDeps {
    * chapter's human bytes and the candidates and reports what happened. Absent ⇒
    * mining is WARNED as unwired, never silently dropped.
    */
-  onMinedRules?: ((args: { cwd: string; sessionId: string; chapterNumber: number; humanText: string; rules: readonly MinedRuleOut[]; max: number }) => Promise<{ written: number; activated: number; suggested: number }>) | undefined
+  onMinedRules?: ((args: { cwd: string; sessionId: string; chapterNumber: number; humanText: string; rules: readonly MinedRuleOut[]; max: number; autoActivate: boolean }) => Promise<{ written: number; stated: number; inferred: number; pending: number }>) | undefined
   scheduler?: { schedule(cwd: string, why: string): void }
   log(m: string): void
   warn(m: string): void
@@ -212,32 +226,56 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
         // one retry with a nudge; garbage stays non-fatal (record §6.1)
         result = parseEnrichResult(await deps.fetch(input + '\nRemember: reply with ONLY the JSON object, no other text.', route))
       }
-      // #50 §7.5 mining runs BEFORE the "already enriched" short-circuit: a chapter
-      // that needs no new title may still be full of standing orders, and skipping
-      // them because the annotation was a no-op is exactly the kind of silence this
-      // round is about. Failures are contained — mining must never cost a chapter
-      // its annotation or break the ladder.
-      if (result !== null && result.rules.length > 0) {
+      // §7.5 mining, and it happens BEFORE the hash-guarded frontmatter write, so a
+      // chapter whose annotation is refused still contributes its standing orders.
+      const humanText = humanBytesOf(body)
+      let mined: readonly MinedRuleOut[] = result !== null ? result.rules : []
+      // A dedicated governance model is opt-in; when set, ITS answer is what gets
+      // mined and the annotation pass's rules are ignored — two models minting
+      // rules for one chapter would just duplicate under different judgement.
+      const mineSpec = (deps.store.getSetting('rules.model') ?? deps.config.rulesModel ?? '').trim()
+      if (deps.config.mineRules !== false && mineSpec !== '' && mineSpec !== 'conversation') {
+        try {
+          const sep = mineSpec.indexOf('/')
+          const base = resolveRoute()
+          const route = sep > 0
+            ? { provider: mineSpec.slice(0, sep), model: mineSpec.slice(sep + 1) }
+            : { provider: base?.provider ?? '', model: mineSpec }
+          if (route.provider !== '') {
+            mined = parseMinedRules(await deps.fetch(buildMineInput(
+              { requests: userChunks.map(stripFence) },
+              body.slice(0, 6000),
+            ), route))
+          } else {
+            deps.warn(`rules.model "${mineSpec}" names no provider to route through — mining with the annotation result instead`)
+          }
+        } catch (error) {
+          deps.warn(`rule mining pass failed (${String((error as Error)?.message ?? error).slice(0, 120)}) — the annotation is unaffected`)
+          mined = []
+        }
+      }
+      if (mined.length > 0) {
         if (deps.config.mineRules === false) {
-          deps.log(`rule mining skipped for ${sid}#${num}: ${result.rules.length} candidate(s) dropped (rulesEnrichment off)`)
+          deps.log(`rule mining skipped for ${sid}#${num}: ${mined.length} candidate(s) dropped (rulesEnrichment off)`)
         } else if (deps.onMinedRules === undefined) {
-          deps.warn(`rule mining UNWIRED on this plane: ${result.rules.length} candidate(s) for ${sid}#${num} were not recorded — the sink owns disk + identity`)
+          deps.warn(`rule mining UNWIRED on this plane: ${mined.length} candidate(s) for ${sid}#${num} were not recorded — the sink owns disk + identity`)
         } else {
           try {
-            const mined = await deps.onMinedRules({
+            const got = await deps.onMinedRules({
               cwd,
               sessionId: sid,
               chapterNumber: num,
-              // ONLY the human's own bytes, cut at the next role marker: the chunks
-              // the annotator input uses run ON into the assistant reply, and that
-              // leaked assistant prose into the quote gate's evidence (§7.5).
-              humanText: humanBytesOf(body),
-              rules: result.rules,
+              // The human's own bytes, cut at the next role marker. They decide
+              // whether a mined rule is LABELLED `stated` or `inferred` — a warrant
+              // shown to the human, not permission to govern (§7.5, 2026-10-21).
+              humanText,
+              rules: mined,
               max: deps.config.mineCap ?? 3,
+              autoActivate: deps.config.rulesAutoActivate !== false,
             })
-            if (mined.written > 0) {
-              deps.log(`rule mining ${sid}#${num}: ${mined.written} recorded (${mined.activated} activated on a verbatim quote, ${mined.suggested} awaiting review — /chapters-rule list --scope session)`)
-              // session rules are LOCAL (§7.5): never staged, so no sync is armed
+            if (got.written > 0) {
+              deps.log(`rule mining ${sid}#${num}: ${got.written} recorded (${got.stated} stated by you, ${got.inferred} inferred${got.pending > 0 ? `, ${got.pending} held for review` : ', all governing now'} — /chapters-rule list --scope session)`)
+              // session rules are LOCAL: nothing is armed on the scheduler (§7.5)
             }
           } catch (error) {
             deps.warn(`rule mining failed for ${sid}#${num}: ${String((error as Error)?.message ?? error).slice(0, 140)} — the annotation itself is unaffected`)

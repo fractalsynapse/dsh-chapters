@@ -28,7 +28,7 @@ import { isHumanAuthored, stripReminderSpans } from './injections.ts'
 import { turnSpanOf } from './signature.ts'
 import {
   buildRulesSection, collectStoreRules, parseRuleFile, parseRuleMarkers, renderRuleFile, ruleSlug,
-  type RuleRecord, type RulesSectionResult, type RuleDerivedFrom,
+  type RuleBasis, type RuleRecord, type RulesSectionResult,
 } from './rules.ts'
 import { redactText } from './redact.ts'
 import type { SessionEventLike } from './types.ts'
@@ -236,23 +236,35 @@ export interface MineDeps {
   rules: readonly MinedRule[]
   /** per-chapter cap: one conversation must not mint a dozen standing orders */
   maxPerChapter: number
+  /** the chapter these came from (provenance rendered into the head) */
+  chapterNumber: number
+  /**
+   * §7.5 policy (amended 2026-10-21): may a mined rule govern on arrival? TRUE by
+   * default — a rule the model inferred from context is the reason this tier
+   * exists; the human may not have known to say it. When false every mined rule is
+   * written `reviewOnly: true` and stays inert until this machine approves it, the
+   * conservative posture a shared box may want.
+   */
+  autoActivate: boolean
   now?: () => string
 }
 
 /**
- * Write the mined candidates. Verified quotes activate; everything else is
- * written `suggested: true` — reviewable in `list --scope session`, inert in
- * every head until a human approves it (§7.5). Deduped by normalized body
+ * Write the mined candidates. Each records its warrant (`stated` / `inferred`) and
+ * the chapter it came from; whether it governs on arrival is the `autoActivate`
+ * POLICY, not an evidence test (§7.5, amended 2026-10-21 — the tier's premise is
+ * that the human may not have known to say the rule). Deduped by normalized body
  * against what the machine already holds, so re-running the ladder (or a
  * chapter annotated by a newer model) fills gaps and never duplicates.
  */
-export function captureMinedRules(deps: MineDeps): { ids: string[]; activated: number; suggested: number } {
+export function captureMinedRules(deps: MineDeps): { ids: string[]; stated: number; inferred: number; pending: number } {
   const rulesDir = path.join(deps.storeDir, 'rules', deps.harnessId)
   const existing = new Set<string>()
   for (const r of collectStoreRules(deps.storeDir, deps.harnessId)) existing.add(norm(r.body))
   const written: string[] = []
-  let activated = 0
-  let suggested = 0
+  let stated = 0
+  let inferred = 0
+  let pending = 0
   const cap = Math.max(0, deps.maxPerChapter)
   for (const m of deps.rules) {
     // the cap counts rules WRITTEN, not candidates examined: a duplicate or an
@@ -260,26 +272,32 @@ export function captureMinedRules(deps: MineDeps): { ids: string[]; activated: n
     if (written.length >= cap) break
     const body = redactText(m.text.trim().replace(/\s+/g, ' ')).text
     if (body.length < 10 || existing.has(norm(body))) continue
-    const verified = quoteIsHuman(deps.humanText, m.quote)
+    // The quote check CLASSIFIES, it does not authorize (§7.5, amended
+    // 2026-10-21): `stated` = a human sentence is behind this, `inferred` = the
+    // model judged it useful and nobody said it. Both govern unless the plugin is
+    // configured to hold mined rules for review, and the difference is SHOWN in
+    // the rendered rule line — which is where a judgement call belongs.
+    const basis: RuleBasis = quoteIsHuman(deps.humanText, m.quote) ? 'stated' : 'inferred'
+    const reviewOnly = !deps.autoActivate
     const number = nextRuleNumber({ records: deps.records, harnessId: deps.harnessId, rulesDir })
     const category = (m.category || 'general').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) || 'general'
     const title = body.split(/[.!?]/)[0]!.trim().slice(0, 60)
     const name = `${String(number).padStart(3, '0')}-${ruleSlug(category, title)}.md`
     fs.mkdirSync(rulesDir, { recursive: true })
-    const derivedFrom: RuleDerivedFrom = 'model'
     fs.writeFileSync(path.join(rulesDir, name), renderRuleFile({
       number, category, title, sourceSession: deps.sessionId,
       at: (deps.now !== undefined ? deps.now() : new Date().toISOString()),
       body: `${body}\n`,
-      scope: 'session', session: deps.sessionId, derivedFrom,
-      suggested: !verified,
+      scope: 'session', session: deps.sessionId, derivedFrom: 'model',
+      reviewOnly, basis, chapter: deps.chapterNumber,
     }), { flag: 'wx' })
     written.push(`${deps.harnessId}/${String(number).padStart(3, '0')}`)
     existing.add(norm(body))
-    if (verified) activated += 1
-    else suggested += 1
+    if (basis === 'stated') stated += 1
+    else inferred += 1
+    if (reviewOnly) pending += 1
   }
-  return { ids: written, activated, suggested }
+  return { ids: written, stated, inferred, pending }
 }
 
 /** Turn a task description into the relevance term set §7.4 selects on — the same

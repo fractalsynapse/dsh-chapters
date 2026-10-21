@@ -1,22 +1,33 @@
 /**
  * #50 §7.5 — the background half: the SAME model that does the work mines the
  * standing orders out of each archived chapter and applies them, so the human
- * never has to think about it. What keeps that safe is not a click, it is
- * EVIDENCE: a mined rule governs a session only when it quotes the human's own
- * words verbatim out of the chapter's USER text. Anything else is written,
- * listed, and inert until a human approves it.
+ * never has to think about it.
  *
- * Rows here cover: the output contract (backward-compatible), the quote gate,
- * the capture (activation / inertness / dedupe / cap / redaction / numbering),
- * the ladder integration (user-chunks-only, gated off, unwired), and the review
- * surface (approve a suggestion, not an already-active rule).
+ * POLICY, not evidence, decides whether a mined rule governs (§7.5 as amended
+ * 2026-10-21). The first cut required a mined rule to quote the human's own words
+ * verbatim before it could apply, and that was rejected: it makes this tier
+ * redundant with the deterministic `ADD RULE:` marker, when the whole reason to
+ * have the model look is that it can see a standing order coming that nobody has
+ * said yet. So the quote check survives, DEMOTED to a label — `stated` vs
+ * `inferred`, rendered to the human next to the rule text and its chapter — while
+ * `rulesAutoActivate` (default ON) decides whether mined rules govern on arrival.
+ * With it OFF, mined rules are written `reviewOnly: true` and stay inert until
+ * `approve`. The controls that actually hold the risk are structural: machine-local
+ * scope, never staged, 3-per-chapter and per-tier display caps, provenance
+ * rendered inline, revoke one command away, and the agent naming which rules it
+ * applied.
+ *
+ * Rows: output contract (backward-compatible), classification, BOTH activation
+ * postures, dedupe/cap/numbering/redaction, the ladder (human bytes as warrant
+ * evidence, gated off, unwired, dedicated model, ordering before the guarded
+ * write), and the review surface.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { parseEnrichResult, buildEnrichInput } from '../../src/enrich.ts'
+import { parseEnrichResult, buildEnrichInput, buildMineInput, parseMinedRules } from '../../src/enrich.ts'
 import { quoteIsHuman, captureMinedRules } from '../../src/session-rules.ts'
 import {
   parseRuleFile, renderRuleFile, collectStoreRules, sessionRuleActive, buildRulesSection,
@@ -89,43 +100,67 @@ function captureWorld() {
 
 const mined = (text: string, quote: string, category = 'testing') => ({ text, category, quote })
 
-test('§7.5 a verified quote is written and ACTIVE; no suggestion flag, no approval step', () => {
+test('§7.5 THE REVERSAL, PINNED: an inferred rule governs on arrival — no human said it', () => {
+  // Two candidates: one backed by a human sentence, one the model judged. Under the
+  // default posture BOTH govern; the only difference is the label rendered beside the
+  // rule. An earlier cut of this file asserted the opposite — that assertion is what
+  // the 2026-10-21 decision removed, so it is pinned here as removed.
   const w = captureWorld()
   const res = captureMinedRules({
     storeDir: w.storeDir, harnessId: 'hA', sessionId: 'sess-me', records: w.records,
-    humanText: w.humanText, maxPerChapter: 3, now: () => '2026-10-20T00:00:00Z',
-    rules: [mined('Always run the tape replay before cutting a tag.', 'always run the tape replay before cutting a tag')],
+    humanText: w.humanText, maxPerChapter: 3, chapterNumber: 7, autoActivate: true,
+    now: () => '2026-10-20T00:00:00Z',
+    rules: [
+      mined('Always run the tape replay before cutting a tag.', 'always run the tape replay before cutting a tag'),
+      mined('Rebase the feature branch onto staging before opening the PR.', 'phrasing found nowhere in what the human typed'),
+    ],
   })
-  assert.deepEqual(res, { ids: ['hA/001'], activated: 1, suggested: 0 })
-  const file = fs.readFileSync(path.join(w.rulesDir, fs.readdirSync(w.rulesDir)[0]!), 'utf8')
-  const p = parseRuleFile(file)!
-  assert.equal(p.scope, 'session')
-  assert.equal(p.derivedFrom, 'model')
-  assert.equal(p.suggested, false, 'verified ⇒ no inertness marker written at all')
-  assert.equal(p.body.trim(), 'Always run the tape replay before cutting a tag.')
+  assert.deepEqual(res, { ids: ['hA/001', 'hA/002'], stated: 1, inferred: 1, pending: 0 })
+  const files = fs.readdirSync(w.rulesDir).sort()
+  const stated = parseRuleFile(fs.readFileSync(path.join(w.rulesDir, files[0]!), 'utf8'))!
+  const inferred = parseRuleFile(fs.readFileSync(path.join(w.rulesDir, files[1]!), 'utf8'))!
+  assert.equal(stated.basis, 'stated')
+  assert.equal(inferred.basis, 'inferred')
+  assert.equal(inferred.reviewOnly, false, 'the warrant is a LABEL, not a lock')
+  assert.equal(inferred.chapter, 7, 'and it names the chapter it came from')
   const active = collectStoreRules(w.storeDir, 'hA').filter((r) => sessionRuleActive(r, { ancestorSessions: new Set(['sess-me']), revoked: new Set() }))
-  assert.equal(active.length, 1, 'it governs the session without a human touching it — the whole point')
+  assert.equal(active.length, 2, 'both govern without a human touching either')
   w.dispose()
 })
 
-test('§7.5 an unverified quote is recorded, listed, and INERT in every head', () => {
-  const w = captureWorld()
+test('§7.5 the REVIEW posture is a knob, not a verdict on the quote', () => {
+  // The same candidate and the same unmatched quote under two policies: inert in
+  // one, governing in the other. Nothing in the quote path gates activation now —
+  // `rulesAutoActivate` does.
+  const off = captureWorld()
   const res = captureMinedRules({
-    storeDir: w.storeDir, harnessId: 'hA', sessionId: 'sess-me', records: w.records,
-    humanText: w.humanText, maxPerChapter: 3,
+    storeDir: off.storeDir, harnessId: 'hA', sessionId: 'sess-me', records: off.records,
+    humanText: off.humanText, maxPerChapter: 3, chapterNumber: 2, autoActivate: false,
     rules: [mined('Never force-push to a shared branch.', 'we should probably never force push')],
   })
-  assert.equal(res.suggested, 1, 'the guess is captured, not discarded')
-  const p = parseRuleFile(fs.readFileSync(path.join(w.rulesDir, fs.readdirSync(w.rulesDir)[0]!), 'utf8'))!
-  assert.equal(p.suggested, true)
-  const mirror = path.join(w.dir, '.dsh-knowledge')
-  const sec = buildRulesSection(mirror, {
-    projectKey: 'PK', harnessId: 'hA', budgetTokens: 1200, storeDir: w.storeDir,
-    ancestorSessions: new Set(['sess-me']),
+  assert.equal(res.pending, 1)
+  const held = parseRuleFile(fs.readFileSync(path.join(off.rulesDir, fs.readdirSync(off.rulesDir)[0]!), 'utf8'))!
+  assert.equal(held.reviewOnly, true)
+  assert.equal(held.basis, 'inferred', 'still classified honestly')
+  const secOff = buildRulesSection(path.join(off.dir, '.dsh-knowledge'), {
+    projectKey: 'PK', harnessId: 'hA', budgetTokens: 1200, storeDir: off.storeDir, ancestorSessions: new Set(['sess-me']),
   })
-  assert.ok(sec.kind === 'none' || !sec.text.includes('Never force-push'),
-    `a model guess must not steer a session unreviewed: ${sec.kind === 'ok' ? sec.text : sec.kind}`)
-  w.dispose()
+  assert.ok(secOff.kind === 'none' || !secOff.text.includes('Never force-push'), 'inert until someone approves it')
+
+  const on = captureWorld()
+  captureMinedRules({
+    storeDir: on.storeDir, harnessId: 'hA', sessionId: 'sess-me', records: on.records,
+    humanText: on.humanText, maxPerChapter: 3, chapterNumber: 2, autoActivate: true,
+    rules: [mined('Never force-push to a shared branch.', 'we should probably never force push')],
+  })
+  const secOn = buildRulesSection(path.join(on.dir, '.dsh-knowledge'), {
+    projectKey: 'PK', harnessId: 'hA', budgetTokens: 1200, storeDir: on.storeDir, ancestorSessions: new Set(['sess-me']),
+  })
+  assert.ok(secOn.kind === 'ok' && secOn.text.includes('Never force-push'), JSON.stringify(secOn))
+  assert.match(secOn.text, /inferred from ch\.2 — nobody said it/, 'the head says it out loud')
+  assert.match(secOn.text, /Name by id the session rule\(s\) above that actually shaped what you did/,
+    'and the agent must tell the human which rules it applied (§7.5)')
+  off.dispose(); on.dispose()
 })
 
 test('§7.5 approving a SUGGESTION activates it — and the write-once file never changed', () => {
@@ -225,19 +260,22 @@ function ladderHarness(fetchImpl: (prompt: string) => Promise<string>, over: Par
 const minedAnswer = (quote: string) => async () =>
   `{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"],"rules":[{"text":"Always run the tape replay before cutting a tag.","category":"testing","quote":${JSON.stringify(quote)}}]}`
 
-test('§7.5 the ladder hands the sink the chapter\u2019s HUMAN bytes only, and reports what it did', async () => {
+test('§7.5 the ladder hands the sink the chapter’s HUMAN bytes and the posture, and reports', async () => {
   const h = ladderHarness(minedAnswer('always run the tape replay before cutting a tag'))
-  const seen: { humanText: string; count: number; sessionId: string; cwd: string }[] = []
-  h.deps.onMinedRules = async (a) => { seen.push({ humanText: a.humanText, count: a.rules.length, sessionId: a.sessionId, cwd: a.cwd }); return { written: 1, activated: 1, suggested: 0 } }
+  const seen: { humanText: string; autoActivate: boolean; chapter: number }[] = []
+  h.deps.onMinedRules = async (a) => {
+    seen.push({ humanText: a.humanText, autoActivate: a.autoActivate, chapter: a.chapterNumber })
+    return { written: 1, stated: 1, inferred: 0, pending: 0 }
+  }
   try {
     const r = await createEnrichWiring(h.deps).runNow()
     assert.equal(r.processed, 1, JSON.stringify(r))
     assert.equal(seen.length, 1)
     assert.match(seen[0]!.humanText, /always run the tape replay before cutting a tag/)
-    assert.ok(!seen[0]!.humanText.includes('pushed and verified'), 'assistant text is NOT offered as evidence: ' + seen[0]!.humanText)
-    assert.equal(seen[0]!.sessionId, 'sess-1', 'the rule binds the chapter\u2019s own session tree')
-    assert.equal(seen[0]!.cwd, h.ws)
-    assert.match(h.logs.join('\n'), /rule mining sess-1#1: 1 recorded \(1 activated on a verbatim quote/)
+    assert.ok(!seen[0]!.humanText.includes('pushed and verified'), 'assistant prose is not warrant evidence: ' + seen[0]!.humanText)
+    assert.equal(seen[0]!.autoActivate, true, 'the default posture reaches the sink')
+    assert.equal(seen[0]!.chapter, 1)
+    assert.match(h.logs.join('\n'), /rule mining sess-1#1: 1 recorded \(1 stated by you, 0 inferred, all governing now/)
   } finally { h.dispose() }
 })
 
@@ -315,9 +353,11 @@ function ioWorld() {
   captureMinedRules({
     storeDir, harnessId: 'hA', sessionId: 'sess-me', records: new Map<string, RuleRecord>(),
     humanText: 'a sentence that mentions deploy windows only', maxPerChapter: 3,
+    chapterNumber: 3, autoActivate: false,
     rules: [{ text: 'Never deploy during the Friday freeze window.', category: 'deploy', quote: 'the friday freeze is not a deploy window really' }],
   })
   let syncs = 0
+  const settings = new Map<string, string>()
   const io: RulesIo = {
     cwd: () => cwd, storeRoot: '.dsh-chapters', harnessId: 'hA',
     store: { rules: () => new Map<string, RuleRecord>().entries(), getRule: () => undefined, putRule: async () => {} },
@@ -327,28 +367,32 @@ function ioWorld() {
     now: () => new Date('2026-10-20T12:00:00Z'),
     ancestors: async () => new Set(['sess-me']),
     budgetTokens: 1200,
+    autoActivate: false,
+    settings: { get: (k) => settings.get(k), put: async (k, v) => { settings.set(k, v) } },
   }
-  return { cwd, io, storeDir, syncCount: () => syncs, dispose: () => fs.rmSync(cwd, { recursive: true, force: true }) }
+  return { cwd, io, storeDir, settings, syncCount: () => syncs, dispose: () => fs.rmSync(cwd, { recursive: true, force: true }) }
 }
 
-test('§7.9 list --scope session shows a suggestion as REVIEWABLE, and approve turns it on', async () => {
+test('§7.9 list --scope session shows a held rule, and approve turns it on', async () => {
   const w = ioWorld()
   const listed = await rulesCommand(w.io, 'list --scope session')
   assert.equal(listed.kind, 'success', listed.text)
-  assert.match(listed.text, /hA\/001\s+session\s+suggested/, listed.text)
-  // inert right now
+  assert.match(listed.text, /hA\/001\s+session\s+review/, listed.text)
   const before = buildRulesSection(path.join(w.cwd, '.dsh-knowledge'), {
     projectKey: 'PKM', harnessId: 'hA', budgetTokens: 1200, storeDir: w.storeDir, ancestorSessions: new Set(['sess-me']),
   })
-  assert.ok(before.kind === 'none' || !before.text.includes('Friday freeze'), 'not governing anything yet')
+  assert.ok(before.kind === 'none' || !before.text.includes('Friday freeze'), 'held, so it governs nothing')
   const ap = await rulesCommand(w.io, 'approve hA/001')
   assert.equal(ap.kind, 'success', ap.text)
-  assert.match(ap.text, /suggested rule hA\/001 approved/, ap.text)
+  assert.match(ap.text, /mined rule hA\/001 approved/, ap.text)
   assert.match(ap.text, /stays LOCAL/, ap.text)
   const after = buildRulesSection(path.join(w.cwd, '.dsh-knowledge'), {
     projectKey: 'PKM', harnessId: 'hA', budgetTokens: 1200, storeDir: w.storeDir, ancestorSessions: new Set(['sess-me']),
   })
   assert.ok(after.kind === 'ok' && after.text.includes('Never deploy during the Friday freeze window.'), JSON.stringify(after))
+  const act = await rulesCommand(w.io, 'active')
+  assert.match(act.text, /mining posture: REVIEW — mined rules stay inert until you approve them/, act.text)
+  assert.match(act.text, /of them inferred by the model, never said by you/, act.text)
   w.dispose()
 })
 
@@ -363,4 +407,95 @@ test('§7.5 approving an already-active marker rule still refuses (approve is fo
   assert.equal(r.kind, 'error', r.text)
   assert.match(r.text, /already active for this session tree — there is nothing to approve/, r.text)
   w.dispose()
+})
+
+// ---------------------------------------- the dedicated governance model (§7.5, `rulesModel`)
+
+test('§7.5 parseMinedRules validates the mining-only answer and defaults an unknown basis to inferred', () => {
+  assert.deepEqual(parseMinedRules('not json'), [])
+  assert.deepEqual(parseMinedRules('{"rules":"nope"}'), [])
+  const ok = parseMinedRules('{"rules":[{"text":"Always rebase onto staging before opening the PR","category":"Workflow","quote":"rebase before the PR","basis":"stated"},{"text":"Short","quote":"","basis":"magic"}]}')
+  assert.equal(ok.length, 1, 'the sub-minimum candidate is dropped, not the whole answer')
+  assert.equal(ok[0]!.category, 'workflow')
+  assert.equal(ok[0]!.basis, 'stated', 'the model\u2019s own claim is carried (the plugin re-checks it at capture)')
+})
+
+test('§7.5 buildMineInput asks for inference, not for a quote', () => {
+  const input = buildMineInput({ requests: ['the deploy window is wednesday, again'] }, 'chapter body text')
+  assert.match(input, /Infer what the material implies even when nobody spelled it out/)
+  assert.match(input, /must GENERALIZE beyond this chapter/)
+  assert.match(input, /basis.*stated.*inferred/s, 'both warrants are offered, so inference is a legitimate answer')
+  assert.match(input, /At most 3/)
+})
+
+test('§7.5 rulesModel set: a second bounded call on that route, and its answer is what gets mined', async () => {
+  const calls: { prompt: string; route: unknown }[] = []
+  const h = ladderHarness(async () => '{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"],"rules":[{"text":"Mined by the annotation model, should be ignored","category":"c","quote":"always run the tape replay"}]}')
+  h.deps.config = { ...h.deps.config, rulesModel: 'p/bigger' }
+  h.deps.fetch = async (prompt, route) => {
+    calls.push({ prompt, route })
+    return /STANDING ORDERS/.test(prompt)
+      ? '{"rules":[{"text":"Freeze deploys on wednesdays during the migration","category":"deploy","quote":"","basis":"inferred"}]}'
+      : '{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"]}'
+  }
+  let got: { rules: readonly { text: string }[] } | null = null
+  h.deps.onMinedRules = async (a) => { got = { rules: a.rules }; return { written: 1, stated: 0, inferred: 1, pending: 0 } }
+  try {
+    await createEnrichWiring(h.deps).runNow()
+    assert.equal(calls.length, 2, 'annotation pass + mining pass')
+    assert.equal((calls[1]!.route as { provider: string; model: string }).model, 'bigger', 'mining runs on the configured model')
+    assert.ok(got !== null, 'the sink was called')
+    assert.equal((got as { rules: readonly { text: string }[] }).rules.length, 1)
+    assert.match((got as { rules: readonly { text: string }[] }).rules[0]!.text, /Freeze deploys on wednesdays/, 'the dedicated model\u2019s answer wins')
+    assert.ok(!JSON.stringify(got).includes('ignored'), 'the annotation pass\u2019s rules are not double-mined')
+  } finally { h.dispose() }
+})
+
+test('§7.5 the settings key wins over the row, and a failing mining pass cannot break enrichment', async () => {
+  const h = ladderHarness(async () => '{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"],"rules":[]}')
+  h.deps.store = {
+    ...h.deps.store,
+    getSetting: (k: string) => (k === 'rules.model' ? 'p/from-settings' : undefined),
+  } as unknown as EnrichWiringDeps['store']
+  let routeSeen = ''
+  let boom = true
+  h.deps.fetch = async (prompt, route) => {
+    if (/STANDING ORDERS/.test(prompt)) {
+      routeSeen = `${route?.provider}/${route?.model}`
+      if (boom) throw new Error('upstream 503')
+      return '{"rules":[{"text":"Run the tape replay before any tag, said the recovering pass","category":"testing","quote":"run the tape replay","basis":"stated"}]}'
+    }
+    return '{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"]}'
+  }
+  const seen: number[] = []
+  h.deps.onMinedRules = async (a) => { seen.push(a.rules.length); return { written: 1, stated: 1, inferred: 0, pending: 0 } }
+  try {
+    const r = await createEnrichWiring(h.deps).runNow()
+    assert.equal(routeSeen, 'p/from-settings', 'a runtime override beats the profile row')
+    assert.equal(seen.length, 0, 'a failed mining pass mines nothing')
+    assert.equal(r.processed, 1, 'and the chapter was still annotated')
+    boom = false
+    const r2 = await createEnrichWiring(h.deps).runNow()
+    assert.ok(r2.processed >= 0)
+  } finally { h.dispose() }
+})
+
+test('§7.5 `/chapters-rule model` reads and sets the mining route, and `clear` puts it back', async () => {
+  const w = ioWorld()
+  const unset = await rulesCommand(w.io, 'model')
+  assert.match(unset.text, /rules\.model: \(unset\) — mining rides the enrichment call/, unset.text)
+  const set = await rulesCommand(w.io, 'model p/bigger')
+  assert.equal(set.kind, 'success', set.text)
+  assert.match(set.text, /rules\.model set to p\/bigger/)
+  assert.equal(w.settings.get('rules.model'), 'p/bigger')
+  const shown = await rulesCommand(w.io, 'model')
+  assert.match(shown.text, /rules\.model: p\/bigger — one extra bounded call per chapter/, shown.text)
+  const cleared = await rulesCommand(w.io, 'model clear')
+  assert.match(cleared.text, /mining rides the enrichment call again/)
+  assert.equal(w.settings.get('rules.model'), '')
+  const noboard = ioWorld()
+  noboard.io = { ...noboard.io, settings: undefined }
+  const refused = await rulesCommand(noboard.io, 'model x/y')
+  assert.equal(refused.kind, 'error'); assert.match(refused.text, /settings table is unavailable/)
+  w.dispose(); noboard.dispose()
 })

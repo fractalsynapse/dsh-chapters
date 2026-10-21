@@ -42,6 +42,18 @@ export type RuleScope = (typeof RULE_SCOPE)[number]
 export const RULE_DERIVED_FROM = ['human', 'marker', 'model'] as const
 export type RuleDerivedFrom = (typeof RULE_DERIVED_FROM)[number]
 
+/**
+ * The WARRANT behind a rule — what a human reads when deciding whether to trust
+ * it (record §7.5, amended 2026-10-21). `stated` means a human sentence is behind
+ * the rule; `inferred` means the model judged that a standing order would help and
+ * nobody said it. BOTH govern by default, because the premise of the tier is that
+ * the human may not know the rule yet — the distinction is displayed, not used as
+ * a permission check. Requiring a human to have already said it would make this
+ * tier redundant with the deterministic `ADD RULE:` marker.
+ */
+export const RULE_BASIS = ['human', 'marker', 'stated', 'inferred'] as const
+export type RuleBasis = (typeof RULE_BASIS)[number]
+
 export interface RuleRecord {
   id: string // '<harnessId>/<NNN>' — globally unique, human-typable tail
   projectKey: string
@@ -61,9 +73,15 @@ export interface RuleRecord {
   derivedFrom?: RuleDerivedFrom | undefined
   /** §7.4 always-rendered class; human-set only. */
   pinned?: boolean | undefined
-  /** §7.5: a model-mined rule with NO verbatim human quote — inert until a
-   * human approves it. `suggested` is how the quote gate is enforced on disk. */
-  suggested?: boolean | undefined
+  /** §7.5 (amended 2026-10-21): review posture, NOT an evidence test. A mined
+   * rule is inert until this machine approves it only when `rulesAutoActivate` is
+   * off. The default is that it governs immediately — inferring a useful standing
+   * order IS the point of the tier. */
+  reviewOnly?: boolean | undefined
+  /** §7.5: the warrant a human reads alongside the text. */
+  basis?: RuleBasis | undefined
+  /** the chapter a mined rule came from (provenance for the review surface) */
+  chapter?: number | undefined
 }
 
 export const ruleRecordSchema = z.object({
@@ -79,7 +97,9 @@ export const ruleRecordSchema = z.object({
   session: z.string().optional(),
   derivedFrom: z.enum(RULE_DERIVED_FROM).optional(),
   pinned: z.boolean().optional(),
-  suggested: z.boolean().optional(),
+  reviewOnly: z.boolean().optional(),
+  basis: z.enum(RULE_BASIS).optional(),
+  chapter: z.number().int().positive().optional(),
 })
 
 export const ruleSlug = (category: string, title: string): string => {
@@ -102,7 +122,9 @@ export function renderRuleFile(input: {
   session?: string | undefined
   derivedFrom?: RuleDerivedFrom | undefined
   pinned?: boolean | undefined
-  suggested?: boolean | undefined
+  reviewOnly?: boolean | undefined
+  basis?: RuleBasis | undefined
+  chapter?: number | undefined
 }): string {
   // §7.1 byte-compatibility: a project rule derived from a human and unpinned
   // emits NOTHING extra, so every rule file written before #50 keeps rendering
@@ -112,7 +134,9 @@ export function renderRuleFile(input: {
   if (input.session !== undefined && input.session !== '') extras.push(`session: ${JSON.stringify(input.session)}`)
   if (input.derivedFrom !== undefined && input.derivedFrom !== 'human') extras.push(`derivedFrom: ${input.derivedFrom}`)
   if (input.pinned === true) extras.push('pinned: true')
-  if (input.suggested === true) extras.push('suggested: true')
+  if (input.reviewOnly === true) extras.push('reviewOnly: true')
+  if (input.basis !== undefined && input.basis !== 'human') extras.push(`basis: ${input.basis}`)
+  if (input.chapter !== undefined && input.chapter > 0) extras.push(`chapter: ${input.chapter}`)
   return [
     '---',
     `number: ${input.number}`,
@@ -140,7 +164,9 @@ export interface ParsedRule {
   session: string
   derivedFrom: RuleDerivedFrom
   pinned: boolean
-  suggested: boolean
+  reviewOnly: boolean
+  basis: RuleBasis
+  chapter: number
 }
 
 export function parseRuleFile(text: string): ParsedRule | null {
@@ -169,7 +195,9 @@ export function parseRuleFile(text: string): ParsedRule | null {
       session: unq(fm.get('session'), ''),
       derivedFrom: (RULE_DERIVED_FROM as readonly string[]).includes(rawDerived) ? rawDerived as RuleDerivedFrom : 'human',
       pinned: unq(fm.get('pinned'), '') === 'true',
-      suggested: unq(fm.get('suggested'), '') === 'true',
+      reviewOnly: unq(fm.get('reviewOnly'), '') === 'true',
+      basis: (RULE_BASIS as readonly string[]).includes(unq(fm.get('basis'), '')) ? unq(fm.get('basis'), '') as RuleBasis : 'human',
+      chapter: Number(unq(fm.get('chapter'), '0')) > 0 ? Number(unq(fm.get('chapter'), '0')) : 0,
     }
   } catch {
     return null
@@ -253,8 +281,10 @@ export interface MirrorRule {
   session: string
   derivedFrom: RuleDerivedFrom
   pinned: boolean
-  /** §7.5: inert model guess (no verbatim quote) until this machine approves it */
-  suggested: boolean
+  /** §7.5: inert pending review — set only when `rulesAutoActivate` is off */
+  reviewOnly: boolean
+  basis: RuleBasis
+  chapter: number
 }
 
 /** every rule file the mirror knows for one project, with THIS machine's effective status */
@@ -281,7 +311,7 @@ export function collectMirrorRules(mirrorDir: string, projectKey: string, harnes
         scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom,
         // file-level pin (an authored default) OR this machine's pin fact (§7.4)
         pinned: rule.pinned || pins.has(id),
-        suggested: rule.suggested,
+        reviewOnly: rule.reviewOnly, basis: rule.basis, chapter: rule.chapter,
       })
     }
   }
@@ -378,7 +408,7 @@ export function collectStoreRules(
         category: rule.category, title: rule.title,
         body: rule.body.trim(), bodyTokens: estimateTokens(rule.body.trim()),
         scope: rule.scope, session: rule.session, derivedFrom: rule.derivedFrom,
-        pinned: rule.pinned, suggested: rule.suggested,
+        pinned: rule.pinned, reviewOnly: rule.reviewOnly, basis: rule.basis, chapter: rule.chapter,
       })
     }
   }
@@ -417,11 +447,12 @@ export function sessionRuleActive(
   if (rule.scope !== 'session') return false
   if (rule.session === '') return false
   if (opts.revoked.has(rule.id)) return false
-  // The SUGGESTED arm IS the verbatim-quote gate enforced where it matters — at
-  // activation. An unquoted model guess is written so it can be reviewed, but it
-  // governs nothing until this machine approves it: the ladder may PROPOSE a
-  // standing order, it may not make one on inference alone.
-  if (rule.suggested && rule.status !== 'core') return false
+  // Review posture, NOT an evidence test (amended 2026-10-21): a mined rule is
+  // inert only when the plugin is configured to hold mined rules for review. What
+  // keeps an inferred rule from doing damage is that it is machine-local, never
+  // staged, count-capped, rendered with its warrant, and one command from
+  // revoke — not a requirement that a human have already said it.
+  if (rule.reviewOnly && rule.status !== 'core') return false
   return opts.ancestorSessions.has(rule.session)
 }
 
@@ -517,13 +548,28 @@ export function buildRulesSection(
     lines.push('## CORE RULES (approved for this project — follow them)')
     for (const r of pShown) lines.push(`[${r.id}] (${r.category}) ${r.body}`, '')
   }
+  // Every rule carries its WARRANT, because a human has to be able to tell a
+  // standing order they gave from a standing order a model inferred (§7.5).
+  const tag = (r: MirrorRule): string => {
+    if (r.scope === 'project' || r.derivedFrom !== 'model') return r.derivedFrom === 'marker' ? 'you said this' : ''
+    const from = r.chapter > 0 ? `ch.${r.chapter}` : 'this session tree'
+    return r.basis === 'stated' ? `stated by you, mined from ${from}` : `inferred from ${from} — nobody said it`
+  }
   const pWithheld = capLine('project', pSel.length, pShown.length)
   if (pWithheld !== null) lines.push(pWithheld, '')
   if (sShown.length > 0) {
     lines.push('## SESSION RULES (captured this session — they refine the project rules above; they never override them)')
-    for (const r of sShown) lines.push(`[${r.id}] (${r.category}) ${r.body}`, '')
+    for (const r of sShown) { const t = tag(r); lines.push(`[${r.id}] (${r.category}${t !== '' ? `; ${t}` : ''}) ${r.body}`, '') }
     const sWithheld = capLine('session', sSel.length, sShown.length)
     if (sWithheld !== null) lines.push(sWithheld, '')
+  }
+  if (sShown.length > 0) {
+    // The transparency the tier needs: an inferred standing order is exactly the
+    // kind of thing a human must be able to catch, so the agent names which rules
+    // actually shaped its reply (§7.5). Scoped to blocks that carry session rules —
+    // a project-only block keeps its pre-#50 bytes (the R0 golden row pins that),
+    // so this costs nothing to a session that has no mined rules.
+    lines.push('Name by id the session rule(s) above that actually shaped what you did — say "none" if none applied. A rule cited wrongly twice should be revoked.', '')
   }
   if (categories.size > 0) {
     lines.push('Rule categories (load a category from the repo when this session\u2019s topics overlap it):')

@@ -132,6 +132,10 @@ export interface Config {
   rulesEnrichment: boolean
   /** #50 §7.5: per-chapter cap on mined rules. */
   rulesMinedPerChapter: number
+  /** #50 §7.5: mined rules govern on arrival (default true); false holds them for review. */
+  rulesAutoActivate: boolean
+  /** #50 §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass. */
+  rulesModel: string
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -220,6 +224,8 @@ export const Config = Schema.object({
   rulesRelevance: Schema.boolean().default(true),
   rulesEnrichment: Schema.boolean().default(true),
   rulesMinedPerChapter: Schema.number().default(3),
+  rulesAutoActivate: Schema.boolean().default(true),
+  rulesModel: Schema.string().default(''),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -299,11 +305,13 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         batchCap: config.enrichmentBatchCap,
         mineRules: config.rulesEnrichment,
         mineCap: config.rulesMinedPerChapter,
+        rulesAutoActivate: config.rulesAutoActivate,
+        rulesModel: config.rulesModel,
       },
       // §7.5 host-plane sink: `/chapters-enrich run` drains here, so a manual run
       // mines exactly like the realm's auto pass. Local files only — nothing is
       // armed on the scheduler, because session rules never travel (§7.5).
-      onMinedRules: async ({ cwd, sessionId, humanText, rules, max }) => {
+      onMinedRules: async ({ cwd, sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
         const res = captureMinedRules({
           storeDir: join(cwd, config.artifactStoreRoot),
           harnessId: config.harnessId,
@@ -312,8 +320,10 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
           humanText,
           rules,
           maxPerChapter: max,
+          chapterNumber,
+          autoActivate,
         })
-        return { written: res.ids.length, activated: res.activated, suggested: res.suggested }
+        return { written: res.ids.length, stated: res.stated, inferred: res.inferred, pending: res.pending }
       },
       fetch: async (prompt, route) => {
         if (route === null) throw new Error('no enrichment route resolvable (set /chapters-enrich model … or run a turn first)')
@@ -394,6 +404,14 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         budgetTokens: config.coreRulesBudgetTokens,
         projectCap: config.projectRulesDisplayCap,
         sessionCap: config.sessionRulesDisplayCap,
+        // §7.5: the review surface reads the same activation posture the ladder uses
+        // (so `active` can say whether mined rules govern on arrival), and `model`
+        // sets a dedicated mining model through the shared settings table.
+        autoActivate: config.rulesAutoActivate,
+        settings: {
+          get: (k) => store.getSetting(k),
+          put: async (k, v) => { await store.putSetting(k, v) },
+        },
         // §7.7: ONE bounded call, report-only, reusing the conversation route (and
         // therefore the conversation's own cached prefix). An explicit exception to
         // zero-inference in the elicitedPlot family — never a mutation.

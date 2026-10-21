@@ -75,11 +75,15 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   projectRulesDisplayCap?: number
   sessionRulesDisplayCap?: number
   rulesRelevance?: boolean
-  /** §7.5 model-mined rules; default ON (undefined). The quote gate, not this
-   * switch, is what keeps a guess from steering a session. */
+  /** §7.5 model-mined rules; default ON. */
   rulesEnrichment?: boolean
   /** §7.5 per-chapter cap on mined rules */
   rulesMinedPerChapter?: number
+  /** §7.5: mined rules govern on arrival unless false (then they wait for review).
+   * Default true — inferring what nobody spelled out is the whole point. */
+  rulesAutoActivate?: boolean
+  /** §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass */
+  rulesModel?: string
   // P2 enrichment (record §6): the realm plane owns the AUTO triggers.
   enrichmentEnabled?: boolean
   enrichmentModel?: string
@@ -223,6 +227,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     rulesRelevance: z.boolean().default(true),
     rulesEnrichment: z.boolean().default(true),
     rulesMinedPerChapter: z.number().step(1).min(0).default(3),
+    rulesAutoActivate: z.boolean().default(true),
+    rulesModel: z.string().default(''),
     enrichmentEnabled: z.boolean().default(true),
     enrichmentModel: z.string().default(''),
     enrichmentTrigger: z.string().default('both'),
@@ -252,7 +258,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     /** §7.5 model-mined rules (the background half); default true from the row */
     mine?: boolean | undefined
     mineCap?: number | undefined
-  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true, mine: true, mineCap: 3 }
+    /** §7.5: do mined rules govern on arrival? Default true — that is the tier's premise */
+    autoActivate?: boolean | undefined
+    /** §7.5: dedicated mining model; '' ⇒ mine inside the annotation call */
+    model?: string | undefined
+  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true, mine: true, mineCap: 3, autoActivate: true, model: '' }
   private storePromise: Promise<ChapterStoreHandle> | null = null
 
   constructor(ctx: Context, config: ChaptersRowConfig = {}) {
@@ -266,7 +276,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
       harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
       projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
-      rulesEnrichment, rulesMinedPerChapter,
+      rulesEnrichment, rulesMinedPerChapter, rulesAutoActivate, rulesModel,
       enrichmentEnabled, enrichmentModel, enrichmentTrigger, enrichmentIdleMs, enrichmentBatchCap,
       vocabApply, vocabCoMin, vocabOverlapMin,
       treedxFetchTimeoutMs, treedxWorkspaceTtlSeconds, treedxLeaseRetries, treedxLeaseRetryDelayMs,
@@ -303,6 +313,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       model: enrichmentModel ?? '',
       mineRules: rulesEnrichment ?? true,
       mineCap: rulesMinedPerChapter ?? 3,
+      rulesAutoActivate: rulesAutoActivate ?? true,
+      rulesModel: rulesModel ?? '',
       trigger: (enrichmentTrigger ?? 'both') as 'afterPush' | 'idle' | 'both' | 'manual',
       idleMs: enrichmentIdleMs ?? 60000,
       batchCap: enrichmentBatchCap ?? 5,
@@ -317,6 +329,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       relevance: rulesRelevance ?? true,
       mine: rulesEnrichment ?? true,
       mineCap: rulesMinedPerChapter ?? 3,
+      autoActivate: rulesAutoActivate ?? true,
+      model: rulesModel ?? '',
     }
     this.#listenForSignatures()
     this.#listenForRuleCapture()
@@ -335,7 +349,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * lock and debounce keep the two honest against each other. */
   private syncDebounceMs = 30000
   private vocabCfg: { apply: boolean; coMin: number; overlapMin: number } = { apply: false, coMin: 3, overlapMin: 0.5 }
-  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; mineRules?: boolean | undefined; mineCap?: number | undefined } =
+  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; mineRules?: boolean | undefined; mineCap?: number | undefined; rulesAutoActivate?: boolean | undefined; rulesModel?: string | undefined } =
     { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5, mineRules: true, mineCap: 3 }
   private enrichPromise: Promise<EnrichWiring> | null = null
   private lastCwd: string | null = null
@@ -378,9 +392,9 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       // §7.5 the sink: the realm plane owns disk, identity and the registry, so it
       // writes what the pass mined. Session rules are LOCAL — nothing is armed on
       // the scheduler here, because the pool never carries them.
-      onMinedRules: async ({ sessionId, humanText, rules, max }) => {
+      onMinedRules: async ({ sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
         const cwd = this.lastCwd ?? undefined
-        if (cwd === undefined) return { written: 0, activated: 0, suggested: 0 }
+        if (cwd === undefined) return { written: 0, stated: 0, inferred: 0, pending: 0 }
         const { store } = await this.store()
         const res = captureMinedRules({
           storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
@@ -390,8 +404,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
           humanText,
           rules,
           maxPerChapter: max,
+          chapterNumber,
+          autoActivate,
         })
-        return { written: res.ids.length, activated: res.activated, suggested: res.suggested }
+        return { written: res.ids.length, stated: res.stated, inferred: res.inferred, pending: res.pending }
       },
       scheduler: { schedule: (cwd, why) => { void this.#scheduler().then((s) => s.schedule(cwd, why)).catch(() => undefined) } },
       log: (m) => this.ctx.logger?.info?.(`dsh-chapters: ${m}`),
