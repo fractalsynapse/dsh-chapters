@@ -56,7 +56,9 @@
     "bench": "node benchmarks/run-bench.mjs",
     "bench:nightly": "node benchmarks/run-bench.mjs --every 60",
     "docs:dev": "npm --prefix site run dev",
-    "docs:build": "npm --prefix site run build"
+    "docs:build": "npm --prefix site run build",
+    "mining:probe": "node scripts/mining-probe.mjs",
+    "llm:where": "node -e \"import('./scripts/llm.mjs').then(async m=>{const t=await m.resolve({});console.log(t.base,t.model,t.regime,'| credential:',m.apiKeySource(),'| key found:',m.apiKey()!==null)})\""
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0",
