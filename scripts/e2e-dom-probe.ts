@@ -17,12 +17,18 @@ import { chromium } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { bootE2eServer, ROOT } from '../tests/e2e/boot.ts'
-import { dismissTestingNotice } from '../tests/e2e/session.ts'
+import { dismissTestingNotice, typeComposer, openSessionByRow, durableLogExists, E2E_SESS_DIR, sessionLogFileFor } from '../tests/e2e/session.ts'
 
 const port = Number(process.env.E2E_PROBE_PORT ?? 41799)
 const boot = await bootE2eServer(port, { thresholdRatio: '0.9' })
 const browser = await chromium.launch({ executablePath: process.env.E2E_CHROMIUM ?? undefined })
 const page = await browser.newPage()
+// The client-side truth: if a slot registration throws, the host renders the message
+// WITHOUT our row and the only trace is a browser console line. Capture it — pageerror
+// for throws, console for the host's own warnings — and dump it with everything else.
+const console_ = []
+page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console_.push(`${m.type()}: ${(m.text() ?? '').slice(0, 240)}`) })
+page.on('pageerror', (e) => console_.push(`pageerror: ${String(e?.message ?? e).slice(0, 240)}`))
 try {
   await page.goto(boot.url, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(6000)
@@ -93,6 +99,95 @@ try {
     .filter((e) => /notice/i.test(e.getAttribute('aria-label') ?? ''))
     .map((e) => ({ label: e.getAttribute('aria-label'), tag: e.tagName, role: e.getAttribute('role'),
       rect: (() => { const r = e.getBoundingClientRect(); return `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}` })() })))
+  if (process.env.DOOR_PROBE_TURN === '1') {
+    // The thing we are actually chasing (#54): our door rows are in the DOM but NOT
+    // visible on the 0.2.x client, so the fork affordance a user must click cannot be
+    // clicked. That can only be seen with a REAL assistant row on screen, so drive one
+    // turn (tool-free, one sentence) and then describe the action row geometry.
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))
+        .find((b) => /New Session/i.test(b.textContent ?? '')) as HTMLButtonElement | undefined
+      btn?.click()
+    })
+    await page.waitForTimeout(4000)
+    // the notice is a focus trap; openApp clears it, and this path skips openApp
+    await dismissTestingNotice(page)
+    await typeComposer(page, 'Name one HTTP redirect status code in one short sentence. Make ZERO tool calls.')
+    for (let i = 0; i < 40; i++) {
+      const done = await page.evaluate(() => document.querySelectorAll('button').length > 0
+        && /Cache hit|tok\/s/.test(document.body.textContent ?? ''))
+      const busy = await page.evaluate(() => /Stop|Generating|thinking/i.test(document.body.textContent ?? ''))
+      if (done && !busy) break
+      await page.waitForTimeout(3000)
+    }
+    await page.waitForTimeout(3000)
+    dump.slots = await page.evaluate(() => {
+    // Our component's own className, and every slot-ish container the host renders, so
+    // "not mounted" is distinguished from "mounted and hidden" by more than one signal.
+    const mine = Array.from(document.querySelectorAll('[class*="dsh-chapters"]'))
+      .map((e) => `${e.tagName}.${(e.className ?? '').toString().slice(0, 40)}[${e.getAttribute('aria-label') ?? ''}]`)
+    const styles = Array.from(document.querySelectorAll('style')).map((s) => (s.textContent ?? '').slice(0, 24))
+      .filter((t) => t.includes('dsh-chapters'))
+    const detail = mine.map((label) => {
+      const el = Array.from(document.querySelectorAll('button')).find((b) => (b.getAttribute('aria-label') ?? '') === label.slice(label.indexOf('[') + 1, label.lastIndexOf(']')))
+      if (el === undefined) return { label, found: false }
+      const b = el as HTMLElement
+      const r = b.getBoundingClientRect()
+      const cs = getComputedStyle(b)
+      const chain = []
+      let p = b.parentElement
+      for (let i = 0; i < 6 && p !== null; i++) { chain.push(`${p.tagName}.${(p.className ?? '').toString().split(/\s+/).slice(0, 2).join('.')}`); p = p.parentElement }
+      const anc = b.closest('[class*="essage"],[class*="ssistant"],[role="listitem"],article')
+      return { label, found: true, rect: `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`,
+        display: cs.display, visibility: cs.visibility, opacity: cs.opacity, inDocument: document.contains(b),
+        messageAncestor: anc === null ? 'NONE — not inside a message subtree' : `${anc.tagName}.${(anc.className ?? '').toString().slice(0, 40)}`,
+        parentChain: chain.join(' < ') }
+    })
+    return { mine, detail, ourCssInjected: styles.length > 0, actionRows: Array.from(document.querySelectorAll('[class*="actions"]')).length }
+  })
+  dump.console = console_.slice(-25)
+  dump.doors = await page.evaluate(() => {
+      const probe = (el: Element) => {
+        const b = el as HTMLElement
+        const r = b.getBoundingClientRect()
+        const cs = getComputedStyle(b)
+        const chain: string[] = []
+        let p: HTMLElement | null = b.parentElement
+        for (let i = 0; i < 5 && p !== null; i++) { chain.push(`${p.tagName}.${(p.className ?? '').toString().split(/\s+/).slice(0, 2).join('.')}`); p = p.parentElement }
+        return {
+          aria: b.getAttribute('aria-label'), text: (b.textContent ?? '').trim().slice(0, 30),
+          rect: `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`,
+          display: cs.display, visibility: cs.visibility, opacity: cs.opacity,
+          overflowHidden: cs.overflow, parentChain: chain.join(' < '),
+        }
+      }
+      const hit = (el: Element) => /chapters|fork|continue with|branch/i.test(el.getAttribute('aria-label') ?? '')
+      const ours = Array.from(document.querySelectorAll('button')).filter(hit).map(probe)
+      // the host's own assistant action row is the neighbour that DOES render (Copy)
+      const copy = Array.from(document.querySelectorAll('button')).find((b) => (b.getAttribute('aria-label') ?? '') === 'Copy')
+      const row = copy?.parentElement as HTMLElement | undefined
+      const siblings = Array.from(row?.querySelectorAll('button') ?? []).map((b) => b.getAttribute('aria-label') ?? (b.textContent ?? '').trim().slice(0, 24))
+      const menus = Array.from(document.querySelectorAll('button'))
+        .filter((b) => /more|actions|overflow/i.test((b.getAttribute('aria-label') ?? '') + (b.textContent ?? '')))
+        .map((b) => b.getAttribute('aria-label') ?? (b.textContent ?? '').trim().slice(0, 24))
+      return { ours, rowTag: row?.tagName ?? null, rowClass: (row?.className ?? '').slice(0, 90), rowRect: row ? JSON.stringify(row.getBoundingClientRect()) : null, siblings, menus }
+    })
+    // and does the door, when force-clicked, leave anything observable behind?
+    const clicked = await page.evaluate(() => {
+      const b = Array.from(document.querySelectorAll('button')).find((x) => (x.getAttribute('aria-label') ?? '') === 'Fork with chapters')
+      if (!b) return 'absent'
+      ;(b as HTMLButtonElement).click()
+      return 'clicked'
+    })
+    await page.waitForTimeout(12000)
+    const kids = (() => { try { return fs.readdirSync(E2E_SESS_DIR).filter((d) => d.startsWith('ch-')) } catch { return [] } })()
+    dump.child = {
+      clicked, dirs: kids.length,
+      withLog: kids.filter((d) => sessionLogFileFor(`${E2E_SESS_DIR}/${d}`) !== null).length,
+      rowOpenable: kids.length > 0 ? await openSessionByRow(page, [kids[kids.length - 1].replace(/^ch-/, '')]) : false,
+      projcache: (() => { try { return fs.readdirSync(`${process.cwd()}/var/e2e-home-${process.env.E2E_PROBE_PORT ?? 41799}/storages/session_projcache/sessions`).length } catch { return -1 } })(),
+    }
+  }
   dump.dismiss = await page.evaluate(() => {
     const d = document.querySelector('[role="dialog"], [aria-label*="Notice"]')
     return d === null ? 'no dialog present at this moment' : `dialog: ${d.getAttribute('aria-label') ?? '?'} / buttons: ${Array.from(d.querySelectorAll('button')).map((b) => (b.textContent ?? '').trim() || b.getAttribute('aria-label') || '?').join('|')}`

@@ -24,7 +24,16 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
   test.setTimeout(420_000)
   test.skip(!(await localModelUp()), 'Local model server not running')
   await openApp(page)
-  await newSessionWithTurn(page, 'Which file implements the chapter composer merge rule? Use only file reads (no shell commands) and answer in one sentence.')
+  // The stimulus must be ONE sentence with no tool work, and the wording is load-bearing.
+  // #54's first 0.2.x distill of this journey asked "which file implements…" and the
+  // hosted model obeyed literally — it read files, the turn ran past the output limit, the
+  // host rendered "Output token limit reached", and the assistant action row NEVER mounted,
+  // so `toBeVisible` on our door timed out at 20s. Nothing was wrong with the door: the
+  // probe with a one-sentence tool-free turn shows both rows live at 28x28 inside the
+  // host's own action container (`EvIC1a_flowItem > TS9iAW_actions`). This is RR2=137's
+  // lesson restated for a stronger model: a journey that depends on a wander-prone turn
+  // fails for a reason that has nothing to do with what it asserts.
+  await newSessionWithTurn(page, 'Name one HTTP redirect status code in one short sentence. Make ZERO tool calls and read no files.')
 
   await expect(page.locator('button[aria-label="Fork with chapters"]').first()).toBeVisible()
   // Both deterministic doors need a mouth: a composer-only `/chapters-continue`
