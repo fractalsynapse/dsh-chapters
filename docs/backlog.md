@@ -211,16 +211,21 @@ answer is the pinned class + the withheld-count line, not more injection.
 The round landed green on the deterministic plane (640 unit / 137 integration rows, coverage gate
 held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and none is a surprise:
 
-1. **Mined-rule QUALITY is unmeasured, and it now matters more.** The model half is built (§7.5,
-   2026-10-21), but the maintainer rejected the verbatim-quote gate and mined inferences govern by
-   default — so the open question is empirical: how often is a small model's inference right? Cheapest
-   real measurement, in order: (a) point the enrichment route at a reachable model and run
-   `/chapters-enrich run` over an archive with real sessions, (b) read
-   `list --scope session` and count `stated` vs `inferred`, (c) watch whether agents cite rules that
-   get revoked. If inferences are wrong more often than a human catches them in replies, the fix is
-   the existing `rulesAutoActivate: false` posture — do NOT reintroduce an evidence gate; the reversal
-   in Amendment 2026-10-21 explains why that was the wrong instrument. Do not add a per-turn model
-   call either: the server is single-slot (§6.2) and the critical path is zero-inference (§1.1).
+1. **Mined-rule quality: first data in, sample tiny.** `npm run mining:probe` (2026-10-21) mined
+   three real chapters of THIS repo at `qwen3.8-flash` through the shipped path: 9 rules, 6 stated / 3
+   inferred, every inference confined to the one chapter that had no human text, none wrong or unsafe.
+   Full numbers and the caveats in `docs/verify.md` R5. Next: probe archives from a project that is not
+   this repo — our own history is the friendliest corpus available, and a rule like "treat pinned tests
+   as authoritative" is true here partly because the reader is already convinced.
+
+   1b. **Undecided, and it needs a decision rather than a patch:** mining inside the annotation call
+   shares `ENRICH_MAX_TOKENS = 900`, while the hosted route counts reasoning tokens in completion usage
+   (969–3237 observed against a 700-token request). Either raise that ceiling deliberately or send
+   mining to its own bounded call by defaulting `rulesModel`; measure before guessing.
+   1c. The canonical base URL (`maas.qwencloudapi.com/compatible-mode/v1`, the one fed to the OpenAI
+   client) rejects the key this box holds, while the regional token-plan origin accepts it.
+   `scripts/llm.mjs` now PROBES both and prints which it chose, so a credential that starts working at
+   the alias is picked up automatically — if that happens, nothing here needs changing.
 2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
    the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
    `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round

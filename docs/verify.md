@@ -187,7 +187,27 @@ stay the shipped-behavior record; these extend it with the session tier.
 | R10 | Losing a checkout is re-derivation, not corruption | 🟡 partial | `parseRuleMarkers` is deterministic over message text and capture dedupes against disk, so a replay fills gaps without duplicating — but the **end-to-end wipe-and-replay row is not written**. The mining half is now re-derivable by re-running the ladder, and capture dedupes against disk, so a replay fills gaps rather than duplicating. |
 | R-e2e | The browser plane: a live model, the `rules` journey, the new tool in the header | ❌ cannot run on this host | `npm run test:e2e:replay` **refuses by name** (`tests/e2e/boot.ts:130`: the pinned host predates preset declaration rows). The re-record this feature owes is queued with the `dev/dsh-host-lock` move in `docs/backlog.md` — stated, not skipped silently |
 
-**Inference QUALITY is NOT witnessed, and it now matters more.** The mechanisms are proven against fixtures; nothing here can say how often a small model infers a *correct* standing order, now that inferences govern by default. That is the open risk of the 2026-10-21 decision, and the measured first step is cheap: point the enrichment route at a reachable model, run `/chapters-enrich run` over real archives, then read the `stated` vs `inferred` ratio in `/chapters-rule list --scope session`. If inferences are wrong more often than a human catches them in replies, the answer is `rulesAutoActivate: false` — not a new evidence gate (the amendment records why the gate was the wrong instrument). The box's GPU driver was unreachable when this landed (`nvidia-smi` cannot talk to it), so no vLLM boot and no real mining pass ran.
+**First live witness (2026-10-21, `npm run mining:probe`).** Three real archived chapters of this repo,
+mined by `qwen3.8-flash` — the model that powers live sessions here — through the shipped code paths
+(`buildMineInput` → `parseMinedRules` → `quoteIsHuman` → `captureMinedRules`), local :8080 down so the
+token-plan hosted route was used. Nine rules captured (the 3-per-chapter cap bound every chapter),
+**6 stated / 3 inferred**, and all three inferences came from the one chapter with ZERO human bytes —
+a subagent chapter — which is exactly what the classification should do. The model's own `basis` claim
+was the weaker signal: chapters 2 and 3 each declared only 1 stated rule, while the plugin's check
+found 3/3 quotes genuinely present in the human text. So the label is earned from evidence, not from
+the model's say-so, and the head rendered all nine in 479 tokens with nothing withheld at a cap of 12.
+On quality: none of the nine was wrong or unsafe; the three inferences were arguably the most
+transferable ("verify decisive architectural claims in shipped code before treating them as settled").
+n = 3 chapters on one repo's own history is not proof, but it is no longer nothing.
+
+**One cost fact the probe exposed, unresolved:** the hosted route reports completion tokens
+(969–3237) far above the 700-token ceiling the probe sent, because reasoning tokens are counted —
+which means mining *inside* the annotation call competes with a reasoning budget the annotation path
+was sized for (`ENRICH_MAX_TOKENS = 900`). The clean answer is `rulesModel` (a separate bounded
+mining call), or raising that ceiling deliberately; leaving it as an unexamined default is the thing
+to avoid.
+
+**Inference QUALITY had no witness when the posture was set; the first data is below and it is thin.** The mechanisms are proven against fixtures; nothing here can say how often a small model infers a *correct* standing order, now that inferences govern by default. That is the open risk of the 2026-10-21 decision, and the measured first step is cheap: point the enrichment route at a reachable model, run `/chapters-enrich run` over real archives, then read the `stated` vs `inferred` ratio in `/chapters-rule list --scope session`. If inferences are wrong more often than a human catches them in replies, the answer is `rulesAutoActivate: false` — not a new evidence gate (the amendment records why the gate was the wrong instrument). The box's GPU driver was unreachable when this landed (`nvidia-smi` cannot talk to it), so no vLLM boot and no real mining pass ran.
 
 **Two environmental facts, learned the hard way on 2026-10-20 and worth repeating.** (1) The
 deterministic suites need **Node ≥ 24** (`package.json` engines); on Node 22 every test file fails

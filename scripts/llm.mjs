@@ -5,7 +5,7 @@
  *
  *   local  http://localhost:8080/v1            the dev stress regime (32K/15K),
  *                                              `local` provider in dev/settings.yaml
- *   hosted https://maas.qwencloudapi.com/compatible-mode/v1
+ *   hosted https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
  *                                              the SAME provider that powers live
  *                                              sessions (`qwen-token-plan`)
  *
@@ -34,7 +34,31 @@ import os from 'node:os'
 import path from 'node:path'
 
 export const LOCAL_BASE = process.env.LOCAL_LLM_BASE ?? 'http://localhost:8080/v1'
-export const HOSTED_BASE = process.env.DSH_LLM_BASE ?? 'https://maas.qwencloudapi.com/compatible-mode/v1'
+/*
+ * Hosted candidates, tried IN ORDER and probed, because guessing wrong here costs
+ * a confusing 401 at call time:
+ *
+ *   1. $DSH_LLM_BASE, if the operator says so explicitly.
+ *   2. https://maas.qwencloudapi.com/compatible-mode/v1 — the canonical base URL,
+ *      the one fed to the OpenAI client constructor by the harness provider config.
+ *      Treat this as the answer when it authenticates.
+ *   3. https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1 —
+ *      the regional origin behind the same plan. Measured 2026-10-21 with one
+ *      reset key: the canonical alias answered `401 Invalid API-key provided`
+ *      while the regional origin answered `200`, for `qwen3.8-flash`. Same model,
+ *      same completions, different front door — so the fallback is not a different
+ *      service to measure against, it is the same service one hop earlier.
+ *
+ * A 404 is NOT a rejection: some hosts don't implement /models. `unknown` ranks
+ * below any authenticated host but still beats nothing, so the real error surfaces
+ * where it can be read.
+ */
+export const HOSTED_CANDIDATES = [
+  process.env.DSH_LLM_BASE,
+  'https://maas.qwencloudapi.com/compatible-mode/v1',
+  'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+].filter((x) => x !== undefined && x !== '')
+export const HOSTED_BASE = HOSTED_CANDIDATES[0]
 export const HOSTED_MODEL = process.env.DSH_LLM_MODEL ?? 'qwen3.8-flash'
 export const LOCAL_MODEL = process.env.LOCAL_LLM_MODEL ?? 'qwen3.8-flash-next'
 const KEY_FILE = process.env.LLM_KEY_FILE ?? path.join(os.homedir(), '.dsh', 'secrets', 'qwen-token-plan.key')
@@ -99,14 +123,50 @@ async function reachable(base, ms = 1500) {
 
 /** Where we will actually talk, and why. */
 export async function resolve({ prefer = 'local' } = {}) {
+  const key = apiKey()
   const localUp = await reachable(LOCAL_BASE)
   if (prefer === 'local' && localUp) {
     return { base: LOCAL_BASE, model: LOCAL_MODEL, regime: 'local-stress', local: true }
   }
+  const probed = await probeHosted(key)
   return {
-    base: HOSTED_BASE, model: HOSTED_MODEL, regime: 'hosted-session-model', local: false,
+    base: probed.base, model: HOSTED_MODEL, regime: 'hosted-session-model', local: false,
+    probed: probed.probed,
     ...(localUp ? {} : { note: 'local server (:8080) is not answering — hosted fallback in use' }),
+    ...(probed.note !== undefined ? { note: probed.note } : {}),
   }
+}
+
+/** Which hosted front door actually takes this credential. Cached per process. */
+let hostedCache = null
+async function probeHosted(key) {
+  if (hostedCache !== null) return hostedCache
+  const probed = []
+  let fallback = null
+  for (const base of HOSTED_CANDIDATES) {
+    const label = base.replace('https://', '').split('/')[0]
+    if (key === null) { probed.push(`${label}: no credential`); fallback ??= base; continue }
+    try {
+      const res = await fetch(`${base}/models`, {
+        headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000),
+      })
+      if (res.status === 401 || res.status === 403) { probed.push(`${label}: rejected`); fallback ??= base; continue }
+      probed.push(res.ok ? `${label}: accepted` : `${label}: ${res.status} (route unknown)`)
+      // a 2xx proves the credential; a 404 proves nothing but reachability, so it
+      // is a fallback rather than a win
+      if (res.ok) { hostedCache = { base, probed }; return hostedCache }
+      fallback ??= base
+    } catch (error) {
+      probed.push(`${label}: unreachable (${String(error?.message ?? error).slice(0, 40)})`)
+    }
+  }
+  const chosen = fallback ?? HOSTED_CANDIDATES[0]
+  hostedCache = {
+    base: chosen, probed,
+    note: 'no hosted candidate authenticated on /models — using ' + chosen.replace('https://', '') +
+      '; a 401 at call time means the credential is not valid for the hosts probed (' + probed.join(', ') + ')',
+  }
+  return hostedCache
 }
 
 /** One chat completion; returns text. Throws a readable error, key never included. */

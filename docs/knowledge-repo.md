@@ -567,6 +567,13 @@ rules, not a new policy):
   Why it stopped being a gate is the amendment's subject: requiring a human to have already said it
   makes the tier redundant with the deterministic marker, and the premise of the tier is that the
   human may not know the rule yet.
+  Measured before shipping, on three real chapters at the session model (§13 P3c, verify.md R5): 9
+  rules captured, 6 stated / 3 inferred, every inference confined to the chapter that had no human
+  text at all, and the model's self-declared `basis` less accurate than the check. It also exposed a
+  cost fact worth a decision: the hosted route counts reasoning tokens, so mining inside the
+  annotation call shares a budget sized for annotation (`ENRICH_MAX_TOKENS`) — `rulesModel` is the
+  clean bound, and an unexamined default is not.
+
   Three properties worth stating: mining runs **before** the hash-guarded annotation write, so a
   chapter whose enrichment is refused still contributes its standing orders; mining may use a
   **dedicated model** (`rulesModel` / `/chapters-rule model`), which costs one extra bounded call
