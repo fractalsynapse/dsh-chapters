@@ -488,6 +488,12 @@ Contents (all O(1), §1 invariant 6):
   Omission stays non-blocking: rules are additive, and a broken mirror or an overflowing ruleset
   must not stop a continuation or a compaction.
 - **Precedence line** (§7.7): session rules refine and add; they never override a project rule.
+- **Per-rule warrant** (§7.5, amended 2026-10-21): a session rule renders with how it was
+  established — `you said this` (marker), `stated by you, mined from ch.N`, or `inferred from ch.N
+  — nobody said it`. Inference is allowed to govern, but never anonymously.
+- **The speak-up line**, present only when a block carries session rules: the agent names by id
+  which of them shaped its reply, or says none did. A project-only block keeps its exact pre-#50
+  bytes (verify.md R0 pins that), so nothing is spent where nothing is inferred.
 - **Rules category index:** category names + one-line essence + paths, with the instruction
   *load a rule category when this session's topics overlap a category* — i.e., the agent
   reads the full category from the repo when (and only when) relevant.
@@ -549,17 +555,24 @@ rules, not a new policy):
   (mining writes its own rule files; it never touches chapter prose). `rules` is **optional in the
   output contract**, so every pre-existing stub, fake and tape still validates, and a malformed
   `rules` value cannot cost a chapter its annotation.
-  **The gate is evidence, not a click: a mined rule activates only when its `quote` appears
-  verbatim (case/whitespace-normalized) in the chapter's HUMAN bytes.** Assistant prose is
-  inadmissible — the model restating an instruction it was handed is the amplification path, and
-  an invented quote is a guess wearing a citation. Everything else is written `suggested: true`:
-  reviewable in `list --scope session`, **inert in every head** until this machine's status fact
-  says core, which is what `approve` is for on this tier. Activation rides a curation fact; the
-  write-once file is never rewritten (§1.3).
-  Two properties worth stating, because they were the design's point: a small model will produce
-  mostly *suggestions* (exact quotes are hard for a 4B), so the tier degrades to a review queue
-  rather than to unearned authority; and mining runs **before** the hash-guarded annotation write,
-  so a chapter whose enrichment is refused still contributes its standing orders. That is the §1.4 division — model proposes, plugin commits — with the activation gate
+  **What decides whether a mined rule governs is POLICY, not evidence** (Amendment 2026-10-21).
+  `rulesAutoActivate` defaults ON: a rule the model inferred from context applies to the session
+  tree the moment it is written. With it off, every mined rule is written `reviewOnly: true` and
+  stays inert until this machine's `approve` fact says core — activation still rides a curation
+  fact, so the write-once file is never rewritten (§1.3).
+  **The quote check survives, demoted to a label.** Matching the chapter's human bytes verbatim
+  classifies a rule `stated`; not matching classifies it `inferred`; the label is rendered *beside
+  the rule text, with the chapter it came from*, and it drives nothing. Assistant prose is not
+  admissible even as a label — a "quote" found only in the model's own restatement is `inferred`.
+  Why it stopped being a gate is the amendment's subject: requiring a human to have already said it
+  makes the tier redundant with the deterministic marker, and the premise of the tier is that the
+  human may not know the rule yet.
+  Three properties worth stating: mining runs **before** the hash-guarded annotation write, so a
+  chapter whose enrichment is refused still contributes its standing orders; mining may use a
+  **dedicated model** (`rulesModel` / `/chapters-rule model`), which costs one extra bounded call
+  per chapter and, when set, replaces rather than supplements the annotation pass's answer; and the
+  agent must **name the session rules it applied** in its reply (§7.3) — which is where a wrong
+  inference becomes visible to the only party who can revoke it. That is the §1.4 division — model proposes, plugin commits — with the activation gate
   moved to machine-local, where a wrong guess costs one session and not a team's corpus.
 
 **Activation is derived, never a curation fact.** A session rule is active iff `scope: session` ∧
@@ -809,10 +822,13 @@ needs a human gate:
 - **Session rules** (§15 amendment 2026-10-20) are the deliberate exception, and the exception is
   *narrowed by scope, not by gate*: machine-local, never staged to the pool (§7.5), permanently
   active for one session tree, and visible/reversible with one command (`active`, `revoke`).
-  Blast radius is that tree. Two properties keep it honest: model-derived rules auto-activate
-  **only** when they quote human bytes verbatim, and a session rule never overrides a project rule
-  (§7.7). What is *not* permitted is a session rule migrating into the shared tier on its own —
-  promotion is a human act, exactly as approval is.
+  Blast radius is that tree. What keeps it honest is structural, not evidentiary (§7.5, amended
+  2026-10-21): machine-local scope and never staged, a per-chapter cap of 3 plus per-tier display
+  caps, the warrant rendered beside every rule with its chapter, the agent naming which rules it
+  applied, one-command `active`/`revoke` review, `rulesAutoActivate` for anyone who wants
+  review-before-trust, and a session rule never overriding a project rule (§7.7). What is *not*
+  permitted is a session rule migrating into the shared tier on its own — promotion is a human act,
+  exactly as approval is.
 
 Git history + provenance makes every tier auditable and every mistake revertible.
 
@@ -837,7 +853,9 @@ No hardcoded tunables (existing hard rule). New config, all with defaults docume
 | `coreRulesBudgetTokens` | P3 §7.3 cap on the notice's core-rules block; overflow refuses with per-rule numbers | 1200 |
 | `sessionRulesEnabled` | §7.5: the deterministic `ADD RULE:` capture path (zero model tokens) | true |
 | `rulesMarkerPrefix` | §7.5 capture marker; matched at line start of **human-authored** messages only | `ADD RULE:` |
-| `rulesEnrichment` | §7.5 model-derived capture: rides the §6.2 idle batch, never per-turn, and no mined rule activates without a verbatim human quote (unverified candidates are `suggested`, i.e. inert) | true |
+| `rulesEnrichment` | §7.5 model-derived capture: rides the §6.2 idle batch, never per-turn | true |
+| `rulesAutoActivate` | §7.5 (amended 2026-10-21): may a mined rule govern on arrival? It **may**, by default — inferring what nobody said is the tier's purpose. Off ⇒ mined rules are `reviewOnly` and inert until `approve` | true |
+| `rulesModel` | §7.5: `'provider/model'` for a dedicated mining call — one extra bounded call per chapter, replacing the annotation pass's answer. `''` ⇒ mine inside the enrichment call, at no extra inference cost. Runtime override `/chapters-rule model` (settings key `rules.model`) | `''` |
 | `rulesMinedPerChapter` | §7.5 cap on mined rules per chapter — the cap counts rules **written**, not candidates examined, so a duplicate cannot eat a chapter's budget | 3 |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | §7.4 per-tier count caps on rules **rendered** into a rebuilt head; anything dropped is announced by count, never silently | 12 / 12 |
 | `rulesRelevance` | §7.4 relevance selection on; off ⇒ deterministic category→id order (the order tapes were distilled against) | true |
@@ -900,8 +918,8 @@ of active rules did not yet grow on its own.
 **P3c — Two-tier rules (issue #50): BUILT, both capture speeds (2026-10-20).** §7.1's `scope`/`session`/
 `derivedFrom`/`pinned` frontmatter (absent `scope` ⇒ `project`, so every pre-existing rule record
 keeps working byte-identically); `ADD RULE:` capture at the existing `turn/end` listener;
-`rulesEnrichment` capture behind the verbatim-quote gate (§7.5's second speed, default on,
-unverified candidates inert); session-scope exclusion in
+`rulesEnrichment` capture (§7.5's second speed; governed on arrival by default per
+Amendment 2026-10-21, the quote demoted to a rendered warrant); session-scope exclusion in
 `planStoreToRepo`; the three render classes and per-tier caps in `buildRulesSection`; the third
 checkpoint lead section; `intent` filtering at the four door sites; `chapters_rules`; the
 `active`/`pin`/`conflicts` verbs; and §7.8's loud-identity lines.
@@ -1141,6 +1159,61 @@ instruction never names does not exist to a small model.
 
 Specification: §7.1 and §7.3–§7.9. Build status and exit criteria: §13 P3c (specified, not yet
 built at the time of this amendment — this entry is the decision record, not a claim of behavior).
+
+### Amendment 2026-10-21 — a mined rule is governed by POLICY, not by proof that a human said it
+
+Human directive, one day after the previous entry and against the feature as built: *"I don't like
+your approach of making mined rules governing if it appears verbatim in my own words… we need to
+assume that the human may not know, which is why they may be using AI in the first place."* The
+verbatim-quote gate built under §7.5 is **removed as a condition on activation**.
+
+What was wrong was a category error, and it is worth stating plainly because it is the kind of
+error this project keeps making: the gate confused **where a rule came from** with **whether it is
+allowed to govern**. Requiring a human sentence behind every mined rule meant the model could only
+ever re-state what had already been said — which is exactly what the deterministic `ADD RULE:`
+marker does better, because there you know precisely what you got. A tier that can only confirm the
+known is not inference; it is a paraphrase of the marker with extra latency. And the honest failure
+mode it was built to prevent — the model inventing a rule the human never sanctioned — is the same
+failure mode it was built to *cause*: the useful case is the standing order nobody has articulated
+yet, and the value of asking a model to look is precisely that it may see one.
+
+**What replaces it.** Four things, all structural — and the reason all four are needed is that
+evidence is no longer one of them:
+
+1. `rulesAutoActivate` (default **on**) is the single switch. Off ⇒ every mined rule is written
+   `reviewOnly: true` and stays inert until this machine approves it. Review-before-trust is a
+   posture a team can choose; it is no longer the default posture.
+2. The quote check survives, **demoted to a label**: `stated` (a human sentence backs it) vs
+   `inferred` (the model judged it, nobody said it). It renders beside the rule text *with the
+   chapter it came from*, in the head, so no inferred rule can govern anonymously. Assistant prose
+   stays inadmissible even as a label — a "quote" found only in the model's restatement is
+   `inferred`, not `stated`.
+3. The agent must **name by id the session rules that shaped its reply** (§7.3's speak-up line),
+   or say none did. This is the mechanism the human asked for instead of a gate, and it is better:
+   a wrong inference becomes visible at the moment it acts, to the only party who can revoke it,
+   rather than being prevented in advance by a test the model can satisfy by quoting badly.
+4. The caps stay: 3 mined rules per chapter (counting rules **written**), per-tier display caps
+   with the withheld count announced, machine-local scope, never staged to the pool, `revoke` one
+   command away.
+
+Two things deliberately **not** relaxed: a session rule never overrides a project rule (§7.7), and
+a session rule never becomes a project rule without a human (`add`) — promotion is still a human
+act. The tier's warrant for governing itself got broader; its warrant for governing *anyone else*
+did not change at all.
+
+**Honest limits, recorded at the time of writing.** No live model has mined a real chapter yet (the
+dev box's GPU driver was unreachable), so how often a 4B produces a *correct* inference — versus a
+confident wrong one that now governs by default — is unmeasured. The default is a bet on the
+visibility mechanisms above, and `docs/verify.md` R5 marks the quality half unverified. Anyone
+revisiting this should look at the ratio of `stated` to `inferred` on real archives first; if
+inferences are wrong more often than a human catches them in replies, the fix is
+`rulesAutoActivate: false`, not a new gate.
+
+Implementation: `src/rules.ts` (`basis`/`chapter`/`reviewOnly`, `sessionRuleActive`),
+`src/session-rules.ts` (`captureMinedRules` policy + classification), `src/enrich-wire.ts`
+(`rulesAutoActivate`, `rulesModel`, dedicated mining call), `src/rules-commands.ts` (`model` verb,
+`active` posture). Reversal pinned by a test row, not just described: *"THE REVERSAL, PINNED: an
+inferred rule governs on arrival — no human said it."*
 
 ---
 

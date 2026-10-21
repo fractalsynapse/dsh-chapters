@@ -211,11 +211,16 @@ answer is the pinned class + the withheld-count line, not more injection.
 The round landed green on the deterministic plane (640 unit / 137 integration rows, coverage gate
 held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and none is a surprise:
 
-1. **`rulesEnrichment` (§7.5's model half) is not built.** The tier ships on the deterministic
-   `ADD RULE:` marker alone, which is the zero-token path the invariants demand. Building it means:
-   a `rules: [{text, category, quote}]` field on the §6.1 pass, validation-before-commit, and the
-   rule that **only a verbatim quote of human bytes may auto-activate**. Do not add a per-turn model
-   call — the server is single-slot (§6.2) and the critical path is zero-inference (§1.1).
+1. **Mined-rule QUALITY is unmeasured, and it now matters more.** The model half is built (§7.5,
+   2026-10-21), but the maintainer rejected the verbatim-quote gate and mined inferences govern by
+   default — so the open question is empirical: how often is a small model's inference right? Cheapest
+   real measurement, in order: (a) point the enrichment route at a reachable model and run
+   `/chapters-enrich run` over an archive with real sessions, (b) read
+   `list --scope session` and count `stated` vs `inferred`, (c) watch whether agents cite rules that
+   get revoked. If inferences are wrong more often than a human catches them in replies, the fix is
+   the existing `rulesAutoActivate: false` posture — do NOT reintroduce an evidence gate; the reversal
+   in Amendment 2026-10-21 explains why that was the wrong instrument. Do not add a per-turn model
+   call either: the server is single-slot (§6.2) and the critical path is zero-inference (§1.1).
 2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
    the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
    `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round

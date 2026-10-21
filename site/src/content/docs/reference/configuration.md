@@ -29,9 +29,11 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `coreRulesBudgetTokens` | 1200 | the CORE RULES block in notices — **refuses with numbers, never clips** |
 | `rulesCoreBonus` | 0.15 | per-machine rank bonus for core-approved rules |
 | `sessionRulesEnabled` | true | deterministic `ADD RULE:` capture into the local session tier — zero model tokens, never staged to the pool |
-| `rulesMinedPerChapter` | 3 | cap on mined rules per chapter; the cap counts rules **written**, so a duplicate cannot consume a chapter's budget |
+| `rulesMinedPerChapter` | 3 | cap on mined rules per chapter; the cap counts rules **written**, so a duplicate cannot consume a chapter's budget, and 3 is the ceiling on what any one archived chapter can teach the session |
 | `rulesMarkerPrefix` | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
-| `rulesEnrichment` | true | model-derived capture: rides the idle-batched enrichment pass (never per-turn), and **no mined rule activates without a verbatim quote of your own words** — anything else is written as an inert *suggestion* until you approve it |
+| `rulesEnrichment` | true | model-derived capture: the enrichment pass mines standing orders from each archived chapter, idle-batched, never per-turn |
+| `rulesAutoActivate` | true | whether a mined rule governs on arrival. It does by default — inferring what nobody said is the tier's purpose ([#50, Amendment 2026-10-21](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md)). Off ⇒ mined rules are written `reviewOnly` and stay inert until you `approve` |
+| `rulesModel` | `''` | `'provider/model'` for a **dedicated mining model**: one extra bounded call per chapter, and its answer replaces (never supplements) the annotation pass's rules. `''` ⇒ mine inside the enrichment call, at no extra cost. Runtime: `/chapters-rule model p/m` |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
 | `rulesRelevance` | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
 | — | — | `/chapters-rule conflicts` has **no key of its own**: it runs one bounded stream call on the conversation route the session already has, **report-only**, never edits a rule. No route ⇒ the verb refuses honestly |

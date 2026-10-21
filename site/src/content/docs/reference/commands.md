@@ -38,20 +38,23 @@ Per linked project: `Project` / `Remote` / `Provider` lines, then `Sync: a push 
 /chapters-rule approve <id> | revoke <id>                  # YOUR machine's curation fact — never a shared rewrite
 ```
 
-Specified in [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50) (two-tier rules; **not yet
-shipped**) — the session tier and the audit surface that makes the shared tier's caps checkable:
+The session tier and the audit surface, so automatic capture is never opaque
+([#50](https://github.com/treeseed-ai/dsh-chapters/issues/50)):
 
 ```
 /chapters-rule list --scope project|session               # which tier a rule belongs to
-/chapters-rule active                                     # exactly what is / will be rendered, + withheld count and why
+/chapters-rule active                                     # exactly what a rebuilt head will show, + withheld counts + the mining posture
+/chapters-rule approve <id>                               # the one action that turns a held mined rule on
 /chapters-rule pin <id> | unpin <id>                       # the always-rendered class (human-set only)
-/chapters-rule conflicts [--model <pin>]                  # report contradictory pairs — never edits a rule
+/chapters-rule model [<provider/model> | clear]            # a dedicated model for mining; costs one call per chapter
+/chapters-rule conflicts                                  # report contradictory pairs — never edits a rule
 ```
 
-`ADD RULE: <text>` at the start of a line in your own message is the capture path — deterministic,
-zero model tokens, active for your session tree. It is deliberately **not** a command: nothing to
-remember, no review step that must happen before it takes effect. See
-[Rules & governance](/knowledge/rules/).
+`ADD RULE: <text>` at the start of a line in your own message is the deterministic capture path —
+zero model tokens, active for your session tree, exactly the words you wrote. It is deliberately
+**not** a command: nothing to remember, no review step before it takes effect. Everything the model
+mines instead is labelled `stated` or `inferred` in the head, so the two paths are never confused.
+See [Rules & governance](/knowledge/rules/).
 
 ## The deterministic door: `/chapters-fork [title]` and `/chapters-continue [title]`
 

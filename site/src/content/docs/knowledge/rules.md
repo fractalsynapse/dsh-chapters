@@ -4,6 +4,13 @@ description: Two tiers of durable agent steering — team-approved project rules
 lastUpdated: true
 ---
 
+> **Status.** Both tiers ship. The *project* tier has been running since P3; the *session* tier is
+> [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50), with the mining posture settled by
+> [Amendment 2026-10-21](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md).
+> Two things are honestly unverified: no live model has mined a real chapter yet (so how often an
+> inference is *right* is unmeasured), and the browser-plane acceptance is blocked on a host-lock
+> move — see `docs/backlog.md`. Neither changes what this page describes.
+
 > **Status.** Both tiers ship. The *project* tier is what has been running since P3; the *session*
 > tier is [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50), specified in
 > [the record §7](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md).
@@ -71,19 +78,28 @@ inferred: the head states `0 project rules — this checkout resolves project �
 - **`ADD RULE: <text>`** at the start of a line in one of your own messages becomes an active
   session rule immediately, with **zero model tokens** — a deterministic parse on the same turn
   boundary the topic signatures use. The rule body is your sentence, verbatim.
-- **Model capture** is a setting (`rulesEnrichment`, **on** by default) riding the existing
-  idle-batched enrichment pass. It runs *after* a chapter is archived, so a mined rule arrives at
-  the next boundary, not mid-turn — the local model server is single-slot, and per-turn work would
-  queue against your own conversation. **A mined rule activates only when its quote appears
-  verbatim in your own words** in that chapter. Everything the model inferred without a sentence
-  behind it is written as a *suggestion*: listed by `list --scope session`, and inert in every head
-  until you `approve` it. So the model can propose a standing order, but it cannot give itself one.
-  A handful of suggestions is the expected steady state with a small model — that is the safety
-  working, not the feature failing.
+- **Model capture** rides the existing idle-batched enrichment pass (`rulesEnrichment`, on by
+  default). It runs *after* a chapter is archived, so a mined rule arrives at the next boundary,
+  not mid-turn — the local model server is single-slot and per-turn work would queue against your
+  own conversation. **A mined rule governs your session tree as soon as it is written.** It does
+  not need to have been said by you first; that was an earlier design and it was dropped, because
+  a rule you already stated is a rule you could have written with `ADD RULE:` — the point of asking
+  a model to look is that it may see a standing order nobody has articulated. If you would rather
+  review before trusting, one setting does that: `rulesAutoActivate: false`, and every mined rule
+  then waits, inert, for `approve`.
 
-Activation for this tier is **derived, not approved**: a session rule is active when it is scoped
-`session`, belongs to a session on your current ancestry, and has not been revoked. No approval step,
-because it governs only your session tree and never leaves the machine.
+### What you see, so inference can't hide
+
+Every mined rule is labelled and cited, in the head itself: `stated by you, mined from ch.7` when
+one of your sentences backs it, `inferred from ch.7 — nobody said it` when the model's judgement is
+the only source. And an agent carrying session rules is told to **name by id the rules that actually
+shaped its reply** — say "none" if none applied. That is where a wrong inference surfaces: not blocked
+in advance by a test the model could satisfy by quoting badly, but caught at the moment it acts, by
+you, who can revoke it in one command.
+
+Two caps bound the damage regardless: at most 3 mined rules per chapter, and a per-tier display
+cap on how many rules any head shows (with the withheld count announced, so you always know the
+ceiling is what limited it, not the store running dry).
 
 ### Carried at the moments the head is rebuilt
 
@@ -107,13 +123,12 @@ Selection that could silently drop the load-bearing rule would just rebuild the 
 the fix. The token ceiling keeps the old doctrine: over budget it refuses with per-rule numbers, it
 never clips.
 
-### Suggestions
+### Promotion stays a human act
 
-The ladder mines at most three rules per chapter (`rulesMinedPerChapter`), and the cap counts
-rules *written*, not candidates examined, so a duplicate can't eat a chapter's budget. Approved
-suggestions stay local — session rules are never staged to the pool, which is what lets this half
-run in the background without a human approving each one and without one machine's bad guess
-becoming another machine's instruction.
+Nothing about the softer posture changed the boundary that matters: a session rule never overrides a
+project rule, and a session rule never becomes one. Promotion is you typing `add`; approval of a
+held rule is you typing `approve`. A model may govern the session tree it is working in — it may not
+govern your team.
 
 ## Conflicts
 
