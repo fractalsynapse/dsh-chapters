@@ -174,6 +174,22 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
         : {}),
     })
   }
+  // #54: the profile's provider block, guaranteed present and pointed at the rig.
+  // 0.2.x reads provider config ONLY from cordis.patch.yml, and the home this boot
+  // copies may predate that file's llm-pi-ai entry (or be a CI-built profile), so
+  // append it when absent and rewrite the baseURL when a tape proxy is in front.
+  {
+    const patchPath = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
+    if (fs.existsSync(patchPath)) {
+      let p = fs.readFileSync(patchPath, 'utf8')
+      if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: 0\n` + p
+      }
+      p = p.replace(/contextWindow: \d+/g, 'contextWindow: 32000').replace(/maxTokens: \d+/g, 'maxTokens: 15000')
+      if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
+      fs.writeFileSync(patchPath, p)
+    }
+  }
   const liveSettings = path.join(E2E_HOME, 'settings.yaml')
   if (fs.existsSync(liveSettings)) {
     const s = fs.readFileSync(liveSettings, 'utf8')

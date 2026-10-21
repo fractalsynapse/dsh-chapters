@@ -17,6 +17,7 @@ import { chromium } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { bootE2eServer, ROOT } from '../tests/e2e/boot.ts'
+import { dismissTestingNotice } from '../tests/e2e/session.ts'
 
 const port = Number(process.env.E2E_PROBE_PORT ?? 41799)
 const boot = await bootE2eServer(port, { thresholdRatio: '0.9' })
@@ -54,6 +55,56 @@ try {
     current: (JSON.parse(localStorage.getItem('dsh.sessions.current') ?? 'null') as { sessionId?: string })?.sessionId ?? null,
   }))
   dump.after = after
+  // the composer locator matches WHAT, and what actually sits under the point the rig
+  // clicks — 'composer did not take focus (active: Preview Notice)' says only that the
+  // click landed somewhere else
+  dump.composers = await page.evaluate(() => {
+    const els = Array.from(document.querySelectorAll('div[aria-label*="/ commands, @ files or sessions"]'))
+    return els.map((e) => {
+      const r = (e as HTMLElement).getBoundingClientRect()
+      const probe = document.elementFromPoint(r.x + Math.min(60, r.width / 2), r.y + r.height / 2)
+      return {
+        label: e.getAttribute('aria-label'),
+        tag: e.tagName,
+        contenteditable: e.getAttribute('contenteditable'),
+        rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        visible: r.width > 0 && r.height > 0,
+        underClickPoint: probe === null ? null : `${probe.tagName}:${probe.getAttribute('aria-label') ?? (probe.textContent ?? '').trim().slice(0, 30)}`,
+      }
+    })
+  })
+  dump.dialog = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    if (d === null) return null
+    return {
+      label: d.getAttribute('aria-label'),
+      text: (d.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
+      buttons: Array.from(d.querySelectorAll('button')).map((b) => ({
+        text: (b.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 40),
+        aria: b.getAttribute('aria-label'), disabled: (b as HTMLButtonElement).disabled,
+      })),
+      inputs: Array.from(d.querySelectorAll('input, [role="checkbox"], [role="switch"]')).map((i) => ({
+        tag: i.tagName, type: i.getAttribute('type'), role: i.getAttribute('role'),
+        aria: i.getAttribute('aria-label'), checked: (i as HTMLInputElement).checked,
+      })),
+    }
+  })
+  dump.noticeEls = await page.evaluate(() => Array.from(document.querySelectorAll('[aria-label]'))
+    .filter((e) => /notice/i.test(e.getAttribute('aria-label') ?? ''))
+    .map((e) => ({ label: e.getAttribute('aria-label'), tag: e.tagName, role: e.getAttribute('role'),
+      rect: (() => { const r = e.getBoundingClientRect(); return `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}` })() })))
+  dump.dismiss = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"], [aria-label*="Notice"]')
+    return d === null ? 'no dialog present at this moment' : `dialog: ${d.getAttribute('aria-label') ?? '?'} / buttons: ${Array.from(d.querySelectorAll('button')).map((b) => (b.textContent ?? '').trim() || b.getAttribute('aria-label') || '?').join('|')}`
+  })
+  await dismissTestingNotice(page)
+  await page.waitForTimeout(1200)
+  dump.afterDismiss = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"], [aria-label*="Notice"]')
+    return { dialog: d === null ? null : (d.getAttribute('aria-label') ?? '?'),
+      active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? 'none',
+      composerFocused: (() => { const ae = document.activeElement; return ae !== null && (ae.matches('div[aria-label*="/ commands, @ files or sessions"]') || ae.closest('div[aria-label*="/ commands, @ files or sessions"]') !== null) })() }
+  })
   fs.writeFileSync(path.join(ROOT, 'var', 'e2e-dom-probe.json'), JSON.stringify(dump, null, 2))
   console.log(JSON.stringify(dump, null, 2).slice(0, 2600))
 } finally {
