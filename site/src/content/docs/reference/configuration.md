@@ -23,6 +23,7 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `treedxFetchTimeoutMs` / `treedxWorkspaceTtlSeconds` / `treedxLeaseRetries` / `treedxLeaseRetryDelayMs` | 15000 / 900 / 3 / 1000 | TreeDX transport tunables (fetch timeout, workspace TTL, lease retry count and delay) |
 | `enrichmentEnabled` | true | **false makes the whole P2 ladder a pure no-op** — corpus stays fully working |
 | `enrichmentModel` | `''` (conversation route) | the annotator override |
+| `enrichmentMaxTokens` | 4000 | one auxiliary completion budget (annotation, mined rules, the conflicts report). It has to cover **reasoning** tokens, not just the visible answer — measured mining usage ran 1.1K–3.2K per chapter. The route used here ignores `max_tokens`, so this is headroom for providers that don't rather than a live limit |
 | `enrichmentIdleMs` / `enrichmentBatchCap` | 60000 / 5 | idle trigger; chapters per drain |
 | `vocabApply` | false | shadow (default) vs git-visible topic curation |
 | `vocabCoMin` / `vocabOverlapMin` | 3 / 0.5 | trust thresholds for emergent vocabulary |

@@ -200,12 +200,17 @@ On quality: none of the nine was wrong or unsafe; the three inferences were argu
 transferable ("verify decisive architectural claims in shipped code before treating them as settled").
 n = 3 chapters on one repo's own history is not proof, but it is no longer nothing.
 
-**One cost fact the probe exposed, unresolved:** the hosted route reports completion tokens
-(969–3237) far above the 700-token ceiling the probe sent, because reasoning tokens are counted —
-which means mining *inside* the annotation call competes with a reasoning budget the annotation path
-was sized for (`ENRICH_MAX_TOKENS = 900`). The clean answer is `rulesModel` (a separate bounded
-mining call), or raising that ceiling deliberately; leaving it as an unexamined default is the thing
-to avoid.
+**A cost finding, stated twice because the first version was wrong.** The probe reported completion
+usage of 969–3237 tokens against a 700-token request. The inference I drew — that the annotation
+ceiling was truncating mining — was **wrong**: a direct test of the same route with a 64-token cap
+still produced 113 tokens with `finish_reason: stop`, and usage itemizes
+`completion_tokens_details.reasoning_tokens`. `max_tokens` is advisory on this provider, not
+enforced, and reasoning counts toward completion usage. So nothing was truncating; what was true is
+that the ceiling had no business being a literal at three call sites (900/900/600) sized for
+pre-mining answers. It is now `enrichmentMaxTokens`, default **4000** — above the observed 3.2K —
+because a *strict* provider would enforce it, and one that itemizes reasoning deserves a budget that
+covers the thinking. The lesson stays worth recording: a usage number is not evidence about a
+mechanism until the mechanism is tested directly.
 
 **Inference QUALITY had no witness when the posture was set; the first data is below and it is thin.** The mechanisms are proven against fixtures; nothing here can say how often a small model infers a *correct* standing order, now that inferences govern by default. That is the open risk of the 2026-10-21 decision, and the measured first step is cheap: point the enrichment route at a reachable model, run `/chapters-enrich run` over real archives, then read the `stated` vs `inferred` ratio in `/chapters-rule list --scope session`. If inferences are wrong more often than a human catches them in replies, the answer is `rulesAutoActivate: false` — not a new evidence gate (the amendment records why the gate was the wrong instrument). The box's GPU driver was unreachable when this landed (`nvidia-smi` cannot talk to it), so no vLLM boot and no real mining pass ran.
 
@@ -213,10 +218,15 @@ to avoid.
 deterministic suites need **Node ≥ 24** (`package.json` engines); on Node 22 every test file fails
 with `ERR_NO_TYPESCRIPT`/unknown-extension, which looks exactly like a broken change and is not one.
 (2) Under `npm run coverage:ci`'s parallel load the real-HTTP-git files
-(`git-auth-classification`, `sync-remote`) intermittently fail with an EPIPE in their `before` hook —
-**proven pre-existing** by running the same command in a worktree at the last docs-only commit, where
-`git-auth-classification` fails identically. Hosted CI is green, so this is a box-level flake, not a
-regression; anyone chasing a red `coverage:ci` locally should re-run before blaming the diff.
+(`git-auth-classification`, `sync-remote`) intermittently failed with an EPIPE blamed on their
+`before` hook. It was **recorded as a box-level flake and left alone — which was the wrong call**: the
+"prove it predates my diff" step was right, and stopping there was not. The cause was real and is now
+fixed in the rig: the test git server wrote each request body into a CGI child's `stdin` with **no
+error listener**, so a child that had already exited raised an async EPIPE with no handler, which the
+runner reported as uncaughtException after the test ended. Guards now sit on the child's three
+streams and on both request/response objects ([tests/integration/http-git-server.ts](http-git-server.ts));
+three consecutive combined runs since then are 800 pass / 0 fail. Lesson for the next agent, in the
+repo's own style: a pre-existing failure is still a failure.
 Ledger on this branch: **93.16% statements / 85.53% branches / 90.01% functions** — the gate holds.
 
 ## The Cache Metric, Before You Trust a Number

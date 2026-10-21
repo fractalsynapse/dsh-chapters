@@ -68,10 +68,20 @@ const PART_CAP = 1200
 const TOTAL_IN_CAP = 8000
 const BODY_HEAD_TOKENS = 200
 
-// 350 was sized for three fields; §7.5 adds up to three mined rules with quotes.
-// Bound the ANSWER rather than let the model truncate mid-JSON (an invalid parse
-// costs the chapter its annotation; the retry is cheap but not free).
-export const ENRICH_MAX_TOKENS = 900
+// The default ceiling for ONE auxiliary completion — the annotation pass (which now
+// also carries mined rules) and the conflicts report.
+//
+// 900 was the pre-mining number. Measured 2026-10-21, mining real chapters at
+// `qwen3.8-flash`: the provider reported completion usage of 969–3237 tokens against a
+// 700-token request, because REASONING tokens are counted in completion usage. A ceiling
+// with room only for the visible JSON truncates mid-object, and a truncated answer
+// parses as "no rules" — a silent loss that reads like a model with nothing to say. So
+// the budget covers the thinking, not just the answer: 4000, configurable as
+// `enrichmentMaxTokens` so no call site carries a literal.
+//
+// Unchanged: the input caps and the one-retry ladder. Cost is bounded by chapters per
+// drain, not by this number.
+export const ENRICH_MAX_TOKENS_DEFAULT = 4000
 
 const INSTRUCTION =
   'You annotate one archived chapter of a coding-agent conversation for retrieval. '

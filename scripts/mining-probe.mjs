@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { callChat, resolve, apiKeySource } from './llm.mjs'
-import { buildMineInput, parseMinedRules } from '../src/enrich.ts'
+import { buildMineInput, parseMinedRules, ENRICH_MAX_TOKENS_DEFAULT } from '../src/enrich.ts'
 import { humanBytesOf } from '../src/enrich-wire.ts'
 import { parseChapterFile } from '../src/enrich-store.ts'
 import { captureMinedRules, quoteIsHuman } from '../src/session-rules.ts'
@@ -79,7 +79,8 @@ for (const [i, file] of chapters.entries()) {
   process.stdout.write(`\n[${i + 1}/${chapters.length}] ${path.basename(file).slice(0, 60)} … `)
   let answer
   try {
-    const r = await callChat(prompt, { target, maxTokens: 700 })
+    // the SAME ceiling the plugin sends, so the probe measures the shipped budget
+    const r = await callChat(prompt, { target, maxTokens: ENRICH_MAX_TOKENS_DEFAULT })
     answer = r.text
     rows.push({ file, usage: r.usage, error: null })
   } catch (error) {
@@ -89,6 +90,7 @@ for (const [i, file] of chapters.entries()) {
   }
   fs.writeFileSync(path.join(OUT, `answer-${i + 1}.json`), answer)
   const mined = parseMinedRules(answer)
+  if (mined.length === 0 && /"rules"/.test(answer)) console.log('   !! advertised rules but the JSON did not parse — answer is TRUNCATED at this ceiling')
   const verdicts = mined.map((m) => ({ ...m, humanBacked: quoteIsHuman(human, m.quote) }))
   console.log(`${mined.length} rule(s); claimed-stated ${mined.filter((m) => m.basis === 'stated').length}; quote actually in human bytes ${verdicts.filter((v) => v.humanBacked).length}`)
   const cap = captureMinedRules({

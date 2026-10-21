@@ -218,14 +218,19 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    this repo — our own history is the friendliest corpus available, and a rule like "treat pinned tests
    as authoritative" is true here partly because the reader is already convinced.
 
-   1b. **Undecided, and it needs a decision rather than a patch:** mining inside the annotation call
-   shares `ENRICH_MAX_TOKENS = 900`, while the hosted route counts reasoning tokens in completion usage
-   (969–3237 observed against a 700-token request). Either raise that ceiling deliberately or send
-   mining to its own bounded call by defaulting `rulesModel`; measure before guessing.
-   1c. The canonical base URL (`maas.qwencloudapi.com/compatible-mode/v1`, the one fed to the OpenAI
-   client) rejects the key this box holds, while the regional token-plan origin accepts it.
-   `scripts/llm.mjs` now PROBES both and prints which it chose, so a credential that starts working at
-   the alias is picked up automatically — if that happens, nothing here needs changing.
+   1b. **Settled 2026-10-21, and settled twice:** the first reading ("mining is being truncated by
+   `ENRICH_MAX_TOKENS = 900`") was wrong — the token-plan route does not enforce `max_tokens` at all
+   (a 64-token cap returned 113 tokens, `finish_reason: stop`) and it itemizes
+   `completion_tokens_details.reasoning_tokens`. What was real is that the budget was three
+   hardcoded literals sized for pre-mining answers, so it is now `enrichmentMaxTokens` (default
+   4000). If a future provider DOES enforce the ceiling, this is the knob; if mining ever needs its
+   own budget, `rulesModel` already gives it its own call.
+   1c. **Endpoint default is the regional token-plan door**
+   (`token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`): QwenCloud gives no region
+   choice, and the `maas.qwencloudapi.com/compatible-mode/v1` alias answers `401 Invalid API-key
+   provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
+   alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
+   that starts working at the alias is used with no edit.
 2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
    the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
    `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round

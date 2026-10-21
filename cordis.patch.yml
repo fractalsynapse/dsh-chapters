@@ -116,6 +116,9 @@
 #
 # Realm-row-only keys (in the preset's engine row, not this patch):
 #   harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   enrichmentMaxTokens (4000 — one auxiliary completion budget; sized to cover
+#   reasoning tokens, since the measured route reports reasoning inside completion usage
+#   and does not enforce max_tokens)
 #   rulesEnrichment (true — the ladder mines standing orders),
 #   rulesMinedPerChapter (3), rulesAutoActivate (true — mined inferences govern on
 #   arrival; false holds them for approve), rulesModel ('' — or a dedicated

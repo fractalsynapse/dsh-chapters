@@ -39,26 +39,30 @@ export const LOCAL_BASE = process.env.LOCAL_LLM_BASE ?? 'http://localhost:8080/v
  * a confusing 401 at call time:
  *
  *   1. $DSH_LLM_BASE, if the operator says so explicitly.
- *   2. https://maas.qwencloudapi.com/compatible-mode/v1 — the canonical base URL,
- *      the one fed to the OpenAI client constructor by the harness provider config.
- *      Treat this as the answer when it authenticates.
- *   3. https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1 —
- *      the regional origin behind the same plan. Measured 2026-10-21 with one
- *      reset key: the canonical alias answered `401 Invalid API-key provided`
- *      while the regional origin answered `200`, for `qwen3.8-flash`. Same model,
- *      same completions, different front door — so the fallback is not a different
- *      service to measure against, it is the same service one hop earlier.
+ *   2. the REGIONAL token-plan door — the default (user decision 2026-10-21:
+ *      QwenCloud offers no region choice, and the alias below answers
+ *      `401 Invalid API-key provided` for the keys this box holds while the
+ *      regional origin answers 200 for the same model).
+ *   3. https://maas.qwencloudapi.com/compatible-mode/v1 — the alias that is fed
+ *      to the OpenAI client constructor in the harness config. Kept in the probe
+ *      list second so a credential that starts working there is used without an
+ *      edit, but it is no longer the assumed answer.
  *
  * A 404 is NOT a rejection: some hosts don't implement /models. `unknown` ranks
  * below any authenticated host but still beats nothing, so the real error surfaces
  * where it can be read.
  */
+export const REGIONAL_BASE = 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1'
+export const ALIAS_BASE = 'https://maas.qwencloudapi.com/compatible-mode/v1'
+/** The default endpoint for every script and probe: the regional token-plan door.
+ *  Override with DSH_LLM_BASE (or LOCAL_LLM_BASE for the dev server). */
+export const HOSTED_BASE_DEFAULT = REGIONAL_BASE
 export const HOSTED_CANDIDATES = [
   process.env.DSH_LLM_BASE,
-  'https://maas.qwencloudapi.com/compatible-mode/v1',
-  'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
+  REGIONAL_BASE,
+  ALIAS_BASE,
 ].filter((x) => x !== undefined && x !== '')
-export const HOSTED_BASE = HOSTED_CANDIDATES[0]
+export const HOSTED_BASE = HOSTED_BASE_DEFAULT
 export const HOSTED_MODEL = process.env.DSH_LLM_MODEL ?? 'qwen3.8-flash'
 export const LOCAL_MODEL = process.env.LOCAL_LLM_MODEL ?? 'qwen3.8-flash-next'
 const KEY_FILE = process.env.LLM_KEY_FILE ?? path.join(os.homedir(), '.dsh', 'secrets', 'qwen-token-plan.key')

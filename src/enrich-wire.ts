@@ -31,6 +31,8 @@ export interface EnrichConfig {
   trigger: 'afterPush' | 'idle' | 'both' | 'manual'
   idleMs: number
   batchCap: number
+  /** One auxiliary completion budget (see enrich.ts: reasoning tokens are counted) */
+  maxTokens?: number | undefined
   /**
    * #50 §7.5: mine standing orders out of each annotated chapter. `undefined`
    * means ON — the point of the tier is that the human does not have to think

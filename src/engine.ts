@@ -42,6 +42,7 @@ import { registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
 import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
+import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { hostname } from 'node:os'
 import path from 'node:path'
 import { captureMinedRules, makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
@@ -79,6 +80,9 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   rulesEnrichment?: boolean
   /** §7.5 per-chapter cap on mined rules */
   rulesMinedPerChapter?: number
+  /** One auxiliary completion budget (annotation+mining, conflicts): must cover
+   * reasoning tokens as well as the visible answer — see enrich.ts. */
+  enrichmentMaxTokens?: number
   /** §7.5: mined rules govern on arrival unless false (then they wait for review).
    * Default true — inferring what nobody spelled out is the whole point. */
   rulesAutoActivate?: boolean
@@ -234,6 +238,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     enrichmentTrigger: z.string().default('both'),
     enrichmentIdleMs: z.number().step(1).min(0).default(60000),
     enrichmentBatchCap: z.number().step(1).min(1).default(5),
+    enrichmentMaxTokens: z.number().step(1).min(400).default(ENRICH_MAX_TOKENS_DEFAULT),
     vocabApply: z.boolean().default(false),
     vocabCoMin: z.number().step(1).min(2).default(3),
     vocabOverlapMin: z.number().default(0.5),
@@ -278,7 +283,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
       rulesEnrichment, rulesMinedPerChapter, rulesAutoActivate, rulesModel,
       enrichmentEnabled, enrichmentModel, enrichmentTrigger, enrichmentIdleMs, enrichmentBatchCap,
-      vocabApply, vocabCoMin, vocabOverlapMin,
+      vocabApply, vocabCoMin, vocabOverlapMin, enrichmentMaxTokens,
       treedxFetchTimeoutMs, treedxWorkspaceTtlSeconds, treedxLeaseRetries, treedxLeaseRetryDelayMs,
       ...baseConfig
     } = config
@@ -315,6 +320,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       mineCap: rulesMinedPerChapter ?? 3,
       rulesAutoActivate: rulesAutoActivate ?? true,
       rulesModel: rulesModel ?? '',
+      maxTokens: enrichmentMaxTokens ?? ENRICH_MAX_TOKENS_DEFAULT,
       trigger: (enrichmentTrigger ?? 'both') as 'afterPush' | 'idle' | 'both' | 'manual',
       idleMs: enrichmentIdleMs ?? 60000,
       batchCap: enrichmentBatchCap ?? 5,
@@ -349,7 +355,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * lock and debounce keep the two honest against each other. */
   private syncDebounceMs = 30000
   private vocabCfg: { apply: boolean; coMin: number; overlapMin: number } = { apply: false, coMin: 3, overlapMin: 0.5 }
-  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; mineRules?: boolean | undefined; mineCap?: number | undefined; rulesAutoActivate?: boolean | undefined; rulesModel?: string | undefined } =
+  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; maxTokens?: number; mineRules?: boolean | undefined; mineCap?: number | undefined; rulesAutoActivate?: boolean | undefined; rulesModel?: string | undefined } =
     { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5, mineRules: true, mineCap: 3 }
   private enrichPromise: Promise<EnrichWiring> | null = null
   private lastCwd: string | null = null
@@ -386,7 +392,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       fetch: async (prompt, route) => {
         const r = route ?? this.lastRoute
         if (r === null || r.provider === '' || r.model === '') throw new Error('no auxiliary route yet')
-        return await this.#auxComplete(prompt, r, 900)
+        return await this.#auxComplete(prompt, r, this.enrichCfg.maxTokens ?? ENRICH_MAX_TOKENS_DEFAULT)
       },
       conversationRoute: () => this.lastRoute,
       // §7.5 the sink: the realm plane owns disk, identity and the registry, so it

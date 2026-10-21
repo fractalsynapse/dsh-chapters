@@ -34,6 +34,7 @@ import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLi
 import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
+import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules } from './session-rules.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -107,6 +108,9 @@ export interface Config {
   /** 'provider/model' or '' = conversation/stored route (record §6). */
   enrichmentModel: string
   enrichmentIdleMs: number
+  /** One auxiliary completion budget: annotation+mining and the conflicts report.
+   * Must cover reasoning tokens, not just the visible JSON (record §6.1, #50). */
+  enrichmentMaxTokens: number
   enrichmentBatchCap: number
   /** P2 §6.3 vocabulary pass (shadow by default). */
   vocabApply: boolean
@@ -209,6 +213,7 @@ export const Config = Schema.object({
   enrichmentEnabled: Schema.boolean().default(true),
   enrichmentModel: Schema.string().default(''),
   enrichmentIdleMs: Schema.number().default(60000),
+  enrichmentMaxTokens: Schema.number().default(ENRICH_MAX_TOKENS_DEFAULT),
   enrichmentBatchCap: Schema.number().default(5),
   vocabApply: Schema.boolean().default(false),
   vocabCoMin: Schema.number().default(3),
@@ -302,6 +307,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         model: config.enrichmentModel,
         trigger: 'manual',
         idleMs: config.enrichmentIdleMs,
+        maxTokens: config.enrichmentMaxTokens,
         batchCap: config.enrichmentBatchCap,
         mineRules: config.rulesEnrichment,
         mineCap: config.rulesMinedPerChapter,
@@ -333,7 +339,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         for await (const chunk of llm.stream({
           provider: route.provider, model: route.model,
           messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
-          maxTokens: 900,
+          maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
         })) assembler.push(chunk as never)
         return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
@@ -424,7 +430,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
           for await (const chunk of llm.stream({
             provider: route.provider, model: route.model,
             messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
-            maxTokens: 600,
+            maxTokens: config.enrichmentMaxTokens,
             purpose: 'compaction',
           })) assembler.push(chunk as never)
           return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
