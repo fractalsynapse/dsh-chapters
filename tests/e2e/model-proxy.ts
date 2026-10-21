@@ -206,6 +206,17 @@ export interface ProxyOpts {
   /** journal override; default is next to the tapes */
   journalPath?: string
   upstream?: string // e.g. http://localhost:8080 — required in record mode
+  /** #54: the credential the PROXY presents upstream, replacing whatever the
+   * harness sent. The e2e profile must never hold a real key — it is a fixture —
+   * and the local vLLM rig does not check one at all, so leaving this unset keeps
+   * the passthrough behavior the GPU box has always had. */
+  upstreamKey?: string
+  /** #54: rewrite the REQUESTED model name on the way out, so the fixture can keep
+   * the id its profile pins (`qwen3.8-flash-next`, the 32K stress regime) while a
+   * hosted upstream is addressed by the id it actually serves. The tape stores the
+   * profile's name — never the remote's — because a tape is a fixture of THIS rig,
+   * not of whatever service distilled it. */
+  upstreamModel?: string
   /** replay + liveFallback: a miss goes to the real model AND lands on the
    * tape (journal the gap, self-heal); strict replay keeps misses LOUD so
    * suites fail fast when a scenario legitimately changed. */
@@ -287,7 +298,10 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
     req.on('data', (c) => chunks.push(c as Buffer))
     req.on('end', () => {
       void (async () => {
-        const raw = Buffer.concat(chunks)
+        // #54: `let`, not `const` — the upstream model rewrite below rebinds it, and a
+        // TypeError thrown inside a try/catch that swallows everything is how a
+        // translation silently does nothing while the client still sees a 200.
+        let raw = Buffer.concat(chunks)
         let body: Record<string, unknown> = {}
         try { body = JSON.parse(raw.toString('utf8')) as Record<string, unknown> } catch { /* non-json passthrough below */ }
         const inc = messagesOf(body)
@@ -325,7 +339,30 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         // ---- record: stream through, capture bytes, append tape
         const upstreamUrl = new URL((opts.upstream ?? 'http://localhost:8080') + req.url!)
         const transport = upstreamUrl.protocol === 'https:' ? https : http
-        const ureq = transport.request(upstreamUrl, { method: req.method, headers: { ...req.headers, host: upstreamUrl.host } }, (ures) => {
+        const fwd: Record<string, unknown> = { ...req.headers, host: upstreamUrl.host }
+        if (opts.upstreamKey !== undefined && opts.upstreamKey !== '') {
+          // ONE credential leaves this process toward the upstream, and it is not the
+          // profile's — the harness keeps talking to a keyless local fixture
+          fwd.authorization = `Bearer ${opts.upstreamKey}`
+        }
+        if (opts.upstreamModel !== undefined && opts.upstreamModel !== '') {
+          try {
+            const parsed = JSON.parse(raw.toString('utf8')) as { model?: unknown }
+            if (typeof parsed.model === 'string' && parsed.model !== opts.upstreamModel) {
+              parsed.model = opts.upstreamModel
+              raw = Buffer.from(JSON.stringify(parsed), 'utf8')
+              // and say how long it is: a stale content-length makes the upstream
+              // read the OLD body (measured — the rewrite silently did nothing while
+              // the client still saw a 200)
+              fwd['content-length'] = String(raw.length)
+            }
+          } catch { /* not a JSON body (models/info) — pass it through untouched */ }
+        }
+        const ureq = transport.request(upstreamUrl, { method: req.method, headers: fwd }, (ures) => {
+          // RELAY THE STATUS. The tape records it, but until #54 every client saw an
+          // implicit 200 — so a distill against a rejecting host "succeeded" while
+          // writing error bodies into the corpus.
+          try { res.writeHead(ures.statusCode ?? 200, { 'content-type': String(ures.headers['content-type'] ?? 'text/event-stream') }) } catch { /* client gone */ }
           const buf: Buffer[] = []
           ures.on('data', (c) => { const b = c as Buffer; buf.push(b); try { res.write(b) } catch { /* client gone (teardown race) — the tape still records below */ } })
           ures.on('end', () => {
@@ -339,6 +376,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
               model: String(body.model ?? ''),
               recordedAt: new Date().toISOString(),
             }
+            if ((ures.statusCode ?? 200) >= 300) return // a failed answer is not a fixture
             const n = fs.readdirSync(opts.tapeDir).filter((f) => /^\d+\.json$/.test(f)).length
             fs.writeFileSync(path.join(opts.tapeDir, `${String(n).padStart(4, '0')}.json`), JSON.stringify(entry))
           })

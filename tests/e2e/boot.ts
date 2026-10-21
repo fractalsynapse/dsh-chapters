@@ -141,6 +141,13 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // E2E_MODEL=record|replay inserts the tape proxy (same directive's second
   // half: the GPU model distills tapes; acceptance replays them in seconds).
   const modelMode = process.env.E2E_MODEL ?? 'live'
+  const upstreamBase = process.env.E2E_UPSTREAM ?? 'http://localhost:8080'
+  // A remote upstream without a key is a guaranteed 401 on every request, eight
+  // projects long. Fail here, in one line, with the fix in the message.
+  if (modelMode === 'record' && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(upstreamBase)
+    && (process.env.E2E_UPSTREAM_KEY === undefined || process.env.E2E_UPSTREAM_KEY === '')) {
+    throw new Error(`e2e: E2E_UPSTREAM=${upstreamBase} is remote but E2E_UPSTREAM_KEY is unset — the tape proxy would forward the profile's dummy credential and every distill request would 401. Set E2E_UPSTREAM_KEY (and E2E_UPSTREAM_MODEL if the endpoint serves a different id).`)
+  }
   let proxy: ProxyHandle | null = null
   if (modelMode === 'record' || modelMode === 'replay') {
     proxy = await startModelProxy({
@@ -153,7 +160,18 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // E2E_TAPE_FALLBACK=1: tape hits stay, misses go live and are
       // recorded — a self-healing pass instead of a full re-record
       ...(process.env.E2E_TAPE_FALLBACK === '1' ? { liveFallback: true } : {}),
-      upstream: process.env.E2E_UPSTREAM ?? 'http://localhost:8080',
+      upstream: upstreamBase,
+      // #54: a REMOTE distill target. The profile pins the local fixture's model id
+      // and its key env; a hosted endpoint knows neither. The proxy translates both
+      // on the way out, and the tape still records the fixture's name — so a
+      // re-distill needs no per-machine profile edit (the drift the hermetic host
+      // lock exists to prevent).
+      ...(process.env.E2E_UPSTREAM_KEY !== undefined && process.env.E2E_UPSTREAM_KEY !== ''
+        ? { upstreamKey: process.env.E2E_UPSTREAM_KEY }
+        : {}),
+      ...(process.env.E2E_UPSTREAM_MODEL !== undefined && process.env.E2E_UPSTREAM_MODEL !== ''
+        ? { upstreamModel: process.env.E2E_UPSTREAM_MODEL }
+        : {}),
     })
   }
   const liveSettings = path.join(E2E_HOME, 'settings.yaml')
