@@ -8,6 +8,11 @@ No hardcoded tunables anywhere the harness can configure them. The table below i
 
 **Two planes.** `config` (below) is the *host plane* — your profile's plugin entry. The compaction *engine* lives on the *realm plane*: the `chapters` agent-preset row (the `preset-chapters` declaration row at the foot of the bundle's `cordis.patch.yml`, mounted by `src/preset.ts`), which owns `thresholdRatio`, `retainRatio/retainTokens`, `maxTokens`, `compactionRetries/maxOverflowRetries`, `summarizationProvider/summarizationModel` (legacy override), `enrichmentTrigger` (`afterPush|idle|both|manual`), `elicitedPlot`, and `toolResultArtifactTokens`. Shared names behave per plane — design record §12.
 
+The `#50` rule keys below are declared on the **host plane** only; the three the compaction checkpoint
+also needs (`projectRulesDisplayCap`, `sessionRulesDisplayCap`, `rulesRelevance`) are *mirrored* into
+the engine's `chaptersConfig` the way `elicitedPlot` and `enrichmentEnabled` already are — one
+declaration read by both planes, so a head rebuilt by either path selects the same rules.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `harnessId` | hostname | this machine's identity: commit author, curation partition, rule authorship |
@@ -18,11 +23,21 @@ No hardcoded tunables anywhere the harness can configure them. The table below i
 | `treedxFetchTimeoutMs` / `treedxWorkspaceTtlSeconds` / `treedxLeaseRetries` / `treedxLeaseRetryDelayMs` | 15000 / 900 / 3 / 1000 | TreeDX transport tunables (fetch timeout, workspace TTL, lease retry count and delay) |
 | `enrichmentEnabled` | true | **false makes the whole P2 ladder a pure no-op** — corpus stays fully working |
 | `enrichmentModel` | `''` (conversation route) | the annotator override |
+| `enrichmentMaxTokens` | 4000 | one auxiliary completion budget (annotation, mined rules, the conflicts report). It has to cover **reasoning** tokens, not just the visible answer — measured mining usage ran 1.1K–3.2K per chapter. The route used here ignores `max_tokens`, so this is headroom for providers that don't rather than a live limit |
 | `enrichmentIdleMs` / `enrichmentBatchCap` | 60000 / 5 | idle trigger; chapters per drain |
 | `vocabApply` | false | shadow (default) vs git-visible topic curation |
 | `vocabCoMin` / `vocabOverlapMin` | 3 / 0.5 | trust thresholds for emergent vocabulary |
 | `coreRulesBudgetTokens` | 1200 | the CORE RULES block in notices — **refuses with numbers, never clips** |
 | `rulesCoreBonus` | 0.15 | per-machine rank bonus for core-approved rules |
+| `sessionRulesEnabled` | true | deterministic `ADD RULE:` capture into the local session tier — zero model tokens, never staged to the pool |
+| `rulesMinedPerChapter` | 3 | cap on mined rules per chapter; the cap counts rules **written**, so a duplicate cannot consume a chapter's budget, and 3 is the ceiling on what any one archived chapter can teach the session |
+| `rulesMarkerPrefix` | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
+| `rulesEnrichment` | true | model-derived capture: the enrichment pass mines standing orders from each archived chapter, idle-batched, never per-turn |
+| `rulesAutoActivate` | true | whether a mined rule governs on arrival. It does by default — inferring what nobody said is the tier's purpose ([#50, Amendment 2026-10-21](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md)). Off ⇒ mined rules are written `reviewOnly` and stay inert until you `approve` |
+| `rulesModel` | `''` | `'provider/model'` for a **dedicated mining model**: one extra bounded call per chapter, and its answer replaces (never supplements) the annotation pass's rules. `''` ⇒ mine inside the enrichment call, at no extra cost. Runtime: `/chapters-rule model p/m` |
+| `projectRulesDisplayCap` / `sessionRulesDisplayCap` | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
+| `rulesRelevance` | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
+| — | — | `/chapters-rule conflicts` has **no key of its own**: it runs one bounded stream call on the conversation route the session already has, **report-only**, never edits a rule. No route ⇒ the verb refuses honestly |
 | `continuationBudgetRatio` | 0.25 | TOC + note share of the window *remaining after the header* |
 | `chapterTokenTarget` / `chapterLimit` | 8000 / 8000 | soft per-chapter size / hard split |
 | `mergeThreshold` | 0.3 | turn→chapter topic-merge τ (archive-time only) |

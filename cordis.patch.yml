@@ -115,6 +115,18 @@
 #   treedxLeaseRetryDelayMs: 1000  # delay between lease retries
 #
 # Realm-row-only keys (in the preset's engine row, not this patch):
+#   harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   enrichmentMaxTokens (4000 — one auxiliary completion budget; sized to cover
+#   reasoning tokens, since the measured route reports reasoning inside completion usage
+#   and does not enforce max_tokens)
+#   rulesEnrichment (true — the ladder mines standing orders),
+#   rulesMinedPerChapter (3), rulesAutoActivate (true — mined inferences govern on
+#   arrival; false holds them for approve), rulesModel ('' — or a dedicated
+#   'provider/model' for mining, one extra bounded call per chapter),
+#   projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance  (#50 §7/§7.5 —
+#   the realm plane owns what an in-place checkpoint renders; the host plugin config
+#   owns what a continuation notice renders; same names, same defaults, set both to
+#   diverge from the default)
 #   thresholdRatio, retainRatio, retainTokens, maxTokens, compactionRetries,
 #   maxOverflowRetries, auto, summarizationProvider/summarizationModel (legacy
 #   override), enrichmentTrigger (afterPush|idle|both|manual),

@@ -174,3 +174,73 @@ pin the pair deliberately in the profile patch (`disabled: true` on `directory-p
 `@deepseek-ai/dsh-host-directory-picker-browse` + `@deepseek-ai/dsh-client-ui-directory-picker-browse`).
 Upstream ask: compat aliases for the renamed icon exports, or a boot-time shell↔plugin version handshake
 that rejects a mismatched bundle instead of crashing at render.
+
+## Two-tier rules — specified, deliberately not built (2026-10-20, #50)
+
+The design round that produced record §7.1 + §7.3–§7.9 and Amendment 2026-10-20 started from one
+measured hole: `planSummarize` composes `leadSections = [planSection, plotSection]`, so a plan and a
+plot survive an in-place compaction and a **rule does not**. Docs are committed ahead of code
+(docs-first); `docs/verify.md § Two-Tier Rules — SPEC` rows R1–R10 are the checklist, and each one is
+supposed to be provable-red before it is called a fact. A fresh session should start at the tests, not
+at the implementation.
+
+Two things the round decided **not** to do, so they don't get rediscovered as oversights:
+
+**1. Team-identity curation facts (multi-human collective approval) — deferred, and it is a real
+design question, not a gap.** Approval is per-machine by the 2026-09-20 amendment, and that boundary
+was NOT relaxed: a rule a teammate approves is not `core` on your machine. For checkouts on *one*
+machine that is invisible (`harnessId` = hostname, so they share one facts file) — which is exactly the
+use case that asked for it. For **several humans on one project**, the cost is re-reviewing a growing
+list. The clean way to buy it back without reopening the bug the amendment closed: keep facts namespaced
+by *writer* and let a machine read **more** namespaces — my own `edits/<harness>/curation.jsonl` ∪ a
+recognized team identity's `edits/<teamId>/curation.jsonl`, still one writer per file (§3.3 survives),
+no file rewrite, and "primary architect" becomes whoever holds the team credentials rather than a role
+people are trusted to respect. Local `revoke` must still win over a team fact (last-write-wins by
+namespace precedence, stated explicitly). Needs a decision first: is the population one team, or can
+unrelated projects share a TreeDX instance? The second turns this from a feature into governance.
+
+**2. Per-request rule injection — rejected on measurement, not taste.** Invariant 3 keeps the global
+system prompt out, and E3/r23-r28 show a head-position replacement reuses nothing on llama.cpp
+(`cacheReuse 0`) — a ruleset that churns mid-session would be a cache-wipe machine on the target
+hardware. Carriage happens at the two moments a head is actually rebuilt, plus `chapters_rules` on
+demand. If someone revisits this, the honest argument is "small models drift mid-window", and the
+answer is the pinned class + the withheld-count line, not more injection.
+
+## #50 two-tier rules — what the next session inherits (2026-10-20)
+
+The round landed green on the deterministic plane (640 unit / 137 integration rows, coverage gate
+held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and none is a surprise:
+
+1. **Mined-rule quality: first data in, sample tiny.** `npm run mining:probe` (2026-10-21) mined
+   three real chapters of THIS repo at `qwen3.8-flash` through the shipped path: 9 rules, 6 stated / 3
+   inferred, every inference confined to the one chapter that had no human text, none wrong or unsafe.
+   Full numbers and the caveats in `docs/verify.md` R5. Next: probe archives from a project that is not
+   this repo — our own history is the friendliest corpus available, and a rule like "treat pinned tests
+   as authoritative" is true here partly because the reader is already convinced.
+
+   1b. **Settled 2026-10-21, and settled twice:** the first reading ("mining is being truncated by
+   `ENRICH_MAX_TOKENS = 900`") was wrong — the token-plan route does not enforce `max_tokens` at all
+   (a 64-token cap returned 113 tokens, `finish_reason: stop`) and it itemizes
+   `completion_tokens_details.reasoning_tokens`. What was real is that the budget was three
+   hardcoded literals sized for pre-mining answers, so it is now `enrichmentMaxTokens` (default
+   4000). If a future provider DOES enforce the ceiling, this is the knob; if mining ever needs its
+   own budget, `rulesModel` already gives it its own call.
+   1c. **Endpoint default is the regional token-plan door**
+   (`token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`): QwenCloud gives no region
+   choice, and the `maas.qwencloudapi.com/compatible-mode/v1` alias answers `401 Invalid API-key
+   provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
+   alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
+   that starts working at the alias is used with no edit.
+2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
+   the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
+   `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round
+   added a tool (`chapters_rules`), which changes the header of every recorded session. Extending
+   `rules.spec.ts` with the checkpoint-carriage and continue-vs-fork assertions is part of that job;
+   writing spec assertions that cannot execute would be a false witness.
+3. **R10 is only partly proven.** Marker rules re-derive off the durable log and dedupe against
+   disk, but there is no end-to-end wipe-and-replay row yet.
+
+Two local truths to save the next agent an hour: the suites need **Node ≥ 24** (on 22 every file
+fails for a reason that looks like your diff), and `coverage:ci` intermittently reddens
+`git-auth-classification`/`sync-remote` on this box under parallel load — **verified pre-existing** by
+running it in a worktree at the last docs-only commit. Re-run before blaming the change.

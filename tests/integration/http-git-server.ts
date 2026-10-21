@@ -34,6 +34,13 @@ export async function startGitHttpServer(rootDir: string): Promise<GitHttpServer
   const children = new Set<import('node:child_process').ChildProcess>()
   const gates = new Map<string, string>()
   const server = http.createServer((req, res) => {
+    // An EPIPE on a stream is emitted ASYNCHRONOUSLY, long after any try/catch
+    // around writeHead/end has returned — and with it the whole test run, as an
+    // uncaughtException blamed on the `before` hook ("generated asynchronous
+    // activity after the test ended"). A client that hangs up during teardown is
+    // normal here, so swallow it at the source on both directions.
+    res.on('error', () => { /* client gone mid-write: not a test failure */ })
+    req.on('error', () => { /* request aborted: not a test failure */ })
     const chunks: Buffer[] = []
     req.on('data', (c: Buffer) => chunks.push(c))
     req.on('end', () => {
@@ -69,6 +76,14 @@ export async function startGitHttpServer(rootDir: string): Promise<GitHttpServer
       const cgi = spawn(BACKEND, [], { env })
       children.add(cgi)
       cgi.on('close', () => children.delete(cgi))
+      // The child's OWN streams are the remaining async surface: writing a request
+      // body into a CGI stdin that already died, or it emitting after teardown,
+      // raises an EPIPE with no listener and lands as an uncaughtException blamed
+      // on the test file. Swallow at each pipe; the response path already guards.
+      cgi.stdin.on('error', () => { /* child gone before the body landed */ })
+      cgi.stdout.on('error', () => { /* child died mid-output */ })
+      cgi.stderr.on('error', () => { /* child logged after teardown */ })
+      cgi.on('error', () => { /* spawn failure surfaces as an empty response */ })
       // Suppress EPIPE on stderr — CGI children can emit after the response
       // closes during teardown; that async activity fails the test runner.
       cgi.stderr.on('data', (c: Buffer) => {

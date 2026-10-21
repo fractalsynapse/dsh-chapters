@@ -34,7 +34,9 @@ import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLi
 import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
+import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
+import { ancestorSessionIds, captureMinedRules } from './session-rules.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -106,6 +108,9 @@ export interface Config {
   /** 'provider/model' or '' = conversation/stored route (record §6). */
   enrichmentModel: string
   enrichmentIdleMs: number
+  /** One auxiliary completion budget: annotation+mining and the conflicts report.
+   * Must cover reasoning tokens, not just the visible JSON (record §6.1, #50). */
+  enrichmentMaxTokens: number
   enrichmentBatchCap: number
   /** P2 §6.3 vocabulary pass (shadow by default). */
   vocabApply: boolean
@@ -115,6 +120,26 @@ export interface Config {
   coreRulesBudgetTokens: number
   /** P3 §8: search bonus for effective-core rules (per-machine status). */
   rulesCoreBonus: number
+  /** #50 §7.5: deterministic `ADD RULE:` capture into the local session tier. */
+  sessionRulesEnabled: boolean
+  /** #50 §7.5: the capture marker, matched at line start of human messages. */
+  rulesMarkerPrefix: string
+  /** #50 §7.4: per-tier count caps on rules rendered into a rebuilt head. */
+  projectRulesDisplayCap: number
+  /** #50 §7.4: session-tier display cap. */
+  sessionRulesDisplayCap: number
+  /** #50 §7.4: topic-overlap selection on; off ⇒ deterministic category→id order. */
+  rulesRelevance: boolean
+  /** #50 §7.5: mine standing orders during enrichment. Default ON — background
+   * capture is the whole point; the verbatim-quote gate (not a click) is what
+   * keeps a guess from steering a session. */
+  rulesEnrichment: boolean
+  /** #50 §7.5: per-chapter cap on mined rules. */
+  rulesMinedPerChapter: number
+  /** #50 §7.5: mined rules govern on arrival (default true); false holds them for review. */
+  rulesAutoActivate: boolean
+  /** #50 §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass. */
+  rulesModel: string
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -188,12 +213,24 @@ export const Config = Schema.object({
   enrichmentEnabled: Schema.boolean().default(true),
   enrichmentModel: Schema.string().default(''),
   enrichmentIdleMs: Schema.number().default(60000),
+  enrichmentMaxTokens: Schema.number().default(ENRICH_MAX_TOKENS_DEFAULT),
   enrichmentBatchCap: Schema.number().default(5),
   vocabApply: Schema.boolean().default(false),
   vocabCoMin: Schema.number().default(3),
   vocabOverlapMin: Schema.number().default(0.5),
   coreRulesBudgetTokens: Schema.number().default(1200),
   rulesCoreBonus: Schema.number().default(0.15),
+  // #50 §7.3–§7.5: the session tier + per-tier display caps. The three the
+  // checkpoint also needs are mirrored into the engine row (docs/configuration).
+  sessionRulesEnabled: Schema.boolean().default(true),
+  rulesMarkerPrefix: Schema.string().default('ADD RULE:'),
+  projectRulesDisplayCap: Schema.number().default(12),
+  sessionRulesDisplayCap: Schema.number().default(12),
+  rulesRelevance: Schema.boolean().default(true),
+  rulesEnrichment: Schema.boolean().default(true),
+  rulesMinedPerChapter: Schema.number().default(3),
+  rulesAutoActivate: Schema.boolean().default(true),
+  rulesModel: Schema.string().default(''),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -270,7 +307,29 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         model: config.enrichmentModel,
         trigger: 'manual',
         idleMs: config.enrichmentIdleMs,
+        maxTokens: config.enrichmentMaxTokens,
         batchCap: config.enrichmentBatchCap,
+        mineRules: config.rulesEnrichment,
+        mineCap: config.rulesMinedPerChapter,
+        rulesAutoActivate: config.rulesAutoActivate,
+        rulesModel: config.rulesModel,
+      },
+      // §7.5 host-plane sink: `/chapters-enrich run` drains here, so a manual run
+      // mines exactly like the realm's auto pass. Local files only — nothing is
+      // armed on the scheduler, because session rules never travel (§7.5).
+      onMinedRules: async ({ cwd, sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
+        const res = captureMinedRules({
+          storeDir: join(cwd, config.artifactStoreRoot),
+          harnessId: config.harnessId,
+          sessionId,
+          records: store.rules(),
+          humanText,
+          rules,
+          maxPerChapter: max,
+          chapterNumber,
+          autoActivate,
+        })
+        return { written: res.ids.length, stated: res.stated, inferred: res.inferred, pending: res.pending }
       },
       fetch: async (prompt, route) => {
         if (route === null) throw new Error('no enrichment route resolvable (set /chapters-enrich model … or run a turn first)')
@@ -280,7 +339,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         for await (const chunk of llm.stream({
           provider: route.provider, model: route.model,
           messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
-          maxTokens: 900,
+          maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
         })) assembler.push(chunk as never)
         return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
@@ -310,6 +369,13 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       harnessId: config.harnessId,
       coreRulesBudgetTokens: config.coreRulesBudgetTokens,
       rulesCoreBonus: config.rulesCoreBonus,
+      // #50 §7.4 — the doors read the HOST plane; the compaction checkpoint reads
+      // the realm row (same names, same defaults). There is no cross-plane channel
+      // to inject host config into a preset row, so a profile that overrides a cap
+      // sets it in both places; leaving one unset keeps the documented default.
+      projectRulesDisplayCap: config.projectRulesDisplayCap,
+      sessionRulesDisplayCap: config.sessionRulesDisplayCap,
+      rulesRelevance: config.rulesRelevance,
       scheduler,
       noteRoute: (r) => {
         hostRoute = r
@@ -321,9 +387,10 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       artifactStoreRoot: config.artifactStoreRoot,
       subagentAutoSave: config.subagentAutoSave,
       harnessId: config.harnessId,
+      projectKeyOverride: config.projectKeyOverride,
       scheduler,
       enrich,
-      rules: (cwd, args) => rulesCommand({
+      rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,
         storeRoot: config.artifactStoreRoot,
         harnessId: config.harnessId,
@@ -332,6 +399,42 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         mirrorDir: (c) => join(c, DEFAULT_CLONE_DIR),
         syncNow: async (c) => { try { await scheduler.run(c, 'rules') } catch { /* status file records it */ } },
         now: () => new Date(),
+        // #50 §7.5: the session tier activates by ancestry, so the surface needs
+        // the tree the caller is sitting on. No sessionId ⇒ `active` reports the
+        // session tier UNRESOLVED rather than guessing an empty path.
+        ...(sessionId !== undefined ? {
+          ancestors: async () => new Set(await ancestorSessionIds(async (id) => await store.get(id), sessionId)),
+        } : {}),
+        // §7.3/§7.4: the SAME numbers the doors render with, so `active` can never
+        // describe a view the head will not show.
+        budgetTokens: config.coreRulesBudgetTokens,
+        projectCap: config.projectRulesDisplayCap,
+        sessionCap: config.sessionRulesDisplayCap,
+        // §7.5: the review surface reads the same activation posture the ladder uses
+        // (so `active` can say whether mined rules govern on arrival), and `model`
+        // sets a dedicated mining model through the shared settings table.
+        autoActivate: config.rulesAutoActivate,
+        settings: {
+          get: (k) => store.getSetting(k),
+          put: async (k, v) => { await store.putSetting(k, v) },
+        },
+        // §7.7: ONE bounded call, report-only, reusing the conversation route (and
+        // therefore the conversation's own cached prefix). An explicit exception to
+        // zero-inference in the elicitedPlot family — never a mutation.
+        ask: async (prompt) => {
+          const route = hostRoute
+          if (route === null) throw new Error('no conversation route yet — run a turn first')
+          const llm = ctx.llm
+          if (llm?.stream === undefined) throw new Error('llm.stream absent')
+          const assembler = new BlockAssembler()
+          for await (const chunk of llm.stream({
+            provider: route.provider, model: route.model,
+            messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+            maxTokens: config.enrichmentMaxTokens,
+            purpose: 'compaction',
+          })) assembler.push(chunk as never)
+          return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+        },
       } satisfies RulesIo, args),
     })
 

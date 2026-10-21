@@ -42,6 +42,10 @@ import { registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
 import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
+import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
+import { hostname } from 'node:os'
+import path from 'node:path'
+import { captureMinedRules, makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
@@ -61,6 +65,29 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   plansInCheckpoint?: boolean
   planCheckpointChars?: number
   elicitedPlot?: boolean
+  // #50 §7/§7.5 rules. Declared on the HOST plane (src/index.ts) and mirrored
+  // into this row exactly the way `elicitedPlot`/`enrichmentEnabled` already
+  // are, so a head rebuilt by the notice path and one rebuilt by the compaction
+  // path select the same rules from the same numbers.
+  harnessId?: string
+  sessionRulesEnabled?: boolean
+  rulesMarkerPrefix?: string
+  coreRulesBudgetTokens?: number
+  projectRulesDisplayCap?: number
+  sessionRulesDisplayCap?: number
+  rulesRelevance?: boolean
+  /** §7.5 model-mined rules; default ON. */
+  rulesEnrichment?: boolean
+  /** §7.5 per-chapter cap on mined rules */
+  rulesMinedPerChapter?: number
+  /** One auxiliary completion budget (annotation+mining, conflicts): must cover
+   * reasoning tokens as well as the visible answer — see enrich.ts. */
+  enrichmentMaxTokens?: number
+  /** §7.5: mined rules govern on arrival unless false (then they wait for review).
+   * Default true — inferring what nobody spelled out is the whole point. */
+  rulesAutoActivate?: boolean
+  /** §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass */
+  rulesModel?: string
   // P2 enrichment (record §6): the realm plane owns the AUTO triggers.
   enrichmentEnabled?: boolean
   enrichmentModel?: string
@@ -195,11 +222,23 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     syncDebounceMs: z.number().step(1).min(0).default(30000),
     toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
     elicitedPlot: z.boolean().default(true),
+    harnessId: z.string().default(''),
+    sessionRulesEnabled: z.boolean().default(true),
+    rulesMarkerPrefix: z.string().default('ADD RULE:'),
+    coreRulesBudgetTokens: z.number().step(1).min(1).default(1200),
+    projectRulesDisplayCap: z.number().step(1).min(0).default(12),
+    sessionRulesDisplayCap: z.number().step(1).min(0).default(12),
+    rulesRelevance: z.boolean().default(true),
+    rulesEnrichment: z.boolean().default(true),
+    rulesMinedPerChapter: z.number().step(1).min(0).default(3),
+    rulesAutoActivate: z.boolean().default(true),
+    rulesModel: z.string().default(''),
     enrichmentEnabled: z.boolean().default(true),
     enrichmentModel: z.string().default(''),
     enrichmentTrigger: z.string().default('both'),
     enrichmentIdleMs: z.number().step(1).min(0).default(60000),
     enrichmentBatchCap: z.number().step(1).min(1).default(5),
+    enrichmentMaxTokens: z.number().step(1).min(400).default(ENRICH_MAX_TOKENS_DEFAULT),
     vocabApply: z.boolean().default(false),
     vocabCoMin: z.number().step(1).min(2).default(3),
     vocabOverlapMin: z.number().default(0.5),
@@ -212,6 +251,23 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   })
 
   private readonly chaptersConfig: EngineConfig
+  /** #50 §7.5/§7.3: capture + rendering numbers, host plane mirrored in. */
+  private ruleCfg: {
+    harnessId: string
+    captureEnabled: boolean
+    markerPrefix: string
+    budgetTokens: number
+    projectCap: number
+    sessionCap: number
+    relevance: boolean
+    /** §7.5 model-mined rules (the background half); default true from the row */
+    mine?: boolean | undefined
+    mineCap?: number | undefined
+    /** §7.5: do mined rules govern on arrival? Default true — that is the tier's premise */
+    autoActivate?: boolean | undefined
+    /** §7.5: dedicated mining model; '' ⇒ mine inside the annotation call */
+    model?: string | undefined
+  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true, mine: true, mineCap: 3, autoActivate: true, model: '' }
   private storePromise: Promise<ChapterStoreHandle> | null = null
 
   constructor(ctx: Context, config: ChaptersRowConfig = {}) {
@@ -223,8 +279,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       artifactStoreRoot, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
+      harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+      projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
+      rulesEnrichment, rulesMinedPerChapter, rulesAutoActivate, rulesModel,
       enrichmentEnabled, enrichmentModel, enrichmentTrigger, enrichmentIdleMs, enrichmentBatchCap,
-      vocabApply, vocabCoMin, vocabOverlapMin,
+      vocabApply, vocabCoMin, vocabOverlapMin, enrichmentMaxTokens,
       treedxFetchTimeoutMs, treedxWorkspaceTtlSeconds, treedxLeaseRetries, treedxLeaseRetryDelayMs,
       ...baseConfig
     } = config
@@ -257,11 +316,30 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.enrichCfg = {
       enabled: enrichmentEnabled ?? true,
       model: enrichmentModel ?? '',
+      mineRules: rulesEnrichment ?? true,
+      mineCap: rulesMinedPerChapter ?? 3,
+      rulesAutoActivate: rulesAutoActivate ?? true,
+      rulesModel: rulesModel ?? '',
+      maxTokens: enrichmentMaxTokens ?? ENRICH_MAX_TOKENS_DEFAULT,
       trigger: (enrichmentTrigger ?? 'both') as 'afterPush' | 'idle' | 'both' | 'manual',
       idleMs: enrichmentIdleMs ?? 60000,
       batchCap: enrichmentBatchCap ?? 5,
     }
+    this.ruleCfg = {
+      harnessId: harnessId ?? '',
+      captureEnabled: sessionRulesEnabled ?? true,
+      markerPrefix: rulesMarkerPrefix ?? 'ADD RULE:',
+      budgetTokens: coreRulesBudgetTokens ?? 1200,
+      projectCap: projectRulesDisplayCap ?? 12,
+      sessionCap: sessionRulesDisplayCap ?? 12,
+      relevance: rulesRelevance ?? true,
+      mine: rulesEnrichment ?? true,
+      mineCap: rulesMinedPerChapter ?? 3,
+      autoActivate: rulesAutoActivate ?? true,
+      model: rulesModel ?? '',
+    }
     this.#listenForSignatures()
+    this.#listenForRuleCapture()
     this.#listenForFirstTurnPull()
     ctx.logger?.info?.('dsh-chapters: engine constructed for a mount (signature listener live)')
   }
@@ -277,8 +355,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * lock and debounce keep the two honest against each other. */
   private syncDebounceMs = 30000
   private vocabCfg: { apply: boolean; coMin: number; overlapMin: number } = { apply: false, coMin: 3, overlapMin: 0.5 }
-  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number } =
-    { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5 }
+  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; maxTokens?: number; mineRules?: boolean | undefined; mineCap?: number | undefined; rulesAutoActivate?: boolean | undefined; rulesModel?: string | undefined } =
+    { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5, mineRules: true, mineCap: 3 }
   private enrichPromise: Promise<EnrichWiring> | null = null
   private lastCwd: string | null = null
   private lastRoute: { provider: string; model: string } | null = null
@@ -314,9 +392,29 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       fetch: async (prompt, route) => {
         const r = route ?? this.lastRoute
         if (r === null || r.provider === '' || r.model === '') throw new Error('no auxiliary route yet')
-        return await this.#auxComplete(prompt, r, 900)
+        return await this.#auxComplete(prompt, r, this.enrichCfg.maxTokens ?? ENRICH_MAX_TOKENS_DEFAULT)
       },
       conversationRoute: () => this.lastRoute,
+      // §7.5 the sink: the realm plane owns disk, identity and the registry, so it
+      // writes what the pass mined. Session rules are LOCAL — nothing is armed on
+      // the scheduler here, because the pool never carries them.
+      onMinedRules: async ({ sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
+        const cwd = this.lastCwd ?? undefined
+        if (cwd === undefined) return { written: 0, stated: 0, inferred: 0, pending: 0 }
+        const { store } = await this.store()
+        const res = captureMinedRules({
+          storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+          harnessId: (this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()),
+          sessionId,
+          records: store.rules(),
+          humanText,
+          rules,
+          maxPerChapter: max,
+          chapterNumber,
+          autoActivate,
+        })
+        return { written: res.ids.length, stated: res.stated, inferred: res.inferred, pending: res.pending }
+      },
       scheduler: { schedule: (cwd, why) => { void this.#scheduler().then((s) => s.schedule(cwd, why)).catch(() => undefined) } },
       log: (m) => this.ctx.logger?.info?.(`dsh-chapters: ${m}`),
       warn: (m) => this.ctx.logger?.warn?.(`dsh-chapters: ${m}`),
@@ -382,6 +480,37 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     } catch {
       // A non-cordis ctx (L0 construction) has no event bus — signatures are
       // optional there by design; the compaction path is unaffected.
+    }
+  }
+
+  /**
+   * #50 §7.5: capture `ADD RULE:` markers at the SAME `turn/end` boundary the
+   * topic signatures use — this extends an existing door, it is not a sixth
+   * archive moment. Deterministic and model-free (invariant 1): no marker in the
+   * turn costs one string scan and nothing else. Gated off when `harnessId` is
+   * absent, because a rule with no author partition is a rule nothing can
+   * revoke.
+   */
+  #listenForRuleCapture(): void {
+    try {
+      this.ctx.on('session/event', makeRuleCaptureListener({
+        enabled: () => this.ruleCfg.captureEnabled,
+        prefix: () => this.ruleCfg.markerPrefix,
+        // The realm row's harnessId, or the same default the host plane's config
+        // uses (`hostname()`). A custom host-plane override does NOT strand the
+        // rule: the directory is only an author partition, and rendering walks
+        // every dir under `rules/` and activates by scope+ancestry (§7.5) — the
+        // id prefix differs, nothing else.
+        harnessId: () => (this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()),
+        storeRoot: (cwd) => resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+        store: async () => ({ store: (await this.store()).store as RegistryStore }),
+        warn: (error) => { this.ctx.logger?.warn?.(`dsh-chapters: session-rule capture failed (${String(error)})`) },
+        onCaptured: (sessionId, ids) => {
+          this.ctx.logger?.info?.(`dsh-chapters: ${ids.length} session rule(s) captured for ${sessionId} (${ids.join(', ')})`)
+        },
+      }))
+    } catch {
+      // same containment as signatures: a non-cordis ctx has no event bus
     }
   }
 
@@ -478,7 +607,18 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       }
     }
 
-    const { plan, state: next } = planSummarize(session, state, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry)
+    // #50 §7.6: the rules ride the checkpoint the way the plot and the plan do.
+    // Anything that goes wrong here DEGRADES TO NOTHING and is reported on the
+    // operator channel — the compaction critical path stays zero-model-token and
+    // never fails because of a rules read (§1 invariant 1, §7.3's non-blocking rule).
+    let rulesCarry: string | null = null
+    try {
+      rulesCarry = await this.#rulesForCheckpoint(session)
+    } catch (error) {
+      this.#diagnostic(`dsh-chapters: rule carriage skipped (${String(error)}) — the archive still holds every rule`)
+    }
+
+    const { plan, state: next } = planSummarize(session, state, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry, rulesCarry)
     const stored = rememberPlan(next, cid, {
       number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
       ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
@@ -620,6 +760,47 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     } catch (error) {
       this.#diagnostic(`dsh-chapters: chapter finalization deferred (session ${session.id}): ${String((error as Error)?.stack ?? error)}`)
     }
+  }
+
+  /**
+   * §7.3/§7.6: the block this session's rebuilt head should carry, from the ONE
+   * builder that renders it for the notice too — a second rule-ranking or
+   * rule-selecting implementation is forbidden (record §8: two doors, one
+   * scorer). Zero bytes when nothing is active.
+   *
+   * Relevance topics come from the session's OWN stored turn signatures
+   * (deterministic, already on disk, no model call), newest last. With
+   * `rulesRelevance` off the selection falls back to category→id order, which is
+   * the order the tapes were distilled against.
+   */
+  async #rulesForCheckpoint(session: EngineSession): Promise<string | null> {
+    const cwd = (session as { header?: { cwd?: string } }).header?.cwd
+    if (cwd === undefined || cwd === '') return null
+    const { store } = await this.store()
+    const harness = this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()
+    const project = projectForCwd(store.projects(), cwd)
+    // the SAME renderer the doors use — one builder for every rebuilt head (§7.3)
+    const built = await renderRulesBlock({
+      mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+      storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+      projectKey: project?.projectKey ?? '',
+      harnessId: harness,
+      budgetTokens: this.ruleCfg.budgetTokens,
+      projectCap: this.ruleCfg.projectCap,
+      sessionCap: this.ruleCfg.sessionCap,
+      relevance: this.ruleCfg.relevance,
+      includeSession: true,
+      store,
+      sessionId: session.id,
+    })
+    if (built.kind === 'none') return null
+    if (built.kind === 'refusal') {
+      // announced, never clipped: the head says the rules did not fit rather
+      // than silently carrying none of them
+      this.#diagnostic(`dsh-chapters: rules over budget at this checkpoint — ${built.reason}`)
+      return `Rules NOT carried into this checkpoint (their token budget was exceeded, so nothing was clipped): ${built.reason}`
+    }
+    return built.text
   }
 
   /**
