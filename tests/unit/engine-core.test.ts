@@ -6,6 +6,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { CHAPTERS_PROVIDER, DETERMINISTIC_MODEL, SUMMARY_CLOSE_TAG, SUMMARY_OPEN_TAG, buildFinalizedChapter, chapterPathFor, deriveIdentity, engineRecord, extractCheckpointBlocks, findOpenCompactionId, parseTocState, planSummarize, resolveOriginalEvent, type EngineMessage, type EngineSession, type EngineSessionEvent, extractPlot } from '../../src/engine-core.ts'
 import { reserve, freshSession } from '../../src/registry.ts'
 import { ENGINE_CONFIG_DEFAULTS } from '../../src/engine-core.ts'
@@ -186,9 +187,25 @@ test('provider/model tags stay distinct from message-source kinds', () => {
 })
 
 test('checkpoint tags still match the installed host bundle (drift => re-anchor, never relax)', (t) => {
-  const bundle = '/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js'
-  if (!existsSync(bundle)) {
-    t.skip(`installed host bundle not readable at ${bundle}; pin above still stands`)
+  // Resolve it, do not hardcode a machine (the same correction notice.test.ts got from
+  // issue #43: a drift guard that silently skips is worse than no guard — the kernel
+  // moved v3→v4 underneath one). This box's npm prefix is NOT /usr/lib, so the old
+  // single path meant the gate skipped here forever while the package sat installed
+  // three directories away, in this repo's own devDependencies.
+  const candidates = [
+    // PATH, not createRequire: the package's `exports` map does not publish this
+    // subpath (measured — resolve() threw ERR_PACKAGE_PATH_NOT_EXPORTED, which is a
+    // module-system fact, not the drift this gate exists to detect). The file is on
+    // disk in the repo's own devDependencies and in every host install layout.
+    join(process.cwd(), 'node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js'),
+    '/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js',
+    `${process.env.HOME ?? ''}/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js`,
+    ...(process.env.DSH_GLOBAL_ROOT !== undefined
+      ? [`${process.env.DSH_GLOBAL_ROOT}/@deepseek-ai/dsh-compaction-basic/lib/index.js`] : []),
+  ]
+  const bundle = candidates.find((p) => existsSync(p))
+  if (bundle === undefined) {
+    t.skip(`host bundle not readable from any of: ${candidates.join(', ')}; pin above still stands`)
     return
   }
   const src = readFileSync(bundle, 'utf8')
