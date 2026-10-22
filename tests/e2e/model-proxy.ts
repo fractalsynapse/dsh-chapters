@@ -217,6 +217,17 @@ export interface ProxyOpts {
    * profile's name — never the remote's — because a tape is a fixture of THIS rig,
    * not of whatever service distilled it. */
   upstreamModel?: string
+  /** #54: how long the proxy waits for upstream RESPONSE HEADERS before it calls the
+   * request dead. The profile pins `timeoutMs: 3600000` (an hour) on the harness side,
+   * so with nothing on the proxy a stalled distill is indistinguishable from a slow one
+   * — measured: a `suite` leg produced no tape entry for 20 minutes and no log line
+   * anywhere could say which of the two it was. 10 minutes is generous for a real
+   * prefill at the stress regime and short enough to end a run with an answer. */
+  upstreamTimeoutMs?: number
+  /** #54: journal path for in-flight upstream activity. Defaults next to the tapes. */
+  activityLog?: string
+  /** #54: how often a request that has NOT sent its first byte re-logs itself. */
+  stallWarnMs?: number
   /** replay + liveFallback: a miss goes to the real model AND lands on the
    * tape (journal the gap, self-heal); strict replay keeps misses LOUD so
    * suites fail fast when a scenario legitimately changed. */
@@ -293,6 +304,21 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   const tapeName = path.basename(opts.tapeDir)
   fs.mkdirSync(opts.tapeDir, { recursive: true })
   const missLog = opts.journalPath ?? path.join(opts.tapeDir, '..', 'e2e-tape-misses.log')
+  // #54: the DISTELLER's visibility. A tape miss is loud by design; a request that
+  // simply never comes back was silent for as long as the harness's own hour timeout.
+  // Every upstream attempt now logs start / stalled / first-byte / done / dead, with
+  // elapsed and byte counts, so "is it progressing" is a lookup, not an inference.
+  // beside the MISS journal, not inside the tape directory: tests/fixtures/model-tape
+  // is the corpus, and a runtime log dropped in it is an untracked file that outlives
+  // the run and gets committed by the next broad `git add`.
+  const activityLog = opts.activityLog ?? process.env.E2E_UPSTREAM_LOG
+    ?? path.join(path.dirname(missLog), 'e2e-upstream.log')
+  const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? Number(process.env.E2E_UPSTREAM_TIMEOUT_MS ?? 600_000)
+  const stallWarnMs = opts.stallWarnMs ?? Number(process.env.E2E_UPSTREAM_STALL_MS ?? 60_000)
+  let inFlight = 0
+  const journal = (line: string): void => {
+    try { fs.appendFileSync(activityLog, `${new Date().toISOString()} tape=${tapeName} ${line}\n`) } catch { /* visibility never breaks the run */ }
+  }
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (c) => chunks.push(c as Buffer))
@@ -358,13 +384,40 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
             }
           } catch { /* not a JSON body (models/info) — pass it through untouched */ }
         }
+        const startedAt = Date.now()
+        inFlight += 1
+        let sawBytes = 0
+        let firstByteMs = -1
+        journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
+        const stall = setInterval(() => {
+          journal(`STALLED elapsed=${String(Date.now() - startedAt)}ms bytes=${sawBytes} inflight=${inFlight}`)
+        }, stallWarnMs)
+        const dead = setTimeout(() => {
+          journal(`DEAD elapsed=${String(Date.now() - startedAt)}ms no-response-headers bytes=${sawBytes} — destroying (E2E_UPSTREAM_TIMEOUT_MS=${upstreamTimeoutMs})`)
+          try { ureq.destroy() } catch { /* already gone */ }
+          try { res.writeHead(504, { 'content-type': 'application/json' }) } catch { /* client gone */ }
+          try { res.end(JSON.stringify({ error: { message: `tape proxy upstream: no response after ${String(upstreamTimeoutMs)}ms (${upstreamUrl.pathname})`, type: 'upstream_timeout' } })) } catch { /* client gone */ }
+          clearInterval(stall)
+          inFlight -= 1
+        }, upstreamTimeoutMs)
         const ureq = transport.request(upstreamUrl, { method: req.method, headers: fwd }, (ures) => {
           // RELAY THE STATUS. The tape records it, but until #54 every client saw an
           // implicit 200 — so a distill against a rejecting host "succeeded" while
           // writing error bodies into the corpus.
           try { res.writeHead(ures.statusCode ?? 200, { 'content-type': String(ures.headers['content-type'] ?? 'text/event-stream') }) } catch { /* client gone */ }
           const buf: Buffer[] = []
-          ures.on('data', (c) => { const b = c as Buffer; buf.push(b); try { res.write(b) } catch { /* client gone (teardown race) — the tape still records below */ } })
+          ures.on('data', (c) => {
+            const b = c as Buffer
+            buf.push(b)
+            sawBytes += b.length
+            if (firstByteMs < 0) {
+              firstByteMs = Date.now() - startedAt
+              clearTimeout(dead)
+              clearInterval(stall)
+              journal(`FIRSTBYTE status=${String(ures.statusCode)} elapsed=${String(firstByteMs)}ms`)
+            }
+            try { res.write(b) } catch { /* client gone (teardown race) — the tape still records below */ }
+          })
           ures.on('end', () => {
             try { res.end() } catch { /* client gone */ }
             const entry: TapeEntry = {
@@ -376,12 +429,19 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
               model: String(body.model ?? ''),
               recordedAt: new Date().toISOString(),
             }
+            journal(`DONE elapsed=${String(Date.now() - startedAt)}ms status=${String(ures.statusCode ?? 200)} bytes=${sawBytes}`)
+            inFlight -= 1
             if ((ures.statusCode ?? 200) >= 300) return // a failed answer is not a fixture
             const n = fs.readdirSync(opts.tapeDir).filter((f) => /^\d+\.json$/.test(f)).length
             fs.writeFileSync(path.join(opts.tapeDir, `${String(n).padStart(4, '0')}.json`), JSON.stringify(entry))
           })
         })
-        ureq.on('error', (e) => { try { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `tape proxy upstream: ${String(e)}` } })) } catch { /* client gone */ } })
+        ureq.on('error', (e) => {
+          clearInterval(stall)
+          journal(`ERROR elapsed=${String(Date.now() - startedAt)}ms bytes=${sawBytes} :: ${String(e).slice(0, 200)}`)
+          inFlight -= 1
+          try { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `tape proxy upstream: ${String(e)}` } })) } catch { /* client gone */ }
+        })
         ureq.write(raw)
         ureq.end()
       })()

@@ -232,3 +232,59 @@ test('a remote distill target answers the reachability question, a dead one does
     await new Promise<void>((r) => { wide.close(() => r()) })
   }
 })
+
+/**
+ * The proxy's own visibility (#54). A distill that produced no tape entry for 20
+ * minutes could not be classified from any artifact: no timeout on the upstream, no
+ * record that a request was even in flight. These rows pin both halves — the bound,
+ * and the journal that answers "was it progressing or was it hung?".
+ */
+test('a silent upstream dies at the bound and says so, instead of hanging the run', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tape-proxy-dead-'))
+  const journalPath = path.join(dir, 'misses.log')
+  const silent = http.createServer(() => { /* never respond — the exact failure mode */ })
+  const addr = await new Promise<{ port: number }>((r) => silent.listen(0, '127.0.0.1', () => r(silent.address() as { port: number })))
+  const proxy = await startModelProxy({
+    mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath,
+    upstream: `http://127.0.0.1:${addr.port}`, upstreamTimeoutMs: 400, stallWarnMs: 150,
+  })
+  try {
+    const r = await post(proxy.url, 'k')
+    assert.equal(r.status, 504, 'a dead upstream must surface as a gateway timeout, not an open socket')
+    assert.match(r.body, /no response after 400ms/)
+    const log = fs.readFileSync(path.join(path.dirname(journalPath), 'e2e-upstream.log'), 'utf8')
+    // the path is whatever the harness asked for plus whatever the upstream base
+    // already carries; the row cares that a START was JOURNALED, not the exact prefix
+    // (in a real boot E2E_UPSTREAM has no /v1 precisely because req.url carries it).
+    assert.match(log, /START path=.*chat\/completions/)
+    assert.match(log, /STALLED elapsed=\d+ms bytes=0/, 'a request with no bytes must announce itself BEFORE the deadline')
+    assert.match(log, /DEAD .*no-response-headers/)
+    assert.equal(fs.readdirSync(path.join(dir, 'tape')).filter((f) => f.endsWith('.json')).length, 0,
+      'a timed-out attempt never becomes a tape entry')
+  } finally {
+    await proxy.close()
+    await new Promise<void>((r) => { silent.close(() => r()) })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a streaming upstream is logged as progress, and is not cut off', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tape-proxy-live-'))
+  const journalPath = path.join(dir, 'misses.log')
+  const upstream = await startGuardedUpstream('k')
+  const proxy = await startModelProxy({
+    mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath,
+    upstream: upstream.url, upstreamKey: 'k', upstreamTimeoutMs: 5000, stallWarnMs: 150,
+  })
+  try {
+    const r = await post(proxy.url, 'dummy')
+    assert.equal(r.status, 200)
+    const log = fs.readFileSync(path.join(path.dirname(journalPath), 'e2e-upstream.log'), 'utf8')
+    assert.match(log, /FIRSTBYTE status=200 elapsed=\d+ms/)
+    assert.match(log, /DONE elapsed=\d+ms status=200 bytes=[1-9]/)
+    assert.doesNotMatch(log, /DEAD/, 'a live stream must never trip the bound')
+  } finally {
+    await proxy.close(); await upstream.close()
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

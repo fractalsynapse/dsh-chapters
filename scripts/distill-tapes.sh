@@ -53,9 +53,30 @@ for proj in "${want[@]}"; do
   echo "=== distill $proj — port ${PORTS[$proj]}, threshold ${THRESH[$proj]} ${EXTRA[$proj]:-} ==="
   [[ "${KEEP_TAPES:-}" == "1" ]] || rm -rf "tests/fixtures/model-tape/$proj"
   # shellcheck disable=SC2086
+  # FULL output to a per-leg file, never through `tail`: #54 measured a leg that produced no
+  # tape entry for 20 minutes while the runner buffered every line until the leg ENDED — so
+  # "progressing or hung?" was unanswerable from the artifacts this script itself produces.
+  mkdir -p var/distill
+  leg_log="var/distill/${proj}-$(date +%H%M%S).log"
+  started=$(date +%s)
   env E2E_MODEL=record E2E_PORT="${PORTS[$proj]}" E2E_THRESHOLD="${THRESH[$proj]}" E2E_TAPE="$proj" ${EXTRA[$proj]:-} \
-    timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" 2>&1 | tail -10
-  rc=${PIPESTATUS[0]}
+    timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "$leg_log" 2>&1 &
+  leg_pid=$!
+  # heartbeat: tape entries + last upstream journal line, every 60s. A stall becomes
+  # visible AS a stall instead of being inferred from silence an hour later.
+  while kill -0 "$leg_pid" 2>/dev/null; do
+    sleep 60
+    kill -0 "$leg_pid" 2>/dev/null || break
+    hn=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+    hj=$(tail -1 var/e2e-upstream.log 2>/dev/null | cut -c1-120)
+    echo "    …${proj} +$(( $(date +%s) - started ))s tapeEntries=${hn} | upstream: ${hj:-no journal yet}"
+  done
+  wait "$leg_pid"; rc=$?
+  echo "    full leg output: ${leg_log}"
+  if [[ "$rc" -ne 0 ]]; then
+    echo "    --- last 12 lines of ${leg_log} ---"; tail -12 "$leg_log" 2>/dev/null | sed 's/^/    /'
+    echo "    --- upstream journal tail ---"; tail -6 var/e2e-upstream.log 2>/dev/null | sed 's/^/    /'
+  fi
   n=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
   echo "--- $proj: exit=$rc tapeEntries=$n"
   [[ "$rc" -ne 0 ]] && failed+=("$proj")

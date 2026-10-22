@@ -116,6 +116,25 @@ later session may re-reference them for the *why* behind an implementation. Two 
    contradiction with the shipped code, update or supersede it in place via git history — never rewrite
    silently.
 
+### Reading a distill while it runs (#54)
+
+`scripts/distill-tapes.sh` writes each leg's FULL playwright output to `var/distill/<proj>-<hhmmss>.log`
+(never `tail`, which buffers until the leg ends) and prints a 60-second heartbeat: tape-entry count
+plus the last line of `var/e2e-upstream.log`. That journal is the proxy's own record of every upstream
+attempt — `START / FIRSTBYTE / STALLED / DONE / DEAD`, with elapsed ms and byte counts — and the proxy
+now bounds the wait at `E2E_UPSTREAM_TIMEOUT_MS` (default 600000, 10 minutes: generous for a cold
+prefill at the stress regime, short enough that a hung connection ends the run with an answer instead
+of silently consuming the harness's own 3600000 ms profile timeout).
+
+So the question "is this turn slow, or is the connection dead?" is a lookup:
+
+| journal shape | meaning |
+|---|---|
+| `START` then `FIRSTBYTE` | answered; `DONE elapsed=… bytes=…` says how long and how much |
+| `START`, `STALLED elapsed=…ms bytes=0`, then `DEAD` | upstream never responded — a hang, not a slow model |
+| `START`, `FIRSTBYTE`, then `STALLED … bytes=N` growing | real streaming progress; leave it alone |
+| no journal line at all | the request never reached the proxy (boot/port/profile problem) |
+
 ### Three test layers (and why the third exists)
 
 | Layer | Command | Runs | Covers |
