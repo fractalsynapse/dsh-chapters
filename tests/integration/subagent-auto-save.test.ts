@@ -21,6 +21,7 @@ import { buildChaptersTools } from '../../src/tools.ts'
 import { freshSession, type SessionState } from '../../src/registry.ts'
 import { buildLocalCorpus, rankEntries } from '../../src/search.ts'
 import type { SessionEventLike } from '../../src/types.ts'
+import { withMutate } from '../fake-store.ts'
 
 const CONFIG = {
   artifactStoreRoot: '.dsh-chapters',
@@ -54,10 +55,10 @@ interface WorldOpts {
 function makeWorld(opts: WorldOpts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-save-'))
   const states = new Map<string, SessionState>()
-  const store = {
+  const store = withMutate({
     get: async (id: string): Promise<SessionState> => states.get(id) ?? freshSession(id),
-    put: async (id: string, s: SessionState): Promise<void> => { states.set(id, s) },
-  } as never
+    put: async (id: string, st: SessionState): Promise<void> => { states.set(id, st) },
+  }) as never
   const schedules: Array<[string, string]> = []
   const enrichRuns: string[] = []
   const warnings: string[] = []
@@ -178,10 +179,10 @@ test('refused: the durable arm reads payload-less records → no chapter, no num
   const w = makeWorld()
   const records = w.events.map((e) => ({ sessionId: 'child-1', seq: e.seq, type: e.type, time: e.time ?? 0, surface: 'current' }))
   const tmp = w.tmp
-  const store = {
-    get: async (id: string) => w.states.get(id) ?? freshSession(id),
-    put: async (id: string, s: SessionState) => { w.states.set(id, s) },
-  } as never
+  const store = withMutate({
+    get: async (id: string): Promise<SessionState> => w.states.get(id) ?? freshSession(id),
+    put: async (id: string, st: SessionState): Promise<void> => { w.states.set(id, st) },
+  }) as never
   const warns: string[] = []
   const ctx = {
     get: (name: string): unknown => name === 'agents'
@@ -212,10 +213,10 @@ test('durable arm: the payload-bearing readSession archives a disposed continuab
   // not an edge case — in the field it is the only one that ever runs.
   const w = makeWorld()
   const tmp = w.tmp
-  const store = {
-    get: async (id: string) => w.states.get(id) ?? freshSession(id),
-    put: async (id: string, s: SessionState) => { w.states.set(id, s) },
-  } as never
+  const store = withMutate({
+    get: async (id: string): Promise<SessionState> => w.states.get(id) ?? freshSession(id),
+    put: async (id: string, st: SessionState): Promise<void> => { w.states.set(id, st) },
+  }) as never
   const ctx = {
     get: (name: string): unknown => name === 'agents'
       ? { get: () => undefined } // handle disposed at emit
@@ -269,10 +270,10 @@ test('depth 2: a grandchild (its parent is a continuation child) archives throug
   const header = { id: 'grand-1', cwd: w.tmp, parentSession: 'ch-parent', origin: 'subagent', agentPreset: 'chapters' }
   const session = { id: 'grand-1', header, snapshotEvents: () => events }
   const states = w.states
-  const store = {
-    get: async (id: string) => states.get(id) ?? freshSession(id),
-    put: async (id: string, s: SessionState) => { states.set(id, s) },
-  } as never
+  const store = withMutate({
+    get: async (id: string): Promise<SessionState> => states.get(id) ?? freshSession(id),
+    put: async (id: string, st: SessionState): Promise<void> => { states.set(id, st) },
+  }) as never
   const ctx = {
     get: (name: string): unknown => name === 'agents' ? { get: () => ({ agent: { session } }) } : undefined,
     logger: { warn: () => {}, info: () => {} },
@@ -309,10 +310,10 @@ test('ONE BUILDER: /chapters-save on the same log archives byte-identically', as
   const saveEvents = [...turnEvents(1, 'reading the paper'), ...turnEvents(2, 'summarizing findings')]
   const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'save-door-'))
   const states2 = new Map<string, SessionState>()
-  const store2 = {
+  const store2 = withMutate({
     get: async (id: string) => states2.get(id) ?? freshSession(id),
     put: async (id: string, s: SessionState) => { states2.set(id, s) },
-  } as never
+  }) as never
   const caller = {
     id: 'child-1',
     options: {},

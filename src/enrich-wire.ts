@@ -24,6 +24,18 @@ import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
 import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
 
+/** The row shape the ladder may read and re-write — structural, never the registry's own type. */
+interface ChapterRowItem {
+  number: number
+  path?: string | undefined
+  title?: string | undefined
+  summary?: string | undefined
+  topics?: string[] | undefined
+  generated?: Record<string, GeneratedMark[]> | undefined
+  sha256?: string | undefined
+}
+interface ChapterRow { chapters: ChapterRowItem[] }
+
 export interface EnrichConfig {
   enabled: boolean
   /** 'provider/model' or '' = follow the conversation (realm) / stored route (host) */
@@ -61,7 +73,9 @@ export interface EnrichConfig {
 export interface EnrichWiringDeps {
   store: {
     get(id: string): Promise<{ chapters: { number: number; path: string; title: string; summary: string; topics: string[]; sha256: string; generated?: Record<string, GeneratedMark[]> }[] }>
-    put(id: string, state: unknown): Promise<void>
+    put(id: string, state: unknown, expectedRev?: number): Promise<void>
+    /** #59: the ladder's whole-row write must run as one section over a FRESH read. */
+    mutate(id: string, fn: (state: ChapterRow) => ChapterRow | Promise<ChapterRow>): Promise<unknown>
     sessions(): IterableIterator<[string, unknown]>
     getSetting(key: string): string | undefined
     putSetting(key: string, value: string): Promise<void>
@@ -182,6 +196,8 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
     const cwd = deps.cwd() ?? rememberedCwd
     if (cwd === undefined) return { ok: false, skipped: 'no workspace cwd yet (a sync or command arms it)' }
     try {
+      // Pre-flight read: cheap, and only used to find the file to annotate. The WRITE below never
+      // touches this snapshot (#59).
       const state = await deps.store.get(sid)
       const rec = state.chapters.find((c) => c.number === num)
       if (rec === undefined) return { ok: false, skipped: 'record gone' }
@@ -294,14 +310,24 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
         topics: `[${v.topics.map((t) => JSON.stringify(t)).join(', ')}]`,
         generated: renderGeneratedBlock(v.generated as GeneratedProvenance),
       }, typeof rec.sha256 === 'string' ? rec.sha256 : undefined)
-      await deps.store.put(sid, {
-        ...state,
-        chapters: (state as { chapters: Record<string, unknown>[] }).chapters.map((c) => c.number === num
-          // re-anchor the registry's whole-file hash after the sanctioned write
-          // so the cite-time tamper check stays truthful for every descendant
-          ? { ...c, title: v.title, summary: v.summary, topics: v.topics, generated: v.generated, ...(written.changed ? { sha256: written.fileSha256 } : {}) }
-          : c),
+      // #59: this put was built from a row read BEFORE the model call, so every chapter annotated
+      // late enough rewound whatever another door had committed in the meantime — the field
+      // instance landed at 04:53:52.841 over a compaction commit from 04:53:50.915. The whole
+      // remaining step is now ONE section over a fresh read: re-find the record, write the file,
+      // re-anchor the row. Nothing derived from a pre-model snapshot survives into the write.
+      await deps.store.mutate(sid, (fresh) => {
+        const cur = fresh.chapters.find((c) => c.number === num)
+        if (cur === undefined) return fresh // record vanished under us: the file write already happened, the row is its own truth
+        return {
+          ...fresh,
+          chapters: fresh.chapters.map((c): ChapterRowItem => c.number === num
+            // re-anchor the registry's whole-file hash after the sanctioned write
+            // so the cite-time tamper check stays truthful for every descendant
+            ? { ...c, number: c.number, title: v.title, summary: v.summary, topics: v.topics, generated: v.generated, ...(written.changed ? { sha256: written.fileSha256 } : {}) }
+            : c),
+        }
       })
+      // Annotated bytes are new knowledge: arm the push, exactly as before #59 moved the write.
       deps.scheduler?.schedule(cwd, 'archive:enrichment')
       return { ok: true }
     } catch (error) {

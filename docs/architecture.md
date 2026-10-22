@@ -383,6 +383,40 @@ Concurrency is real, not theoretical: parallel branch work is a first-class patt
 two agents can continue from one ancestor at the same time. A directory-scan counter races; registry
 allocation does not.
 
+### The row is shared, and a lost update is not an orphan — it is an erasure (#59)
+
+Steps 1-5 order the work *inside* one door. They say nothing about two doors writing the **same session
+row**, and the registry row is one whole value: `get → mutate → put`, last writer wins. Five doors plus the
+turn/end signature listener write it, and the wide ones hold a stale snapshot across an await — a model
+call, or hundreds of filesystem writes:
+
+- `enrich-wire.ts` reads the row, annotates per chapter, then puts the **whole row** back
+  (`get:185 → … → put:297`);
+- `engine.ts` summarize reads, elicits a plot (a model call), then puts (`:567 → :641`);
+- `engine.ts` finalize reads, runs `writeArchive` (render + every artifact), then puts the state read
+  **before** those writes (`:857 → :891`);
+- `store.ts` allocator and `commitChapters` each read-modify-write (`:240-266`).
+
+Field instance, second-level evidence (`session-aac0254e`): a compaction committed its manifest and wrote
+its chapter at **04:53:50.915**; an enrichment put built from a pre-compaction read landed at
+**04:53:52.841** and rewound the row. The manifest, the reservation, the `finalized` entry and the chapter
+**record** all disappeared — while the 960 KB chapter file stayed on disk, unregistered and uncitable.
+`nextChapterNumber` rewound to 15, so a later door spent 15 again: two different `015-*.md` files in one
+tree. `appendChapters` deduped the reallocated record by **number alone** (`registry.ts:159-161`), so the
+collision presented as a harmless retry.
+
+So an orphan file is the tolerated failure; an **erased commit** is not, and it is invisible — the files look
+right and only the registry knows. The rule, therefore:
+
+**Every registry mutation for a session goes through `RegistryStore.mutate(sessionId, fn)`** — a
+per-session serialized section that re-reads the row before writing and refuses on a changed `rev`. A door
+that holds work across an await passes a **function**, never a snapshot. Refuse with numbers, never
+silently clobber: a refused write is visible and retryable, a lost update is neither.
+
+Three invariants in the same family: an identity is `(number, sha256)`, never `number` alone; a reservation
+whose files never landed is **released** (or expires) instead of burning a number forever; and one
+unresolvable item in the finalize queue may not poison the items behind it.
+
 ## Integrity
 
 Chapter files are plain Markdown in a writable tree whose content is replayed into a child as an

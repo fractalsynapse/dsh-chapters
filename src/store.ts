@@ -21,7 +21,7 @@ import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname , isAbsolute} from 'node:path'
 import type { ArchiveFs, ChapterRecord, NumberAllocator } from './archive.ts'
-import { appendChapters, freshSession, reserve, reservePlan as reservePlanNumber, type SessionState } from './registry.ts'
+import { appendChapters, freshSession, releaseReservation, reserve, reservePlan as reservePlanNumber, type SessionState } from './registry.ts'
 
 // ---------------------------------------------------------------- schemas + spec
 
@@ -78,6 +78,7 @@ const collectionSchema = z.object({
 })
 
 const sessionStateSchema = z.object({
+  rev: z.number().int().nonnegative().default(0),
   parentSession: z.string().nullable(),
   rootSession: z.string().min(1),
   nextChapterNumber: z.number().int().positive(),
@@ -181,7 +182,19 @@ export type ProjectRecord = import('./sync.ts').ProjectRecord
 
 export interface RegistryStore {
   get(sessionId: string): Promise<SessionState>
-  put(sessionId: string, state: SessionState): Promise<void>
+  /**
+   * A whole-row write, guarded. `expectedRev` is the `rev` of the row the caller READ; a mismatch means
+   * another door committed since, and the write is REFUSED with numbers rather than clobbering it.
+   * Omit it only where a blind put is intended (the boot witness probe, a rollback to a captured row).
+   */
+  put(sessionId: string, state: SessionState, expectedRev?: number): Promise<void>
+  /**
+   * The ONLY sanctioned way to change a session row (#59): one serialized section per session, the fn
+   * runs against a FRESH read, and the write is rev-checked. A door that holds work across an await
+   * passes a function, never a snapshot — that is what stopped a stale `put` from erasing another
+   * door's committed state. Nested calls for the same session are refused rather than deadlocked.
+   */
+  mutate(sessionId: string, fn: (state: SessionState) => SessionState | Promise<SessionState>): Promise<SessionState>
   /** Knowledge projects linked for this workspace (record §8). Live view. */
   projects(): IterableIterator<[string, ProjectRecord]>
   /** All session states in the domain (for collection publishing, §5). */
@@ -200,13 +213,73 @@ export function makeDomainStore(domain: DomainLike): RegistryStore {
   const projects = domain.table('projects')
   const settings = domain.table('settings')
   const rules = domain.table('rules')
+
+  // One serialized section per session (#59). The row is a single whole value and five doors plus the
+  // turn/end signature listener write it; the wide sites hold a read across a model call or hundreds
+  // of filesystem writes, and an unguarded whole-row put then silently ERASES whatever another door
+  // committed in between (measured in the field: a compaction's manifest, reservation, `finalized`
+  // entry and chapter record all vanished while its 960 KB file stayed on disk, and the chapter number
+  // was re-spent). Serialization plus a rev check turns that into a refusal with numbers.
+  const sections = new Map<string, Promise<unknown>>()
+  const inside = new Set<string>()
+  const runExclusive = async <T>(sessionId: string, job: () => Promise<T>): Promise<T> => {
+    if (inside.has(sessionId)) {
+      // Nested sections would deadlock (the inner waits on the outer's gate). Refusing is honest and
+      // cheap; a caller that needs to compose two mutations does it inside ONE fn.
+      throw new Error(`mutate: re-entered the registry section for ${sessionId} — compose the mutations in one fn`)
+    }
+    const prev = sections.get(sessionId) ?? Promise.resolve()
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    // Chain: this session's next waiter must also wait for OUR completion, not just our predecessor.
+    const mine = prev.then(() => gate)
+    sections.set(sessionId, mine)
+    await prev.catch(() => undefined)
+    inside.add(sessionId)
+    try {
+      return await job()
+    } finally {
+      inside.delete(sessionId)
+      release()
+      if (sections.get(sessionId) === mine) sections.delete(sessionId)
+    }
+  }
+
+  const readRow = (sessionId: string): SessionState => table.get(sessionId) ?? freshSession(sessionId)
+
+  /** Bump the write counter and store. Only ever called from INSIDE a section. */
+  const writeInside = async (sessionId: string, state: SessionState, currentRev: number): Promise<void> => {
+    await table.put(sessionId, { ...state, rev: currentRev + 1 })
+  }
+
   return {
     async get(sessionId) {
-      const raw = table.get(sessionId)
-      return raw ?? freshSession(sessionId)
+      return readRow(sessionId)
     },
-    async put(sessionId, state) {
-      await table.put(sessionId, state)
+    async put(sessionId, state, expectedRev) {
+      return runExclusive(sessionId, async () => {
+        const current = readRow(sessionId)
+        if (expectedRev !== undefined && (current.rev ?? 0) !== expectedRev) {
+          throw new Error(
+            `registry put refused: session ${sessionId} moved under this write (expected rev ${expectedRev}, `
+            + `found ${current.rev ?? 0}). Another door committed since the read — re-read and re-apply, `
+            + 'do not clobber it (store.mutate).',
+          )
+        }
+        await writeInside(sessionId, state, current.rev ?? 0)
+      })
+    },
+    async mutate(sessionId, fn) {
+      return runExclusive(sessionId, async () => {
+        const before = readRow(sessionId)
+        const draft = structuredClone(before)
+        const next = await fn(draft)
+        // Returning the very object handed in means "no change" — the same idiom commitChapters used
+        // (`if (next !== state)`) so an idempotent retry costs no write and no rev bump.
+        if (next === draft) return before
+        await writeInside(sessionId, next, before.rev ?? 0)
+        return next
+      })
     },
     projects() {
       return projects.entries()
@@ -239,17 +312,30 @@ export function makeDomainStore(domain: DomainLike): RegistryStore {
  */
 export function makeAllocator(store: RegistryStore, sessionId: string): NumberAllocator {
   return {
+    // Allocation is the operation that MUST NOT interleave: two doors that both read
+    // `nextChapterNumber: 15` write two different `015-*.md` files into one tree, which is the exact
+    // damage #59 measured. `mutate` makes read-allocate-write one section, so the number a door is
+    // handed is already durable by the time the call returns.
     async reserve(attemptId: string, count: number): Promise<number[]> {
-      const state = await store.get(sessionId)
-      const next = reserve(state, attemptId, count)
-      await store.put(sessionId, next.state)
-      return next.numbers
+      let numbers: number[] = []
+      await store.mutate(sessionId, (state) => {
+        const next = reserve(state, attemptId, count)
+        numbers = next.numbers
+        return next.state
+      })
+      return numbers
     },
     async reservePlan(attemptId: string, count: number): Promise<number[]> {
-      const state = await store.get(sessionId)
-      const next = reservePlanNumber(state, attemptId, count)
-      await store.put(sessionId, next.state)
-      return next.numbers
+      let numbers: number[] = []
+      await store.mutate(sessionId, (state) => {
+        const next = reservePlanNumber(state, attemptId, count)
+        numbers = next.numbers
+        return next.state
+      })
+      return numbers
+    },
+    async release(attemptId: string): Promise<void> {
+      await store.mutate(sessionId, (state) => releaseReservation(state, attemptId))
     },
   }
 }
@@ -260,9 +346,9 @@ export async function commitChapters(
   sessionId: string,
   records: readonly ChapterRecord[],
 ): Promise<void> {
-  const state = await store.get(sessionId)
-  const next = appendChapters(state, records)
-  if (next !== state) await store.put(sessionId, next)
+  // One section, fresh read inside it (#59): the old get→append→put held the snapshot across an
+  // await, which is how another door's committed state got erased.
+  await store.mutate(sessionId, (state) => appendChapters(state, records))
 }
 
 /**

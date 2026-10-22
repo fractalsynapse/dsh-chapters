@@ -307,6 +307,17 @@ not a plugin bug.
   that child from ever being re-archived. (#58: this exact pair — a hollow chapter plus a poisoned
   watermark — turned 12 recoverable archives into permanent ones, and the renderer already *knew*:
   `writeArchive` warns "N event(s) rendered no output" and door 5 discarded the warning.)
+- **Mutate the registry row through `store.mutate(sessionId, fn)`, never a snapshot.** The row is one whole
+  value and five doors plus the turn/end listener write it; the wide sites hold a read across a model call or
+  hundreds of fs writes. A stale `put` does not merely lose its own work — it **erases other doors' committed
+  state**, invisibly (files on disk, records gone). Measured in the field: an enrichment put at 04:53:52.841
+  rewound a compaction commit from 04:53:50.915, deleting its manifest, reservation, `finalized` entry and
+  chapter record while its 960 KB file survived, and re-spent chapter number 15 (two `015-*.md` in one tree).
+  Related identities in the same family: a chapter's identity is `(number, sha256)` — never `number` alone,
+  which is what made that collision look like a retry; a reservation whose files never landed is released,
+  not burned; one poison item in the finalize queue may not block the rest. See
+  docs/architecture.md § The row is shared.
+
 - **Measure a host verb's payload SHAPE, not its presence.** `listEvents` exists, is ambient-readable
   after disposal, and returned 10 correctly-typed events — and had **no `data`** field, because it
   returns `SessionEventRecord` metadata, not events. The spike recorded `{count, types}`, wrote "returned
