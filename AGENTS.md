@@ -183,8 +183,16 @@ save, compaction finalize, and **subagent settlement** (#47: a host-plane listen
 `subagent/end` event runs the *same* save pipeline for chapters-preset children — save-only, so it
 creates no session and engages no mid-step rule; watermark-idempotent across repeated settlements of a
 continuable child; chapters land in the child's own tree with `subagent`/`parentSession` frontmatter
-from the durable header the host stamps). Knowledge that trips none of the five never enters the
-index — when adding a sixth door, extend the list, never copy the pipeline.
+from the durable header the host stamps, and are `linkChild`-ed onto the ancestor path (#58)).
+**Settlement has two arms and they are not symmetric** (#58): a *one-shot* child is still live when
+`end` fires, so the synchronous `snapshotEvents()` read works; a *continuable* child is disposed
+**first**, so the durable arm is the only arm — and it must be a payload-bearing read
+(`sessionQuery.readSession`), never `listEvents`, whose records have no `data` and produce a structurally
+valid, semantically **empty** chapter. No door commits an archive that rendered nothing:
+`stats.messages === 0` over `stats.events > 0` is a `payloadless` refusal **before any number is
+reserved** — a committed husk poisons the watermark (`max(endSeq)`) so the child can never be re-archived
+without repair. Knowledge that trips none of the five never enters the index — when adding a sixth door,
+extend the list, never copy the pipeline.
 
 ## Continuation Budget, Not a Handoff Cap
 
@@ -292,6 +300,22 @@ not a plugin bug.
 - **Never reorganize chapters mid-session.** Continuation boundaries only.
 - **Never trust agent-supplied ranges.** Validate ascending, non-overlapping, coverage ≤ archive
   ceiling. An overlap duplicates archived text; a gap silently drops it.
+- **Never commit an archive that rendered nothing.** A chapter whose `stats.events > 0` but
+  `stats.messages === 0` is a **payload read that went wrong**, not a short conversation — a tool call
+  always follows an assistant message. Every door refuses it, before reserving a number, and says so with
+  numbers. The reason is permanent: the watermark is `max(chapter.endSeq) + 1`, so a committed husk blocks
+  that child from ever being re-archived. (#58: this exact pair — a hollow chapter plus a poisoned
+  watermark — turned 12 recoverable archives into permanent ones, and the renderer already *knew*:
+  `writeArchive` warns "N event(s) rendered no output" and door 5 discarded the warning.)
+- **Measure a host verb's payload SHAPE, not its presence.** `listEvents` exists, is ambient-readable
+  after disposal, and returned 10 correctly-typed events — and had **no `data`** field, because it
+  returns `SessionEventRecord` metadata, not events. The spike recorded `{count, types}`, wrote "returned
+  the full durable log", and door 5 was built on it. So: assert the *fields you read* in a drift row that
+  reads the kernel's own published types; never widen an input type's optionality to make a lie compile
+  (`SessionEventLike.data` is **required** now, which is what should have failed first); and when a test
+  stubs a host verb, stub it the host's shape, not yours. The same trap has a precedent in this repo —
+  `spikes/probe/FINDINGS.md` r28: "the L0 test had stubbed the fictional shape and passed a dead
+  listener".
 - **Never truncate to fit.** Refuse with measured numbers instead.
 - **Never create a session automatically mid-step.** Continuation-creating actions fire at `turn/end`
   boundaries only. (In-place *surface* compaction is different and is the harness's own design: the base

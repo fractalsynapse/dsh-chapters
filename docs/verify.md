@@ -270,6 +270,27 @@ that still need a running chapter engine:
 | E7 | Arrival-time artifacting (architecture amendment) | **green 2026-09-19 (9.3m)**: 373KB book / one read → exactly 1 arrival prune at the tail; model answers buried token + chapter count via 5 `chapters_artifact` calls; ZERO compaction events at production 0.9; blob fingerprint in no `request/*` event; cache table in FINDINGS shows prefix intact (cacheRead monotonically 15.7K→24.5K) |
 | E8 | Plot carriage across in-place checkpoints | forward path live (persona discipline — suiteB oversized run carries `PLOT:` blocks through 7 compactions); render→extract round trip pinned in unit (`carried plot survives the checkpoint round-trip`); elicited fallback unit-pinned (capped input/output, degrades to null) — fires only when the agent writes no note | compaction lands at `agent/pre-step`, bracketed `compaction/start.turn` = open turn number (r13/r17 `turn: 2`); never mid-request, never mid-step |
 
+## Door 5 — Subagent Settlement (#47; read contract corrected by #58)
+
+The settlement door is the only archive that runs with nobody watching, so its checks are about **payload**,
+not about plumbing. Every row here was verified to fail on the mutation it guards.
+
+| # | Check | How to verify |
+|---|---|---|
+| S1 | The durable read is payload-bearing | `tests/unit/host-durable-read.test.ts` reads the **host's own published types** and asserts `SessionEventRecord` has no `data` key while `readSession`/`snapshotSessionEvent` yields one. This is a kernel-drift gate: a host rename must turn it red, not re-create husks. Cross-check by hand: `zstd -dc ~/.dsh/sessions/<slug>/<id>/session.v4.jsonl.zstd \| head -20` for a settled child — the real log has `data.name`, `data.arguments`, `data.message.content`; a hollow chapter has none of them. |
+| S2 | Both arms, both modes | A **one-shot** child settles with a live handle (`snapshotEvents()`); a **continuable** child is disposed *before* `subagent/end` (`dsh-subagent/lib/index.js:1240-1250`) so only the durable arm runs. Integration rows cover each arm × each mode, and one covers **depth 2** (a continuation child that delegates — `d57b4710`'s parent is `ch-dc3be3ab` in the SAIP field data). |
+| S3 | No archive that rendered nothing | Feed the real `data`-less record shape to `saveSession` and assert: skipped `payloadless`, **no file written**, **no chapter number reserved**, `nextChapterNumber` unchanged. Then the converse pair: the same span read through `readSession` archives with `stats.messages > 0`. |
+| S4 | The watermark is never poisoned | After a S3 refusal, a later settle of the same child still archives (i.e. `max(endSeq)` did not advance). This is the property that makes the defect recoverable instead of permanent. |
+| S5 | Warnings survive the door | `writeArchive` emits `N event(s) rendered no output` for a low-content chapter; assert door 5 logs it (via the injected `warn`/sink), not returns-and-drops. |
+| S6 | Lineage recorded | After a settle, the child's registry row has `parentSession` = the header's parent and `rootSession` = the parent's root (`linkChild`), so the child's chapters appear on the parent's ancestor path — not orphaned on a self-root. Re-settling is a no-op; a *different* parent link throws. |
+| S7 | Fanout containment | A 10-child fanout schedules sync 10× and runs enrichment **0** times (`runNow` never per settlement) and no child blocks another (per-child promise chains). |
+| S8 | Field census (human, one-time) | `SELECT` the store: no chapter may have `messages === 0` with `events > 0`. The recovery half of this defect is #60; measure **before/after counts** there, and quote them as a repair result, never as a passing test. |
+
+**Anti-pattern that created this section:** a stub that returns *your* type instead of the host's.
+`tests/integration/subagent-auto-save.test.ts` once faked `listEvents: async () => durable` with full
+events and passed against a host verb that returns metadata. If a test proves a door works while the
+production arm returns a different shape, the test is the bug.
+
 ## Bug Reports
 
 Cache and context behaviour are the plugin's core promise, so a report must include:

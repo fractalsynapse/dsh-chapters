@@ -230,18 +230,38 @@ that never enters the index. Four are session-facing, all idempotent over a per-
 4. Compaction finalize — the engine's `summarize()` commits a plan pre-durable, and the post-commit
    finalizer writes the chapter (issue #47 note: the fanout field study shows this is the ONLY one
    of these that subagents historically reached — 20 child compactions, or nothing).
-5. **Subagent settlement (issue #47, this round)** — a host-plane listener on the published
-   `subagent/end` lifecycle event runs the SAME save pipeline (one implementation, shared with
-   door 3 by extraction — never a second renderer) for children whose header carries
-   `origin: subagent` and `agentPreset === chapters`. The emitter fires `end` synchronously before
-   the holder's dispose continuation (measured, spike), so the fast path is a synchronous
-   `agents.get(info.id).session.snapshotEvents()`; the fallback arm is `sessionQuery.listEvents`
-   over the durable log (ambient-readable — measured); when neither reads, the child is skipped
-   with a loud diagnostic, never guessed. Save-only, so the "no continuation-creating actions
-   mid-step" rule is not engaged: no session is created, no surface is compacted. Enrichment is
-   **queued** per settlement — a 10-child fanout must not `runNow` ten annotator passes. A
-   continuable child settles repeatedly; the watermark makes every repeat after the first a
-   save of only-new-turns. Config: `subagentAutoSave` (default on).
+5. **Subagent settlement (issue #47; ordering corrected by #58)** — a host-plane listener on the
+   published `subagent/end` lifecycle event runs the SAME save pipeline (one implementation, shared
+   with door 3 by extraction — never a second renderer) for children whose header carries
+   `origin: subagent` and `agentPreset === chapters`. **The ordering is mode-dependent, and that is
+   the whole defect** (#58, measured): a **one-shot** run emits `end` before its dispose
+   continuation, so the synchronous fast path — `agents.get(info.id).session.snapshotEvents()` —
+   sees the live log; a **continuable** run is disposed *first* (`flushFinalState` →
+   `handle.dispose()` → `resident.delete` → `observer.settle` → emit), so the fast path is **always**
+   empty for continuable children — the kind a real fanout produces. The durable arm is therefore
+   not an edge case; for `mode: "continuable"` it is the only arm, and it must return
+   **payload-bearing** events: `sessionQuery.readSession` (cloned header + `snapshotSessionEvent`
+   events, one call, so the header scan goes away too). It must **not** be `sessionQuery.listEvents`,
+   whose records carry `seq`/`type`/`time`/`surface` and **no `data`**: fed to the renderer they yield
+   a structurally valid, semantically empty chapter — every tool name `unknown`, every argument `{}`,
+   every result the `sha256("")` blob at 0 B, every message event pushed to `unrenderedSeqs` — which
+   is what 12 archives on this machine turned out to be. The file:line facts are in
+   `docs/contract.md` § Durable reads. When neither arm yields a payload-bearing read, the child is
+   skipped with a loud diagnostic, never guessed.
+   **No door commits an archive that rendered nothing** (#58): the shared save core refuses a chapter
+   with `stats.messages === 0` over `stats.events > 0` — a tool call always follows an assistant
+   message, so that pair is unreachable in real traffic and means "payload read", not "short
+   conversation". Refusal is a `payloadless` skip **with numbers**, before any number is reserved or
+   any file is written: a committed husk would poison the watermark, which is `max(endSeq)`, and the
+   child could then never be re-archived without a repair (#60). Door 5 also stops discarding
+   `writeArchive`'s warnings — it already says "N event(s) rendered no output", and dropping that
+   string is what let the defect run for days — and it links lineage through `linkChild`, so a
+   child's chapters sit on its ancestor path instead of orphaned on a self-root. Save-only, so the
+   "no continuation-creating actions mid-step" rule is not engaged: no session is created, no surface
+   is compacted. Enrichment is **queued** per settlement — a 10-child fanout must not `runNow` ten
+   annotator passes — and an empty or refused chapter is never enqueued (#61). A continuable child
+   settles repeatedly; the watermark makes every repeat after the first a save of only-new-turns.
+   Config: `subagentAutoSave` (default on).
 
 ## Budgets and the Reserve Margin
 
