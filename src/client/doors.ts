@@ -90,11 +90,84 @@ export const CHILD_ID = /is session (ch-[\w-]+)/
  * refusal or an unrelated quote cannot pass for it. */
 export const doorTitle = (noun: string): RegExp => new RegExp(`${noun} \\u201C([^\\u201D]+)\\u201D is session`)
 
+/**
+ * Is the child in the client's OWN roster? This is the question that separates two very
+ * different failures, and the door used to report the symptom without it:
+ *  - the client never learned the session exists (roster: missing) → the fix is server-side
+ *    publication, and no amount of clicking `open` will ever work;
+ *  - the client knows it and `open` still did nothing (roster: contains) → a navigation bug.
+ * Measured host 0.2.0-rc.2: the sessions service exposes `projectList`, `refresh`, `retain`,
+ * `handleSessionAdded` — the roster is a projection the client fills from control frames.
+ */
+function rosterNote(sessions: ClientSessions | undefined, child: string): string {
+  try {
+    // gated on `projectList` existing — wrong test, since the note reads the STORE, not that
+    // mutator. Any service exposing a list store can answer; any other answers UNKNOWN.
+    // Measure the SHAPE, not the hope (the repo's own lesson: `listEvents` "worked" and had
+    // no `data`). The first version of this note printed "0 sessions" for a conversation that
+    // visibly had one, because it guessed at Array|Map and reported the guess as a fact.
+    // The host's client store shape is `list.getSnapshot() → { ids, byId, phase }`. And
+    // `projectList()` turned out to be a MUTATOR that returns undefined (measured), so the
+    // first version of this note printed "0 sessions" about a conversation that visibly had
+    // one — the repo's own `listEvents` lesson ("measure the shape, not the presence"),
+    // repeated by me in the same week. Read the store; if it isn't reachable, presence is
+    // UNKNOWN, and the note says so rather than inventing an absence.
+    const store = (sessions as unknown as { list?: { getSnapshot?: () => unknown } })?.list
+    const snap = typeof store?.getSnapshot === 'function' ? store.getSnapshot() : undefined
+    const ids = new Set<string>()
+    if (Array.isArray((snap as { ids?: unknown[] } | undefined)?.ids)) {
+      for (const id of (snap as { ids: unknown[] }).ids) ids.add(String(id))
+    } else if ((snap as { byId?: object } | undefined)?.byId !== undefined) {
+      for (const k of Object.keys((snap as { byId: object }).byId)) ids.add(k)
+    }
+    if (ids.size === 0) {
+      const shape = typeof store?.getSnapshot !== 'function' ? 'no list store on the service' : 'snapshot unreadable'
+      return ` (roster: ${shape} — presence of ${child.slice(0, 11)}… is UNKNOWN, not absent)`
+    }
+    const n = ids.size
+    return ids.has(child)
+      ? ` (roster: contains ${child.slice(0, 11)}…, ${String(n)} sessions — open() is the failure)`
+      : ` (roster: MISSING, ${String(n)} sessions — the client never catalogued this session)`
+  } catch { return '' }
+}
+
+/** The service's own method names, as a hint attached to a failure note (never a guess). */
+function verbsNote(sessions: ClientSessions | undefined): string {
+  try {
+    const svc = sessions as unknown as Record<string, unknown> | undefined
+    if (svc === null || svc === undefined || typeof svc !== 'object') return ' (sessions service: absent)'
+    // Measured: `Object.keys(svc)` returned NOTHING for the real service, because the host
+    // puts its verbs on the PROTOTYPE (a class instance), not as own keys. A diagnostic that
+    // reports "no methods" about a working service is worse than none — walk the chain.
+    const found = new Set<string>()
+    let node: unknown = svc
+    // Stop at Object.prototype: its four legacy accessors are not service verbs, and listing
+    // them pushed the real names past the cap on the first live run.
+    for (let depth = 0; depth < 6 && node !== null && node !== undefined && node !== Object.prototype; depth++) {
+      for (const key of Object.getOwnPropertyNames(node as object)) {
+        if (key === 'constructor') continue
+        try { if (typeof (svc as Record<string, unknown>)[key] === 'function') found.add(key) } catch { /* getter that throws — not a verb we can use either */ }
+      }
+      node = Object.getPrototypeOf(node)
+    }
+    const verbs = [...found].sort().slice(0, 24)
+    return verbs.length === 0 ? ' (sessions service: no methods on the chain)' : ` (sessions verbs: ${verbs.join(', ')})`
+  } catch { return ' (sessions service: unreadable)' }
+}
+
 function openByService(sessions: ClientSessions | undefined, sessionId: string): Promise<boolean> {
   return (async () => {
-    const svc = sessions as unknown as { open?: (id: string) => unknown; refresh?: () => unknown } | undefined
+    const svc = sessions as unknown as { open?: (id: string) => unknown; refresh?: () => unknown; projectList?: () => unknown } | undefined
     if (typeof svc?.open !== 'function') return false
     try { await svc.refresh?.() } catch { /* refresh best-effort */ }
+    // #57: re-project the client's session catalog. The host does this ITSELF after every
+    // create and fork — `dsh-api-session-controller/lib/client.js`, `create()` and `fork()`
+    // both end in `this.projectList()` — because a session the client has never catalogued is
+    // not addressable by `open()` no matter how often you call it. A plugin-created child is
+    // exactly that case: durable, workspace-attached, absent from the client's roster. Measured
+    // on 0.2.0-rc.2: without this the door created the child, `open` resolved, and the app
+    // stayed on the parent (the door's own note now says `roster: …` so this is never a guess).
+    try { svc.projectList?.() } catch { /* best-effort, like refresh */ }
     // The store must know the session before open() resolves it; a child
     // created seconds ago is only server-known until refresh lands. Retry
     // open briefly across that window.
@@ -179,9 +252,13 @@ export function makeDoorRunner(
       if (title !== undefined && await openBranchRow(title) && await switched()) return { ok: true, message: '' }
       // #54: a child that is created but not shown is a DIFFERENT fact from one the user
       // has to open by hand, and the message must not blur them.
+      // #56/#57: the note must be ACTIONABLE. "the app did not switch" is true and useless;
+      // naming the verbs the injected service actually exposes turns one failure into the
+      // diagnosis (is there a refresh/reload to call, or is `open` the only verb and the
+      // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch; open it from the sidebar` }
+        : { ok: true, message: `${door.noun} created — the app did not switch; open it from the sidebar${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }

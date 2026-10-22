@@ -30,7 +30,14 @@ function world(text: string, kind = 'success') {
       },
     },
   } as unknown as ClientRemote
-  const sessions = { open: (id: string) => { opened.push(id) } } as unknown as ClientSessions
+  // A CLASS INSTANCE, like the real host service: verbs live on the prototype, and the
+  // diagnostic that only looked at own keys reported "no methods" about a working service.
+  const sessions = new (class {
+    sink: (id: string) => void
+    constructor(sink: (id: string) => void) { this.sink = sink }
+    open(id: string) { this.sink(id) }
+    refresh() { return Promise.resolve() }
+  })((id: string) => { opened.push(id) }) as unknown as ClientSessions
   return { remote, sessions, executed, opened }
 }
 
@@ -143,6 +150,10 @@ test('a verified switch leaves no note; an unverified one says the app did not s
   assert.match(badRun.message, /did not switch|not switch/i,
     'but it says the affordance failed, instead of silently claiming the switch')
   assert.match(badRun.message, new RegExp(door.noun), 'in the door’s own noun, like every other note')
+  // #56/#57: the note names the verbs the service actually exposes, so one field failure
+  // tells the next reader whether a refresh exists to call or `open` is all there is.
+  assert.match(badRun.message, /sessions verbs: [^)]*open/,
+    `the failure note must deliver the diagnosis, got: ${badRun.message}`)
 })
 
 test('the client wires a real verifier — absence would restore the silent no-op', () => {
@@ -150,4 +161,49 @@ test('the client wires a real verifier — absence would restore the silent no-o
   assert.match(src, /makeDoorRunner\([^)]*\)/, 'the runner is still built once per door')
   assert.match(src, /dsh\.sessions\.current/,
     'the verifier reads the host-published current session (dsh-client-ui-workspace); without it the door is back to trusting a void call')
+})
+
+/**
+ * #57 — the client must CATALOGUE a plugin-created session before `open()` can address it.
+ * The host's own client create/fork paths both end in `this.projectList()`
+ * (`dsh-api-session-controller/lib/client.js`); a session the client never catalogued is not
+ * openable however many times `open()` resolves — which is precisely the 0.2.0-rc.2 symptom
+ * the fork journeys were failing on.
+ */
+test('the door re-projects the client catalog before it tries to open the child', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const calls: string[] = []
+  const remote = {
+    commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-proj-1') } } }) },
+  } as unknown as ClientRemote
+  const sessions = {
+    projectList: () => { calls.push('projectList') },
+    open: (id: string) => { calls.push(`open:${id}`) },
+  } as unknown as ClientSessions
+  await makeDoorRunner(remote, sessions, door, async () => true)('parent-1')
+  assert.deepEqual(calls, ['projectList', 'open:ch-proj-1'],
+    `open() before re-projection can only ever address a stale roster: ${calls.join(' → ')}`)
+})
+
+test('the failure note reports roster presence from the store, and UNKNOWN when there is none', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const mk = (list: unknown) => ({
+    commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-note-1') } } }) },
+  }) as unknown as ClientRemote
+  const svcMissing = { open: () => undefined, list: { getSnapshot: () => ({ ids: ['session-a', 'session-b'] }) } } as unknown as ClientSessions
+  const r1 = await makeDoorRunner(mk('x'), svcMissing, door, async () => false)('parent-1')
+  assert.match(r1.message, /roster: MISSING, 2 sessions — the client never catalogued/,
+    `the note must name the real cause, got: ${r1.message}`)
+
+  const svcHas = { open: () => undefined, list: { getSnapshot: () => ({ ids: ['ch-note-1'] }) } } as unknown as ClientSessions
+  const r2 = await makeDoorRunner(mk('x'), svcHas, door, async () => false)('parent-1')
+  assert.match(r2.message, /roster: contains ch-note-1…, 1 sessions — open\(\) is the failure/,
+    `a session the client KNOWS but cannot open is a different bug and must read differently: ${r2.message}`)
+
+  const svcNoStore = { open: () => undefined } as unknown as ClientSessions
+  const r3 = await makeDoorRunner(mk('x'), svcNoStore, door, async () => false)('parent-1')
+  assert.match(r3.message, /UNKNOWN, not absent/, 'absence of evidence is never reported as evidence of absence')
+  assert.doesNotMatch(r3.message, /0 sessions/, 'the old misread that made a live conversation look empty')
 })

@@ -73,7 +73,15 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
         const f = sessionLogFileFor(path.join(sessDir, k.d))
         if (f === null) continue
         const log = execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-        if (log.includes('chapters:toc') && log.includes('.dsh-chapters/')) return true
+        if (!log.includes('chapters:toc')) continue
+        // #56/#57: `.dsh-chapters/` was the OLD dialect — since #70 each boot pins its own
+        // store root (`<e2e home>/chapters`), so a literal here asserts a path the product no
+        // longer writes and the run fails while the feature works. Verify the citation is
+        // TRUE instead: take the chapter paths the notice names and require one to exist.
+        // That is strictly stronger than a substring, and it survives any store location.
+        const cites = [...log.matchAll(/([^\s"`'()\\]+chapters\/[^\s"`'()\\]+\.md)/g)].map((m) => m[1])
+        const real = cites.some((c) => fs.existsSync(path.isAbsolute(c) ? c : path.join(ROOT, c)))
+        if (cites.length > 0 && real) return true
       } catch { /* partial */ }
     }
     return false
