@@ -9,7 +9,7 @@ this machine, not assumed.
 
 | Thing | Value |
 |---|---|
-| Host serving this session | global npm install, `/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js`, **0.1.5-rc.1**, listening on `127.0.0.1:3080` |
+| Host serving this session | the GLOBAL npm install — but the PREFIX IS NOT PART OF THE FACT. Resolve it: `readlink -f $(command -v dsh)`, then read that package's `version`. On this box today: `/home/adrian/node_modules/@deepseek-ai/dsh`, **0.2.0-rc.2**, listening on `127.0.0.1:3080`. This row used to assert `/usr/lib/...` and `0.1.5-rc.1` as if they were the machine; a drift gate that hardcoded that path then skipped forever while the package sat in the repo's own `node_modules` (#54). |
 | Profile root | `~/.dsh` (`DSH_HOME` default) — `profiles/`, `sessions/`, `storages/`, `.credentials.yaml` |
 | Sandbox effect | `~/.dsh` is **read-only** from the agent sandbox: `dsh web --help` died with `EROFS: read-only file system, open '/home/adrian/.dsh/profiles/web/cordis.yml'` |
 | Dev fork | `~/Projects/deepseek-harness` — git `fb2c4b9e69` (2026-09-10), **0.1.5-rc.2**, pnpm workspace, `node_modules` installed |
@@ -24,6 +24,14 @@ Two consequences worth stating plainly:
    snapshot. Line numbers in `docs/contract.md` come from the `examples/` copy. Treat any of the three as
    truth only for the question you asked it; resolve real behaviour against the version you are actually
    booting.
+3. **Check the binary you are measuring, not just the code you changed.** #54 lost hours to
+   `.dshdev-local/profiles/web/node_modules/@treeseed/dsh-chapters` having become a COPIED tree
+   dated six days earlier: every browser journey, probe and re-distill attempt was running a build
+   predating the feature under test, and drew confident conclusions about the HOST — including a
+   seed-admission refusal the current code does not produce (`tests/e2e/boot.ts` refuses to spawn
+   on a copied tree now, and names the re-link command). The general habit: where a built artifact
+   is loaded by path, link it or assert its version — an old binary passes every test you write
+   against it and reports them as facts.
 
 ## The Isolation Mechanism: `DSH_HOME`
 
