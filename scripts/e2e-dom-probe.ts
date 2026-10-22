@@ -172,6 +172,16 @@ try {
         .map((b) => b.getAttribute('aria-label') ?? (b.textContent ?? '').trim().slice(0, 24))
       return { ours, rowTag: row?.tagName ?? null, rowClass: (row?.className ?? '').slice(0, 90), rowRect: row ? JSON.stringify(row.getBoundingClientRect()) : null, siblings, menus }
     })
+    // #57 follow-up: the knowledge-loop runs host COMMANDS between the turn and the click, and
+    // those render as command flow nodes rather than chat rows. Whether the door is still
+    // reachable — and what it SAYS when the switch fails — can only be answered in a
+    // conversation of that shape, so the probe can put a command in the composer first.
+    const cmd = process.env.PROBE_CMD
+    if (cmd !== undefined && cmd !== '') {
+      await typeComposer(page, cmd)
+      await page.waitForTimeout(9000)
+    }
+    dump.probeCmd = cmd ?? null
     // and does the door, when force-clicked, leave anything observable behind?
     const clicked = await page.evaluate(() => {
       const b = Array.from(document.querySelectorAll('button')).find((x) => (x.getAttribute('aria-label') ?? '') === 'Fork with chapters')
