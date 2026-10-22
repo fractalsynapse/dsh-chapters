@@ -101,8 +101,17 @@ export interface ContinuePorts {
     modeEvents: SessionEventLike[]
     presetId: string
     title: string
-  }): Promise<void>
+  }): Promise<void | { warnings?: readonly string[] }>
   now(): number
+  /**
+   * The plane's diagnostics seam (#54). The core refuses a child creation with the kernel's
+   * own words — and on host 0.2.x those words ended the whole acceptance chain while the
+   * error sink stayed empty, because only the engine had ever written to it. The core cannot
+   * touch the filesystem (it is L0-pure, and its tests run everywhere), so each plane injects
+   * its own: `src/diag.ts` for both of them in practice, but injected so a caller can also
+   * surface it. OPTIONAL on purpose: absence must never break a door.
+   */
+  diagnostic?(where: string, message: string, error?: unknown): void
 }
 
 export interface ContinueResult {
@@ -468,8 +477,16 @@ async function finishChild(
   const childId = `ch-${ports.newId()}`
   const presetId = args.callerPreset ?? config.fallbackPreset
   try {
-    await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    // The plane may come back with warnings of its own — an attached-but-unlisted child,
+    // a workspace service that no longer exposes attachSession. Those are facts about the
+    // continuation the user is being handed, so they belong in the door's reply, not only
+    // in a log the reply already summarizes.
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
+    // Full detail to the sink, short detail to the composer. The UI string is sliced to fit
+    // a note; the reason a kernel refused the seed is the part an investigator needs whole.
+    ports.diagnostic?.(`door:${args.intent ?? 'continue'}`, `child creation refused for ${childId}`, error)
     throw new Refusal({ ok: false, reason: `child creation refused: ${(error as Error).message}`, warnings })
   }
   if (commitRecords.length > 0) {

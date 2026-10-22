@@ -206,6 +206,28 @@ export interface ProxyOpts {
   /** journal override; default is next to the tapes */
   journalPath?: string
   upstream?: string // e.g. http://localhost:8080 — required in record mode
+  /** #54: the credential the PROXY presents upstream, replacing whatever the
+   * harness sent. The e2e profile must never hold a real key — it is a fixture —
+   * and the local vLLM rig does not check one at all, so leaving this unset keeps
+   * the passthrough behavior the GPU box has always had. */
+  upstreamKey?: string
+  /** #54: rewrite the REQUESTED model name on the way out, so the fixture can keep
+   * the id its profile pins (`qwen3.8-flash-next`, the 32K stress regime) while a
+   * hosted upstream is addressed by the id it actually serves. The tape stores the
+   * profile's name — never the remote's — because a tape is a fixture of THIS rig,
+   * not of whatever service distilled it. */
+  upstreamModel?: string
+  /** #54: how long the proxy waits for upstream RESPONSE HEADERS before it calls the
+   * request dead. The profile pins `timeoutMs: 3600000` (an hour) on the harness side,
+   * so with nothing on the proxy a stalled distill is indistinguishable from a slow one
+   * — measured: a `suite` leg produced no tape entry for 20 minutes and no log line
+   * anywhere could say which of the two it was. 10 minutes is generous for a real
+   * prefill at the stress regime and short enough to end a run with an answer. */
+  upstreamTimeoutMs?: number
+  /** #54: journal path for in-flight upstream activity. Defaults next to the tapes. */
+  activityLog?: string
+  /** #54: how often a request that has NOT sent its first byte re-logs itself. */
+  stallWarnMs?: number
   /** replay + liveFallback: a miss goes to the real model AND lands on the
    * tape (journal the gap, self-heal); strict replay keeps misses LOUD so
    * suites fail fast when a scenario legitimately changed. */
@@ -277,17 +299,160 @@ function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
 }
 export function normalizeSingle(m: unknown): string { return JSON.stringify(m) === '' ? '' : normalize(m) }
 
+/**
+ * A single upstream attempt, buffered, with bounded throttle-retry (#54).
+ *
+ * Why buffered rather than streamed: a 429 must be RETRYABLE, and the only safe moment to
+ * decide that is before any byte reaches the client or the tape — once an SSE body has been
+ * half-forwarded, retrying either duplicates output downstream or writes a throttle into the
+ * corpus as if it were an answer. Record mode is a distill, not a chat: the client is the
+ * harness, its own client timeout is an hour, and replay never takes this path at all (it is
+ * served from the tape). So buffering costs nothing measurable and buys quota survival.
+ *
+ * Every watchdog is cleared on every exit path and unref'd: an armed timer is a process that
+ * will not exit, which is how a green test file hung for ten minutes while its rows had
+ * already finished (measured, same evening).
+ */
+interface PumpOpts {
+  transport: typeof http | typeof https
+  upstreamUrl: URL
+  method: string
+  headers: Record<string, unknown>
+  body: Buffer
+  tapeDir: string
+  journal: (line: string) => void
+  res: import('node:http').ServerResponse
+  keyOf: () => string
+  prefixOf: () => string[]
+  modelOf: () => string
+  timeoutMs: number
+  stallMs: number
+  retryMax: number
+  retryMs: number
+  startedAt: number
+  onInflight: (delta: number) => void
+  onBytes: (n: number) => void
+}
+
+interface PumpOutcome { status: number; contentType: string; chunks: Buffer[] }
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.() })
+
+async function attemptOnce(o: PumpOpts, attempt: number): Promise<PumpOutcome> {
+  return await new Promise<PumpOutcome>((resolve) => {
+    let settled = false
+    const finish = (v: PumpOutcome): void => {
+      if (settled) return
+      settled = true
+      clearInterval(stall)
+      clearTimeout(dead)
+      resolve(v)
+    }
+    const chunks: Buffer[] = []
+    let firstLogged = false
+    const up = o.transport.request(o.upstreamUrl, { method: o.method, headers: { ...o.headers } }, (resUp) => {
+      const status = resUp.statusCode ?? 200
+      const contentType = String(resUp.headers['content-type'] ?? 'text/event-stream')
+      resUp.on('data', (c) => {
+        const b = c as Buffer
+        chunks.push(b)
+        o.onBytes(b.length)
+        if (!firstLogged) {
+          firstLogged = true
+          clearInterval(stall)
+          o.journal(`FIRSTBYTE status=${String(status)} elapsed=${String(Date.now() - o.startedAt)}ms attempt=${String(attempt)}`)
+        }
+      })
+      resUp.on('end', () => finish({ status, contentType, chunks }))
+      resUp.on('error', () => finish({ status: 0, contentType: 'text/event-stream', chunks }))
+    })
+    const stall = setInterval(() => {
+      o.journal(`STALLED attempt=${String(attempt)} elapsed=${String(Date.now() - o.startedAt)}ms bytes=${String(chunks.length)}`)
+    }, o.stallMs)
+    const dead = setTimeout(() => {
+      o.journal(`DEAD attempt=${String(attempt)} elapsed=${String(Date.now() - o.startedAt)}ms no-response-headers — destroying (E2E_UPSTREAM_TIMEOUT_MS=${String(o.timeoutMs)})`)
+      try { up.destroy() } catch { /* already gone */ }
+      finish({ status: 504, contentType: 'application/json', chunks: [Buffer.from(JSON.stringify({ error: { message: `tape proxy upstream: no response after ${String(o.timeoutMs)}ms (${o.upstreamUrl.pathname})`, type: 'upstream_timeout' } })) ] })
+    }, o.timeoutMs)
+    up.on('error', (e) => {
+      // a transport failure is a RETRY candidate too; the old code answered 502 on the first sneeze
+      o.journal(`XERROR attempt=${String(attempt)} elapsed=${String(Date.now() - o.startedAt)}ms :: ${String(e).slice(0, 160)}`)
+      finish({ status: 0, contentType: 'application/json', chunks: [Buffer.from(JSON.stringify({ error: { message: `tape proxy upstream: ${String(e)}`, type: 'upstream_error' } })) ] })
+    })
+    stall.unref?.()
+    dead.unref?.()
+    up.write(o.body)
+    up.end()
+  })
+}
+
+async function pumpUpstream(o: PumpOpts): Promise<void> {
+  let attempt = 0
+  for (;;) {
+    attempt += 1
+    o.onInflight(1)
+    const out = await attemptOnce(o, attempt)
+    const throttled = out.status === 429 || out.status === 0 || out.status >= 500
+    if (throttled && attempt <= o.retryMax) {
+      o.journal(`RETRY attempt=${String(attempt)} status=${String(out.status)} waiting=${String(o.retryMs)}ms (E2E_UPSTREAM_RETRY_MAX=${String(o.retryMax)})`)
+      o.onInflight(-1)
+      await sleep(o.retryMs)
+      continue
+    }
+    if (out.status === 429 || out.status >= 500) {
+      o.journal(`LIMITED status=${String(out.status)} elapsed=${String(Date.now() - o.startedAt)}ms attempts=${String(attempt)} — distill throttled by the upstream; the answer is NOT recorded. Re-run later, or against the local stress server (:8080), which is what the pinned regime is for`)
+    }
+    try { o.res.writeHead(out.status, { 'content-type': out.contentType }) } catch { /* client gone */ }
+    for (const b of out.chunks) { try { o.res.write(b) } catch { /* client gone mid-write */ } }
+    try { o.res.end() } catch { /* client gone */ }
+    o.journal(`DONE elapsed=${String(Date.now() - o.startedAt)}ms status=${String(out.status)} attempts=${String(attempt)} bytes=${String(out.chunks.reduce((n, b) => n + b.length, 0))}`)
+    o.onInflight(-1)
+    if (out.status >= 300) return // a failed answer is not a fixture
+    const entry: TapeEntry = {
+      key: o.keyOf(),
+      prefix: o.prefixOf(),
+      status: out.status,
+      contentType: out.contentType,
+      bytes: Buffer.concat(out.chunks).toString('base64'),
+      model: o.modelOf(),
+      recordedAt: new Date().toISOString(),
+    }
+    const n = fs.readdirSync(o.tapeDir).filter((f) => /^\d+\.json$/.test(f)).length
+    fs.writeFileSync(path.join(o.tapeDir, `${String(n).padStart(4, '0')}.json`), JSON.stringify(entry))
+    return
+  }
+}
+
+
 export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // Which project's tape this is — a miss must name itself (see the journal line).
   const tapeName = path.basename(opts.tapeDir)
   fs.mkdirSync(opts.tapeDir, { recursive: true })
   const missLog = opts.journalPath ?? path.join(opts.tapeDir, '..', 'e2e-tape-misses.log')
+  // #54: the DISTELLER's visibility. A tape miss is loud by design; a request that
+  // simply never comes back was silent for as long as the harness's own hour timeout.
+  // Every upstream attempt now logs start / stalled / first-byte / done / dead, with
+  // elapsed and byte counts, so "is it progressing" is a lookup, not an inference.
+  // beside the MISS journal, not inside the tape directory: tests/fixtures/model-tape
+  // is the corpus, and a runtime log dropped in it is an untracked file that outlives
+  // the run and gets committed by the next broad `git add`.
+  const activityLog = opts.activityLog ?? process.env.E2E_UPSTREAM_LOG
+    ?? path.join(path.dirname(missLog), 'e2e-upstream.log')
+  const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? Number(process.env.E2E_UPSTREAM_TIMEOUT_MS ?? 600_000)
+  const stallWarnMs = opts.stallWarnMs ?? Number(process.env.E2E_UPSTREAM_STALL_MS ?? 60_000)
+  let inFlight = 0
+  const journal = (line: string): void => {
+    try { fs.appendFileSync(activityLog, `${new Date().toISOString()} tape=${tapeName} ${line}\n`) } catch { /* visibility never breaks the run */ }
+  }
   const server = http.createServer((req, res) => {
     const chunks: Buffer[] = []
     req.on('data', (c) => chunks.push(c as Buffer))
     req.on('end', () => {
       void (async () => {
-        const raw = Buffer.concat(chunks)
+        // #54: `let`, not `const` — the upstream model rewrite below rebinds it, and a
+        // TypeError thrown inside a try/catch that swallows everything is how a
+        // translation silently does nothing while the client still sees a 200.
+        let raw = Buffer.concat(chunks)
         let body: Record<string, unknown> = {}
         try { body = JSON.parse(raw.toString('utf8')) as Record<string, unknown> } catch { /* non-json passthrough below */ }
         const inc = messagesOf(body)
@@ -325,27 +490,49 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         // ---- record: stream through, capture bytes, append tape
         const upstreamUrl = new URL((opts.upstream ?? 'http://localhost:8080') + req.url!)
         const transport = upstreamUrl.protocol === 'https:' ? https : http
-        const ureq = transport.request(upstreamUrl, { method: req.method, headers: { ...req.headers, host: upstreamUrl.host } }, (ures) => {
-          const buf: Buffer[] = []
-          ures.on('data', (c) => { const b = c as Buffer; buf.push(b); try { res.write(b) } catch { /* client gone (teardown race) — the tape still records below */ } })
-          ures.on('end', () => {
-            try { res.end() } catch { /* client gone */ }
-            const entry: TapeEntry = {
-              key: createHash('sha256').update(normalize(body)).digest('hex').slice(0, 16),
-              prefix: inc.map(normalizeSingle),
-              status: ures.statusCode ?? 200,
-              contentType: String(ures.headers['content-type'] ?? 'text/event-stream'),
-              bytes: Buffer.concat(buf).toString('base64'),
-              model: String(body.model ?? ''),
-              recordedAt: new Date().toISOString(),
+        const fwd: Record<string, unknown> = { ...req.headers, host: upstreamUrl.host }
+        if (opts.upstreamKey !== undefined && opts.upstreamKey !== '') {
+          // ONE credential leaves this process toward the upstream, and it is not the
+          // profile's — the harness keeps talking to a keyless local fixture
+          fwd.authorization = `Bearer ${opts.upstreamKey}`
+        }
+        if (opts.upstreamModel !== undefined && opts.upstreamModel !== '') {
+          try {
+            const parsed = JSON.parse(raw.toString('utf8')) as { model?: unknown }
+            if (typeof parsed.model === 'string' && parsed.model !== opts.upstreamModel) {
+              parsed.model = opts.upstreamModel
+              raw = Buffer.from(JSON.stringify(parsed), 'utf8')
+              // and say how long it is: a stale content-length makes the upstream
+              // read the OLD body (measured — the rewrite silently did nothing while
+              // the client still saw a 200)
+              fwd['content-length'] = String(raw.length)
             }
-            const n = fs.readdirSync(opts.tapeDir).filter((f) => /^\d+\.json$/.test(f)).length
-            fs.writeFileSync(path.join(opts.tapeDir, `${String(n).padStart(4, '0')}.json`), JSON.stringify(entry))
-          })
+          } catch { /* not a JSON body (models/info) — pass it through untouched */ }
+        }
+        const startedAt = Date.now()
+        inFlight += 1
+        let sawBytes = 0
+        let firstByteMs = -1
+        journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
+        // watchdogs live in pumpUpstream now, PER ATTEMPT — arming them here too would
+        // double-answer the client and keep the process alive after the run (#54).
+        // Buffered pump with bounded throttle-retry (#54). The only behavioral difference
+        // from the inline relay it replaces: a RECORD answer is forwarded when it completes
+        // instead of chunk-by-chunk, which is what makes a 429 retryable without half-writing
+        // an SSE body or recording a throttle as an answer. Replay never takes this path.
+        const retryMax = opts.upstreamRetryMax ?? Number(process.env.E2E_UPSTREAM_RETRY_MAX ?? 3)
+        const retryMs = opts.upstreamRetryMs ?? Number(process.env.E2E_UPSTREAM_RETRY_MS ?? 20_000)
+        await pumpUpstream({
+          transport, upstreamUrl, method: req.method ?? 'POST', headers: fwd, body: raw,
+          tapeDir: opts.tapeDir, journal, res,
+          keyOf: () => createHash('sha256').update(normalize(body)).digest('hex').slice(0, 16),
+          prefixOf: () => inc.map(normalizeSingle),
+          modelOf: () => String(body.model ?? ''),
+          timeoutMs: upstreamTimeoutMs, stallMs: stallWarnMs,
+          retryMax, retryMs, startedAt,
+          onInflight: (delta) => { inFlight += delta },
+          onBytes: (n) => { sawBytes += n },
         })
-        ureq.on('error', (e) => { try { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `tape proxy upstream: ${String(e)}` } })) } catch { /* client gone */ } })
-        ureq.write(raw)
-        ureq.end()
       })()
     })
   })

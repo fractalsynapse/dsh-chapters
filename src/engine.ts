@@ -17,7 +17,7 @@ import type { SessionEventLike } from './types.ts'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
-import { appendFileSync } from 'node:fs'
+import { diagnosticWarn } from './diag.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
@@ -830,14 +830,12 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * not a tunable. Any degradation that leaves the user wondering "did the
    * feature run?" belongs here.
    */
-  #diagnostic(message: string): void {
-    this.ctx.logger?.warn?.(message)
-    const sink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
-    if (sink !== undefined) {
-      try {
-        appendFileSync(sink, `[${new Date().toISOString()}] ${message}\n`)
-      } catch { /* diagnostics must never mask the real failure */ }
-    }
+  #diagnostic(message: string, error?: unknown): void {
+    // #54: ONE writer, in src/diag.ts. This held a private three-line copy of the sink while
+    // the two places a user's door can actually fail — the host-plane tool and the shared
+    // continuation core — wrote nothing anywhere. Which is how a kernel refusal that ended the
+    // whole acceptance chain left no trace readable without a browser.
+    diagnosticWarn(this.ctx.logger, 'realm:engine', message, error)
   }
 
   /** Every provider-tagged summary without a finalized manifest, oldest first. */

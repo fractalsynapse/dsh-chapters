@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { openApp, newSessionWithTurn, typeComposer, localModelUp, currentSessionId, sessionLogTextById, ROOT, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, typeComposer, localModelUp, currentSessionId, sessionLogTextById, durableLogExists, forkDoor, ROOT, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
 
 /**
  * ORDERING (2026-09-24): filename 'a-' makes Playwright run this journey FIRST —
@@ -80,7 +80,7 @@ test('the knowledge loop end to end over a real git remote, from the browser', a
     // the child — identified EXACTLY: the app switches the live session to
     // the child, and localStorage names it (no freshest-file guessing).
     const before = childCount()
-    await page.locator('button[aria-label="Fork with chapters"]').first().click()
+    await forkDoor(page).click()
     await expect.poll(() => childCount(), { timeout: 30_000, intervals: [500] }).toBeGreaterThan(before)
     let kid: string | null = null
     await expect.poll(async () => { const cur = await currentSessionId(page); if (cur !== null && cur !== sid) { kid = cur; return true } return false },

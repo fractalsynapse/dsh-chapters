@@ -46,6 +46,26 @@ export async function localModelUp(): Promise<boolean> {
   // without any 8080 must still RUN the suite, and it must FAIL if a tape is
   // missing. Only live/record runs ask the server the question.
   if ((process.env.E2E_MODEL ?? 'live') === 'replay') return true
+  const base = (process.env.E2E_UPSTREAM ?? '').trim().replace(/\/+$/, '')
+  // #54: RECORD against a REMOTE endpoint. The guard asks "is the model this run talks
+  // to reachable?" — and answering it by probing port 8080 alone made every remote
+  // distill SKIP six of the eight projects silently (measured: the fork journey came
+  // back as `1 skipped`, which reads like a pass to anyone scanning a log). A spec that
+  // skips because it is looking at the wrong endpoint is a spec that is not run.
+  if (base !== '' && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(base)) {
+    const key = (process.env.E2E_UPSTREAM_KEY ?? process.env.LOCAL_API_KEY ?? '').trim()
+    try {
+      const r = await fetch(`${base}/v1/models`, {
+        ...(key !== '' ? { headers: { authorization: `Bearer ${key}` } } : {}),
+        signal: AbortSignal.timeout(8000),
+      })
+      // ANY HTTP answer means an endpoint is there; 5xx means it is not usable. A 401
+      // would already have been refused at boot when the key is missing.
+      return r.status < 500
+    } catch {
+      return false
+    }
+  }
   try {
     const r = await fetch('http://localhost:8080/v1/models', { signal: AbortSignal.timeout(3000) })
     return r.ok
@@ -62,19 +82,41 @@ export async function openApp(page: Page): Promise<void> {
 }
 
 /**
- * The app's 'Internal Testing Notice' dialog is a FOCUS TRAP: while open,
- * every click on the composer, the sidebar, and 'New session' silently
- * bounced (activeElement stayed on the dialog's H2 — the whole e2e debugging
- * saga of 2026-09-18). Dismissing it is the FIRST thing any browser flow
- * must do.
+ * Dismiss every notice dialog the host puts up, WHICHEVER one it shows.
+ *
+ * These dialogs are FOCUS TRAPS: while one is open, every click on the composer,
+ * the sidebar and 'New session' silently bounces and `activeElement` stays on the
+ * dialog (the 2026-09-18 saga was exactly this, with 'Internal Testing Notice').
+ * #54 found the second member of the family: host 0.2.x opens a **Preview Notice**,
+ * and a rig that dismisses one dialog BY NAME stops working the moment the host
+ * ships a second — the failure surfaced as 'composer did not take focus (active:
+ * Preview Notice)', hundreds of lines from the cause.
+ *
+ * Target the DIALOG, not "a div that mentions a notice": scanning ancestor divs
+ * matches the whole app wrapper, whose button list includes unrelated controls — the
+ * first cut pressed some other 'Close', reported success, and left the notice holding
+ * focus (measured: the retry died with `dialog: Preview Notice: Continue` still on
+ * screen). Press the control that ACKNOWLEDGES this dialog, repeat for stacked
+ * notices, and let an unknown label be a no-op: the focus assert downstream still
+ * fires, and the diagnostic names the dialog and its buttons.
  */
 export async function dismissTestingNotice(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const dlg = Array.from(document.querySelectorAll('div')).find((d) => (d.textContent ?? '').includes('Internal Testing Notice') && d.querySelector('button'))
-    const btn = Array.from(dlg?.querySelectorAll('button') ?? []).find((b) => /^continue$/i.test((b.textContent ?? '').trim()))
-    ;(btn as HTMLButtonElement | undefined)?.click()
-  })
-  await page.waitForTimeout(1000)
+  for (let i = 0; i < 3; i++) {
+    const dismissed = await page.evaluate(() => {
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], [aria-label*="Notice"]'))
+      for (const dlg of dialogs) {
+        const buttons = Array.from(dlg.querySelectorAll('button'))
+        if (buttons.length === 0) continue
+        const ack = buttons.find((b) => /^continue$/i.test((b.textContent ?? '').trim()))
+          ?? buttons.find((b) => /^(got it|i understand|acknowledge|dismiss|ok)$/i.test((b.textContent ?? '').trim()))
+          ?? buttons.find((b) => /^close$/i.test((b.textContent ?? '').trim()) && (b.getAttribute('aria-label') ?? '').toLowerCase().includes('notice'))
+        if (ack !== undefined) { (ack as HTMLButtonElement).click(); return true }
+      }
+      return false
+    })
+    if (!dismissed) return
+    await page.waitForTimeout(800)
+  }
 }
 
 /**
@@ -105,6 +147,70 @@ export async function focusComposer(page: Page): Promise<void> {
     throw new Error(`composer did not take focus (active: ${ae})`)
   }
 }
+
+/**
+ * Does a session have a durable log on disk yet? (#54)
+ *
+ * Host 0.2.x persists a created-but-never-started child as a directory holding only
+ * `session.lock`. Specs that assert on a child's notice bytes therefore cannot just
+ * poll the file — the file is a fact about whether the session was STARTED, not about
+ * what the child was seeded with. This helper names the distinction so each journey can
+ * decide, explicitly, to open the child rather than wait for a write that will not come.
+ */
+export function durableLogExists(sessionId: string): boolean {
+  for (const dir of sessDirs()) {
+    if (!dir.includes(sessionId)) continue
+    return sessionLogFileFor(path.join(SESS_DIR, dir)) !== null
+  }
+  return false
+}
+
+/**
+ * Open a session the way the product does: click its sidebar row.
+ *
+ * Same selector the client door uses (`src/client/doors.ts` openBranchRow —
+ * role=treeitem matched by text, 'more sessions' expanded when the list is folded),
+ * so the rig is exercising the real affordance instead of inventing one. Returns false
+ * when no row matched — callers must say which child they could not open, never proceed
+ * as if it had.
+ */
+export async function openSessionByRow(page: Page, needles: readonly string[]): Promise<boolean> {
+  const clean = needles.filter((n) => n !== '').map((n) => n.toLowerCase())
+  if (clean.length === 0) return false
+  const rows = page.locator('[role="treeitem"]')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const n = await rows.count()
+    for (let i = 0; i < n; i++) {
+      const t = ((await rows.nth(i).textContent()) ?? '').toLowerCase()
+      if (clean.some((needle) => t.includes(needle))) {
+        await rows.nth(i).click()
+        await page.waitForTimeout(1200)
+        return true
+      }
+    }
+    // the list can be folded; the door clicks the expander before giving up
+    const expanded = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>('button'))
+        .filter((b) => /more sessions|ungrouped/i.test(b.textContent ?? '') && b.getAttribute('aria-expanded') !== 'true')
+      for (const b of buttons) b.click()
+      return buttons.length
+    })
+    if (expanded === 0) break
+    await page.waitForTimeout(400)
+  }
+  return false
+}
+
+/**
+ * The fork door as a USER would click it: the NEWEST assistant row, visible.
+ *
+ * `.first()` picks the OLDEST message's row — harmless in a one-turn journey, and a
+ * 25-minute dead click in a long one (#54, the `suite` leg), because once the conversation
+ * moves on that node is no longer the actionable one and Playwright waits for
+ * actionability that never comes. One helper, both specs, so the two journeys cannot drift
+ * back into different selectors for the same affordance.
+ */
+export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork with chapters"]:visible').last()
 
 /**
  * Type via insertText (one real input event — contenteditable editors can
@@ -182,13 +288,36 @@ export async function currentSessionId(page: Page): Promise<string | null> {
 
 const SESS_DIR = E2E_SESS_DIR
 
+/**
+ * The durable session log inside one session dir, WHICHEVER format the host writes.
+ *
+ * #54: 0.2.x persists `session.v4.jsonl.zstd`; the rig hardcoded `session.v3…` and every
+ * log-reading assertion silently returned '' — which reads as "the archive never landed"
+ * and sends you hunting a product bug that lives in a filename. The resolver takes the
+ * HIGHEST version present and refuses to guess when there is none.
+ */
+export function sessionLogFileFor(dir: string): string | null {
+  let best: { file: string; v: number } | null = null
+  let names: string[] = []
+  try { names = fs.readdirSync(dir) } catch { return null }
+  for (const n of names) {
+    const m = /^session\.v(\d+)\.jsonl\.zstd$/.exec(n)
+    if (m === null) continue
+    const v = Number(m[1])
+    if (best === null || v > best.v) best = { file: path.join(dir, n), v }
+  }
+  return best === null ? null : best.file
+}
+
 const sessDirs = (): string[] => { try { return fs.readdirSync(SESS_DIR) } catch { return [] } }
 
 /** full decoded session log for a session id ('' until the file exists). */
 export function sessionLogTextById(id: string): string {
   for (const dir of sessDirs()) {
     if (!dir.includes(id)) continue
-    try { return execFileSync('zstd', ['-dc', path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
+    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    if (f === null) return '' // no durable log yet — an empty answer is honest here, a guess is not
+    try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
       if (!zstdWarned) { zstdWarned = true; console.error(`e2e: zstd failed reading session log ${dir}: ${String((e as Error)?.message ?? e).slice(0, 160)}`) }
       return ''
     }
@@ -222,8 +351,8 @@ export function findSessionIdWhoseLogContains(fragment: string, prefix = ''): st
 function sessionLogFile(sid: string): string | null {
   for (const dir of sessDirs()) {
     if (!dir.includes(sid)) continue
-    const f = path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')
-    return fs.existsSync(f) ? f : null
+    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    return f !== null && fs.existsSync(f) ? f : null
   }
   return null
 }
@@ -233,7 +362,9 @@ function sessionLogFile(sid: string): string | null {
 export function freshestSessionLog(): { dir: string; file: string } | null {
   let best: { dir: string; file: string; m: number } | null = null
   for (const dir of sessDirs()) {
-    const file = path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')
+    const file0 = sessionLogFileFor(path.join(SESS_DIR, dir))
+    if (file0 === null) continue
+    const file = file0
     let m: number
     try { m = fs.statSync(file).mtimeMs } catch { continue }
     if (best === null || m > best.m) best = { dir, file, m }

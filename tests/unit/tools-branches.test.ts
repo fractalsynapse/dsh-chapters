@@ -70,7 +70,13 @@ test('child created despite workspace-attach failure — the miss is warned, not
   try {
     const r = await w.built.chaptersContinue.execute(continueArgs as never, w.exec as never) as { ok: boolean }
     assert.equal(r.ok, true, 'continuation survives an unattachable workspace')
-    assert.ok(w.warns.some((m) => m.includes('workspace attach failed')), 'and says so')
+    // #54: the phrase changed because the CONTRACT got stronger, not weaker — an attach
+    // failure is now named with the missing service/method, reaches the diagnostics sink,
+    // AND travels in the door's own result. Same intent, new words; skipping this row
+    // would have hidden the regression instead of pinning it.
+    const warned = w.warns.filter((m) => /could NOT be attached|attach was refused/i.test(m))
+    assert.ok(warned.length > 0, 'no attach warning reached the logger')
+    assert.match(JSON.stringify(r), /attach|sidebar/i, 'and the door result carries it for the human to read')
   } finally { w.dispose() }
 })
 

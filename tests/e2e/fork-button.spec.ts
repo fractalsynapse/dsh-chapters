@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
 
 /**
  * The assistant-row door actions, on a session this spec CREATES through the
@@ -15,8 +15,19 @@ import { openApp, newSessionWithTurn, localModelUp, E2E_REGISTRY, E2E_SESS_DIR }
  * happened. One runner, two rows — src/client/doors.ts.
  */
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const registry = () => JSON.parse(fs.readFileSync(E2E_REGISTRY, 'utf8')) as
-  { tables: { sessions: Record<string, { parentSession?: string | null }> } }
+// A fresh home has NO registry file until the first archive writes it — which is exactly
+// what the poll below waits for. Throwing ENOENT on the first tick kills the poll on line 1
+// and reports "the fork did nothing" when the truth is "nothing has been written yet"
+// (from #54, same class as the v3/v4 log path). Absence is a zero, stated as a zero.
+const registry = (): { tables: { sessions: Record<string, { parentSession?: string | null }> } } => {
+  try {
+    return JSON.parse(fs.readFileSync(E2E_REGISTRY, 'utf8')) as
+      { tables: { sessions: Record<string, { parentSession?: string | null }> } }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { tables: { sessions: {} } }
+    throw error
+  }
+}
 const childCount = () => Object.values(registry().tables.sessions).filter((s) => typeof s.parentSession === 'string').length
 const sessDir = E2E_SESS_DIR
 
@@ -24,16 +35,25 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
   test.setTimeout(420_000)
   test.skip(!(await localModelUp()), 'Local model server not running')
   await openApp(page)
-  await newSessionWithTurn(page, 'Which file implements the chapter composer merge rule? Use only file reads (no shell commands) and answer in one sentence.')
+  // The stimulus must be ONE sentence with no tool work, and the wording is load-bearing.
+  // #54's first 0.2.x distill of this journey asked "which file implements…" and the
+  // hosted model obeyed literally — it read files, the turn ran past the output limit, the
+  // host rendered "Output token limit reached", and the assistant action row NEVER mounted,
+  // so `toBeVisible` on our door timed out at 20s. Nothing was wrong with the door: the
+  // probe with a one-sentence tool-free turn shows both rows live at 28x28 inside the
+  // host's own action container (`EvIC1a_flowItem > TS9iAW_actions`). This is RR2=137's
+  // lesson restated for a stronger model: a journey that depends on a wander-prone turn
+  // fails for a reason that has nothing to do with what it asserts.
+  await newSessionWithTurn(page, 'Name one HTTP redirect status code in one short sentence. Make ZERO tool calls and read no files.')
 
-  await expect(page.locator('button[aria-label="Fork with chapters"]').first()).toBeVisible()
+  await expect(forkDoor(page)).toBeVisible()
   // Both deterministic doors need a mouth: a composer-only `/chapters-continue`
   // left the user with a created child and no affordance at all.
   await expect(page.locator('button[aria-label="Continue with chapters"]').first()).toBeVisible()
   await expect(page.locator('button[aria-label="Branch into a new conversation"]')).toBeHidden()
 
   const before = childCount()
-  await page.locator('button[aria-label="Fork with chapters"]').first().click()
+  await forkDoor(page).click()
 
   // durable plane: a linked child appears in the registry
   await expect.poll(() => childCount(), { timeout: 30_000, intervals: [500] }).toBeGreaterThan(before)
@@ -50,7 +70,9 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
       .sort((a, b) => b.t - a.t)
     for (const k of kids.slice(0, 3)) {
       try {
-        const log = execFileSync('zstd', ['-dc', path.join(sessDir, k.d, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+        const f = sessionLogFileFor(path.join(sessDir, k.d))
+        if (f === null) continue
+        const log = execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
         if (log.includes('chapters:toc') && log.includes('.dsh-chapters/')) return true
       } catch { /* partial */ }
     }

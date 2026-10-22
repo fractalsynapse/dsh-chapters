@@ -18,9 +18,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# ONE source of truth for the host version this plugin is verified against.
-# The whole acceptance ledger was measured on exactly this; bump deliberately.
-DSH_HOST_VERSION="${DSH_HOST_VERSION:-0.1.5-rc.1}"
+# ONE source of truth for the host version this plugin is verified against — and it is
+# the host LOCK, not a literal here. The comment used to claim "one source" while a second
+# copy of the version sat in this file next to dev/dsh-host-lock/package.json and
+# .github/workflows/ci.yml, which is precisely how #54 found the pin stale in three places:
+# the lock moves, the chain does not, and the mismatch check then (correctly) refuses to run.
+# Bump deliberately: change dev/dsh-host-lock/package.json, resolve, re-distill the tapes.
+DSH_HOST_VERSION="${DSH_HOST_VERSION:-$(node -p "require('./dev/dsh-host-lock/package.json').dependencies['@deepseek-ai/dsh']")}"
 
 command -v dsh >/dev/null 2>&1 || {
   echo "ci-replay: 'dsh' not on PATH. Install the hermetic host lock first:" >&2

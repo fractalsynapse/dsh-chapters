@@ -128,7 +128,29 @@ export function apply(ctx: Ctx): void {
   // that explains itself. Components and runners are built ONCE here — slot
   // factories may re-run, and a fresh component identity per call would
   // remount the row.
-  const rows = DOOR_ACTIONS.map((door) => ({ door, run: makeDoorRunner(remote, sessions, door), component: makeDoorAction(door) }))
+  // #54: the switch verifier. `dsh.sessions.current` is published by the host's own
+  // dsh-client-ui-workspace (grep-confirmed, not folklore) — the same key the e2e specs
+  // read to name a session exactly, which is the point: the door now checks the fact the
+  // user would notice, not whether a void call threw.
+  const currentSessionId = (): string | null => {
+    try {
+      const raw = window.localStorage.getItem('dsh.sessions.current')
+      if (raw === null) return null
+      const parsed = JSON.parse(raw) as { sessionId?: string } | null
+      return parsed?.sessionId ?? null
+    } catch { return null }
+  }
+  const rows = DOOR_ACTIONS.map((door) => ({
+    door,
+    run: makeDoorRunner(remote, sessions, door, async (child) => {
+      for (let i = 0; i < 8; i++) {
+        if (currentSessionId() === child) return true
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      return currentSessionId() === child
+    }),
+    component: makeDoorAction(door),
+  }))
   slots.inject('conversation.chat.assistant-actions', () => rows.map(({ door, run, component }) => slots.register({
     name: 'conversation.chat.assistant-actions',
     id: door.id,

@@ -9,7 +9,7 @@ this machine, not assumed.
 
 | Thing | Value |
 |---|---|
-| Host serving this session | global npm install, `/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js`, **0.1.5-rc.1**, listening on `127.0.0.1:3080` |
+| Host serving this session | the GLOBAL npm install — but the PREFIX IS NOT PART OF THE FACT. Resolve it: `readlink -f $(command -v dsh)`, then read that package's `version`. On this box today: `/home/adrian/node_modules/@deepseek-ai/dsh`, **0.2.0-rc.2**, listening on `127.0.0.1:3080`. This row used to assert `/usr/lib/...` and `0.1.5-rc.1` as if they were the machine; a drift gate that hardcoded that path then skipped forever while the package sat in the repo's own `node_modules` (#54). |
 | Profile root | `~/.dsh` (`DSH_HOME` default) — `profiles/`, `sessions/`, `storages/`, `.credentials.yaml` |
 | Sandbox effect | `~/.dsh` is **read-only** from the agent sandbox: `dsh web --help` died with `EROFS: read-only file system, open '/home/adrian/.dsh/profiles/web/cordis.yml'` |
 | Dev fork | `~/Projects/deepseek-harness` — git `fb2c4b9e69` (2026-09-10), **0.1.5-rc.2**, pnpm workspace, `node_modules` installed |
@@ -24,6 +24,14 @@ Two consequences worth stating plainly:
    snapshot. Line numbers in `docs/contract.md` come from the `examples/` copy. Treat any of the three as
    truth only for the question you asked it; resolve real behaviour against the version you are actually
    booting.
+3. **Check the binary you are measuring, not just the code you changed.** #54 lost hours to
+   `.dshdev-local/profiles/web/node_modules/@treeseed/dsh-chapters` having become a COPIED tree
+   dated six days earlier: every browser journey, probe and re-distill attempt was running a build
+   predating the feature under test, and drew confident conclusions about the HOST — including a
+   seed-admission refusal the current code does not produce (`tests/e2e/boot.ts` refuses to spawn
+   on a copied tree now, and names the re-link command). The general habit: where a built artifact
+   is loaded by path, link it or assert its version — an old binary passes every test you write
+   against it and reports them as facts.
 
 ## The Isolation Mechanism: `DSH_HOME`
 
@@ -107,6 +115,49 @@ later session may re-reference them for the *why* behind an implementation. Two 
    is a working artifact of one pre-implementation session, not a second index. If it rots into
    contradiction with the shipped code, update or supersede it in place via git history — never rewrite
    silently.
+
+### Is the corpus anchored to the host we pin? (`tests/fixtures/model-tape/CORPUS_HOST`)
+
+Tape matching is normalized request-PREFIX matching, and the prefixes carry the host's
+system-prompt composition. So moving `dev/dsh-host-lock`, editing the preset persona, or changing a
+tool description invalidates the whole corpus — and a replay failure then describes an *earlier*
+change, not the one under review. `scripts/corpus-anchor.mjs` states the provenance in one file and
+answers the question in exactly one place; two consumers use it:
+
+- `tests/e2e/boot.ts` **refuses replay by name** when `host` ≠ the pinned version, quoting the
+  recorded `reason` and the tracking issue. `E2E_MODEL=record` is deliberately exempt — re-distilling
+  is the way out, and a gate that blocked it would strand itself.
+- `.github/workflows/ci.yml`'s `host-capability` job sets `corpus-anchored`, the `e2e-replay` job
+  requires it, and the run log gets a step summary plus a `::warning::` naming the issue. Skipped,
+  visibly — the same discipline as the preset-row refusal it sits beside: never silently green,
+  never permanently red.
+
+The gate lifts with no code change: re-distill the eight projects
+(`scripts/distill-tapes.sh`), write the new `host =` line, done. Current state: pinned
+`0.2.0-rc.2`, corpus distilled `0.1.5-rc.1`, tracked by
+[issue #56](https://github.com/treeseed-ai/dsh-chapters/issues/56) (with the door-selector blocker
+[#57](https://github.com/treeseed-ai/dsh-chapters/issues/57) inside it). Rows in
+`tests/unit/corpus-anchor.test.ts` assert both directions — matching lifts, missing/garbled
+provenance refuses, and the committed repo state is reported honestly as NOT anchored.
+
+### Reading a distill while it runs (#54)
+
+`scripts/distill-tapes.sh` writes each leg's FULL playwright output to `var/distill/<proj>-<hhmmss>.log`
+(never `tail`, which buffers until the leg ends) and prints a 60-second heartbeat: tape-entry count
+plus the last line of `var/e2e-upstream.log`. That journal is the proxy's own record of every upstream
+attempt — `START / FIRSTBYTE / STALLED / DONE / DEAD`, with elapsed ms and byte counts — and the proxy
+now bounds the wait at `E2E_UPSTREAM_TIMEOUT_MS` (default 600000, 10 minutes: generous for a cold
+prefill at the stress regime, short enough that a hung connection ends the run with an answer instead
+of silently consuming the harness's own 3600000 ms profile timeout).
+
+So the question "is this turn slow, or is the connection dead?" is a lookup:
+
+| journal shape | meaning |
+|---|---|
+| `START` then `FIRSTBYTE` | answered; `DONE elapsed=… bytes=…` says how long and how much |
+| `START`, `STALLED elapsed=…ms bytes=0`, then `DEAD` | upstream never responded — a hang, not a slow model |
+| `START`, `FIRSTBYTE`, then `STALLED … bytes=N` growing | real streaming progress; leave it alone |
+| no journal line at all | the request never reached the proxy (boot/port/profile problem) |
 
 ### Three test layers (and why the third exists)
 
@@ -220,14 +271,63 @@ ship; `0.1.0` itself carries no attestation.
   failing-test lines and c8's threshold verdicts as `::error::`, because on the
   0.1.6 tag a red gate left nothing behind but "exit code 1" while every local
   reproduction of the same SHA was green; the summary step now runs
-  `if: always()`). `e2e-replay`: installs the pinned
-  host (`npm i -g @deepseek-ai/dsh@0.1.5-rc.1` — the SAME version as the
-  gate line in `scripts/ci-replay.sh`, which fails loudly on mismatch) plus
-  chromium's apt libs, then `scripts/ci-replay.sh` — eight browser segments
-  served entirely from the committed tapes. **No LLM, no key, no GPU:** in
+  `if: always()`). `e2e-replay`: materializes the pinned host from
+  `dev/dsh-host-lock` (`npm ci`, hermetic — `npm i -g` rewrites the plugin tree and the
+  host's caret ranges float), plus chromium's apt libs, then `scripts/ci-replay.sh`, which
+  READS the version out of that lock rather than repeating it (#54 removed the second
+  literal; three copies of a pin is how it goes stale in three places) — eight browser
+  segments served entirely from the committed tapes. **No LLM, no key, no GPU:** in
   replay mode `localModelUp()` short-circuits to true (specs RUN, they do not
   skip) and a tape miss is a loud proxy 503, so a scenario that legitimately
   changed fails the job instead of silently passing.
+### Distilling tapes WITHOUT the GPU box (#54)
+
+`E2E_MODEL=record` drives the real model once per scenario to make a tape. Until #54 that
+meant the local vLLM server had to be up. It no longer does, because the tape proxy
+translates on the way out instead of asking the fixture to change:
+
+```bash
+E2E_MODEL=record E2E_TAPE=rules E2E_PORT=41735 E2E_THRESHOLD=0.9 \
+  E2E_UPSTREAM=https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode \
+  E2E_UPSTREAM_MODEL=qwen3.8-flash PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright \
+  E2E_UPSTREAM_KEY="$(node -e "import('./scripts/llm.mjs').then(m=>process.stdout.write(m.apiKey()||''))")" \
+  npx playwright test -c tests/e2e/playwright.config.ts --project=rules
+```
+
+- `E2E_UPSTREAM` is the endpoint WITHOUT the `/v1` suffix (the proxy appends the request
+  path, which already carries it).
+- `E2E_UPSTREAM_KEY` is the credential the PROXY presents. The profile keeps `apiKeyEnv:
+  LOCAL_API_KEY` and the boot still injects its `e2e-tape-proxy-dummy` when none is
+  configured — a real secret never enters a fixture profile.
+- `E2E_UPSTREAM_MODEL` rewrites the requested id, so the profile can keep pinning
+  `qwen3.8-flash-next` (the 32K stress-regime name) while a hosted endpoint is addressed by
+  the id it serves. **The tape records the profile's name**, because a tape is a fixture of
+  this rig, not of whatever service distilled it.
+- A remote `E2E_UPSTREAM` in record mode with no key refuses at boot in one line, instead of
+  discovering it 401 times across eight projects.
+- `scripts/llm.mjs` is the same resolution the dev scripts use (local server preferred, hosted
+  fallback, credential resolved from env → key file → profile export → harness store, value
+  never printed).
+
+Three 0.2.x host drifts the first boots found, all rig-side, all now handled — each is the
+kind that produces a wrong conclusion instead of an error:
+
+1. **the durable log is `session.v4.jsonl.zstd`.** Five places hardcoded `session.v3…`, so
+   every log-backed assertion decoded nothing and reported "the archive never landed".
+   `sessionLogFileFor()` resolves the highest `session.v<N>.jsonl.zstd`; a row scans
+   `tests/e2e/` for a hand-built versioned path (comment lines excluded — prose may name the
+   formats it explains).
+2. **the host opens a Preview Notice, and it is a focus trap** — the 2026-09-18 saga with a
+   new member. Dismissal now targets `[role=dialog]`-shaped elements and presses the control
+   that acknowledges *that* dialog; matching "any div mentioning a notice" matched the app
+   wrapper and pressed an unrelated 'Close'.
+3. **provider config must ride `cordis.patch.yml`.** A profile-dir `settings.yaml` is read by
+   nothing on 0.2.x, so `dev/settings.yaml`'s `llm-pi-ai` block was invisible: the host had no
+   `local` provider and the browser opened on "Add an API key to get started" with the
+   composer never reachable. `dev/profile-cordis.patch.yml` now defines the provider, and
+   `tests/e2e/boot.ts` guarantees the block in the copied home before rewriting the window
+   pins and the proxy `baseURL`.
+
 - **`release.yml`** — bare-semver tag (`0.1.0`, matching the Production
      environment's `*.*.*` tag protection) or manual dispatch → the full
      gated deterministic suite as publish blocker → `npm publish

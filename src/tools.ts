@@ -13,6 +13,8 @@ import { estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
+import { diagnosticWarn } from './diag.ts'
+import { attachCreatedChild } from './attach.ts'
 import { DEFAULT_CLONE_DIR } from './sync.ts'
 import { lineageOf, type ChapterRange, type SessionEventLike, type ToolResultOverride } from './types.ts'
 import { composeChapters } from './compose.ts'
@@ -149,6 +151,7 @@ export function buildChaptersTools(
         return { windowTokens, headerBoundTokens }
       },
       newId: () => randomUUID(),
+      diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
       createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
         const callerOptions = caller.options
         // The seed is contiguous from seq 0: the notice, then any STATE events this
@@ -168,16 +171,18 @@ export function buildChaptersTools(
             await presets.mount(agentCtx, mountPreset)
           },
         })
-        try {
-          const workspaceRegistry = ctx.get?.('workspaceRegistry') as { createCanonical?: (cwd: string) => Promise<{ attachSession?: (id: string) => Promise<void> | void } | undefined> } | undefined
-          if (cwd !== '' && workspaceRegistry?.createCanonical !== undefined) {
-            const workspace = await workspaceRegistry.createCanonical(cwd)
-            await workspace?.attachSession?.(sessionId)
-          }
-        } catch (error) {
-          // An unattached child is durable but may not list — say so, keep going.
-          ctx.logger?.warn?.(`dsh-chapters: child workspace attach failed (${String(error)})`)
-        }
+        // #54: was an optional chain through a REQUIRED step, inside a catch that only
+        // warned the profile logger. On host 0.2.x that turned a reshaped workspace API
+        // into a silent no-op — durable child, missing from the sidebar, door reporting
+        // success. attachCreatedChild verifies the user-visible fact (is it LISTED) and
+        // returns words the door passes through to the user.
+        const attach = await attachCreatedChild({
+          workspaceRegistry: ctx.get?.('workspaceRegistry'),
+          sessionQuery: ctx.get?.('sessionQuery'),
+          diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
+          childId: sessionId,
+          cwd,
+        })
         // Title while the child is still live: sessionController.rename resolves
         // the agent, routes through the official session-title normalizer, and
         // appends the durable `session/title` event (r6: commands-execute was the
@@ -196,6 +201,7 @@ export function buildChaptersTools(
           // handle", measured r3). Dispose after the live-work, keep the session.
           await handle.dispose?.()
         }
+        return { warnings: attach.warnings }
       },
       now: () => Date.now(),
     }

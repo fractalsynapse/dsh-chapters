@@ -119,9 +119,15 @@ NEW host too (measured). Full record: `docs/contract.md` § Presets are declarat
 
 **Open, in order:**
 
-0. **Re-anchor the e2e host, then re-distill the tapes.** `tests/e2e/boot.ts` now refuses by name
-   while `dev/dsh-host-lock` pins a pre-0.2.0 host, and the refusal lifts itself when the lock moves —
-   that is the upgrade path, not a TODO. `ci.yml`'s `host-capability` job reads that same lock and
+0. **Re-anchor the e2e host, then re-distill the tapes — IN PROGRESS (#54).** The lock now
+   resolves `@deepseek-ai/dsh` **0.2.0-rc.2** (chosen by witness: the host this box has been running
+   the plugin on, not npm's latest), `hostSupportsPresetRows()` answers true, and the boot's named
+   refusal has lifted itself exactly as designed. Three 0.2.x rig drifts were found by booting rather
+   than guessing and are fixed — the `session.v4` log format, the Preview Notice focus trap, and the
+   provider block that 0.2.x reads only from `cordis.patch.yml`. Distillation no longer needs the GPU
+   box (see `docs/development.md` § Distilling tapes WITHOUT the GPU box). REMAINING: re-distill all
+   eight projects on the new host, re-run `npm run test:e2e:replay` strict and `coverage:e2e`, and
+   re-measure the browser ledger before ANY browser-plane claim is made. `ci.yml`'s `host-capability` job reads that same lock and
    SKIPS the acceptance job with a step-summary reason plus a `::warning::` while the pinned host
    predates declaration rows: visibly skipped, never red-by-accident, never green-by-omission.
    Publishing is unaffected — the release gate is the deterministic suite. The per-boot row pins (`thresholdRatio`, `enrichmentEnabled`,
@@ -231,12 +237,59 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
    alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
    that starts working at the alias is used with no edit.
-2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
-   the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
-   `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round
-   added a tool (`chapters_rules`), which changes the header of every recorded session. Extending
-   `rules.spec.ts` with the checkpoint-carriage and continue-vs-fork assertions is part of that job;
-   writing spec assertions that cannot execute would be a false witness.
+2a-1. **The knowledge-loop journey cannot reach the door after two commands run** — precise,
+   measured 2026-10-22. `suite` now dies at `forkDoor(page).click()` waiting for
+   `button[aria-label="Fork with chapters"]:visible, last` for 25 minutes, with the upstream
+   journal showing **44 completed answers, 0 throttles, 0 deadlines** — so it is not quota and
+   not the model. What the journey does between the last assistant message and the click:
+   `/chapters-link`, then `/chapters-status`. Those render as command **flow nodes**, so after
+   them the last assistant chat row is no longer the newest actionable node, and the door row
+   on it is not `:visible` (host action rows appear to be gated on the newest/hovered message —
+   the fork journey, which forks right after ONE turn, clicks the same helper without issue).
+   FIX (rig, not assertion-weakening): select the door **scoped to the last assistant message**,
+   scrolling/hovering that message first — the same affordance a human uses — rather than
+   "the last visible door in the document". Keep `forkDoor` as the single selector so all four
+   journeys move together, and keep the `toBeVisible` assertions: a door nobody can reach is a
+   real defect, whether the cause is the plugin or the client's hover gating.
+
+2a. **On 0.2.x the switch to a forked child is a silent no-op, and the child never
+   appears in the session list** — measured 2026-10-22 against the CURRENT build (host
+   0.2.0-rc.2, plugin link-verified by the new boot guard). The door announces success
+   (`branch “…” is session ch-3865899e…`) and renders NO note element, which
+   `src/client/doors.ts` emits only when `sessions.open()` did not throw — yet
+   `localStorage['dsh.sessions.current']` still names the PARENT, focus stays on the parent's
+   composer, and after a full reload the sidebar lists one session. The child is real: its
+   directory holds `session.lock` + `session.v4.jsonl.zstd`, `session_projcache` has both
+   entries, and the log carries the whole notice (`Project: …`, `(N msgs)`, rule categories).
+   **Prime suspect is our own swallowed failure**: `src/tools.ts` attaches with
+   `workspaceRegistry.createCanonical(cwd)` → `workspace?.attachSession?.(sessionId)`, both
+   optional-chained — and AGENTS records that very attach as the fix for round 6's "an
+   unattached session shows as an unrelated root, so it is not listed". If 0.2.x reshaped that
+   return, the chain no-ops silently and orphans the child from the workspace, which matches
+   every symptom. NEXT: make the attach loud (diagnostic + door note when the service or method
+   is absent; never an optional chain through a required step), re-run, and let the message name
+   what is missing. `tests/e2e/fork-button.spec.ts` already asserts the switch — it is the gate,
+   and it is red for the right reason.
+   Superseded by the above, kept so nobody re-bisects it: an earlier version of this entry blamed
+   a `format v4 message requires a producer-owned source kind` refusal. That message was real but
+   came from a COPIED plugin tree dated Oct 16 in `.dshdev-local`; the current build produces no
+   such refusal, and `spikes/seed-admission/` shows host 0.2.0-rc.2 admitting our notice, the
+   notice + `plan/mode`, and the notice + `agentOptions` + preset mount (5–6 durable events each)
+   while correctly refusing the retired v3 wrapper.
+2. **The browser plane is blocked by CORPUS PROVENANCE, not by the host any more.** The
+   preset-row refusal is gone — `dev/dsh-host-lock` resolves 0.2.0-rc.2 and
+   `hostSupportsPresetRows()` answers true, so the rig boots the preset and CI's acceptance job
+   RUNS instead of skipping on capability. What stops replay now is that the eight tape projects
+   were distilled against 0.1.5-rc.1, and tape matching is normalized request-PREFIX matching over
+   prompt bytes the host composes. `tests/fixtures/model-tape/CORPUS_HOST` says so in one place,
+   `scripts/corpus-anchor.mjs` reads it, `tests/e2e/boot.ts` refuses REPLAY by name (RECORD stays
+   allowed — a gate that blocked the way out would strand itself), and CI skips the acceptance job
+   with a step summary and a `::warning::`. Lift it by re-distilling all eight
+   (`scripts/distill-tapes.sh`) and updating the record — **issue #56**, with **#57** (door
+   selector scoped to the last assistant message) as the blocker inside it. Extending
+   `rules.spec.ts` with the checkpoint-carriage and continue-vs-fork assertions is still owed, and
+   must be written after the corpus is anchored — spec assertions that cannot execute are a false
+   witness, which is why they are not written preemptively.
 3. **R10 is only partly proven.** Marker rules re-derive off the durable log and dedupe against
    disk, but there is no end-to-end wipe-and-replay row yet.
 

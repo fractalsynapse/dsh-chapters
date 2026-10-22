@@ -119,3 +119,35 @@ test('there is no second runner body in the client chrome', () => {
   assert.ok(!entry.includes('is session'), 'index.ts must not parse the reply itself')
   assert.ok(entry.includes('makeDoorRunner'), 'both rows come from the shared runner')
 })
+
+/**
+ * #54 — the switch must be CONFIRMED, not assumed from a call that did not throw.
+ * On host 0.2.0-rc.2 the fork door left no note element (meaning `sessions.open()`
+ * resolved), yet `dsh.sessions.current` still named the parent and the child never
+ * appeared in the sidebar even after a reload. A void-returning open() cannot tell
+ * "switched" from "accepted the request and did nothing", so the runner asks the
+ * client what is current now.
+ */
+test('a verified switch leaves no note; an unverified one says the app did not switch', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const w = world(reply(door.noun, 'Branch work', 'ch-verify-1'))
+  const okRun = await makeDoorRunner(w.remote, w.sessions, door, async () => true)(
+    'parent-1',
+  )
+  assert.deepEqual(okRun, { ok: true, message: '' }, 'a confirmed switch is silent, as today')
+
+  const w2 = world(reply(door.noun, 'Branch work', 'ch-verify-2'))
+  const badRun = await makeDoorRunner(w2.remote, w2.sessions, door, async () => false)('parent-1')
+  assert.equal(badRun.ok, true, 'the child IS created and durable — the door does not lie the other way')
+  assert.match(badRun.message, /did not switch|not switch/i,
+    'but it says the affordance failed, instead of silently claiming the switch')
+  assert.match(badRun.message, new RegExp(door.noun), 'in the door’s own noun, like every other note')
+})
+
+test('the client wires a real verifier — absence would restore the silent no-op', () => {
+  const src = readFileSync(path.join(process.cwd(), 'src/client/index.ts'), 'utf8')
+  assert.match(src, /makeDoorRunner\([^)]*\)/, 'the runner is still built once per door')
+  assert.match(src, /dsh\.sessions\.current/,
+    'the verifier reads the host-published current session (dsh-client-ui-workspace); without it the door is back to trusting a void call')
+})

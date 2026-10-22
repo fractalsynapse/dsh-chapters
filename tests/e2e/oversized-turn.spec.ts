@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, ROOT, E2E_REGISTRY } from './session.ts'
+import { openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, forkDoor, ROOT, E2E_REGISTRY } from './session.ts'
 
 /**
  * THE BIG EDGE CASE: one turn that outgrows the compaction threshold by
@@ -162,7 +162,7 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
 
   // --- observation (never a gate): does the per-row fork action render again
   // after a follow-up turn settled the transcript?
-  const actionRowObserved = await page.locator('button[aria-label="Fork with chapters"]').first().isVisible({ timeout: 30_000 }).catch(() => false)
+  const actionRowObserved = await forkDoor(page).isVisible({ timeout: 30_000 }).catch(() => false)
   fs.writeFileSync(path.join(ROOT, 'var', 'e2e-oversized-notes.json'), JSON.stringify({
     at: new Date().toISOString(), engineChapters: engineChapters.length,
     compactionSummaries: summaries.length, actionRowObservedAfterFollowUp: actionRowObserved,

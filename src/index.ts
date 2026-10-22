@@ -37,6 +37,7 @@ import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
+import { diagnosticStatusLine } from './diag.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -713,6 +714,7 @@ async function witness(
   const out: Record<string, unknown> = { at: new Date().toISOString() }
   try {
     out.storageDomainPresent = ctx.get?.('storageDomain') !== undefined
+    out.diagnostics = diagnosticStatusLine()
     // What this host's preset mechanism IS, and what the roster says about the
     // chapters preset. These two lines are the difference between "the preset files
     // are installed" (true, and meaningless on a declaration-row host) and "the

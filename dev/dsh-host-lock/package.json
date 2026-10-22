@@ -2,8 +2,8 @@
   "name": "dsh-chapters-ci-host-lock",
   "version": "0.0.0",
   "private": true,
-  "description": "Hermetic install manifest for the DSH host the e2e boots spawn. The host version ALONE is not reproducible: its caret ranges float, and @deepseek-ai/dsh-base rc.2 -> rc.3 (published 2026-09-22) changed system-prompt bytes every model tape depends on. This lock was resolved with --before=2026-09-14T18:51:00Z (the working install's date), pinning the whole closure. pnpm is installed in a SEPARATE prefix (a second root in one transaction re-deduces and breaks the host closure; its version never touches model bytes).",
+  "description": "Hermetic install manifest for the DSH host the e2e boots spawn. Pin rationale, twice over: the caret ranges float (0.1.5-rc.1 -> rc.3 changed system-prompt bytes every tape depends on), and preset DECLARATION ROWS need >= 0.2.0 \u2014 below that the chapters preset cannot exist and tests/e2e/boot.ts refuses BY NAME. Version chosen by WITNESS, not by recency: 0.2.0-rc.2 is the host this box has been running the plugin on all week (npm view says latest is 0.2.1-rc.2; moving up is a separate step with its own re-distill, because a host bump changes prompt bytes the corpus is pinned to). Resolved with the network, committed as a lockfile; pnpm lives in a SEPARATE prefix (a second root in one transaction re-deduces and breaks the host closure; its version never touches model bytes).",
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.5-rc.1"
+    "@deepseek-ai/dsh": "0.2.0-rc.2"
   }
 }

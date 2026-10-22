@@ -36,7 +36,14 @@ if ((BASE === '' || TOKEN === '') && fs.existsSync(ENV_FILE)) {
 }
 
 const configured = BASE !== '' && TOKEN !== ''
-const SKIP = configured ? false : 'not configured — run scripts/treedx-local.sh up && scripts/treedx-local.sh token (docs/development.md § TreeDX dev loop)'
+// The message names the WHOLE prerequisite, because the loop used to stop at
+// "no TreeDX checkout" and leave a human to find the repo URL themselves; `up` now
+// clones treeseed-ai/treedx into examples/treedx on its own (#54), so one command is
+// genuinely all that is missing here.
+const SKIP = configured
+  ? false
+  : 'not configured — run scripts/treedx-local.sh up && scripts/treedx-local.sh token '
+    + '(clones examples/treedx from https://github.com/treeseed-ai/treedx.git if absent, builds the dev-auth image, writes var/treedx-dev.env; docs/development.md § TreeDX dev loop)'
 let root = ''
 const REPO = 'dsh-kb-live'
 const RUN = Date.now().toString(36) // unique file names per run; the pool accumulates
@@ -69,6 +76,25 @@ before(async () => {
     healthy = health.ok
   } catch { healthy = false }
   assert.ok(healthy, `TreeDX is configured (${BASE}) but unreachable — boot it with scripts/treedx-local.sh up, or unset TREEDX_LIVE_URL`)
+  // HEALTH IS NOT WARMTH. The service answers /health as soon as the Elixir endpoint is
+  // up, while the FIRST data-plane call still waits on the Rust NIF / repo store to
+  // initialize — measured on a freshly built stack: the exit-criterion test died at
+  // 10.1s (the provider's own fetchTimeoutMs) while the identical test ran in 0.6s one
+  // minute later. A cold-start artifact surfacing as a transport failure is a lie about
+  // the code, so the setup waits for the data plane to actually answer, with a generous
+  // budget, and says so if it never does. No assertion below was touched.
+  let warm = false
+  const warmDeadline = Date.now() + Number(process.env.TREEDX_LIVE_WARM_MS ?? 180_000)
+  while (!warm && Date.now() < warmDeadline) {
+    try {
+      const probe = await fetch(`${BASE}/api/v1/repos`, {
+        headers: { authorization: `Bearer ${TOKEN}` }, signal: AbortSignal.timeout(5000),
+      })
+      warm = probe.status < 500
+    } catch { warm = false }
+    if (!warm) await new Promise((r) => setTimeout(r, 2000))
+  }
+  assert.ok(warm, `TreeDX is healthy but its data plane never answered within ${process.env.TREEDX_LIVE_WARM_MS ?? 180000}ms — this is a cold container, not a transport bug; check 'docker logs' or raise TREEDX_LIVE_WARM_MS`)
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'treedx-live-'))
   const created = await fetch(`${BASE}/api/v1/repos`, {
     method: 'POST',
