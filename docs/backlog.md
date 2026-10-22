@@ -237,6 +237,21 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
    alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
    that starts working at the alias is used with no edit.
+2a-1. **The knowledge-loop journey cannot reach the door after two commands run** — precise,
+   measured 2026-10-22. `suite` now dies at `forkDoor(page).click()` waiting for
+   `button[aria-label="Fork with chapters"]:visible, last` for 25 minutes, with the upstream
+   journal showing **44 completed answers, 0 throttles, 0 deadlines** — so it is not quota and
+   not the model. What the journey does between the last assistant message and the click:
+   `/chapters-link`, then `/chapters-status`. Those render as command **flow nodes**, so after
+   them the last assistant chat row is no longer the newest actionable node, and the door row
+   on it is not `:visible` (host action rows appear to be gated on the newest/hovered message —
+   the fork journey, which forks right after ONE turn, clicks the same helper without issue).
+   FIX (rig, not assertion-weakening): select the door **scoped to the last assistant message**,
+   scrolling/hovering that message first — the same affordance a human uses — rather than
+   "the last visible door in the document". Keep `forkDoor` as the single selector so all four
+   journeys move together, and keep the `toBeVisible` assertions: a door nobody can reach is a
+   real defect, whether the cause is the plugin or the client's hover gating.
+
 2a. **On 0.2.x the switch to a forked child is a silent no-op, and the child never
    appears in the session list** — measured 2026-10-22 against the CURRENT build (host
    0.2.0-rc.2, plugin link-verified by the new boot guard). The door announces success
