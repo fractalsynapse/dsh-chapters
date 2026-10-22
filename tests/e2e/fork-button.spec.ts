@@ -15,8 +15,19 @@ import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, E2E_REGIS
  * happened. One runner, two rows — src/client/doors.ts.
  */
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const registry = () => JSON.parse(fs.readFileSync(E2E_REGISTRY, 'utf8')) as
-  { tables: { sessions: Record<string, { parentSession?: string | null }> } }
+// A fresh home has NO registry file until the first archive writes it — which is exactly
+// what the poll below waits for. Throwing ENOENT on the first tick kills the poll on line 1
+// and reports "the fork did nothing" when the truth is "nothing has been written yet"
+// (from #54, same class as the v3/v4 log path). Absence is a zero, stated as a zero.
+const registry = (): { tables: { sessions: Record<string, { parentSession?: string | null }> } } => {
+  try {
+    return JSON.parse(fs.readFileSync(E2E_REGISTRY, 'utf8')) as
+      { tables: { sessions: Record<string, { parentSession?: string | null }> } }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { tables: { sessions: {} } }
+    throw error
+  }
+}
 const childCount = () => Object.values(registry().tables.sessions).filter((s) => typeof s.parentSession === 'string').length
 const sessDir = E2E_SESS_DIR
 
