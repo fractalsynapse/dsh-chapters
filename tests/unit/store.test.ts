@@ -110,3 +110,33 @@ test('ensureStoreGitignore adds once, no-ops when present, creates when absent',
     await rm(base, { recursive: true, force: true })
   }
 })
+
+test('#71 deleteSetting: with table delete it REMOVES the row (absent ≠ stored-empty); without it, it refuses loudly', async () => {
+  const withDelete = fakeDomain()
+  // the shared fake table lacks delete — the refusal arm first:
+  const store1 = makeDomainStore(withDelete.domain)
+  await store1.putSetting('prompt.model', 'p/m')
+  assert.equal(store1.getSetting('prompt.model'), 'p/m')
+  await assert.rejects(() => store1.deleteSetting('prompt.model'), /lacks delete/)
+  assert.equal(store1.getSetting('prompt.model'), 'p/m', 'the refusal changed nothing')
+
+  // a table that DOES answer delete (every supported host — the 0.2.x domain contract):
+  const map = new Map<string, any>()
+  const domain: DomainLike = {
+    table() {
+      return {
+        get: (k: string) => map.get(k),
+        put: async (k: string, v: unknown) => { map.set(k, structuredClone(v)) },
+        delete: async (k: string) => map.delete(k),
+        entries: () => map.entries(),
+        get size() { return map.size },
+      } as never
+    },
+    close: async () => {},
+  }
+  const store2 = makeDomainStore(domain)
+  await store2.putSetting('prompt.model', '')
+  assert.equal(store2.getSetting('prompt.model'), '', 'stored empty is the OFF state')
+  await store2.deleteSetting('prompt.model')
+  assert.equal(store2.getSetting('prompt.model'), undefined, 'delete is the ABSENT state — config falls back')
+})

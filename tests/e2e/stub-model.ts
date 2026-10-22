@@ -45,6 +45,18 @@ export interface StubHandle { url: string; port: number; close: () => Promise<vo
  */
 export const PLAN_TRIGGER = 'Present your plan with the exit_plan_mode tool now'
 
+/**
+ * #71: the phrase that identifies a PROMPT-RECOMMENDATION call — the second
+ * reader's persona line that `src/prompt.ts` `buildSuggestInput` always opens
+ * with. Shared constant, same discipline as PLAN_TRIGGER: the stub and the
+ * journey must key on the same bytes the product writes.
+ */
+export const SUGGEST_TRIGGER = 'second reader of a DSH session'
+
+/** The recommendation the scripted reader answers with; the journey asserts the
+ *  ghost shows EXACTLY this text. Plain prose, under the 240-char cap. */
+export const SUGGESTION = 'Add a regression row proving the composer ghost hides the moment a draft is typed'
+
 export const STUB_MODEL = 'stub-plan-carriage'
 
 /** The plan the scripted model submits: ordinary markdown, no secrets, no live paths. */
@@ -71,6 +83,8 @@ const PLAN_TOOL = 'exit_plan_mode'
 export type StubDecision =
   | 'title'
   | 'plan'
+  /** #71: the prompt-recommendation call — answers with SUGGESTION, one line */
+  | 'suggest'
   | 'after-approval'
   /** in plan mode, but answering plainly — no submission, so the mode STAYS active */
   | 'plain'
@@ -106,6 +120,10 @@ export function decide(body: { messages?: unknown[]; [k: string]: unknown }): { 
   const messages = Array.isArray(body.messages) ? body.messages : []
   const first = messages[0] as { content?: string } | undefined
   if (typeof first?.content === 'string' && first.content.includes(TITLE_SYSTEM)) return { kind: 'title' }
+  // #71: the second reader answers a SINGLE user message with no tools — key on
+  // its persona phrase before the conversation arms, so nothing else can claim it.
+  if (messages.some((m) => (m as { role?: unknown }).role === 'user'
+    && userText(m).includes(SUGGEST_TRIGGER))) return { kind: 'suggest' }
   const tools = messages.map(toolText).filter((t) => t !== '')
   const lastTool = tools.length > 0 ? tools[tools.length - 1]! : ''
   const lastUser = [...messages].reverse().map((m) => (m as { content?: unknown }).content).find((c) => typeof c === 'string') as string | undefined
@@ -239,6 +257,10 @@ export function startStubModel(opts: { port?: number } = {}): Promise<StubHandle
         for (const p of pieces.slice(1)) res.write(sseToolArg(id, created, model, p))
         completion = Math.max(30, Math.round(args.length / 4))
         res.write(sseFinish(id, created, model, 'tool_calls'))
+      } else if (decision.kind === 'suggest') {
+        res.write(sseText(id, created, model, SUGGESTION))
+        completion = Math.ceil(SUGGESTION.length / 5)
+        res.write(sseFinish(id, created, model, 'stop'))
       } else if (decision.kind === 'plain') {
         res.write(sseText(id, created, model, 'In plan mode, and nothing to plan yet — answering in one sentence without touching any tool.'))
         completion = 16

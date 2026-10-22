@@ -129,6 +129,16 @@
 #                                  # THIS machine (approval = per-machine
 #                                  # curation fact, record §15)
 #
+#   # ---- prompt recommendations (#71, site §28) ----------------------------
+#   promptModel: ''                # the model that DEFINES the next work.
+#                                  # '' ⇒ the feature does not exist (zero calls,
+#                                  # zero surface); setting one IS the enable.
+#                                  # Runtime: /chapters-prompt model <p/m|clear>
+#   promptContextChars: 4000       # hard budget on the assembled input slice
+#                                  # (chapter summaries + screened live tail)
+#   promptMaxChars: 240            # cap on the recommendation; over-cap ⇒ retry
+#                                  # once ⇒ refuse with numbers, never truncate
+#
 #   # ---- transport (2026-09-21 provider-seam amendment) -------------------
 #   knowledgeProvider: 'auto'      # 'auto' | 'git' | 'treedx'; 'auto' dispatches
 #                                  # on the remote scheme (treedx+ → TreeDX),

@@ -107,6 +107,7 @@ export default defineConfig({
           { label: '7. Continuation budget math', slug: 'concepts/budget' },
           { label: '8. Recursive context theory', slug: 'concepts/recursive-context' },
           { label: '9. Anatomy of the archive', slug: 'concepts/archive-anatomy' },
+          { label: '28. Prompt recommendations', slug: 'concepts/prompt-recommendations' },
         ]},
         { label: 'Part III · The Knowledge Layer', items: [
           { label: '10. The pool', slug: 'knowledge/pool' },

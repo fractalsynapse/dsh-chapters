@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # CI acceptance: replay the committed model tapes — no local model, no GPU, no
 # LLM API key. Every model turn is served by tests/e2e/model-proxy.ts from the
-# committed corpus under tests/fixtures/model-tape/<project>/ (eight projects:
-# suite, fork, heavy, arrival, enrich, fanout, rules, plans). A tape MISS is a loud proxy
+# committed corpus under tests/fixtures/model-tape/<project>/ (nine projects:
+# suite, fork, heavy, arrival, enrich, fanout, rules, plans, prompt). A tape MISS is a loud proxy
 # 503 that fails the run; with E2E_MODEL=replay (and no E2E_TAPE_FALLBACK=1)
 # the proxy never reaches a live server — this proves the acceptance suite
 # green on a machine with no model present.
@@ -67,9 +67,9 @@ npm run build
 # Chromium for Playwright, cached in the workspace so it survives across steps.
 PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
 
-# Strict tape replay across all EIGHT projects (seven model-distilled + the plans
-# carriage, whose tape is scripted-upstream distilled — tests/fixtures/model-tape/plans/
-# PROVENANCE.md); any miss fails the chain.
+# Strict tape replay across all NINE projects (seven model-distilled + the plans
+# carriage and the prompt ghost, whose tapes are scripted-upstream distilled —
+# tests/fixtures/model-tape/*/PROVENANCE.md); any miss fails the chain.
 #
 # A red chain has to name its project (the lesson of the 0.1.9 ship): playwright's
 # diagnosis goes to stdout, the job's other artifact is behind a token, and "Process
@@ -111,4 +111,4 @@ if [[ "$STATUS" -ne 0 ]]; then
   echo "::error::${DIAG:0:16000}"
   exit "$STATUS"
 fi
-echo "ci-replay: PASS — eight browser projects replayed green on committed tapes, no LLM present."
+echo "ci-replay: PASS — nine browser projects replayed green on committed tapes, no LLM present."

@@ -163,6 +163,12 @@ export interface DomainLike {
   table(name: 'settings'): {
     get(key: string): { value: string } | undefined
     put(key: string, value: { value: string }): Promise<void>
+    /** Row removal (host table verb — dsh-storage-domain `delete(key)`). #71: a
+     *  `model clear` must RESTORE the config fallback, which a stored value cannot
+     *  express — `''` is the deliberate OFF state, deletion is the ABSENT state.
+     *  Optional only so pre-delete fakes keep compiling; the store refuses loudly
+     *  at the call site when the host table lacks it (every supported host has it). */
+    delete?(key: string): Promise<boolean>
     entries(): IterableIterator<[string, { value: string }]>
     readonly size: number
   }
@@ -202,6 +208,9 @@ export interface RegistryStore {
   /** Durable kv (P2: enrichment model override). */
   getSetting(key: string): string | undefined
   putSetting(key: string, value: string): Promise<void>
+  /** Remove a kv row entirely (#71): `clear` restores the config fallback, which
+   *  a stored value cannot express — stored `''` means deliberately OFF. */
+  deleteSetting(key: string): Promise<void>
   /** P3 §7.1 rule records (status is NOT here — per-machine curation facts, §15). */
   rules(): IterableIterator<[string, import('./rules.ts').RuleRecord]>
   getRule(id: string): import('./rules.ts').RuleRecord | undefined
@@ -292,6 +301,13 @@ export function makeDomainStore(domain: DomainLike): RegistryStore {
     },
     async putSetting(key, value) {
       await settings.put(key, { value })
+    },
+    async deleteSetting(key) {
+      const del = (settings as { delete?: (k: string) => Promise<boolean> }).delete
+      if (typeof del !== 'function') {
+        throw new Error('settings table lacks delete — cannot restore the config default (host too old)')
+      }
+      await del.call(settings, key)
     },
     rules() {
       return rules.entries()

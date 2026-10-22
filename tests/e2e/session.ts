@@ -66,8 +66,16 @@ export async function localModelUp(): Promise<boolean> {
       return false
     }
   }
+  // A LOCAL custom upstream (the scripted stub on its own port — #71's distill,
+  // and any `E2E_UPSTREAM=http://127.0.0.1:<port>` run) must be probed AT THAT
+  // PORT. Answering "is the model reachable?" by probing :8080 regardless is the
+  // same silent-skip bug the remote branch above was fixed for — measured 2026-10-22:
+  // the prompt journey refused to run TWICE with a healthy stub on :8081. The row in
+  // tests/unit/tape-proxy-upstream-key.test.ts that pinned the old :8080-probe changed
+  // with it, reason in its comment.
+  const localBase = base !== '' && /^https?:\/\/(localhost|127\.|\[::1\])/.test(base) ? base : 'http://localhost:8080'
   try {
-    const r = await fetch('http://localhost:8080/v1/models', { signal: AbortSignal.timeout(3000) })
+    const r = await fetch(`${localBase}/v1/models`, { signal: AbortSignal.timeout(3000) })
     return r.ok
   } catch {
     return false

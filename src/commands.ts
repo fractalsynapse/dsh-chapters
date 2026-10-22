@@ -9,6 +9,7 @@
  *   /chapters-link treedx+<url>/<repo> <token>  bind a TreeDX service upstream
  *   /chapters-status                            last sync result
  *   /chapters-enrich run | model … | report     P2 enrichment surface (record §6.2)
+ *   /chapters-prompt model … | off | suggest    prompt recommendations (#71, site §28)
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,6 +25,8 @@ import { readState } from './treedx/state.ts'
 import { selectProvider } from './provider.ts'
 import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
+import type { PromptCommandSurface } from './prompt.ts'
+import type { SessionEventLike } from './types.ts'
 import { resolveStoreRoot } from './store.ts'
 import { diagnosticStatusLine } from './diag.ts'
 import { registryHealth } from './repair.ts'
@@ -50,6 +53,9 @@ export interface HostCommandsConfig {
   /** Door 5 (issue #47): whether subagent settlements auto-archive. Reported in
    *  /chapters-status because it runs WITHOUT a human seeing it happen. */
   subagentAutoSave?: boolean
+  /** #71: prompt recommendations surface (host plane; pull transport — the
+   *  client composer ghost executes `suggest`). Reported by /chapters-status. */
+  prompt?: PromptCommandSurface
   /** §7.8: fed to `resolveProject` so the identity line reports the SAME key the
    * plugin binds by, not a naive re-derivation. */
   projectKeyOverride?: string
@@ -304,6 +310,7 @@ export function registerHostCommands(
       // whether enrichment is off, broken, or simply not printed here — which is how "the feature never
       // ran" hides for three days behind a logger nobody reads.
       lines.push(config.enrich !== undefined ? config.enrich.statusLine() : 'Enrichment: not wired on this plane (no model route registered)')
+      lines.push(config.prompt !== undefined ? config.prompt.statusLine() : 'Prompt suggestions: not wired on this plane')
       lines.push(diagnosticStatusLine())
       lines.push(AUTO_SAVE_LINE(config))
       // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
@@ -371,6 +378,54 @@ export function registerHostCommands(
     },
   }
 
+  const promptCommand = {
+    name: 'chapters-prompt',
+    description: 'Prompt recommendations (#71, site \u00A728): set the defining model, turn the composer ghost off, or answer the client\u2019s pull.',
+    input: { hint: 'model [provider/model | clear] | off | suggest' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
+      if (config.prompt === undefined) return { kind: 'error', text: 'prompt recommendations are not wired on this plane' }
+      const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((p) => p.length > 0)
+      const verb = parts[0] ?? 'help'
+      try {
+        if (verb === 'model') {
+          const arg = parts[1]
+          if (arg === undefined) {
+            const { spec, source } = config.prompt.effective()
+            return { kind: 'success', text: spec === ''
+              ? `prompt model: OFF${source === 'override' ? ' (stored override — /chapters-prompt model <provider/model> to enable)' : ' (unset — set one with /chapters-prompt model <provider/model>)'}`
+              : `prompt model: ${spec} (${source}) — ON` }
+          }
+          if (arg === 'clear') {
+            await config.prompt.setModel(null)
+            const { spec } = config.prompt.effective()
+            return { kind: 'success', text: spec === ''
+              ? 'prompt model override cleared — the config default is unset, so suggestions are OFF'
+              : `prompt model override cleared — now following the config default (${spec}, ON)` }
+          }
+          await config.prompt.setModel(arg)
+          return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables)` }
+        }
+        if (verb === 'off') {
+          await config.prompt.setModel('')
+          return { kind: 'success', text: 'prompt suggestions OFF (stored override; /chapters-prompt model clear restores the config default)' }
+        }
+        if (verb === 'suggest') {
+          const holder = invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }
+          const sess = holder.session ?? holder.agent?.session
+          if (sess?.id === undefined) return { kind: 'error', text: 'suggest needs a session scope — run it inside a session (the composer ghost calls this verb; humans rarely do)' }
+          const events = (sess.snapshotEvents?.() ?? []) as readonly SessionEventLike[]
+          const titleEvent = [...events].reverse().find((e) => e.type === 'session/title')
+          const title = titleEvent !== undefined && typeof titleEvent.data.title === 'string' ? titleEvent.data.title : undefined
+          const r = await config.prompt.suggest({ id: sess.id, title, events: [...events] })
+          return r.ok ? { kind: 'success', text: r.text } : { kind: 'error', text: r.text }
+        }
+        return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest' }
+      } catch (error) {
+        return { kind: 'error', text: `chapters-prompt failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+      }
+    },
+  }
+
   try {
     const d1 = commands.register(linkCommand)
     if (typeof d1 === 'function') disposers.push(d1 as () => void)
@@ -378,6 +433,8 @@ export function registerHostCommands(
     if (typeof d2 === 'function') disposers.push(d2 as () => void)
     const d3 = commands.register(enrichCommand)
     if (typeof d3 === 'function') disposers.push(d3 as () => void)
+    const d3b = commands.register(promptCommand)
+    if (typeof d3b === 'function') disposers.push(d3b as () => void)
     if (config.rules !== undefined) {
       const rulesFn = config.rules
       const rulesCommandDef = {

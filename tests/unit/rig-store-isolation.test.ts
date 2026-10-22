@@ -48,3 +48,17 @@ test('the CI guard exists and compares a directory listing (#61 item 8)', async 
   assert.match(src, /snapshot|verify/, 'two modes: snapshot before the suite, verify after')
   assert.match(src, /\.dsh-chapters/, 'and what it guards is the production store root')
 })
+
+test('#71: promptModel is written ONLY when pinned, and a rerun still replaces the row', () => {
+  const off = applyRigPluginPatch(PROVIDER_ROW, { storeRoot: '/x/off' })
+  assert.ok(!off.includes('promptModel'), 'a boot without the pin has NO prompt config — the OFF state is the default boot')
+  const on = applyRigPluginPatch(PROVIDER_ROW, { storeRoot: '/x/on', promptModel: 'local/qwen3.8-flash-next' })
+  assert.match(on, /promptModel: local\/qwen3\.8-flash-next/)
+  // rerun with the pin OFF must REMOVE the line, not leave yesterday's enable behind:
+  const rerun = applyRigPluginPatch(on, { storeRoot: '/x/on' })
+  assert.ok(!rerun.includes('promptModel'), 'a stale promptModel surviving a rerun would silently enable a model call')
+  // and rerun with a different model replaces rather than duplicates:
+  const twice = applyRigPluginPatch(on, { storeRoot: '/x/on', promptModel: 'other/model' })
+  assert.equal((twice.match(/promptModel:/g) ?? []).length, 1)
+  assert.match(twice, /promptModel: other\/model/)
+})

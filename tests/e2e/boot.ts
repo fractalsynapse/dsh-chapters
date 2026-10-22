@@ -71,13 +71,16 @@ export const e2eHome = (port: number): string => path.join(ROOT, 'var', `e2e-hom
  */
 export const rigStoreRoot = (port: number): string => path.join(e2eHome(port), 'chapters')
 
-export function applyRigPluginPatch(existing: string, opts: { storeRoot: string }): string {
+export function applyRigPluginPatch(existing: string, opts: { storeRoot: string; promptModel?: string | undefined }): string {
   const row = `- id: '@treeseed/dsh-chapters'
   config:
     # per-boot absolute store root (#61): the acceptance chain must never write
     # into the project's real .dsh-chapters/ tree. The host merges a patch row by id.
     artifactStoreRoot: ${opts.storeRoot}
-`
+${opts.promptModel !== undefined ? `    # #71: the ghost journey boots WITH a defining model —
+    # setting one IS the enable (site §28). Absent otherwise: the feature must not exist.
+    promptModel: ${opts.promptModel}
+` : ''}`
   // Drop OUR previous row, indentation and all, so reruns replace rather than duplicate — a second
   // row for the same id would leave "which one wins" up to the host's merge order. Line-scanned
   // rather than regex-matched across newlines: the readable version of this rule is the one that
@@ -107,6 +110,10 @@ export interface Pins {
   noAuxModel?: boolean
   enrichment?: boolean
   toolResultArtifactTokens?: string
+  /** #71: boot WITH the prompt ghost enabled — the rig writes the defining
+   *  model into the plugin's config row. Absent ⇒ the row is absent ⇒ the
+   *  feature does not exist on that boot (which is itself the OFF-state test). */
+  promptModel?: string
 }
 
 export interface BootHandle {
@@ -200,7 +207,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const anchor = await importedCorpusAnchor()
     if (anchor !== null && anchor.anchored !== true) {
       throw new Error(`e2e: the tape corpus is NOT anchored to this host — ${String(anchor.reason)}. `
-        + `Re-distill the eight projects (scripts/distill-tapes.sh) and update tests/fixtures/model-tape/CORPUS_HOST; `
+        + `Re-distill the nine projects (scripts/distill-tapes.sh) and update tests/fixtures/model-tape/CORPUS_HOST; `
         + `tracked by ${String(anchor.tracking ?? 'docs/backlog.md')}. Recording is allowed (E2E_MODEL=record); replay is not.`)
     }
   }
@@ -251,7 +258,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       p = p.replace(/contextWindow: \d+/g, 'contextWindow: 32000').replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
       // #61 item 8: THIS boot's chapters go to this port's home, never to the repo's store root.
-      p = applyRigPluginPatch(p, { storeRoot: rigStoreRoot(port) })
+      p = applyRigPluginPatch(p, { storeRoot: rigStoreRoot(port), ...(pins.promptModel !== undefined ? { promptModel: pins.promptModel } : {}) })
       fs.writeFileSync(patchPath, p)
     }
   }

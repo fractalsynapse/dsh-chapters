@@ -38,10 +38,10 @@ if [[ -z "${E2E_UPSTREAM:-}" ]]; then
 fi
 
 # project:port:threshold:extra — mirrors `npm run test:e2e`'s pins exactly
-declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738)
-declare -A THRESH=([suite]=0.75 [heavy]=0.5 [arrival]=0.9 [enrich]=0.9 [fanout]=0.75 [rules]=0.9 [fork]=0.75 [plans]=0.99)
-declare -A EXTRA=([heavy]="E2E_FLOOR=1000000" [arrival]="E2E_FLOOR=500" [enrich]="E2E_ENRICH=1" [plans]="E2E_NO_AUX_MODEL=1")
-ORDER=(suite heavy arrival enrich fanout rules fork plans)
+declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739)
+declare -A THRESH=([suite]=0.75 [heavy]=0.5 [arrival]=0.9 [enrich]=0.9 [fanout]=0.75 [rules]=0.9 [fork]=0.75 [plans]=0.99 [prompt]=0.99)
+declare -A EXTRA=([heavy]="E2E_FLOOR=1000000" [arrival]="E2E_FLOOR=500" [enrich]="E2E_ENRICH=1" [plans]="E2E_NO_AUX_MODEL=1" [prompt]="E2E_NO_AUX_MODEL=1 E2E_PROMPT=1")
+ORDER=(suite heavy arrival enrich fanout rules fork plans prompt)
 want=("${@:-}")
 [[ -z "${want[0]:-}" ]] && want=("${ORDER[@]}")
 

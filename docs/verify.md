@@ -337,3 +337,56 @@ transport registry). The first push against a real remote is therefore a
 If isomorphic-git ever chokes on a specific forge's smart-HTTP, the documented
 fallback is a CLI driver (the `GitDriver` seam in `src/gitops.ts` exists for
 exactly this swap) — the loop's logic is driver-agnostic by design.
+
+## Prompt recommendations (#71) — SPEC + verification rows
+
+Interface: site §28 (`concepts/prompt-recommendations`); host facts in `docs/contract.md`
+§ Composer Ghost Layer. Off by default — **the effective model string non-empty IS the
+enable**; there is deliberately no second boolean.
+
+Deterministic rows (each must be proven to fail on the mutation it guards):
+
+| Row | Pins |
+|---|---|
+| enable derivation | `effectiveModel = setting('prompt.model') ?? config.promptModel`; empty or unset ⇒ OFF, and a stored empty override beats a non-empty config (`off` verb) |
+| input assembly | chapter summaries first, then the live tail; total ≤ `promptContextChars`; host-injected spans defused BEFORE the cap; deterministic order (same input ⇒ same bytes) |
+| answer validation | trim → reject empty → reject > `promptMaxChars` → ONE retry with the cap restated → refuse with the measured length. Never truncate |
+| cache & watermark | one entry per session keyed by the last completed `turn/end` seq; fresh hit ⇒ zero llm calls; new turn ⇒ recompute on next ask; in-flight dedup shares one promise |
+| command arms | `model` show/set/clear texts, `off`, `suggest` refusals (off / no route / not computable / model failure) each name their remedy |
+| status line | `/chapters-status` prints ON with the model + source, or OFF — both states, linked store or not |
+| client pure logic | `shouldShowGhost` matrix: enabled ∧ !running ∧ draft==='' ∧ hasText ∧ !suppressed/boundary; accept ⇒ setDraft; typing ⇒ hidden; Esc ⇒ suppressed until the boundary moves |
+| client anti-dup | `src/client/index.ts` contains no `commands.execute` for the ghost either — the wire body lives in `src/client/prompt-ghost.ts` ONE time, mirroring the door-runner rule (tests/unit/client-doors.test.ts pattern) |
+| honesty | a suggestion never reaches a chapter file, the notice, the pool, or any model request: an archived session that used the feature contains zero recommendation bytes |
+
+Manual browser procedure (browser-plane claim stays **gated by #56** — the corpus must be
+re-anchored before replay can vouch for it):
+
+1. `/chapters-prompt model local/qwen3.8-flash` (or a cloud route) ⇒ expect "…enables the feature".
+2. Finish a turn, idle with an empty draft ⇒ the ghost line appears dimmed inside the
+   composer card, labeled with the model; the host placeholder is HIDDEN beneath it (draft
+   empty ⇒ host placeholder visible — our layer renders over it; if both are readable at
+   once, that is a styling bug).
+3. Type one character ⇒ ghost gone instantly; delete it ⇒ ghost back (while not accepted).
+4. Click into the editor, press Right-arrow ⇒ suggestion lands as real draft text, cursor
+   at its end; nothing sends. Enter sends as a normal human message — then verify in the
+   log that the message is plain human-authored.
+5. Esc on a fresh ghost ⇒ hidden for this turn; send any turn ⇒ boundary moves, a new offer
+   may come.
+6. `/chapters-prompt off` ⇒ ghost never reappears in this or later sessions, `suggest`
+   refuses; `/chapters-status` says OFF.
+7. Kill the model route (wrong provider) ⇒ ghost hidden, refusal only in command output, no banner.
+
+**Distilled, observed, AND replay-verified 2026-10-22** (`prompt-suggestion.spec.ts`, project `prompt`,
+port 41739): the scripted-upstream record run PASSED in a real browser on host 0.2.0-rc.2 — chip visible
+with the suggestion, hidden by one typed character, re-shown on an emptied draft, Escape dismissed
+boundary 1, the next boundary re-armed, ArrowRight accepted into the draft via the host's own
+`InputActions.setDraft`, Enter sent it, and the log held the human message with zero persona bytes.
+A true `E2E_MODEL=replay` run then passed with ALL SIX requests served from tape and zero misses
+(corpus gate lifted for that check ALONE and restored byte-identical — the committed gate still
+refuses the chain until #56 re-anchors the other eight; `tests/fixtures/model-tape/prompt/PROVENANCE.md`). The distill ALSO caught a rig bug worth remembering: `localModelUp` answered "no upstream" while a
+healthy stub ran on the `E2E_UPSTREAM` port — the guard probed :8080 for any LOCAL base, the same
+silent-skip family #54 fixed for remotes. A ROW had pinned that behavior ("loopback is answered on
+:8080, not by E2E_UPSTREAM") — and the row was measured WRONG in use, twice, by this very journey
+refusing to run against a live stub. Per the house rule (change obsolete behavior with its tests):
+the row now pins probe-the-actual-base for local upstreams, plus a dead-local-port NO arm, with the
+reason in its comment. The guard lying by REFUSING is the same disease as lying by nodding.

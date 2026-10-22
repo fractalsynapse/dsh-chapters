@@ -186,6 +186,23 @@ turns have piled up past its watermark. It creates no session and compacts nothi
 mid-step; a session that never trips a moment is unretrievable, and the field case was 2,363 events with
 zero chapters. Close it with `childAutoArchive: false`.
 
+## `/chapters-prompt` — the recommending model ([§28](/concepts/prompt-recommendations/))
+
+```
+/chapters-prompt                             # usage + the current state (ON with model / OFF)
+/chapters-prompt model                       # show the effective model and its source (override or config)
+/chapters-prompt model <provider/model>      # set it — setting a model is what ENABLES the feature
+/chapters-prompt model clear                 # drop the override; falls back to `promptModel` ('' ⇒ off)
+/chapters-prompt off                         # disable regardless of config (stores the empty override)
+/chapters-prompt suggest                     # machine verb: the composer ghost pulls this; ≤ one bounded call per turn boundary
+```
+
+`suggest` is the client's door: it answers `{kind:'success', text:<one prompt>}` when a
+recommendation is current or computable, and refuses with the remedy (`off`, no route, model
+failure, over-cap answer) when it is not. A refusal latches the ghost hidden for the turn
+boundary — the disabled state shows nothing, ever. `/chapters-status` prints the feature's
+state beside enrichment and rules.
+
 ## Plus the host's `/compact`
 
 With the `chapters` agent preset mounted, `/compact` runs through the plugin's deterministic engine: checkpoint summary with carried plot, zero inference tokens, append-only shadowing. (The harness's own command surface, ours underneath.)

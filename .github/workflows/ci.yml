@@ -28,6 +28,7 @@ jobs:
       # PUBLIC registry — no install secret and no private-registry config.
       - run: npm ci
       - run: npm run typecheck
+      - run: npm run typecheck:client
       - run: npm run build
       # The gate IS the contract: c8 --check-coverage fails the job below
       # 85% on statements, branches, functions (and lines). Current ledger:
@@ -87,7 +88,7 @@ jobs:
             {
               echo "### acceptance chain SKIPPED: the tape corpus is not anchored to the pinned host"
               echo
-              echo "Tape prefixes contain the host's system-prompt composition, so a corpus distilled against an older host cannot replay against this one — the failures would belong to an earlier change, not the PR. Refusing by name (never silently green, never permanently red) until \`scripts/distill-tapes.sh\` re-records all eight projects and \`tests/fixtures/model-tape/CORPUS_HOST\` is updated. Tracked by issue #56; the door-selector blocker inside it is #57."
+              echo "Tape prefixes contain the host's system-prompt composition, so a corpus distilled against an older host cannot replay against this one — the failures would belong to an earlier change, not the PR. Refusing by name (never silently green, never permanently red) until \`scripts/distill-tapes.sh\` re-records all nine projects and \`tests/fixtures/model-tape/CORPUS_HOST\` is updated. Tracked by issue #56; the door-selector blocker inside it is #57."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::tape corpus not anchored to the pinned host - acceptance chain skipped (see issue #56)"
           fi
@@ -107,7 +108,7 @@ jobs:
           fi
 
   e2e-replay:
-    name: acceptance — eight tape-replay segments, no LLM
+    name: acceptance — nine tape-replay segments, no LLM
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
@@ -155,7 +156,7 @@ jobs:
       # wants to know whether it left data behind.
       - name: snapshot the production store root
         run: node scripts/assert-store-untouched.mjs snapshot
-      - name: tape replay (eight segments, no LLM)
+      - name: tape replay (nine segments, no LLM)
         run: bash scripts/ci-replay.sh
         env:
           E2E_TAPE_DIFF: ${{ github.workspace }}/var/e2e-tape-diffs

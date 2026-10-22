@@ -35,6 +35,7 @@ import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
+import { createPromptSurface, promptChaptersOf } from './prompt.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
 import { configureDiagnostics, diagnosticStatusLine } from './diag.ts'
@@ -161,6 +162,14 @@ export interface Config {
   rulesAutoActivate: boolean
   /** #50 §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass. */
   rulesModel: string
+  /** #71 site §28: the model that DEFINES the next work. '' ⇒ the feature does
+   * not exist; setting one (here or `/chapters-prompt model …`) IS the enable —
+   * one knob, no second boolean that could drift against it. */
+  promptModel: string
+  /** #71: hard total budget on the assembled suggest input. */
+  promptContextChars: number
+  /** #71: cap on the recommendation itself; over-cap ⇒ retry once ⇒ refuse (never truncate). */
+  promptMaxChars: number
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -256,6 +265,13 @@ export const Config = Schema.object({
   rulesMinedPerChapter: Schema.number().default(3),
   rulesAutoActivate: Schema.boolean().default(true),
   rulesModel: Schema.string().default(''),
+  // #71 prompt recommendations: the model IS the switch (empty ⇒ off); the two
+  // caps bound the auxiliary call's input slice and its answer. The completion
+  // rides the existing enrichmentMaxTokens budget — one auxiliary budget, now
+  // three consumers (annotation, mined rules, recommendations).
+  promptModel: Schema.string().default(''),
+  promptContextChars: Schema.number().default(4000),
+  promptMaxChars: Schema.number().default(240),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -381,6 +397,41 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       log: (m) => ctx.logger?.info?.(`dsh-chapters: ${m}`),
       warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
     })
+    // #71: prompt recommendations, host plane only (the web composer pulls;
+    // headless sessions have no ghost and never pay the call). The route for a
+    // bare model name rides the same last-seen route enrichment uses, with the
+    // persisted route as fallback — a fork-only flow that never compacted in
+    // place still has a provider to route through after one tool call.
+    const prompt = createPromptSurface({
+      getSetting: (k) => store.getSetting(k),
+      putSetting: (k, v) => store.putSetting(k, v),
+      deleteSetting: (k) => store.deleteSetting(k),
+      chaptersOf: async (sessionId) => promptChaptersOf(await store.get(sessionId)),
+      config: {
+        model: config.promptModel,
+        contextChars: config.promptContextChars,
+        maxChars: config.promptMaxChars,
+      },
+      conversationRoute: () => {
+        if (hostRoute !== null) return hostRoute
+        const persisted = store.getSetting('enrichment.route') ?? ''
+        const i = persisted.indexOf('/')
+        return i > 0 ? { provider: persisted.slice(0, i), model: persisted.slice(i + 1) } : null
+      },
+      fetch: async (input, route) => {
+        const llm = ctx.llm
+        if (llm?.stream === undefined) throw new Error('llm.stream absent')
+        const assembler = new BlockAssembler()
+        for await (const chunk of llm.stream({
+          provider: route.provider, model: route.model,
+          messages: [createUserMessage({ content: [{ type: 'text', text: input }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+          maxTokens: config.enrichmentMaxTokens,
+          purpose: 'compaction',
+        })) assembler.push(chunk as never)
+        return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+      },
+      warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
+    })
     const scheduler = createScheduler(store, domain, config, undefined, (cwd, ok) => {
       enrich.rememberCwd(cwd)
       if (ok) enrich.queue.onSyncDone('afterPush')
@@ -426,6 +477,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       projectKeyOverride: config.projectKeyOverride,
       scheduler,
       enrich,
+      prompt,
       rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,
         storeRoot: config.artifactStoreRoot,

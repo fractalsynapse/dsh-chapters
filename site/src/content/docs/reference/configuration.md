@@ -37,6 +37,9 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `rulesModel` | `''` | `'provider/model'` for a **dedicated mining model**: one extra bounded call per chapter, and its answer replaces (never supplements) the annotation pass's rules. `''` ⇒ mine inside the enrichment call, at no extra cost. Runtime: `/chapters-rule model p/m` |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
 | `rulesRelevance` | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |
+| `promptModel` | `''` | the model that **defines** the next work ([§28](/concepts/prompt-recommendations/)). Empty ⇒ the feature does not exist — zero calls, zero surface. Setting it (here, or at runtime with `/chapters-prompt model p/m`) **is** the enable: one knob, no second boolean to drift |
+| `promptContextChars` | 4000 | hard cap on the assembled input slice (registry chapter summaries + the live conversation tail, host-injected context defused first); deterministic order, same discipline as the enrichment input |
+| `promptMaxChars` | 240 | cap on the recommendation the ghost may show. An over-cap answer is retried **once** with the cap restated, then refused — never truncated |
 | — | — | `/chapters-rule conflicts` has **no key of its own**: it runs one bounded stream call on the conversation route the session already has, **report-only**, never edits a rule. No route ⇒ the verb refuses honestly |
 | `continuationBudgetRatio` | 0.25 | TOC + note share of the window *remaining after the header* |
 | `chapterTokenTarget` / `chapterLimit` | 8000 / 8000 | soft per-chapter size / hard split |

@@ -17,7 +17,7 @@ export default defineConfig({
   use: { headless: true, viewport: { width: 1360, height: 900 } },
   globalSetup: './globalSetup.ts',
   projects: [
-    { name: 'suite', testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
+    { name: 'suite', testIgnore: ['**/prompt-suggestion.spec.ts', '**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
     // fork-button rides its OWN boot (2026-09-25, the fanout lesson applied
     // again): knowledge's fork child becomes the workspace's restore target,
     // so a shared boot records/replays whoever ran first's shape — the fork
@@ -61,5 +61,10 @@ export default defineConfig({
     { name: 'enrich', testMatch: ['**/enrich.spec.ts'] },
     // rules: the P3 lifecycle in the browser over a local-path pool.
     { name: 'rules', testMatch: ['**/rules.spec.ts'] },
+    // prompt: #71 — the composer ghost journey. Its boot is the ONLY one that
+    // writes `promptModel` into the plugin row (E2E_PROMPT=1): the feature must
+    // not exist on any other boot, and its absence there is the OFF-state test.
+    // Threshold 0.99 + NO_AUX_MODEL like plans: one journey, no compaction races.
+    { name: 'prompt', testMatch: ['**/prompt-suggestion.spec.ts'] },
   ],
 })

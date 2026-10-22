@@ -220,8 +220,18 @@ test('a remote distill target answers the reachability question, a dead one does
     const dead = await new Promise<number>((r) => { const srv = net.createServer(); srv.listen(0, h, () => { const p = (srv.address() as { port: number }).port; srv.close(() => r(p)) }) })
     process.env.E2E_UPSTREAM = `http://${h}:${dead}`
     assert.equal(await localModelUp(), false, 'an unreachable remote must be a NO, never an assumed yes')
+    // The loopback rule CHANGED with #71, and the old assertion is kept here as the
+    // mutation it guards: a LOCAL `E2E_UPSTREAM` port — the scripted stub's own :8081,
+    // any second stack's alternate — is now probed AT THAT PORT. The pinned old answer
+    // ("answered on :8080, not by E2E_UPSTREAM") was measured WRONG in use: the prompt
+    // journey refused to run twice with a healthy stub answering on 8081, which is the
+    // same silent-skip family the remote branch above was fixed for — a guard lying by
+    // refusing is as bad as one lying by nodding.
     process.env.E2E_UPSTREAM = `http://127.0.0.1:${widePort}`
-    assert.equal(await localModelUp(), false, 'loopback stays the LOCAL stress regime: it is answered on :8080, not by E2E_UPSTREAM')
+    assert.equal(await localModelUp(), true, 'a LOCAL E2E_UPSTREAM port is asked AT THAT PORT (the scripted stub lives there)')
+    const deadLocal = await new Promise<number>((r) => { const srv = net.createServer(); srv.listen(0, '127.0.0.1', () => { const p = (srv.address() as { port: number }).port; srv.close(() => r(p)) }) })
+    process.env.E2E_UPSTREAM = `http://127.0.0.1:${deadLocal}`
+    assert.equal(await localModelUp(), false, 'a dead local port is a NO, fast (loopback refuses, no black hole)')
     process.env.E2E_MODEL = 'replay'
     assert.equal(await localModelUp(), true, 'replay IS the model: reachability never enters it, or a tape miss becomes a skip')
   } finally {

@@ -511,3 +511,54 @@ not stylistic:
 - Manual is MVP. The button path cannot supply model-authored titles or ranges, so segmentation must be
   a plain function callable **without an agent turn** — build that seam in Phase 1, not Phase 5, or the
   UI and automatic paths both force a rewrite.
+
+## Composer Ghost Layer — measured host facts (#71, verified 2026-10-21 against `examples/dsh` @ 0.2.1-rc.2; runtime pin 0.2.0-rc.2, compile deps still 0.1.5-rc.2)
+
+The prompt-recommendation feature renders a ghost layer in the composer. What the host does
+and does not let a plugin do, with anchors:
+
+- **The placeholder text is NOT plugin-writable.** `placeholderText` is computed inside the
+  host's `InputBar.tsx:363-372` (`packages/client/ui-conversation/src/client/skeleton/`): an
+  owner prop (passed only by the host's own `ConversationContent`) ?? offline/disabled/steer
+  states ?? `useProjection('plan')` swap ?? locale defaults. Every string is locale-owned
+  (`client/locales.ts`, enforced upstream by `verify-client-ui-i18n`); no config key, slot,
+  projection input, or service feeds a plugin value into that chain. Plan mode swaps it from
+  host code (`InputBar.tsx:67-68`) — mechanism precedent, not an extension point.
+- **The composer overlay slot is the hole.** `'conversation.input.overlay'` — "floating
+  entries rendered inside the resident composer card", `{ kind: 'list'; scope: 'session' }`
+  (`contract/slots.ts:271-272`), rendered at `InputBar.tsx:404` inside
+  `[data-composer-overlay]`. The shipped slash-menu occupies it
+  (`ui-input-trigger/src/client/index.ts:65`) — registering there is a proven path, and
+  `slots.inject(name, …)` waits for the declaration, same as our assistant-actions door rows.
+- **Standard session props give the composer machine.** Session-scope slot entries receive
+  `useConversation` / `useInput` / `inputActions` (`contract/slots.ts:329-336`); `InputActions`
+  carries `setDraft(text)` ("replace the whole draft with plain text"), `insertText`,
+  `persistDraft`, `submit` (`contract/input.ts:263-291`), and `InputState.draft` is the
+  published draft text (`contract/input.ts`, `InputState`). `useProjection` is on
+  `SessionStandardProps` (`ui-session/src/client/index.ts:166-173`) for the 0.2.x push upgrade.
+- **ArrowRight is free.** The composer keymap registers `KEY_ARROW_UP/DOWN`, `KEY_TAB`,
+  `KEY_ESCAPE`, `KEY_SPACE`, `KEY_ENTER` at `COMMAND_PRIORITY_CRITICAL`
+  (`input/editor/keymap.ts:104-140`); `grep ArrowRight` over `ui-conversation/src/client` is
+  empty on both 0.1.5 and the 0.2.1 checkout. `ComposerKeyboard` itself is
+  "InputBar-exclusive … never across a plugin boundary" (`contract/draft-editor.ts:54-58`),
+  so the plugin's accept gesture attaches a capture-phase `keydown` listener at the DOM level
+  while its ghost is visible — fail-open: if the host ever claims the key or reshapes the DOM,
+  the click-to-accept path still works and nothing else breaks.
+- **Host→client pull channel: `remote.commands.execute(sessionId, line, [])`**, the exact wire
+  the door buttons ride (`src/client/doors.ts`, Playwright-verified; result arm
+  `{value.result.kind/text}`). New **wire events are NOT available to plugins**: the forwarded
+  allowlist is app-owned ("the one home of this application's forwarded-Host-event allowlist",
+  `packages/api/remotes/src/remote-events.ts:24`).
+- **Push transport is 0.2.x-only.** `appendPluginRecord(session, 'plugin:<name>', data)`
+  (`packages/core/session/src/index.ts:492`, grammar/types at `types.ts:525-543`, reader
+  `pluginRecordOf` at `index.ts:508`): durable, append-only, "never enters the model-visible
+  surface", retained by fork/resume, skipped by unknown readers. The `verify-plugin-record-callers`
+  gate is a **source-tree policy inside the dsh repo** ("rejects any other production caller
+  *in this repository*") — it does not and cannot gate an external plugin, and the `plugin:`
+  grammar is precisely the external-plugin carrier. `PluginRecordMap` is declaration-merged
+  (`export interface PluginRecordMap {}`, `types.ts:533`); a `ProjectionDefinition` registered
+  on `ctx.sessionProjections` (the plan/goal pattern; our host plane ALREADY injects
+  `sessionProjections`) folds committed events to client-pushed values. Both APIs are absent
+  from our installed `@deepseek-ai/dsh-session@0.1.5-rc.2` (grep-verified on `lib/types`),
+  which is why #71 ships the PULL transport; the push swap is the backlog item, and it needs
+  the compile-time `@deepseek-ai/*` closure moved to 0.2.x alongside the runtime pin.

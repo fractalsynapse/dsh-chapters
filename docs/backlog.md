@@ -310,3 +310,23 @@ Deliberately NOT acted on in #61: no persona rewrite, no "make the model search 
 persona is a product-prompt surface and every byte of it costs a tape re-distill (#56/#57), so a change
 there needs a measured defect, not an inference from an unused-tool count. If a future project shows
 knowledge that WAS archived and never retrievable when asked for, that is the evidence that opens this.
+
+## #71 prompt recommendations — push transport (follow-up, gated on the compile-deps move)
+
+The feature ships on the PULL transport (`/chapters-prompt suggest` over `remote.commands`,
+the door-proven wire) because our compile-time `@deepseek-ai/*` closure is still
+0.1.5-rc.2, where `appendPluginRecord` / `PluginRecordMap` do not exist (grep-verified;
+facts in `docs/contract.md` § Composer Ghost Layer). When the workspace deps move to 0.2.x
+(they must for `hostSupportsPresetRows`-era work anyway):
+
+1. Merge `SessionProjectionMap['chaptersPrompt']` + `PluginRecordMap['plugin:dsh-chapters/prompt']`
+   in `src/prompt.ts`; at generation, `appendPluginRecord` the whole-value record (durable,
+   append-only, never surface-eligible — invariant 1 honored), register a
+   `ProjectionDefinition` folding it (plan/goal pattern), and have the client read
+   `useProjection('chaptersPrompt')` instead of pulling.
+2. Screen the record type in `src/injections.ts` (host-injected, never archived) and bucket it
+   as un-rendered in the chapter renderer — one predicate, per the #59 rule.
+3. Add a kernel-drift row: plugin records must stay NOT surface-eligible
+   (`isSurfaceEligibleType`), read from the kernel's own exports.
+4. The pull command stays as a manual verb (`suggest` re-arms the ghost); the anti-dup client
+   row keeps the wire body singular either way.

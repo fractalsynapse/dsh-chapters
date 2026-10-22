@@ -17,7 +17,7 @@ dsh plugin --profile web update @treeseed/dsh-chapters   # keep current — rest
 ```
 
 `--profile <name>` is required on every `dsh plugin` command (`web` = the browser harness profile).
-After restart you have the fork button, six agent tools, four `/chapters-*` commands — and the
+After restart you have the fork button, seven agent tools, nine `/chapters-*` commands — and the
 optional `chapters` preset that routes `/compact` through the zero-token engine.
 
 ## Find the right page for your question
@@ -35,6 +35,7 @@ optional `chapters` preset that routes `/compact` through the zero-token engine.
 | read the design rules the system won't break | [§6 The four invariants](https://treeseed-ai.github.io/dsh-chapters/concepts/invariants/) |
 | the theory behind retrieval-over-compression (RLM) | [§8 Recursive context theory](https://treeseed-ai.github.io/dsh-chapters/concepts/recursive-context/) |
 | propose/approve rules for agents | [§13 Rules & governance](https://treeseed-ai.github.io/dsh-chapters/knowledge/rules/) |
+| let a second model propose your next prompt | [§28 Prompt recommendations](https://treeseed-ai.github.io/dsh-chapters/concepts/prompt-recommendations/) |
 | debug something (“seems broken, is it?”) | [§4 FAQ & troubleshooting](https://treeseed-ai.github.io/dsh-chapters/start/faq/) |
 | prompt-cache / llama.cpp behavior | [§21 Cache behavior on llama.cpp](https://treeseed-ai.github.io/dsh-chapters/evidence/llamacpp-cache/) |
 | see measured results (production run + benchmarks) | [§19 Benchmarks](https://treeseed-ai.github.io/dsh-chapters/evidence/benchmarks/) · [§20 Field study](https://treeseed-ai.github.io/dsh-chapters/evidence/field-study/) |

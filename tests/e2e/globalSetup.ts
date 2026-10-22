@@ -14,6 +14,11 @@ export default async function setup(): Promise<() => Promise<void>> {
     ...(process.env.E2E_NO_AUX_MODEL === '1' ? { noAuxModel: true } : {}),
   }
   if (process.env.E2E_ENRICH === '1') pins.enrichment = true
+  // #71: the ghost journey boots WITH a defining model — the profile's local
+  // fixture route, served in replay/record by the tape proxy (the scripted
+  // upstream's `suggest` arm mints it on record). Absent ⇒ the config row is
+  // absent ⇒ the feature does not exist on that boot (the OFF-state test).
+  if (process.env.E2E_PROMPT === '1') pins.promptModel = 'local/qwen3.8-flash-next'
   const floor = process.env.E2E_FLOOR
   if (floor !== undefined) pins.toolResultArtifactTokens = floor
   const handle = await bootE2eServer(port, pins)
