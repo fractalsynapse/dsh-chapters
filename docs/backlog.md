@@ -276,12 +276,20 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    such refusal, and `spikes/seed-admission/` shows host 0.2.0-rc.2 admitting our notice, the
    notice + `plan/mode`, and the notice + `agentOptions` + preset mount (5–6 durable events each)
    while correctly refusing the retired v3 wrapper.
-2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
-   the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
-   `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round
-   added a tool (`chapters_rules`), which changes the header of every recorded session. Extending
-   `rules.spec.ts` with the checkpoint-carriage and continue-vs-fork assertions is part of that job;
-   writing spec assertions that cannot execute would be a false witness.
+2. **The browser plane is blocked by CORPUS PROVENANCE, not by the host any more.** The
+   preset-row refusal is gone — `dev/dsh-host-lock` resolves 0.2.0-rc.2 and
+   `hostSupportsPresetRows()` answers true, so the rig boots the preset and CI's acceptance job
+   RUNS instead of skipping on capability. What stops replay now is that the eight tape projects
+   were distilled against 0.1.5-rc.1, and tape matching is normalized request-PREFIX matching over
+   prompt bytes the host composes. `tests/fixtures/model-tape/CORPUS_HOST` says so in one place,
+   `scripts/corpus-anchor.mjs` reads it, `tests/e2e/boot.ts` refuses REPLAY by name (RECORD stays
+   allowed — a gate that blocked the way out would strand itself), and CI skips the acceptance job
+   with a step summary and a `::warning::`. Lift it by re-distilling all eight
+   (`scripts/distill-tapes.sh`) and updating the record — **issue #56**, with **#57** (door
+   selector scoped to the last assistant message) as the blocker inside it. Extending
+   `rules.spec.ts` with the checkpoint-carriage and continue-vs-fork assertions is still owed, and
+   must be written after the corpus is anchored — spec assertions that cannot execute are a false
+   witness, which is why they are not written preemptively.
 3. **R10 is only partly proven.** Marker rules re-derive off the durable log and dedupe against
    disk, but there is no end-to-end wipe-and-replay row yet.
 
