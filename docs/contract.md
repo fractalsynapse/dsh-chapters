@@ -131,7 +131,9 @@ Published type: `lib/types/types.d.ts:43-54` (`interface SessionEventRecord` —
 
 Read the header, never infer it: `readSession().session` is the kernel's own `SessionHeader` clone, so
 `origin` / `parentSession` / `agentPreset` / `cwd` come from the same observation as the bytes being
-archived — which is what door 5's gate and its `linkChild` lineage need (#58).
+archived — which is what door 5's gate needs (#58). The header is *recorded* on the child's own row
+(`subagent`/`parentSession` frontmatter), not used to re-link the tree — see docs/architecture.md
+§ The archive moments for why `linkChild` was measured and rejected.
 
 And the host's own teardown ordering, which decides **which** arm runs:
 `@deepseek-ai/dsh-subagent/lib/index.js:1240-1250` (continuable) — `flushFinalState` →

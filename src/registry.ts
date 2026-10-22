@@ -195,6 +195,17 @@ export function reservePlan(
  * `session-aac0254e`, and number-only dedupe silently DROPPED the second record while its 960 KB file
  * stayed on disk — a chapter no TOC cites and no tool can find. Refusing is the only honest option.
  */
+/**
+ * The ONE test for "may this chapter be shown as knowledge?" (#60). Every derived layer — the TOC a
+ * child is seeded with, the enrichment queue, anything else that reads `state.chapters` — goes through
+ * this predicate, because a repair that left a husk in the corpus would be a lie a later reader cannot
+ * see past. Records written before this field existed are `undefined`, i.e. active: legacy archives
+ * are never silently hidden by a new filter.
+ */
+export function isActiveChapter(c: { status?: 'superseded' | undefined }): boolean {
+  return c.status !== 'superseded'
+}
+
 export function appendChapters(state: SessionState, records: readonly ChapterRecord[]): SessionState {
   const byNumber = new Map(state.chapters.map((c) => [c.number, c]))
   const fresh: ChapterRecord[] = []

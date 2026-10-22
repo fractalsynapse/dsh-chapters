@@ -67,6 +67,16 @@ export interface ChapterRecord {
   planMode?: 'active' | 'inactive' | 'unknown' | undefined
   /** Where each plan's own `kind: plan` document landed (docs/plans-carriage.md § 11). */
   planDocs?: Array<{ seq: number; path: string; sha256: string }> | undefined
+  /**
+   * Set by repair (#60): this record was superseded by chapter `supersededBy`. A superseded chapter is
+   * NOT knowledge — no TOC bullet, no enrichment pass, no search entry — but its record, its number and
+   * its seqs stay in the registry forever: append-only has no exceptions, and dropping a record would
+   * rewind the watermark (`max(endSeq)+1`) and let a spent number be re-spent (#59).
+   */
+  status?: 'superseded' | undefined
+  supersededBy?: number | undefined
+  /** Why this chapter exists as a replacement, and which number it replaced (`{class, over, at}`). */
+  repairs?: { class: string; over: number; at: number }[] | undefined
 }
 
 export interface WriteResult {
@@ -86,8 +96,13 @@ export const chapterFileName = (n: number, title: string): string =>
   `${String(n).padStart(3, '0')}-${slugify(title)}.md`
 
 /** Idempotency key: the same source session + ceiling reuses reserved numbers instead of duplicating. */
-export const attemptKey = (sourceSessionId: string, archiveCeiling: number): string =>
-  `${sourceSessionId}@${archiveCeiling}`
+/**
+ * The idempotence key for one archive attempt. `salt` exists for REPAIR (#60): a repair re-rendering a
+ * span the original door keyed would otherwise be swallowed as a retry of that attempt, and a swallowed
+ * repair is indistinguishable from one that worked.
+ */
+export const attemptKey = (sourceSessionId: string, archiveCeiling: number, salt?: string): string =>
+  `${sourceSessionId}@${archiveCeiling}${salt !== undefined ? `+${salt}` : ''}`
 
 /** Join without importing path, so the seam stays portable between ctx.fs and node:fs. */
 const join = (...parts: string[]): string =>

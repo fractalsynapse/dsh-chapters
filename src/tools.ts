@@ -8,6 +8,9 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
+import { runRepair, restoreRepair } from './repair-run.ts'
+import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
+import { readDurableSession } from './auto-save.ts'
 import * as path from 'node:path'
 import { estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
@@ -104,7 +107,7 @@ export function buildChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
   config: ToolsConfig,
-): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand } {
+): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand; repairCommand: HostCommand } {
 
   // #52: the delegation edge for rule ancestry, read from whatever this plane can
   // reach (live handles, else the durable session query). undefined ⇒ the walk
@@ -931,7 +934,112 @@ export function buildChaptersTools(
     },
   })
 
-  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand }
+  /**
+   * `/chapters-repair` — the operator door of the repair engine (#60). Read-only unless `apply` is
+   * named, and `apply` still cannot delete or rewrite anything: damage is SUPERSEDED under a new
+   * number, bad files are COPIED to `.repair-quarantine/`, and every run is journalled so `restore`
+   * can walk it backwards (docs/architecture.md § Repair).
+   *
+   * It repairs the sessions of THIS session's project — found by reading each registry row's durable
+   * header through `readDurableSession`, the same payload-bearing seam door 5 uses (#58). Rows whose
+   * log cannot be read are reported as unrecoverable rather than quietly skipped, because "nothing to
+   * repair" and "cannot repair" are different sentences.
+   */
+  const repairCommand: HostCommand = {
+    name: 'chapters-repair',
+    description: 'Audit the archive against the durable log; repair what the registry lost. Read-only by default; never deletes, never rewrites a chapter body.',
+    input: { hint: '[audit | dry-run | apply <all|hollow|gaps|citations|bookkeeping|files> | status | journal [id] | restore <journal-id>]' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
+      const agent = invocation.agent as CallerAgent
+      if (agent?.session === undefined) return { kind: 'error' as const, text: 'chapters-repair: no session context for this invocation' }
+      const cwd0 = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+      if (cwd0 === '') return { kind: 'error' as const, text: 'chapters-repair: this session has no workspace cwd — no store to inspect' }
+      const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((x) => x.length > 0)
+      const verb = parts[0] ?? 'audit'
+      const get = (name: string): unknown => { try { return (ctx as { get?: (n: string) => unknown }).get?.(name) } catch { return undefined } }
+
+      // targets: rows of this project, proven by their OWN durable header (never a path guess)
+      const ids: string[] = []
+      for (const [id] of store.sessions()) {
+        const view = await readDurableSession(get, id)
+        if (view?.header.cwd !== undefined && path.resolve(view.header.cwd) === path.resolve(cwd0)) ids.push(id)
+      }
+      if (ids.length === 0) return { kind: 'error' as const, text: `chapters-repair: no session row under ${cwd0} has a readable durable log — nothing to audit` }
+      // roots this registry claims, so sibling session trees are not reported as litter
+      const roots = (await Promise.all(ids.map(async (id) => (await store.get(id)).rootSession))) as string[]
+
+      if (verb === 'status' || verb === 'journal') {
+        const lines: string[] = []
+        for (const id of ids) {
+          const st = await store.get(id)
+          const dir = path.join(cwd0, config.artifactStoreRoot, st.rootSession, 'repairs')
+          if (!fs.existsSync(dir)) continue
+          for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json'))) {
+            const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as { id: string; completedAt: number | null; findingsBefore: number; findingsAfter: number; entries: unknown[] }
+            lines.push(`${j.id}  ${id.slice(0, 14)}…  ${j.completedAt === null ? 'UNFINISHED' : 'done'}  ${j.findingsBefore}→${j.findingsAfter} findings  ${j.entries.length} move(s)`)
+          }
+        }
+        if (verb === 'journal' && parts[1] !== undefined) {
+          const hit = lines.find((l) => l.startsWith(parts[1]!))
+          return hit !== undefined ? { kind: 'success' as const, text: hit } : { kind: 'error' as const, text: `no journal ${parts[1]} in this project` }
+        }
+        return { kind: 'success' as const, text: lines.length > 0 ? lines.join('\n') : 'no repair journals yet in this project' }
+      }
+
+      if (verb === 'restore') {
+        const jid = parts[1]
+        if (jid === undefined) return { kind: 'error' as const, text: 'restore needs a journal id (see `/chapters-repair status`)' }
+        const results: string[] = []
+        const outcomes2: Array<{ undone: number }> = []
+        for (const id of ids) {
+          const r = await restoreRepair({ store, readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null, cwd: cwd0, config, log: () => {}, warn: (m) => results.push(`! ${m}`) }, jid, id)
+          outcomes2.push(r)
+          if (r.undone > 0 || r.problems.length > 0) results.push(`${id.slice(0, 14)}…: ${r.undone} undone${r.problems.length > 0 ? `; ${r.problems.join('; ')}` : ''}`)
+        }
+        const anyUndone = outcomes2.some((o) => o.undone > 0)
+        return {
+          kind: anyUndone ? 'success' as const : 'error' as const,
+          text: results.length > 0 ? results.join('\n') : `journal ${jid} matched no session row here — files were NOT touched`,
+        }
+      }
+
+      const dryRun = verb !== 'apply'
+      // ONE resolver, shared with the offline script (src/repair.ts). An unknown name is a REFUSAL:
+      // the first version fell through to `[which]`, matched nothing, and reported success while doing
+      // nothing — the silent no-op is the defect class this issue exists to end (#60).
+      const resolved = resolveRepairClasses((parts[1] ?? 'all').split(','))
+      if (resolved.unknown.length > 0) {
+        return { kind: 'error' as const, text: `chapters-repair: unknown class(es) ${resolved.unknown.join(', ')}\n  known: ${Object.keys(REPAIR_CLASS_ALIASES).join(', ')} — nothing was applied` }
+      }
+      const classes = resolved.classes
+      const outcomes: string[] = []
+      let actionable = 0
+      for (const id of ids) {
+        const view = await readDurableSession(get, id)
+        if (view === undefined) continue
+        const out = await runRepair(
+          { store, readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null, cwd: cwd0, config, knownRoots: roots, log: (m) => outcomes.push(`+ ${m}`), warn: (m) => outcomes.push(`! ${m}`) },
+          { sessionId: id, classes: dryRun ? 'all' : classes, dryRun },
+        )
+        actionable += out.findingsBefore.filter((f) => f.remedy !== 'report-only').length
+        if (out.findingsBefore.length > 0 || out.applied.length > 0) {
+          const by = out.findingsBefore.reduce<Record<string, number>>((m, f) => ({ ...m, [f.class]: (m[f.class] ?? 0) + 1 }), {})
+          outcomes.push(`${id.slice(0, 14)}…: ${out.findingsBefore.length} finding(s) ${JSON.stringify(by)}${out.blindSpots.length > 0 ? ` blind to ${out.blindSpots.join(',')}` : ''}`)
+          for (const r of out.refused) outcomes.push(`  refused: ${r}`)
+          if (!dryRun) outcomes.push(`  → ${out.applied.length} move(s) journalled ${out.journalId}; ${out.findingsAfter.length} finding(s) remain`)
+        }
+      }
+      const head = dryRun
+        ? `chapters-repair ${verb === 'audit' ? 'audit' : 'dry-run'} — ${ids.length} session(s): ${actionable} actionable finding(s). NOTHING WRITTEN.`
+        : `chapters-repair applied to ${ids.length} session(s) — see the per-session counts below.`
+      const tail = dryRun
+        ? '\napply: /chapters-repair apply all   (supersede under a new number; copy bad files to .repair-quarantine/; journal everything)'
+        : ''
+      return { kind: 'success' as const, text: [head, ...outcomes, tail].join('\n') }
+    },
+  }
+
+  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand }
 }
 
 export function registerChaptersTools(
@@ -955,7 +1063,7 @@ export function registerChaptersTools(
       // that overwrote `disposeCommand` would leak the first registration and unregister
       // only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }

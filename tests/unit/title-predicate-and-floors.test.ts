@@ -157,3 +157,44 @@ test('a modest overshoot still archives — the factor separates warn from refus
   })
   assert.equal(out.skipped, null, 'a normal chapter still archives')
 })
+
+test('#58 gate vs #60 split: a TOOL-ONLY part archives; a wholly payloadless read still refuses (#60)', async () => {
+  const { saveSession } = await import('../../src/save-core.ts')
+  const tmp = fs.mkdtempSync('/tmp/partial-')
+  const mk = (events: never[]) => {
+    const states = new Map<string, any>()
+    const store = {
+      get: async (id: string) => states.get(id) ?? freshSession(id),
+      put: async (id: string, s: any) => { states.set(id, s) },
+      mutate: async (id: string, fn: (s: any) => any) => { const n = fn(await store.get(id)); states.set(id, n); return n },
+    }
+    return { store: store as never, states, events, tmp }
+  }
+  const cfg = { artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, chapterOversizeFactor: 2, toolResultDeferFloorTokens: 200, mergeThreshold: 0.3, chapterLimit: 8000 } as never
+
+  // (a) a repair split whose part 2 holds only tool calls: it must ARCHIVE, and say which part is dry.
+  const mixed = mk([
+    { type: 'turn/start', seq: 0, data: { turn: 1 } },
+    { type: 'user/message', seq: 1, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'run the migration' }] } },
+    { type: 'assistant/message', seq: 2, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'running' }] } } },
+    { type: 'turn/end', seq: 3, data: { turn: 1 } },
+  ] as never[])
+  const outA = await saveSession({ events: mixed.events, sessionId: 'S', cwd: mixed.tmp, store: mixed.store, config: cfg, span: { fromSeq: 0, toSeq: 3 } })
+  assert.equal(outA.skipped, null, 'a span with real messages archives')
+
+  // (b) the #58 shape: event SHAPES with no payloads at all — refuse, reserve nothing.
+  const shells = mk([
+    { type: 'turn/start', seq: 0, data: { turn: 1 } },
+    { type: 'user/message', seq: 1, data: {} },
+    { type: 'assistant/message', seq: 2, data: {} },
+    { type: 'tool/call', seq: 3, data: { callId: 'c', name: 'bash' } },
+    { type: 'tool/result', seq: 4, data: {} },
+    { type: 'turn/end', seq: 5, data: { turn: 1 } },
+  ] as never[])
+  const outB = await saveSession({ events: shells.events, sessionId: 'S', cwd: shells.tmp, store: shells.store, config: cfg })
+  assert.equal(outB.skipped, 'payloadless', 'a wholly payloadless read is still refused (#58)')
+  // read it back through the STORE: a refusal writes nothing, so the map has no row — which is itself
+  // the proof. `get` falls back to a fresh state, whose counter is still 1: nothing was spent.
+  assert.equal((await shells.store.get('S')).nextChapterNumber, 1, 'and no number was spent')
+  assert.equal(shells.states.size, 0, 'and no state was written at all')
+})

@@ -165,6 +165,22 @@ renderer, the segmentation tool, and the child's notice.
 | P15 | Plan mode survives a continuation only when it should | seeded `plan/mode` ONLY for `intent: 'continue'` while the fold says active (measured: kernel accepts the two-event seed, host projection folds it to `active:true`, one-event control does not); never for a branch, never after an approval — because approving a plan EXITS plan mode | unit `continue-plans.test.ts` (four rows: seed shape, approved-no-seed, branch-no-seed, `planSeedMode:false`) against the installed-kernel probe recorded in docs/plans-carriage.md § 10 |
 | P16 | The notice reads the intent, not just the log | continuation → `## Active plan` + `## Previous plans on this path` (marked history); branch → zero bytes, plans live in the cited chapters and as documents; the mode statement is either "the directive above is live" or "this child starts OUTSIDE plan mode", never both | unit `plans.test.ts` (seeded/unseeded/branch rows) |
 | P17 | The one injection-screen exception is named, not open-ended | `kind:'plugin' + plugin:'plan-mode' + form:'notice'` archives verbatim; any other plugin notice, snapshot or instruction shape still screens; `isHumanAuthored` (which drives topic signatures and `(N msgs)`) is unchanged | unit `injections.test.ts` (two rows, incl. wrong-form and wrong-plugin negatives) |
+## Repair (#60) — recovering an archive from the durable log
+
+| # | Claim | Procedure | Status 2026-10-22 |
+|---|---|---|---|
+| R1 | The auditor finds the measured damage | `node scripts/chapters-repair.mjs --home <lab> --project <cwd> --cwd-override <lab-tree>` on a COPY of SAIP's live registry + store + 26 session logs | **PASS** — 436 findings: hollow 5, empty-artifact 335, never-archived-span 19, unregistered-file 73, ghost manifest 2, stuck reservation 2. Matches the manual audit exactly. |
+| R2 | A repair re-derives lost knowledge | apply, then grep for three phrases that previously matched 0 files | **PASS** — span 5265-5467 (the "foundational to the project" hosting brief) is now in `chapters/030-hosting-…-plan-1.md`; 719 moves across 3 passes |
+| R3 | Repair converges (idempotent) | run apply again; the third pass must move 0 | **PASS** — pass 3 = 0 moves; audit falls 436 → 3 findings |
+| R4 | What it will NOT do | 3 files remain: two `015-*.md` claiming one number. Re-registering needs a new number = renumbering a chapter → refused, with the reason printed | **PASS** — residue is a human decision, reported as such, not silently "fixed" |
+| R5 | Nothing is deleted or rewritten | after a full apply, the husk files still exist (copied to `.repair-quarantine/`), the registry keeps every record (append-only), and the log's md5 is unchanged | **PASS** |
+| R6 | The run is reversible | `restoreRepair` walks the journal backwards; new files return from quarantine | **PASS** — `tests/integration/repair-apply.test.ts` |
+| R7 | Dry-run is genuinely read-only | registry bytes and directory listing identical before/after | **PASS** — pinned by a row |
+| R8 | LIVE application | `~/.dsh` is read-only to the agent sandbox (EROFS), so SAIP and this repo have NOT been repaired for real | **BLOCKED on the user**: run `node scripts/chapters-repair.mjs --project /home/adrian/Projects/saip --apply all --yes` yourself, or approve the sandbox |
+
+Known limitation, stated rather than hidden: an audit through `ctx.fs` cannot list a directory, so it
+reports `blindSpots: ['orphan-file','test-litter']`; the offline script has `readdir` and sees them.
+
 ## Two-Tier Rules — SPEC (record §7.1, §7.3–§7.9; issue #50)
 
 Rows **R1–R10 verified 2026-10-20** except **R-e2e**, which this host cannot run (see the last row
@@ -282,7 +298,7 @@ not about plumbing. Every row here was verified to fail on the mutation it guard
 | S3 | No archive that rendered nothing | Feed the real `data`-less record shape to `saveSession` and assert: skipped `payloadless`, **no file written**, **no chapter number reserved**, `nextChapterNumber` unchanged. Then the converse pair: the same span read through `readSession` archives with `stats.messages > 0`. |
 | S4 | The watermark is never poisoned | After a S3 refusal, a later settle of the same child still archives (i.e. `max(endSeq)` did not advance). This is the property that makes the defect recoverable instead of permanent. |
 | S5 | Warnings survive the door | `writeArchive` emits `N event(s) rendered no output` for a low-content chapter; assert door 5 logs it (via the injected `warn`/sink), not returns-and-drops. |
-| S6 | Lineage recorded | After a settle, the child's registry row has `parentSession` = the header's parent and `rootSession` = the parent's root (`linkChild`), so the child's chapters appear on the parent's ancestor path — not orphaned on a self-root. Re-settling is a no-op; a *different* parent link throws. |
+| S6 | Lineage recorded, tree NOT re-homed | After a settle the child's own row/frontmatter carry `subagent` + `parentSession` from the durable header, and the child keeps its OWN tree: `rootSession` is unchanged and its chapter paths still resolve. **AMENDED 2026-10-22 (#58):** this row originally demanded `linkChild` onto the parent's path. Measured against the code, that buys no reach (`buildIndex` walks ancestors only) and re-homes files already written under the child's root, so the door does not link; the row now pins the absence, and `subagent-auto-save.test.ts` ("lineage by design") holds both halves. |
 | S7 | Fanout containment | A 10-child fanout schedules sync 10× and runs enrichment **0** times (`runNow` never per settlement) and no child blocks another (per-child promise chains). |
 | S8 | Field census (human, one-time) | `SELECT` the store: no chapter may have `messages === 0` with `events > 0`. The recovery half of this defect is #60; measure **before/after counts** there, and quote them as a repair result, never as a passing test. |
 

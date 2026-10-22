@@ -21,7 +21,7 @@ import { chapterTopics } from './signature.ts'
 import { estimateTokens, oversizeRanges, renderChapter, validateRanges } from './render.ts'
 import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
-import { appendChapters, freshSession, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
+import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
 import type { SessionState } from './registry.ts'
 import { buildTocNotice } from './notice.ts'
 import { deriveIdentity } from './engine-core.ts'
@@ -360,7 +360,9 @@ async function collectEntries(
     const st = await ports.getState(id)
     // Registry order is insertion order = authoring order within a session;
     // sessions walk root-first, so reading order IS causal order.
-    priorRecords.push(...st.chapters)
+    // #60: a superseded chapter is not knowledge — the TOC a child is seeded with must not cite a
+    // husk or a file the repair quarantined. One predicate, in registry.ts, for every derived layer.
+    priorRecords.push(...st.chapters.filter(isActiveChapter))
   }
   const seenPaths = new Set<string>()
   const cited: ChapterRecord[] = []
