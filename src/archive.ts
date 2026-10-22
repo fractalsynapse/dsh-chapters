@@ -67,6 +67,16 @@ export interface ChapterRecord {
   planMode?: 'active' | 'inactive' | 'unknown' | undefined
   /** Where each plan's own `kind: plan` document landed (docs/plans-carriage.md § 11). */
   planDocs?: Array<{ seq: number; path: string; sha256: string }> | undefined
+  /**
+   * Set by repair (#60): this record was superseded by chapter `supersededBy`. A superseded chapter is
+   * NOT knowledge — no TOC bullet, no enrichment pass, no search entry — but its record, its number and
+   * its seqs stay in the registry forever: append-only has no exceptions, and dropping a record would
+   * rewind the watermark (`max(endSeq)+1`) and let a spent number be re-spent (#59).
+   */
+  status?: 'superseded' | undefined
+  supersededBy?: number | undefined
+  /** Why this chapter exists as a replacement, and which number it replaced (`{class, over, at}`). */
+  repairs?: { class: string; over: number; at: number }[] | undefined
 }
 
 export interface WriteResult {

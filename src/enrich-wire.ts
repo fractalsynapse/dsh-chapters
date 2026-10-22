@@ -164,7 +164,9 @@ export function humanBytesOf(body: string): string {
 type ChapterLike = { number: number; title: string; generated?: Record<string, { by: string; model?: string }[]> }
 function chaptersOf(state: unknown): ChapterLike[] {
   const c = (state as { chapters?: unknown } | undefined)?.chapters
-  return Array.isArray(c) ? c as ChapterLike[] : []
+  // #60: the enrichment queue reads registry chapters through the ONE supersede predicate, so a
+  // repaired-away husk is never annotated again (and never re-enters the corpus through the ladder).
+  return Array.isArray(c) ? (c as ChapterLike[]).filter((row) => (row as { status?: string }).status !== 'superseded') : []
 }
 
 export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
