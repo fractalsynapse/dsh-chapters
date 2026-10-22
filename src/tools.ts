@@ -191,6 +191,8 @@ export function buildChaptersTools(
         const attach = await attachCreatedChild({
           workspaceRegistry: ctx.get?.('workspaceRegistry'),
           sessionQuery: ctx.get?.('sessionQuery'),
+          // the surface the browser reads — a child missing here is invisible and unopenable
+          sessionController: ctx.get?.('sessionController'),
           diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
           childId: sessionId,
           cwd,
