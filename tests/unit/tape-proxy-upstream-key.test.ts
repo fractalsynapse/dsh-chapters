@@ -247,6 +247,8 @@ test('a silent upstream dies at the bound and says so, instead of hanging the ru
   const proxy = await startModelProxy({
     mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath,
     upstream: `http://127.0.0.1:${addr.port}`, upstreamTimeoutMs: 400, stallWarnMs: 150,
+    // no retry: this row is about the DEADLINE, and a retry loop would mask it behind a backoff
+    upstreamRetryMax: 0,
   })
   try {
     const r = await post(proxy.url, 'k')
@@ -257,7 +259,9 @@ test('a silent upstream dies at the bound and says so, instead of hanging the ru
     // already carries; the row cares that a START was JOURNALED, not the exact prefix
     // (in a real boot E2E_UPSTREAM has no /v1 precisely because req.url carries it).
     assert.match(log, /START path=.*chat\/completions/)
-    assert.match(log, /STALLED elapsed=\d+ms bytes=0/, 'a request with no bytes must announce itself BEFORE the deadline')
+    // attempt=N is in the line because retries exist now; the assertion is unchanged in
+    // meaning — a request with no bytes must announce itself BEFORE the deadline.
+    assert.match(log, /STALLED attempt=\d+ elapsed=\d+ms bytes=0/, 'a request with no bytes must announce itself BEFORE the deadline')
     assert.match(log, /DEAD .*no-response-headers/)
     assert.equal(fs.readdirSync(path.join(dir, 'tape')).filter((f) => f.endsWith('.json')).length, 0,
       'a timed-out attempt never becomes a tape entry')
@@ -281,7 +285,7 @@ test('a streaming upstream is logged as progress, and is not cut off', async () 
     assert.equal(r.status, 200)
     const log = fs.readFileSync(path.join(path.dirname(journalPath), 'e2e-upstream.log'), 'utf8')
     assert.match(log, /FIRSTBYTE status=200 elapsed=\d+ms/)
-    assert.match(log, /DONE elapsed=\d+ms status=200 bytes=[1-9]/)
+    assert.match(log, /DONE elapsed=\d+ms status=200 attempts=\d+ bytes=[1-9]/)
     assert.doesNotMatch(log, /DEAD/, 'a live stream must never trip the bound')
   } finally {
     await proxy.close(); await upstream.close()
@@ -299,7 +303,10 @@ test('a throttled upstream is journaled as LIMITED and never becomes a tape entr
     res.end(JSON.stringify({ error: { message: 'Too Many Requests', code: 'throttling' } }))
   })
   const addr = await new Promise<{ port: number }>((r) => limited.listen(0, '127.0.0.1', () => r(limited.address() as { port: number })))
-  const proxy = await startModelProxy({ mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath, upstream: `http://127.0.0.1:${addr.port}` })
+  const proxy = await startModelProxy({
+    mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath, upstream: `http://127.0.0.1:${addr.port}`,
+    upstreamRetryMax: 0, // this row is about the throttle being surfaced, not the recovery
+  })
   try {
     const r = await post(proxy.url, 'k')
     assert.equal(r.status, 429, 'the throttle reaches the caller as itself, not as a hang')
@@ -311,6 +318,72 @@ test('a throttled upstream is journaled as LIMITED and never becomes a tape entr
   } finally {
     await proxy.close()
     await new Promise<void>((r) => { limited.close(() => r()) })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/**
+ * The recovery the throttle row implies. The harness profile pins `maxRetries: 0` on purpose
+ * (a queued generation behind a single-slot local server is worse than a clean failure), so
+ * quota survival for a DISTILL has to live in the proxy — and it must not become a way to
+ * record a throttle as an answer.
+ */
+test('a 429 is re-requested with backoff, and the eventual answer is what lands on the tape', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tape-proxy-retry-'))
+  const journalPath = path.join(dir, 'misses.log')
+  let hits = 0
+  const flaky = http.createServer((_req, res) => {
+    hits += 1
+    if (hits < 3) { res.writeHead(429, { 'content-type': 'application/json' }); res.end('{"error":{"message":"slow down"}}'); return }
+    res.writeHead(200, { 'content-type': 'text/event-stream' })
+    res.write('data: {"id":"r1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"recovered"},"finish_reason":null}]}\n\n')
+    res.write('data: [DONE]\n\n'); res.end()
+  })
+  const addr = await new Promise<{ port: number }>((r) => flaky.listen(0, '127.0.0.1', () => r(flaky.address() as { port: number })))
+  const proxy = await startModelProxy({
+    mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath,
+    upstream: `http://127.0.0.1:${addr.port}`, upstreamRetryMax: 3, upstreamRetryMs: 30,
+  })
+  try {
+    const r = await post(proxy.url, 'k')
+    assert.equal(r.status, 200, 'the third attempt answers, and the caller sees the answer')
+    assert.match(r.body, /recovered/)
+    assert.equal(hits, 3)
+    const log = fs.readFileSync(path.join(path.dirname(journalPath), 'e2e-upstream.log'), 'utf8')
+    assert.match(log, /RETRY attempt=1 status=429/)
+    assert.match(log, /RETRY attempt=2 status=429/)
+    assert.match(log, /DONE .*attempts=3/)
+    const files = fs.readdirSync(path.join(dir, 'tape')).filter((f) => f.endsWith('.json'))
+    assert.equal(files.length, 1, 'exactly one entry for the whole retried exchange — the throttles wrote nothing')
+    const entry = JSON.parse(fs.readFileSync(path.join(dir, 'tape', files[0]!), 'utf8')) as { status: number; model: string }
+    assert.equal(entry.status, 200)
+  } finally {
+    await proxy.close()
+    await new Promise<void>((r) => { flaky.close(() => r()) })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('exhausted retries relay the throttle once, count it, and still record nothing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tape-proxy-giveup-'))
+  const journalPath = path.join(dir, 'misses.log')
+  let hits = 0
+  const mean = http.createServer((_req, res) => { hits += 1; res.writeHead(429); res.end('{"error":"nope"}') })
+  const addr = await new Promise<{ port: number }>((r) => mean.listen(0, '127.0.0.1', () => r(mean.address() as { port: number })))
+  const proxy = await startModelProxy({
+    mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath,
+    upstream: `http://127.0.0.1:${addr.port}`, upstreamRetryMax: 2, upstreamRetryMs: 20,
+  })
+  try {
+    const r = await post(proxy.url, 'k')
+    assert.equal(r.status, 429)
+    assert.equal(hits, 3, 'the first try plus two retries, then it stops')
+    const log = fs.readFileSync(path.join(path.dirname(journalPath), 'e2e-upstream.log'), 'utf8')
+    assert.match(log, /LIMITED status=429/)
+    assert.equal(fs.readdirSync(path.join(dir, 'tape')).filter((f) => f.endsWith('.json')).length, 0)
+  } finally {
+    await proxy.close()
+    await new Promise<void>((r) => { mean.close(() => r()) })
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })

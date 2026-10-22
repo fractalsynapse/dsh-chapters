@@ -299,6 +299,131 @@ function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
 }
 export function normalizeSingle(m: unknown): string { return JSON.stringify(m) === '' ? '' : normalize(m) }
 
+/**
+ * A single upstream attempt, buffered, with bounded throttle-retry (#54).
+ *
+ * Why buffered rather than streamed: a 429 must be RETRYABLE, and the only safe moment to
+ * decide that is before any byte reaches the client or the tape — once an SSE body has been
+ * half-forwarded, retrying either duplicates output downstream or writes a throttle into the
+ * corpus as if it were an answer. Record mode is a distill, not a chat: the client is the
+ * harness, its own client timeout is an hour, and replay never takes this path at all (it is
+ * served from the tape). So buffering costs nothing measurable and buys quota survival.
+ *
+ * Every watchdog is cleared on every exit path and unref'd: an armed timer is a process that
+ * will not exit, which is how a green test file hung for ten minutes while its rows had
+ * already finished (measured, same evening).
+ */
+interface PumpOpts {
+  transport: typeof http | typeof https
+  upstreamUrl: URL
+  method: string
+  headers: Record<string, unknown>
+  body: Buffer
+  tapeDir: string
+  journal: (line: string) => void
+  res: import('node:http').ServerResponse
+  keyOf: () => string
+  prefixOf: () => string[]
+  modelOf: () => string
+  timeoutMs: number
+  stallMs: number
+  retryMax: number
+  retryMs: number
+  startedAt: number
+  onInflight: (delta: number) => void
+  onBytes: (n: number) => void
+}
+
+interface PumpOutcome { status: number; contentType: string; chunks: Buffer[] }
+
+const sleep = (ms: number): Promise<void> => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.() })
+
+async function attemptOnce(o: PumpOpts, attempt: number): Promise<PumpOutcome> {
+  return await new Promise<PumpOutcome>((resolve) => {
+    let settled = false
+    const finish = (v: PumpOutcome): void => {
+      if (settled) return
+      settled = true
+      clearInterval(stall)
+      clearTimeout(dead)
+      resolve(v)
+    }
+    const chunks: Buffer[] = []
+    let firstLogged = false
+    const up = o.transport.request(o.upstreamUrl, { method: o.method, headers: { ...o.headers } }, (resUp) => {
+      const status = resUp.statusCode ?? 200
+      const contentType = String(resUp.headers['content-type'] ?? 'text/event-stream')
+      resUp.on('data', (c) => {
+        const b = c as Buffer
+        chunks.push(b)
+        o.onBytes(b.length)
+        if (!firstLogged) {
+          firstLogged = true
+          clearInterval(stall)
+          o.journal(`FIRSTBYTE status=${String(status)} elapsed=${String(Date.now() - o.startedAt)}ms attempt=${String(attempt)}`)
+        }
+      })
+      resUp.on('end', () => finish({ status, contentType, chunks }))
+      resUp.on('error', () => finish({ status: 0, contentType: 'text/event-stream', chunks }))
+    })
+    const stall = setInterval(() => {
+      o.journal(`STALLED attempt=${String(attempt)} elapsed=${String(Date.now() - o.startedAt)}ms bytes=${String(chunks.length)}`)
+    }, o.stallMs)
+    const dead = setTimeout(() => {
+      o.journal(`DEAD attempt=${String(attempt)} elapsed=${String(Date.now() - o.startedAt)}ms no-response-headers — destroying (E2E_UPSTREAM_TIMEOUT_MS=${String(o.timeoutMs)})`)
+      try { up.destroy() } catch { /* already gone */ }
+      finish({ status: 504, contentType: 'application/json', chunks: [Buffer.from(JSON.stringify({ error: { message: `tape proxy upstream: no response after ${String(o.timeoutMs)}ms (${o.upstreamUrl.pathname})`, type: 'upstream_timeout' } })) ] })
+    }, o.timeoutMs)
+    up.on('error', (e) => {
+      // a transport failure is a RETRY candidate too; the old code answered 502 on the first sneeze
+      o.journal(`XERROR attempt=${String(attempt)} elapsed=${String(Date.now() - o.startedAt)}ms :: ${String(e).slice(0, 160)}`)
+      finish({ status: 0, contentType: 'application/json', chunks: [Buffer.from(JSON.stringify({ error: { message: `tape proxy upstream: ${String(e)}`, type: 'upstream_error' } })) ] })
+    })
+    stall.unref?.()
+    dead.unref?.()
+    up.write(o.body)
+    up.end()
+  })
+}
+
+async function pumpUpstream(o: PumpOpts): Promise<void> {
+  let attempt = 0
+  for (;;) {
+    attempt += 1
+    o.onInflight(1)
+    const out = await attemptOnce(o, attempt)
+    const throttled = out.status === 429 || out.status === 0 || out.status >= 500
+    if (throttled && attempt <= o.retryMax) {
+      o.journal(`RETRY attempt=${String(attempt)} status=${String(out.status)} waiting=${String(o.retryMs)}ms (E2E_UPSTREAM_RETRY_MAX=${String(o.retryMax)})`)
+      o.onInflight(-1)
+      await sleep(o.retryMs)
+      continue
+    }
+    if (out.status === 429 || out.status >= 500) {
+      o.journal(`LIMITED status=${String(out.status)} elapsed=${String(Date.now() - o.startedAt)}ms attempts=${String(attempt)} — distill throttled by the upstream; the answer is NOT recorded. Re-run later, or against the local stress server (:8080), which is what the pinned regime is for`)
+    }
+    try { o.res.writeHead(out.status, { 'content-type': out.contentType }) } catch { /* client gone */ }
+    for (const b of out.chunks) { try { o.res.write(b) } catch { /* client gone mid-write */ } }
+    try { o.res.end() } catch { /* client gone */ }
+    o.journal(`DONE elapsed=${String(Date.now() - o.startedAt)}ms status=${String(out.status)} attempts=${String(attempt)} bytes=${String(out.chunks.reduce((n, b) => n + b.length, 0))}`)
+    o.onInflight(-1)
+    if (out.status >= 300) return // a failed answer is not a fixture
+    const entry: TapeEntry = {
+      key: o.keyOf(),
+      prefix: o.prefixOf(),
+      status: out.status,
+      contentType: out.contentType,
+      bytes: Buffer.concat(out.chunks).toString('base64'),
+      model: o.modelOf(),
+      recordedAt: new Date().toISOString(),
+    }
+    const n = fs.readdirSync(o.tapeDir).filter((f) => /^\d+\.json$/.test(f)).length
+    fs.writeFileSync(path.join(o.tapeDir, `${String(n).padStart(4, '0')}.json`), JSON.stringify(entry))
+    return
+  }
+}
+
+
 export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // Which project's tape this is — a miss must name itself (see the journal line).
   const tapeName = path.basename(opts.tapeDir)
@@ -389,72 +514,25 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let sawBytes = 0
         let firstByteMs = -1
         journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
-        const stall = setInterval(() => {
-          journal(`STALLED elapsed=${String(Date.now() - startedAt)}ms bytes=${sawBytes} inflight=${inFlight}`)
-        }, stallWarnMs)
-        const dead = setTimeout(() => {
-          journal(`DEAD elapsed=${String(Date.now() - startedAt)}ms no-response-headers bytes=${sawBytes} — destroying (E2E_UPSTREAM_TIMEOUT_MS=${upstreamTimeoutMs})`)
-          try { ureq.destroy() } catch { /* already gone */ }
-          try { res.writeHead(504, { 'content-type': 'application/json' }) } catch { /* client gone */ }
-          try { res.end(JSON.stringify({ error: { message: `tape proxy upstream: no response after ${String(upstreamTimeoutMs)}ms (${upstreamUrl.pathname})`, type: 'upstream_timeout' } })) } catch { /* client gone */ }
-          clearInterval(stall)
-          inFlight -= 1
-        }, upstreamTimeoutMs)
-        const ureq = transport.request(upstreamUrl, { method: req.method, headers: fwd }, (ures) => {
-          // 429/5xx from a SHARED endpoint is a distill-harness fact, not a product one:
-          // say which, because otherwise a rate limit presents as "the journey hung" and
-          // someone spends an evening debugging the plugin (measured: the suite leg sat 9
-          // minutes with tapeEntries=1 and a journaled status=429 nobody had surfaced).
-          // The status is relayed and the entry is refused below; this line exists so the
-          // JOURNAL says what happened in the words an operator needs. Reading a body here
-          // would be wrong (no bytes have arrived yet in the response callback), and
-          // synthesizing a response would fight the relay that is already correct.
-          if (ures.statusCode === 429 || (ures.statusCode ?? 0) >= 500) {
-            journal(`LIMITED status=${String(ures.statusCode)} elapsed=${String(Date.now() - startedAt)}ms — distill throttled by the upstream; the answer is NOT recorded. Re-run later, or against the local stress server (:8080), which is what the pinned regime is for`)
-          }
-          // RELAY THE STATUS. The tape records it, but until #54 every client saw an
-          // implicit 200 — so a distill against a rejecting host "succeeded" while
-          // writing error bodies into the corpus.
-          try { res.writeHead(ures.statusCode ?? 200, { 'content-type': String(ures.headers['content-type'] ?? 'text/event-stream') }) } catch { /* client gone */ }
-          const buf: Buffer[] = []
-          ures.on('data', (c) => {
-            const b = c as Buffer
-            buf.push(b)
-            sawBytes += b.length
-            if (firstByteMs < 0) {
-              firstByteMs = Date.now() - startedAt
-              clearTimeout(dead)
-              clearInterval(stall)
-              journal(`FIRSTBYTE status=${String(ures.statusCode)} elapsed=${String(firstByteMs)}ms`)
-            }
-            try { res.write(b) } catch { /* client gone (teardown race) — the tape still records below */ }
-          })
-          ures.on('end', () => {
-            try { res.end() } catch { /* client gone */ }
-            const entry: TapeEntry = {
-              key: createHash('sha256').update(normalize(body)).digest('hex').slice(0, 16),
-              prefix: inc.map(normalizeSingle),
-              status: ures.statusCode ?? 200,
-              contentType: String(ures.headers['content-type'] ?? 'text/event-stream'),
-              bytes: Buffer.concat(buf).toString('base64'),
-              model: String(body.model ?? ''),
-              recordedAt: new Date().toISOString(),
-            }
-            journal(`DONE elapsed=${String(Date.now() - startedAt)}ms status=${String(ures.statusCode ?? 200)} bytes=${sawBytes}`)
-            inFlight -= 1
-            if ((ures.statusCode ?? 200) >= 300) return // a failed answer is not a fixture
-            const n = fs.readdirSync(opts.tapeDir).filter((f) => /^\d+\.json$/.test(f)).length
-            fs.writeFileSync(path.join(opts.tapeDir, `${String(n).padStart(4, '0')}.json`), JSON.stringify(entry))
-          })
+        // watchdogs live in pumpUpstream now, PER ATTEMPT — arming them here too would
+        // double-answer the client and keep the process alive after the run (#54).
+        // Buffered pump with bounded throttle-retry (#54). The only behavioral difference
+        // from the inline relay it replaces: a RECORD answer is forwarded when it completes
+        // instead of chunk-by-chunk, which is what makes a 429 retryable without half-writing
+        // an SSE body or recording a throttle as an answer. Replay never takes this path.
+        const retryMax = opts.upstreamRetryMax ?? Number(process.env.E2E_UPSTREAM_RETRY_MAX ?? 3)
+        const retryMs = opts.upstreamRetryMs ?? Number(process.env.E2E_UPSTREAM_RETRY_MS ?? 20_000)
+        await pumpUpstream({
+          transport, upstreamUrl, method: req.method ?? 'POST', headers: fwd, body: raw,
+          tapeDir: opts.tapeDir, journal, res,
+          keyOf: () => createHash('sha256').update(normalize(body)).digest('hex').slice(0, 16),
+          prefixOf: () => inc.map(normalizeSingle),
+          modelOf: () => String(body.model ?? ''),
+          timeoutMs: upstreamTimeoutMs, stallMs: stallWarnMs,
+          retryMax, retryMs, startedAt,
+          onInflight: (delta) => { inFlight += delta },
+          onBytes: (n) => { sawBytes += n },
         })
-        ureq.on('error', (e) => {
-          clearInterval(stall)
-          journal(`ERROR elapsed=${String(Date.now() - startedAt)}ms bytes=${sawBytes} :: ${String(e).slice(0, 200)}`)
-          inFlight -= 1
-          try { res.writeHead(502, { 'content-type': 'application/json' }); res.end(JSON.stringify({ error: { message: `tape proxy upstream: ${String(e)}` } })) } catch { /* client gone */ }
-        })
-        ureq.write(raw)
-        ureq.end()
       })()
     })
   })
