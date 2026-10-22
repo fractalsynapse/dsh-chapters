@@ -95,13 +95,55 @@ export const inject = [
 
 - `agents` — `ctx.agents.create`, the continuation primitive. **The load-bearing one.**
 - `storageDomain` — chain registry.
-- `sessionQuery` — `observeSession` for the calling agent's own log and preset projection.
+- `sessionQuery` — `observeSession` for the calling agent's own log and preset projection, plus the
+  durable reads for **other** sessions (see § Durable reads — the verbs are not interchangeable).
 - `tokenMeter` — pressure math and the continuation budget preflight.
 - **`systemPrompt` is excluded on purpose** (invariant 3).
 - Add `commands` at the UI/CLI trigger phase; `connection` / `sessionController` only if a create path
   turns out to need the client RPC round-trip.
 
 Declare only what you use — `dsh-compact` gets by on `inject = ["commands"]`.
+
+## Durable reads — `sessionQuery` verbs are NOT interchangeable
+
+Measured 2026-10-22 against host `0.2.0-rc.2` while root-causing #58. The rule this section exists to
+enforce: **measure a host verb's payload *shape*, not its presence.** `spikes/subagent-end/FINDINGS.md`
+finding 5 recorded `{count, types}` from `listEvents`, saw 10 plausible event types, wrote "returned the
+full durable log", and the whole of door 5 was built on that. The types were real; the payloads were not
+there at all.
+
+| verb | returns | safe as an archive input? |
+|---|---|---|
+| `listEvents(sessionId)` | `SessionEventRecord[]` = `{sessionId, seq, type, time, surface}` — **no `data`** | **No.** Types and seqs only: a metadata index. |
+| `readSession(sessionId)` | `{session: structuredClone(header), inheritedEventCount, events: snapshotSessionEvent(e)[]}` | **Yes**, and it carries the header too — one call, so no `listSessions()` scan. |
+| `readSurface(sessionId)` | cloned header + `currentSurfaceEvents` (folded surface, snapshot-detached) | Yes for surface work; it is *folded*, so it is not the whole log. |
+| `filterEvents(sessionId, filters)` | semantic event documents | No — search documents, not events. |
+
+File:line (host install, `/home/adrian/node_modules/@deepseek-ai/dsh-session-query/`):
+`lib/index.js:1141` `async listEvents(sessionId) { return eventRecords(sessionId, (await this._corpus.load(sessionId)).events) }`
+→ `:845-847` `eventRecords` → `analyzeEventLog(sessionId, events).records`, built at `:966-973` as
+`records: events.map((event) => ({ sessionId, seq: event.seq, type: event.type, time: event.time, surface: … }))`.
+Published type: `lib/types/types.d.ts:43-54` (`interface SessionEventRecord` — the doc comment says
+*"Lightweight metadata for one event"*, which is the sentence the spike skipped).
+`lib/index.js:1079-1087` `readSession` → `events: loaded.events.map(snapshotSessionEvent)`;
+`snapshotSessionEvent = adoptSessionEvent(structuredClone(event))` at
+`@deepseek-ai/dsh-session/lib/index.js:1106-1108`, i.e. a **validated, payload-bearing** clone.
+
+Read the header, never infer it: `readSession().session` is the kernel's own `SessionHeader` clone, so
+`origin` / `parentSession` / `agentPreset` / `cwd` come from the same observation as the bytes being
+archived — which is what door 5's gate and its `linkChild` lineage need (#58).
+
+And the host's own teardown ordering, which decides **which** arm runs:
+`@deepseek-ai/dsh-subagent/lib/index.js:1240-1250` (continuable) — `flushFinalState` →
+`await activation.handle.dispose()` → `resident.delete(childId)` → `observer.settle(failure)`, and
+`settle` is what emits `subagent/end` (`:317-324`). `observeRun` (one-shot, `:296-306`) emits earlier,
+before disposal. So a continuable child's live handle is **always** gone at settlement: the durable arm
+is the only arm for it, and the fast path is the only arm for one-shot children. Both must be tested;
+one measurement of one mode is what #58 is.
+
+`SessionEventLike.data` is therefore **required** in `src/types.ts` (was optional). Optionality is the
+reason a `listEvents` record passed as `SessionEventLike[]` type-checked, and the renderer's
+`ev.data ?? {}` then made a hollow chapter legal instead of failing to compile.
 
 ## Tools
 

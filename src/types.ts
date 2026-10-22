@@ -14,12 +14,23 @@ export type ContentBlock =
   | { type: 'image'; mimeType?: string; data?: string; path?: string }
   | { type: string; [key: string]: unknown }
 
+/**
+ * One durable session event, as an archive input.
+ *
+ * `data` is **required**, and that is load-bearing (#58). It used to be optional, which is how
+ * `sessionQuery.listEvents` output — a `SessionEventRecord` carrying `seq`/`type`/`time`/`surface`
+ * and NO payload — type-checked as an event list. The renderer's defensive `ev.data ?? {}` then
+ * turned every row into a structurally valid, EMPTY chapter: tool names `unknown`, args `{}`,
+ * results the `sha256("")` blob at 0 B, all messages unrendered. Read the host's `readSession` or
+ * a live `snapshotEvents()` instead — `docs/contract.md` § Durable reads, pinned by
+ * `tests/unit/host-durable-read.test.ts`.
+ */
 export interface SessionEventLike {
   type: string
   seq: number
   time?: number
   surfaceOp?: string
-  data?: Record<string, unknown>
+  data: Record<string, unknown>
 }
 
 /** One chapter = a contiguous, closed range of durable event seqs. Integers, never text anchors. */
