@@ -401,6 +401,17 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           inFlight -= 1
         }, upstreamTimeoutMs)
         const ureq = transport.request(upstreamUrl, { method: req.method, headers: fwd }, (ures) => {
+          // 429/5xx from a SHARED endpoint is a distill-harness fact, not a product one:
+          // say which, because otherwise a rate limit presents as "the journey hung" and
+          // someone spends an evening debugging the plugin (measured: the suite leg sat 9
+          // minutes with tapeEntries=1 and a journaled status=429 nobody had surfaced).
+          // The status is relayed and the entry is refused below; this line exists so the
+          // JOURNAL says what happened in the words an operator needs. Reading a body here
+          // would be wrong (no bytes have arrived yet in the response callback), and
+          // synthesizing a response would fight the relay that is already correct.
+          if (ures.statusCode === 429 || (ures.statusCode ?? 0) >= 500) {
+            journal(`LIMITED status=${String(ures.statusCode)} elapsed=${String(Date.now() - startedAt)}ms — distill throttled by the upstream; the answer is NOT recorded. Re-run later, or against the local stress server (:8080), which is what the pinned regime is for`)
+          }
           // RELAY THE STATUS. The tape records it, but until #54 every client saw an
           // implicit 200 — so a distill against a rejecting host "succeeded" while
           // writing error bodies into the corpus.

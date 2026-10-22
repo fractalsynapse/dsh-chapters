@@ -288,3 +288,29 @@ test('a streaming upstream is logged as progress, and is not cut off', async () 
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('a throttled upstream is journaled as LIMITED and never becomes a tape entry', async () => {
+  // The failure mode this row exists for: a shared hosted endpoint answers 429, the
+  // journey hangs on a turn that will never arrive, and the log says nothing about why.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tape-proxy-429-'))
+  const journalPath = path.join(dir, 'misses.log')
+  const limited = http.createServer((_req, res) => {
+    res.writeHead(429, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ error: { message: 'Too Many Requests', code: 'throttling' } }))
+  })
+  const addr = await new Promise<{ port: number }>((r) => limited.listen(0, '127.0.0.1', () => r(limited.address() as { port: number })))
+  const proxy = await startModelProxy({ mode: 'record', tapeDir: path.join(dir, 'tape'), journalPath, upstream: `http://127.0.0.1:${addr.port}` })
+  try {
+    const r = await post(proxy.url, 'k')
+    assert.equal(r.status, 429, 'the throttle reaches the caller as itself, not as a hang')
+    const log = fs.readFileSync(path.join(path.dirname(journalPath), 'e2e-upstream.log'), 'utf8')
+    assert.match(log, /LIMITED status=429/)
+    assert.match(log, /NOT recorded/)
+    assert.equal(fs.readdirSync(path.join(dir, 'tape')).filter((f) => f.endsWith('.json')).length, 0,
+      'a throttle must never be distilled into the corpus as if it were an answer')
+  } finally {
+    await proxy.close()
+    await new Promise<void>((r) => { limited.close(() => r()) })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
