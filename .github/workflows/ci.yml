@@ -148,10 +148,20 @@ jobs:
       # E2E_TAPE_DIFF: a miss also dumps the normalized incoming vs the
       # stored same-length prefixes, so the exact divergent byte pair is
       # downloadable from the failure artifact instead of being re-guessed.
+      # #61 item 8: the acceptance chain must not write into the project's own store root. The boot now
+      # pins `artifactStoreRoot` per port, and this is the tripwire if the pin stops holding — on a
+      # pristine CI checkout there is no `.dsh-chapters/` at all, so a store APPEARING across the run is
+      # itself the failure. `if: always()` because a suite that died halfway is exactly when someone
+      # wants to know whether it left data behind.
+      - name: snapshot the production store root
+        run: node scripts/assert-store-untouched.mjs snapshot
       - name: tape replay (eight segments, no LLM)
         run: bash scripts/ci-replay.sh
         env:
           E2E_TAPE_DIFF: ${{ github.workspace }}/var/e2e-tape-diffs
+      - name: assert the production store root is untouched
+        if: always()
+        run: node scripts/assert-store-untouched.mjs verify
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

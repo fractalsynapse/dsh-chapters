@@ -57,6 +57,42 @@ export function hostSupportsPresetRows(): boolean {
  * destroying an in-flight capture (2026-09-19). */
 export const e2eHome = (port: number): string => path.join(ROOT, 'var', `e2e-home-${port}`)
 
+/**
+ * The rig's OWN plugin config row, written into the profile patch per boot (#61 item 8).
+ *
+ * Measured cost of not having it: **29 of 47 rows in the developer's live registry are e2e-shaped, and
+ * 42 test trees sit in this repo's production `.dsh-chapters/`** — invisible to the live app yet read by
+ * `buildLocalCorpus`, and read as DAMAGE by #60's auditor (441 `test-litter` findings). An audit whose
+ * residue is mostly someone else's test data teaches the operator to distrust the real findings.
+ *
+ * Pure and exported so a deterministic row can pin it: whether the host honours this row can only be
+ * observed by booting a browser, but WHERE the rig writes it — and that an existing row is replaced
+ * rather than duplicated, which would leave the last row winning by accident — is testable here and now.
+ */
+export const rigStoreRoot = (port: number): string => path.join(e2eHome(port), 'chapters')
+
+export function applyRigPluginPatch(existing: string, opts: { storeRoot: string }): string {
+  const row = `- id: '@treeseed/dsh-chapters'
+  config:
+    # per-boot absolute store root (#61): the acceptance chain must never write
+    # into the project's real .dsh-chapters/ tree. The host merges a patch row by id.
+    artifactStoreRoot: ${opts.storeRoot}
+`
+  // Drop OUR previous row, indentation and all, so reruns replace rather than duplicate — a second
+  // row for the same id would leave "which one wins" up to the host's merge order. Line-scanned
+  // rather than regex-matched across newlines: the readable version of this rule is the one that
+  // does not span four lines of a character class.
+  const out: string[] = []
+  let skipping = false
+  for (const line of existing.split('\n')) {
+    if (/^- id: '@treeseed\/dsh-chapters'/.test(line)) { skipping = true; continue }
+    if (skipping && !/^\s/.test(line) && line !== '') skipping = false
+    if (!skipping) out.push(line)
+  }
+  return row + out.join('\n')
+}
+
+
 export interface Pins {
   thresholdRatio: string
   /**
@@ -214,6 +250,8 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       }
       p = p.replace(/contextWindow: \d+/g, 'contextWindow: 32000').replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
+      // #61 item 8: THIS boot's chapters go to this port's home, never to the repo's store root.
+      p = applyRigPluginPatch(p, { storeRoot: rigStoreRoot(port) })
       fs.writeFileSync(patchPath, p)
     }
   }
