@@ -286,6 +286,29 @@ Honest quality bar: strong for coding sessions (files and commands leave loud si
 degrading to time/size splitting for pure-prose conversations — never worse than today's
 behavior, never blocking.
 
+**Amendment 2026-10-22 (#61, item 6) — a delegate's report to its parent IS conversation.** The
+injection screen (H1) drops host-injected `user/message` events, and it was right to drop the project's
+instruction files. But the same rule was also dropping two shapes the harness produces *about this
+session's own work*:
+
+| source (measured on 0.2.x logs) | content | was | now |
+|---|---|---|---|
+| `{ kind: 'agent-message', form: 'relay' }` | "Agent <id> sent a message: Both Starlight documentation files have been written…" | screened | **archived** |
+| `{ kind: 'subagent-settled', form: 'notice' }` | "Background subagent <id> finished and will do no further work…" | screened | **archived** |
+| `{ kind: 'agent-instructions', form: 'instructions' }` | a project's workspace instruction file | screened | **still screened** |
+
+Measured cost of the old rule in the first `chapters`-preset project: **44 markers, 248,150 chars ≈ 62K
+est tokens** of delegated results thrown away, including an 18,253-char spike report — so the work that
+crossed the delegation edge was lost through **both** doors built to capture it (the parent's archive
+dropped the report; the child's settlement had already archived its own bytes, so the parent's chapter
+recorded a delegation with no outcome).
+
+Still named by **producer AND form**, exactly like the `plan-mode` precedent it joins — the list cannot
+widen by accident into the general plugin-source exemption, and an instruction file arriving with some
+other form still screens. `isHumanAuthored` stays strict on purpose: the topic-signature layer keeps
+ignoring these, because the r28 lesson (injected text moves chapter boundaries) is unchanged, and a
+2 KB report is exactly the kind of text that would drag a signature toward `docs/…` filenames.
+
 ### 4.3 The completeness guard
 
 Chapters include **only collections with a `turn/end`** inside the span. If a compaction

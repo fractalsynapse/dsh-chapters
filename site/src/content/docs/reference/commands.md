@@ -176,6 +176,16 @@ an interrupted tail is skipped, never half-saved); a child on a different preset
 alone; and if a child's log can be read neither live nor from disk at settlement, the archive
 is skipped with a loud diagnostic rather than guessed at.
 
+## Auto-archive when a continuation child lags behind
+
+A `chapters_continue` child is not a subagent, so the settlement door above does not cover it. As of
+issue #61 a `turn/end` listener archives it through the same save core when its session is a
+`chapters`-preset session with lineage — read from the registry row, the header, or the `ch-` id our own
+continue door mints — and either it has never archived at all, or `childAutoArchiveMinTurns` completed
+turns have piled up past its watermark. It creates no session and compacts nothing, so nothing happens
+mid-step; a session that never trips a moment is unretrievable, and the field case was 2,363 events with
+zero chapters. Close it with `childAutoArchive: false`.
+
 ## Plus the host's `/compact`
 
 With the `chapters` agent preset mounted, `/compact` runs through the plugin's deterministic engine: checkpoint summary with carried plot, zero inference tokens, append-only shadowing. (The harness's own command surface, ours underneath.)

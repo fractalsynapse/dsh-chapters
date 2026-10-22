@@ -284,6 +284,28 @@ that never enters the index. Four are session-facing, all idempotent over a per-
    settles repeatedly; the watermark makes every repeat after the first a save of only-new-turns.
    Config: `subagentAutoSave` (default on).
 
+**Amendment 2026-10-22 (#61, item 5) — the seventh moment: a rooted child that has never archived.**
+A `ch-*` continuation child is a real session with a real `parentSession`, and door 5 does NOT cover it
+because its header says `origin: user`/`agentPreset: chapters`, not `origin: subagent`. The field case was
+`ch-dc3be3ab`: **2,363 events, 414 tool calls, 2 completed turns, `chapters: []`, `reservations: {}`** —
+not a failed archive, an archive that was **never even attempted**, because no moment was watching it. Its
+work is in the log and invisible to every search on the machine.
+
+So a `turn/end` listener archives through the SAME save core when all of:
+1. the session is a `chapters`-preset session AND rooted — lineage read from whichever of its three
+   homes has it: the registry row (`chapters_continue` writes it with `linkChild`, continue-core.ts:520),
+   the header, or the `ch-` id prefix our own continue door mints (continue-core.ts:501). **Measured
+   2026-10-22: asking the header alone missed the field case** — `ch-dc3be3ab` has
+   `parentSession: NONE, origin: undefined`. The user's own root sessions stay behind doors 1–3;
+2. `origin !== 'subagent'` (door 5 already owns those, and two doors on one child double-writes);
+3. either its row has **never** archived (`chapters.length === 0`) and it has ≥1 completed turn, or the
+   unarchived completed turns have passed `childAutoArchiveMinTurns`.
+
+It is **save-only**: it creates no session and compacts no surface, so the "no continuation-creating
+actions mid-step" rule is not engaged — the same reasoning that let door 5 exist. Thresholds are config
+(`childAutoArchive`, `childAutoArchiveMinTurns`), never literals. Knowledge that trips none of the seven
+never enters the index: when adding a door, **extend this list, never copy the pipeline**.
+
 ## Budgets and the Reserve Margin
 
 Two distinct ceilings. Conflating them caused the original design's silent-failure mode.

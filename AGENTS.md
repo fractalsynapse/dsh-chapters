@@ -178,15 +178,23 @@ agent turn ──► chapters_segment ──► {archiveCeiling, chapters:[{titl
 The two things the model never does: produce archived text, and traverse the ancestry graph. Both are
 the plugin's job. See [docs/architecture.md](docs/architecture.md).
 
-**The archive moments are exactly six** (docs/architecture.md § The archive moments): continue, fork,
+**The archive moments are exactly seven** (docs/architecture.md § The archive moments): continue, fork,
 save, compaction finalize, **subagent settlement** (#47: a host-plane listener on the host's
 `subagent/end` event runs the *same* save pipeline for chapters-preset children — save-only, so it
 creates no session and engages no mid-step rule; watermark-idempotent across repeated settlements of a
 continuable child; chapters land in the child's OWN tree with `subagent`/`parentSession` frontmatter from
 the durable header the host stamps — deliberately NOT `linkChild`-ed, because `rootSession` *is* the store
 directory and `buildIndex` walks ancestors only, so a link re-homes files for no reach (#58, measured)),
-and **operator repair** (#60: `/chapters-repair` re-derives a span from the durable log through the SAME
-save core, supersedes the bad chapter under a new number, and edits no chapter body and no log byte).
+**forced child archive** (#61: a `ch-*` continuation child is `origin: user`, so door 5 does not cover it —
+`ch-dc3be3ab` was 2,363 events / 414 tool calls / 2 completed turns with `chapters: []` and
+`reservations: {}`: not a failed archive, one **no moment was watching**. A `turn/end` listener archives
+through the SAME save core when the session is `agentPreset: chapters`, is ROOTED by any of the three
+lineage homes — registry row (`linkChild`, continue-core.ts:520), header, or the `ch-` id prefix
+continue-core.ts:501 mints (measured: the field case's header had NO `parentSession`), and
+`origin !== 'subagent'` — and the row never archived or the lag passed `childAutoArchiveMinTurns`.
+Save-only; thresholds are config), and **operator repair** (#60: `/chapters-repair` re-derives a span from
+the durable log through the SAME save core, supersedes the bad chapter under a new number, and edits no
+chapter body and no log byte).
 **Settlement has two arms and they are not symmetric** (#58): a *one-shot* child is still live when
 `end` fires, so the synchronous `snapshotEvents()` read works; a *continuable* child is disposed
 **first**, so the durable arm is the only arm — and it must be a payload-bearing read
@@ -194,7 +202,7 @@ save core, supersedes the bad chapter under a new number, and edits no chapter b
 valid, semantically **empty** chapter. No door commits an archive that rendered nothing:
 `stats.messages === 0` over `stats.events > 0` is a `payloadless` refusal **before any number is
 reserved** — a committed husk poisons the watermark (`max(endSeq)`) so the child can never be re-archived
-without repair. Knowledge that trips none of the six never enters the index — when adding another door,
+without repair. Knowledge that trips none of the seven never enters the index — when adding another door,
 extend the list, never copy the pipeline.
 
 ## Continuation Budget, Not a Handoff Cap
