@@ -237,33 +237,30 @@ held at 93.16 / 85.53 / 90.01). Three things are deliberately unfinished, and no
    provided` for the keys on this box. `scripts/llm.mjs` defaults to the regional door, keeps the
    alias as a probe candidate behind it, and takes `DSH_LLM_BASE` as the override — so a credential
    that starts working at the alias is used with no edit.
-2a. **On 0.2.x, creating a child session is REFUSED — the acceptance chain stops here.**
-   Captured verbatim from the UI of a live 0.2.0-rc.2 boot, after one clean assistant turn,
-   clicking the fork door: `chapters-fork refused: child creation refused: format v4 message
-   requires a producer-owned source kind`. The child directory is created (a 0-byte
-   `session.lock`) and NOTHING is written into it: no durable log, no projection-cache entry,
-   no sidebar row even after a full reload. Every journey that asserts on a child's seeded
-   notice — `rules`, `fork`, `plans`, the knowledge-loop's carry check — is therefore blocked
-   by this, and none of them is telling you anything about rules or plans.
-   **What this is NOT** (each was my working hypothesis and each is dead on evidence):
-   - NOT a client-plane door problem. Both door rows mount and are visible (`28x28`,
-     `inDocument: true`, inside the host's own `EvIC1a_flowItem > TS9iAW_actions`); the earlier
-     "door not visible" failure was the *consequence* of a turn that never completed
-     (see the fork prompt fix), and the probe reached the refusal only after clicking successfully.
-   - NOT our notice's shape. `buildTocNotice` emits
-     `source.kind: 'plugin:dsh-chapters'`, and the installed kernel's own
-     `assertV4RowAdmission` ADMITS it — `tests/unit/host-seed-contract.test.ts` runs 6/6, 0 skips,
-     including "the v4 kernel REFUSES the retired plugin wrapper we no longer emit".
-   - NOT a version skew: the repo's `@deepseek-ai/dsh-session-format-v3-to-v4` is `0.2.0-rc.2`,
-     the same line as the pinned host.
-   So the refusing row is one the HOST adds to the child's first rows (its own setup/injected
-   messages) and the plugin's create call inherits the blame. Next step: reproduce it outside
-   the browser by creating a session through the host API with our seed and nothing else — if
-   it still refuses, the seed is not the problem and the host is; if it admits, the difference is
-   one of the rows the host appends, and the fix is to file it upstream with the reproduction.
-   The plugin's diagnostic sink (`DSH_CHAPTERS_ENGINE_ERRORS`) captured NOTHING for this path,
-   which is itself a gap worth closing: a refusal this consequential should leave a trace the
-   next agent can read without a browser.
+2a. **On 0.2.x the switch to a forked child is a silent no-op, and the child never
+   appears in the session list** — measured 2026-10-22 against the CURRENT build (host
+   0.2.0-rc.2, plugin link-verified by the new boot guard). The door announces success
+   (`branch “…” is session ch-3865899e…`) and renders NO note element, which
+   `src/client/doors.ts` emits only when `sessions.open()` did not throw — yet
+   `localStorage['dsh.sessions.current']` still names the PARENT, focus stays on the parent's
+   composer, and after a full reload the sidebar lists one session. The child is real: its
+   directory holds `session.lock` + `session.v4.jsonl.zstd`, `session_projcache` has both
+   entries, and the log carries the whole notice (`Project: …`, `(N msgs)`, rule categories).
+   **Prime suspect is our own swallowed failure**: `src/tools.ts` attaches with
+   `workspaceRegistry.createCanonical(cwd)` → `workspace?.attachSession?.(sessionId)`, both
+   optional-chained — and AGENTS records that very attach as the fix for round 6's "an
+   unattached session shows as an unrelated root, so it is not listed". If 0.2.x reshaped that
+   return, the chain no-ops silently and orphans the child from the workspace, which matches
+   every symptom. NEXT: make the attach loud (diagnostic + door note when the service or method
+   is absent; never an optional chain through a required step), re-run, and let the message name
+   what is missing. `tests/e2e/fork-button.spec.ts` already asserts the switch — it is the gate,
+   and it is red for the right reason.
+   Superseded by the above, kept so nobody re-bisects it: an earlier version of this entry blamed
+   a `format v4 message requires a producer-owned source kind` refusal. That message was real but
+   came from a COPIED plugin tree dated Oct 16 in `.dshdev-local`; the current build produces no
+   such refusal, and `spikes/seed-admission/` shows host 0.2.0-rc.2 admitting our notice, the
+   notice + `plan/mode`, and the notice + `agentOptions` + preset mount (5–6 durable events each)
+   while correctly refusing the retired v3 wrapper.
 2. **The browser plane is blocked, not skipped.** `npm run test:e2e:replay` refuses by name because
    the pinned host predates preset declaration rows (`tests/e2e/boot.ts:130`). When
    `dev/dsh-host-lock` moves to 0.2.x, the tapes need **one** whole-project re-distill — this round
