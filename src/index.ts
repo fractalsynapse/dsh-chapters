@@ -81,6 +81,8 @@ export interface Config {
    */
   subagentAutoSave: boolean
   chapterLimit: number
+  /** Past `chapterTokenTarget × this` a door refuses the archive (#59). ≥1; 2 by default. */
+  chapterOversizeFactor: number
   /** Plans (docs/plans-carriage.md § 7): verbatim plan chars shown in a chapter,
    * the tool-call-argument artifact floor (0 = off), and whether the notice
    * carries the `## Plans on this path` block. */
@@ -183,6 +185,7 @@ export const Config = Schema.object({
   mergeThreshold: Schema.number().default(0.3),
   subagentAutoSave: Schema.boolean().default(true),
   chapterLimit: Schema.number().default(8000),
+  chapterOversizeFactor: Schema.number().default(2),
   // Plans (docs/plans-carriage.md § 7). A plan's full text is ALWAYS
   // artifact-backed, so planInlineChars is display economy and never a data
   // decision. callArgArtifactTokens defaults to 0 = OFF: turning it on changes
@@ -361,6 +364,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       fallbackPreset: config.fallbackPreset,
       mergeThreshold: config.mergeThreshold,
       chapterLimit: config.chapterLimit,
+      chapterOversizeFactor: config.chapterOversizeFactor,
       planInlineChars: config.planInlineChars,
       callArgArtifactTokens: config.callArgArtifactTokens,
       plansInNotice: config.plansInNotice,
@@ -476,6 +480,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
         mergeThreshold: config.mergeThreshold,
         chapterLimit: config.chapterLimit,
+        chapterOversizeFactor: config.chapterOversizeFactor,
         planInlineChars: config.planInlineChars,
         callArgArtifactTokens: config.callArgArtifactTokens,
         scheduler,

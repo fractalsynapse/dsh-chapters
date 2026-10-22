@@ -18,7 +18,7 @@
  */
 import type { ChapterRange, NoticePlan, RenderConfig, SessionEventLike, ToolResultOverride } from './types.ts'
 import { chapterTopics } from './signature.ts'
-import { estimateTokens, renderChapter, validateRanges } from './render.ts'
+import { estimateTokens, oversizeRanges, renderChapter, validateRanges } from './render.ts'
 import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
 import { appendChapters, freshSession, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -55,6 +55,12 @@ export interface ContinueConfig extends RenderConfig {
   mergeThreshold: number
   /** Estimated-token cap per composed chapter. */
   chapterLimit: number
+  /**
+   * Hard oversize multiple of `chapterTokenTarget` (#59): over the target warns, over
+   * `target × factor` the door refuses before reserving a number. Optional so a profile that predates
+   * the key keeps the pre-#59 behaviour of warning only — the default lives in `Config`, not here.
+   */
+  chapterOversizeFactor?: number
   /**
    * Carry the `## Plans on this path` block into the child's notice
    * (docs/plans-carriage.md § 4). Renders ZERO bytes when the path holds no
@@ -301,6 +307,12 @@ export async function runContinue(
   warnings.push(...rendered
     .filter((r) => r.stats.overTarget)
     .map((r) => `chapter "${r.range.title}" is ${r.stats.estimatedTokens} est tokens over chapterTokenTarget — split at the next continuation, never clip`))
+  // Same hard ceiling as the save door (#59), same ordering: refuse before anything is reserved.
+  const tooBig = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  if (tooBig.length > 0) {
+    throw new Refusal({ ok: false, reason: `ranges refused as oversize: ${tooBig.join('; ')}`, warnings })
+  }
+
   const fs = ports.fs()
   const wrote = await writeArchive({
     fs,

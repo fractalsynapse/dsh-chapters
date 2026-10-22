@@ -130,6 +130,26 @@ export function validateRanges(
   return chapters
 }
 
+/**
+ * Ranges whose render blew past the oversize ceiling (#59). `chapterTokenTarget` stays the SOFT target
+ * — split at the next boundary, never clip — and a modest overshoot is a warning, because a single
+ * indivisible turn can legitimately exceed it. Past `target × factor` the chapter is not a chapter:
+ * nobody can `read` it back inside the window it exists for, which is the whole point of archiving.
+ * The field held an 89,982-token chapter, an unrepaired 237,870-token orphan and eleven over 32K.
+ */
+export function oversizeRanges(
+  rendered: readonly { range: ChapterRange; stats: { estimatedTokens: number } }[],
+  chapterTokenTarget: number,
+  oversizeFactor: number,
+): string[] {
+  const ceiling = Math.floor(chapterTokenTarget * oversizeFactor)
+  return rendered
+    .filter((r) => r.stats.estimatedTokens > ceiling)
+    .map((r) => `"${r.range.title}" (seqs ${r.range.startSeq}-${r.range.endSeq}) rendered ${r.stats.estimatedTokens} est tokens, `
+      + `over the hard oversize ceiling ${ceiling} (= chapterTokenTarget ${chapterTokenTarget} × ${oversizeFactor}) `
+      + '— split at the next boundary; clipping is forbidden')
+}
+
 /** Enumerate tool results in a range so the model can decide keep/defer against real sizes. */
 export function toolResultCandidates(
   events: SessionEventLike[],
@@ -299,6 +319,13 @@ export function renderChapter(
           if (cid !== undefined && lastResultSeq.get(cid) !== ev.seq) break // earlier copy of a redelivery
         }
         const text = redact(toolResultText(data))
+        // #59 — an empty result defers NOTHING. `arrival.ts` has always skipped the empty string;
+        // the renderer did not, so a payload-less read wrote hundreds of references to sha256("") and
+        // the chapter claimed `artifacts: 102` while its tree held one 0-byte file. Say it is empty.
+        if (text.length === 0) {
+          body.push(`  - result (seq ${ev.seq}, empty)`)
+          break
+        }
         const tokens = estimateTokens(text)
         const wantsInline = inline.get(ev.seq) ?? tokens <= config.toolResultDeferFloorTokens
         const priorCall = [...inRange].reverse().find((c) => c.type === 'tool/call' && c.seq < ev.seq)
@@ -400,7 +427,11 @@ export function renderChapter(
     // 2026-09-23, invisible for eras behind the host logger.
     `sha256: ${sha256(`${bodyText}\n`)}`,
     `topics: [${[...new Set(topics)].map((t) => JSON.stringify(t)).join(', ')}]`,
-    `artifacts: ${artifacts.length}`,
+    // #59: the two numbers are NOT the same thing. Content-addressed reuse means 335 references
+    // can point at one blob; reporting references as `artifacts:` made both the field diagnostic and
+    // the registry bloat unreadable.
+    `artifacts: ${new Set(artifacts.map((a) => a.sha256)).size}`,
+    `artifactRefs: ${artifacts.length}`,
     // Plans ride in frontmatter ONLY when this chapter actually carries one, so a
     // session that never entered plan mode writes byte-identical files to before
     // this feature (verify.md P8). Compact `seq:status:sha8` triples: the minimal
