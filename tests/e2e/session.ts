@@ -202,6 +202,17 @@ export async function openSessionByRow(page: Page, needles: readonly string[]): 
 }
 
 /**
+ * The fork door as a USER would click it: the NEWEST assistant row, visible.
+ *
+ * `.first()` picks the OLDEST message's row — harmless in a one-turn journey, and a
+ * 25-minute dead click in a long one (#54, the `suite` leg), because once the conversation
+ * moves on that node is no longer the actionable one and Playwright waits for
+ * actionability that never comes. One helper, both specs, so the two journeys cannot drift
+ * back into different selectors for the same affordance.
+ */
+export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork with chapters"]:visible').last()
+
+/**
  * Type via insertText (one real input event — contenteditable editors can
  * ignore synthetic keystroke streams) and submit VERIFIED: the send button
  * path worked on calm transcripts but silently failed after a heavy turn

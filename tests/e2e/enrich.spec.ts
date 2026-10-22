@@ -10,7 +10,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, ROOT } from './session.ts'
+import { openApp, newSessionWithTurn, typeComposer, forkDoor, ROOT } from './session.ts'
 
 const storeRoot = path.join(ROOT, '.dsh-chapters')
 
@@ -26,7 +26,9 @@ test('an archived chapter enriches through the ladder with the body provably unt
   const sid = await newSessionWithTurn(page, 'What does the read tool do? One sentence, no tools.')
   // the message-level fork archives the parent's turn into chapters (the
   // proven P1 path); a 2K-token session has nothing /compact could archive
-  await page.locator('button[aria-label="Fork with chapters"]').first().click({ force: true })
+  // #54: was `.first().click({ force: true })` — force-masked exactly the stale-node trap
+  // that cost the suite leg 25 minutes. The visible newest row is the affordance a user has.
+  await forkDoor(page).click()
   await expect.poll(async () => chapterFile(sid), { timeout: 360_000, intervals: [2000] }).not.toBe('')
   const f = chapterFile(sid)
   const before = fs.readFileSync(f, 'utf8')

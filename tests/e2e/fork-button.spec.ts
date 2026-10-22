@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
 
 /**
  * The assistant-row door actions, on a session this spec CREATES through the
@@ -46,14 +46,14 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
   // fails for a reason that has nothing to do with what it asserts.
   await newSessionWithTurn(page, 'Name one HTTP redirect status code in one short sentence. Make ZERO tool calls and read no files.')
 
-  await expect(page.locator('button[aria-label="Fork with chapters"]').first()).toBeVisible()
+  await expect(forkDoor(page)).toBeVisible()
   // Both deterministic doors need a mouth: a composer-only `/chapters-continue`
   // left the user with a created child and no affordance at all.
   await expect(page.locator('button[aria-label="Continue with chapters"]').first()).toBeVisible()
   await expect(page.locator('button[aria-label="Branch into a new conversation"]')).toBeHidden()
 
   const before = childCount()
-  await page.locator('button[aria-label="Fork with chapters"]').first().click()
+  await forkDoor(page).click()
 
   // durable plane: a linked child appears in the registry
   await expect.poll(() => childCount(), { timeout: 30_000, intervals: [500] }).toBeGreaterThan(before)
