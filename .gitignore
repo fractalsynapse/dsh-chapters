@@ -43,3 +43,5 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+# verification lab: copies of the LIVE registry/store, 40 MB, never commit real user data
+var/recovery-lab/

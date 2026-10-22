@@ -14,7 +14,7 @@
  */
 import { composeChapters } from './compose.ts'
 import { deriveRanges } from './continue-core.ts'
-import { oversizeRanges, renderChapter } from './render.ts'
+import { estimateTokens, oversizeRanges, renderChapter } from './render.ts'
 import { chapterTopics } from './signature.ts'
 import { makeArchiveFs, commitChapters, type RegistryStore } from './store.ts'
 import { releaseReservation, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -108,6 +108,43 @@ export interface SaveSessionOutcome {
 }
 
 /**
+ * Split a range whose RENDERED size would blow past the oversize ceiling (#60, repair path only).
+ *
+ * The normal doors cut on `turn/end` and warn when a chapter is over `chapterTokenTarget`, because a
+ * boundary is around the corner and clipping is forbidden. A REPAIR span can be one gigantic turn — a
+ * delegated subagent whose single turn ran to 4 MB — where there IS no next boundary, and refusing it
+ * (the #59c gate) would leave the husk superseded-by-nothing. So the repair splits at EVENT boundaries
+ * inside the turn: nothing is truncated, every byte still lands in a chapter, and the TOC gains several
+ * consecutive ranges instead of one unreadable one. The rule that binds is completeness, not "one chapter
+ * per turn" — and a chapter nobody can `read` back is not an archive.
+ */
+function splitOversize(
+  chapters: ChapterRange[],
+  events: readonly SessionEventLike[],
+  chapterTokenTarget: number,
+  oversizeFactor: number,
+): { ranges: ChapterRange[]; notes: string[] } {
+  const ceiling = Math.floor(chapterTokenTarget * oversizeFactor)
+  const notes: string[] = []
+  const out: ChapterRange[] = []
+  for (const c of chapters) {
+    const inRange = events.filter((e) => e.seq >= c.startSeq && e.seq <= c.endSeq)
+    const total = inRange.reduce((m, e) => m + estimateTokens(JSON.stringify(e.data ?? {})), 0)
+    if (total <= ceiling) { out.push(c); continue }
+    const parts = Math.ceil(total / ceiling)
+    const perPart = Math.ceil(inRange.length / parts)
+    let title = c.title
+    for (let i = 0, n = 0; i < inRange.length; i += perPart, n++) {
+      const from = inRange[i]!.seq
+      const to = inRange[Math.min(i + perPart, inRange.length) - 1]!.seq
+      out.push({ ...c, title: n === 0 ? title : `${title} (part ${n + 1})`, startSeq: from, endSeq: to })
+    }
+    notes.push(`"${c.title}" (seqs ${c.startSeq}-${c.endSeq}) is ${total} est tokens in a single unfinished turn — split into ${parts} chapters at event boundaries (repair path; nothing truncated)`)
+  }
+  return { ranges: out, notes }
+}
+
+/**
  * Force a repaired archive to cover exactly the span the finding named (#60). Composition may still cut
  * it into topics - a cut is a chapter boundary, not a loss - but nothing may start above `fromSeq` or
  * stop before the last completed turn inside the span, or the hole the finding reported stays open while
@@ -164,11 +201,17 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   let chapters = composed.chapters.length > 0
     ? composed.chapters
     : deriveRanges(events, anchor, config.chapterTokenTarget, fromSeq).chapters
+  const repairNotes: string[] = []
   if (a.span !== undefined) {
     // A repair's span is bounded by the finding, so force exactly that range: composition inside a hole
     // may cut it into topics, and a cut is fine, but nothing may start above `fromSeq` or end below the
     // last completed turn inside the span.
     chapters = clampSpan(chapters, a.span.fromSeq, a.span.toSeq, events)
+    // A repair span may be one enormous turn; the oversize gate would refuse it and leave the husk
+    // un-replaced. Split inside it at event boundaries — see `splitOversize`.
+    const split = splitOversize(chapters, events, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+    chapters = split.ranges
+    repairNotes.push(...split.notes)
   }
 
   // Render + write archive (same as runContinue steps 2-3, minus child creation).
@@ -254,5 +297,5 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     await commitChapters(store, sessionId, wrote.records)
   }
 
-  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: wrote.warnings }
+  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...wrote.warnings] }
 }

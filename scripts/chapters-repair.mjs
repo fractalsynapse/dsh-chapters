@@ -197,6 +197,7 @@ const CONFIG = {
 console.log(`dsh chapters repair — registry ${REGISTRY}`)
 console.log(`  home ${HOME}`)
 console.log(`  ${targets.length} session(s)${PROJECT !== undefined ? ` under ${PROJECT}` : ''} · ${DRY ? 'DRY RUN (nothing is written)' : `APPLY (${APPLY})`}`)
+if (opt('cwd-override', undefined) !== undefined) console.log(`  *** --cwd-override ACTIVE: writes go under ${opt('cwd-override')} — this is a LAB run, not the live tree ***`)
 
 let totals = { findings: 0, applied: 0, refused: 0, blind: 0 }
 const histogram = {}
@@ -210,7 +211,13 @@ for (const id of targets) {
   }
   const decoded = decodeLog(dir)
   if (decoded.error !== undefined) { console.log(`  ${id}: ${decoded.error}`); continue }
-  const cwd = decoded.header.cwd
+  // The header's cwd is the truth for a LIVE run. `--cwd-override` exists for a VERIFICATION LAB: copy
+  // the registry + store tree + session dirs into a writable directory and re-run the same code against
+  // it. The chapter paths in every record are RELATIVE (.dsh-chapters/<root>/…), so a re-rooted cwd
+  // resolves them without touching a byte of the archive. Never use it to write somewhere you did not
+  // copy — it says so in the banner, because a repair pointed at the wrong tree is a data-loss tool.
+  const headerCwd = decoded.header.cwd
+  const cwd = typeof opt('cwd-override', undefined) === 'string' ? opt('cwd-override') : headerCwd
   if (typeof cwd !== 'string' || cwd === '') { console.log(`  ${id}: header carries no cwd — nowhere to write`); continue }
   const out = await runRepair({
     store,
