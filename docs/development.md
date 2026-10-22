@@ -116,6 +116,30 @@ later session may re-reference them for the *why* behind an implementation. Two 
    contradiction with the shipped code, update or supersede it in place via git history — never rewrite
    silently.
 
+### Is the corpus anchored to the host we pin? (`tests/fixtures/model-tape/CORPUS_HOST`)
+
+Tape matching is normalized request-PREFIX matching, and the prefixes carry the host's
+system-prompt composition. So moving `dev/dsh-host-lock`, editing the preset persona, or changing a
+tool description invalidates the whole corpus — and a replay failure then describes an *earlier*
+change, not the one under review. `scripts/corpus-anchor.mjs` states the provenance in one file and
+answers the question in exactly one place; two consumers use it:
+
+- `tests/e2e/boot.ts` **refuses replay by name** when `host` ≠ the pinned version, quoting the
+  recorded `reason` and the tracking issue. `E2E_MODEL=record` is deliberately exempt — re-distilling
+  is the way out, and a gate that blocked it would strand itself.
+- `.github/workflows/ci.yml`'s `host-capability` job sets `corpus-anchored`, the `e2e-replay` job
+  requires it, and the run log gets a step summary plus a `::warning::` naming the issue. Skipped,
+  visibly — the same discipline as the preset-row refusal it sits beside: never silently green,
+  never permanently red.
+
+The gate lifts with no code change: re-distill the eight projects
+(`scripts/distill-tapes.sh`), write the new `host =` line, done. Current state: pinned
+`0.2.0-rc.2`, corpus distilled `0.1.5-rc.1`, tracked by
+[issue #56](https://github.com/treeseed-ai/dsh-chapters/issues/56) (with the door-selector blocker
+[#57](https://github.com/treeseed-ai/dsh-chapters/issues/57) inside it). Rows in
+`tests/unit/corpus-anchor.test.ts` assert both directions — matching lifts, missing/garbled
+provenance refuses, and the committed repo state is reported honestly as NOT anchored.
+
 ### Reading a distill while it runs (#54)
 
 `scripts/distill-tapes.sh` writes each leg's FULL playwright output to `var/distill/<proj>-<hhmmss>.log`

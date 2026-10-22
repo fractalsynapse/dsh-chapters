@@ -71,11 +71,26 @@ jobs:
     outputs:
       preset-rows: ${{ steps.probe.outputs.preset-rows }}
       pinned: ${{ steps.probe.outputs.pinned }}
+      corpus-anchored: ${{ steps.probe.outputs.corpus-anchored }}
     steps:
       - uses: actions/checkout@v4
       - id: probe
         run: |
           V=$(node -p "require('./dev/dsh-host-lock/package.json').dependencies['@deepseek-ai/dsh']")
+          # Is the tape CORPUS anchored to that host? Tape prefixes carry the host's prompt
+          # composition, so a host move makes replay fail for reasons owned by an earlier change.
+          # Refuse by name with the tracked issue, exactly as the preset-row check does — never
+          # silently green, never permanently red (#56).
+          # the script appends to $GITHUB_OUTPUT itself; do NOT redirect it there too
+          node scripts/corpus-anchor.mjs --github-output || true
+          if ! node scripts/corpus-anchor.mjs --check; then
+            {
+              echo "### acceptance chain SKIPPED: the tape corpus is not anchored to the pinned host"
+              echo
+              echo "Tape prefixes contain the host's system-prompt composition, so a corpus distilled against an older host cannot replay against this one — the failures would belong to an earlier change, not the PR. Refusing by name (never silently green, never permanently red) until \`scripts/distill-tapes.sh\` re-records all eight projects and \`tests/fixtures/model-tape/CORPUS_HOST\` is updated. Tracked by issue #56; the door-selector blocker inside it is #57."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::tape corpus not anchored to the pinned host - acceptance chain skipped (see issue #56)"
+          fi
           M=$(node -e "const v=process.argv[1];const m=/^(\d+)\.(\d+)/.exec(v);console.log(m && (Number(m[1])>0||Number(m[2])>=2) ? 'true':'false')" "$V")
           echo "pinned=$V" >> "$GITHUB_OUTPUT"; echo "preset-rows=$M" >> "$GITHUB_OUTPUT"
           if [ "$M" = "true" ]; then
@@ -94,7 +109,7 @@ jobs:
   e2e-replay:
     name: acceptance — eight tape-replay segments, no LLM
     needs: host-capability
-    if: needs.host-capability.outputs.preset-rows == 'true'
+    if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

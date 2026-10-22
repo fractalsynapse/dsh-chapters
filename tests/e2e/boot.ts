@@ -5,6 +5,19 @@ import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:chil
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 
 /**
+ * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
+ * question the same way (two parsers drift). Loaded lazily and typed loosely: it is plain JS
+ * outside the tsconfig project, and a provenance check must never be the reason a boot
+ * fails to compile.
+ */
+async function importedCorpusAnchor(): Promise<{ anchored?: boolean, reason?: string, tracking?: string } | null> {
+  try {
+    const mod = await import('../../scripts/corpus-anchor.mjs') as unknown as { corpusAnchor?: () => { anchored: boolean, reason: string, tracking: string | null } }
+    return typeof mod.corpusAnchor === 'function' ? mod.corpusAnchor() : null
+  } catch { return null }
+}
+
+/**
  * Shared e2e boot harness. One server per playwright PROJECT (the main suite
  * and the arrival-artifact suite pin different engine rows — the arrival floor
  * must not change the compaction-crossing scenarios' regime), against one
@@ -141,6 +154,20 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // E2E_MODEL=record|replay inserts the tape proxy (same directive's second
   // half: the GPU model distills tapes; acceptance replays them in seconds).
   const modelMode = process.env.E2E_MODEL ?? 'live'
+  // REPLAY asserts against recorded prompt prefixes, which carry the host's prompt
+  // composition. If the corpus was distilled against a different host than we pin, the
+  // chain cannot pass for reasons belonging to an earlier change — so refuse BY NAME,
+  // with the tracking issue, exactly as hostSupportsPresetRows() does for a host that
+  // cannot register preset rows. RECORD is exempt: re-distilling is the way out, and
+  // blocking it would strand the gate (#56).
+  if (modelMode === 'replay') {
+    const anchor = await importedCorpusAnchor()
+    if (anchor !== null && anchor.anchored !== true) {
+      throw new Error(`e2e: the tape corpus is NOT anchored to this host — ${String(anchor.reason)}. `
+        + `Re-distill the eight projects (scripts/distill-tapes.sh) and update tests/fixtures/model-tape/CORPUS_HOST; `
+        + `tracked by ${String(anchor.tracking ?? 'docs/backlog.md')}. Recording is allowed (E2E_MODEL=record); replay is not.`)
+    }
+  }
   const upstreamBase = process.env.E2E_UPSTREAM ?? 'http://localhost:8080'
   // A remote upstream without a key is a guaranteed 401 on every request, eight
   // projects long. Fail here, in one line, with the fix in the message.

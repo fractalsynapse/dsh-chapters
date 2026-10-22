@@ -1,0 +1,18 @@
+# Which DSH host the acceptance corpus was distilled AGAINST.
+#
+# The eight tape projects under this directory are prompt-byte fixtures: the model turns they
+# replay were recorded through a specific host's system-prompt composition, at the pinned
+# context window. Change the pinned host (dev/dsh-host-lock), the persona, or a tool
+# description, and the corpus no longer matches the rig — a replay then misses on prefix
+# comparison and the job fails for a reason that is true but not the next author's change.
+#
+# This file is the machine-readable statement of that fact, so the refusal is EXPLICIT and
+# self-lifting instead of a red job on every future PR (the same pattern `hostSupportsPresetRows`
+# uses for a host that cannot register preset rows). A re-distill updates `host`, and the
+# acceptance chain starts running again with no code edit.
+host = 0.1.5-rc.1
+# host this branch pins (dev/dsh-host-lock) — mismatch above is tracked by:
+pinned = 0.2.0-rc.2
+tracking = https://github.com/treeseed-ai/dsh-chapters/issues/56
+distilledAt = 2026-09-25
+reason = corpus predates the 0.2.x host move, the chapters_rules tool (#50), and the preset persona section (#52)

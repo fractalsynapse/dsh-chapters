@@ -367,7 +367,11 @@ resolves 0.2.0-rc.2 — chosen by WITNESS (the host this box runs the plugin on)
 latest — the refusal has lifted itself, and `hostSupportsPresetRows()` is what lifts it (a
 version test in `tests/e2e/boot.ts`, because it runs before any host exists; silently skipping
 the pins would make every segment pass a run that never exercised the preset).** Three 0.2.x
-drifts were found by booting rather than guessing, all rig-side, all the kind that yields a
+drifts were found by booting rather than guessing, all rig-side (and a fourth was NOT the host:
+the acceptance chain's remaining failure is a **stale tape corpus**, now gated by
+`tests/fixtures/model-tape/CORPUS_HOST` — `scripts/corpus-anchor.mjs` refuses replay by name and CI
+skips the acceptance job with a tracked reason, issues #56/#57; a gate that blocks `record` too
+would strand itself, so record stays allowed), all the kind that yields a
 WRONG conclusion rather than an error: the durable log is `session.v4.jsonl.zstd` (five hardcoded
 `v3` paths made every log assertion decode nothing and report "the archive never landed" —
 `sessionLogFileFor()` resolves the highest now, pinned by a row); the host opens a **Preview
