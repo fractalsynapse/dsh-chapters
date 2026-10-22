@@ -20,6 +20,8 @@ export interface ArchiveFs {
 
 /** Number allocation through the registry, never by scanning a directory (races a concurrent sibling). */
 export interface NumberAllocator {
+  /** Free an attempt key when NOTHING landed, so a failed door cannot leave keys accumulating. */
+  release?(attemptId: string): Promise<void>
   reserve(key: string, count: number): Promise<number[]>
   /**
    * Separate allocation for plan DOCUMENTS (docs/plans-carriage.md § 11), so a plan
@@ -242,6 +244,15 @@ export async function writeArchive(input: WriteInput): Promise<WriteResult> {
         return docs !== undefined && docs.length > 0 ? { planDocs: docs } : {}
       })(),
     })
+  }
+
+  // #59: an attempt that landed NOTHING must not leave a reservation key behind forever — that is how
+  // numbers 20 and 37 stayed burned with no file and no record. PARTIAL landing keeps the key on
+  // purpose: a retry of the same attempt reuses those numbers instead of writing a second chapter
+  // over the same span.
+  if (records.length === 0 && allocator.release !== undefined) {
+    await allocator.release(input.attemptId)
+    warnings.push(`attempt ${input.attemptId} landed no chapter; its reservation key was released`)
   }
 
   return { records, artifactPathsWritten, warnings }

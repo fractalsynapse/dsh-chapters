@@ -37,6 +37,7 @@ import { rulesCommand, type RulesIo } from '../../src/rules-commands.ts'
 import { createEnrichWiring, type EnrichWiringDeps } from '../../src/enrich-wire.ts'
 import type { ProjectRecord } from '../../src/sync.ts'
 import { sha256 } from '../../src/render.ts'
+import { withMutate } from '../fake-store.ts'
 
 
 // ------------------------------------------------------------- the output contract
@@ -235,13 +236,13 @@ function ladderHarness(fetchImpl: (prompt: string) => Promise<string>, over: Par
     chapters: [{ number: 1, path: rel, title: 'legacy fragment', summary: 'deterministic summary text', topics: ['src/a.ts'], sha256: sha256(chapterText), startSeq: 0, endSeq: 5, estimatedTokens: 10 }],
   }
   const settings = new Map<string, string>()
-  const store = {
+  const store = withMutate({
     get: async () => state,
     put: async (_id: string, next: Record<string, unknown>) => { state.chapters = next.chapters },
     sessions: () => [['sess-1', state]] as Iterable<[string, unknown]>,
     getSetting: (k: string) => settings.get(k),
     putSetting: async (k: string, v: string) => { settings.set(k, v) },
-  } as unknown as EnrichWiringDeps['store']
+  }) as unknown as EnrichWiringDeps['store']
   const logs: string[] = []
   const warns: string[] = []
   const deps: EnrichWiringDeps = {
@@ -298,10 +299,10 @@ test('§7.5 mining is not gated on the frontmatter write — a guarded chapter s
   let mined = 0
   const warns: string[] = []
   const deps: EnrichWiringDeps = {
-    store: {
+    store: withMutate({
       get: async () => state, put: async () => {}, sessions: () => [['sess-9', state]],
       getSetting: () => undefined, putSetting: async () => {},
-    } as unknown as EnrichWiringDeps['store'],
+    }) as unknown as EnrichWiringDeps['store'],
     cwd: () => ws,
     config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5 },
     fetch: minedAnswer('never edit a committed tape by hand'),

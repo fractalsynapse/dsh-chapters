@@ -6,6 +6,7 @@ import path from 'node:path'
 import { createEnrichWiring, type EnrichWiringDeps } from '../../src/enrich-wire.ts'
 import { parseChapterFile } from '../../src/enrich-store.ts'
 import { sha256 } from '../../src/render.ts'
+import { withMutate } from '../fake-store.ts'
 
 function harness(fetchImpl?: (prompt: string) => Promise<string>) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'ew-'))
@@ -20,13 +21,13 @@ function harness(fetchImpl?: (prompt: string) => Promise<string>) {
     chapters: [{ number: 1, path: rel, title: 'legacy fragment', summary: 'deterministic summary text', topics: ['src/a.ts'], sha256: sha256(chapterText), startSeq: 0, endSeq: 5, estimatedTokens: 10 }],
   }
   const settings = new Map<string, string>()
-  const store = {
+  const store = withMutate({
     get: async () => state as never,
     put: async (_id: string, next: any) => { state.chapters = next.chapters },
     sessions: () => [['sess-1', state]] as Iterable<[string, unknown]>,
     getSetting: (k: string) => settings.get(k),
     putSetting: async (k: string, v: string) => { settings.set(k, v) },
-  } as unknown as EnrichWiringDeps['store']
+  }) as unknown as EnrichWiringDeps['store']
   let fetched = 0
   const counted = fetchImpl ?? (async () => '{"title": "Enriched title", "summary": "Model summary sentence here.", "topics": ["auth", "retrieval"]}')
   const deps: EnrichWiringDeps = {

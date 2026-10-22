@@ -28,6 +28,7 @@ import type { ChapterRecord } from './archive.ts'
 import { estimateTokens, renderChapter, renderIndex } from './render.ts'
 import { lineageOf } from './types.ts'
 import { slugify } from './archive.ts'
+import { isFinalized } from './registry.ts'
 import type { PlanChapter, SessionState } from './registry.ts'
 
 /** provider tag written into `compaction/summary` — our event-scan discriminator. */
@@ -632,6 +633,43 @@ export function engineRecord(plan: SummarizePlan, shadowedSeqs: readonly number[
 }
 
 /** Numbers the plan reserved, or null when the manifest disagrees (corruption). */
+/**
+ * Walk the provider-tagged summaries of one session and finalize each that is not yet finalized,
+ * ONE AT A TIME (#59): an item whose manifest is gone is reported and skipped, never allowed to
+ * abort the items behind it. Pure over injected effects so the poison-pill case is testable without
+ * a host.
+ */
+export async function scanAndFinalize(
+  state: SessionState,
+  summaries: readonly { compactionId: string; summarySeq: number; shadowedSeqs: number[] }[],
+  finalizeOne: (found: { compactionId: string; summarySeq: number; shadowedSeqs: number[] }) => Promise<void>,
+  onSkip?: (reason: { compactionId: string; reason: string }, error: unknown) => void,
+): Promise<{ done: string[]; skipped: Array<{ compactionId: string; reason: string }> }> {
+  const done: string[] = []
+  const skipped: Array<{ compactionId: string; reason: string }> = []
+  for (const found of summaries) {
+    if (isFinalized(state, found.compactionId)) continue
+    const hasManifest = state.plans[found.compactionId] !== undefined
+      && state.reservations[`compaction:${found.compactionId}`] !== undefined
+    if (!hasManifest) {
+      // The field case: the manifest row was erased by a stale whole-row put. Nothing can write the
+      // chapter now (the cited path/number are not durable), so say which and move on.
+      skipped.push({ compactionId: found.compactionId, reason: 'no-manifest' })
+      onSkip?.({ compactionId: found.compactionId, reason: 'no-manifest' }, new Error('no durable plan/reservation'))
+      continue
+    }
+    try {
+      await finalizeOne(found)
+      done.push(found.compactionId)
+    } catch (error) {
+      // Keep the rest of the queue alive; the item itself stays un-finalized and is retried next touch.
+      skipped.push({ compactionId: found.compactionId, reason: 'finalize-failed' })
+      onSkip?.({ compactionId: found.compactionId, reason: 'finalize-failed' }, error)
+    }
+  }
+  return { done, skipped }
+}
+
 export function assertReservationMatchesPlan(state: SessionState, compactionId: string, plan: SummarizePlan): boolean {
   const got = state.reservations[`compaction:${compactionId}`]
   return got !== undefined && got.length === plan.numbers.length && got.every((n, i) => n === plan.numbers[i])

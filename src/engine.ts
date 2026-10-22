@@ -23,8 +23,10 @@ import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compa
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import z from '@deepseek-ai/schemastery'
 import {
+  assertReservationMatchesPlan,
   CHAPTERS_PROVIDER, DETERMINISTIC_MODEL, buildFinalizedChapter, buildFinalizedChapters,
   findOpenCompactionId, planSummarize, reconstructShadowedSeqs, scanChaptersSummaries,
+  scanAndFinalize,
   type EngineConfig, type EngineSession, type SummarizeInputLike, type SummarizeResultLike,
 } from './engine-core.ts'
 import { composeChapters } from './compose.ts'
@@ -146,10 +148,12 @@ export function makeSignatureListener(deps: {
       const enrichPromise = cwd !== undefined
         ? enrichSignatureWithCodegraph(sig, span, deps.subprocess, cwd).catch(() => {})
         : Promise.resolve()
-      const job = (): Promise<void> => enrichPromise.then(() => deps.store()).then(({ store }) => {
-        const state = store.get(id)
-        return state.then((st) => store.put(id, appendCollection(st, sig)))
-      }).then(() => undefined).catch(deps.warn)
+      // One serialized section (#59): the signature listener used to get→append→put with the whole
+      // row snapshot, so a turn that landed during another door's await could erase that door's
+      // committed state. The lost signature is what dropped a COMPLETED turn out of the archive.
+      const job = (): Promise<void> => enrichPromise.then(() => deps.store()).then(({ store }) =>
+        store.mutate(id, (st) => appendCollection(st, sig)),
+      ).then(() => undefined).catch(deps.warn)
       const prev = chains.get(id)
       const next = prev === undefined ? job() : prev.then(job)
       chains.set(id, next)
@@ -633,13 +637,24 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       this.#diagnostic(`dsh-chapters: rule carriage skipped (${String(error)}) — the archive still holds every rule`)
     }
 
-    const { plan, state: next } = planSummarize(session, state, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry, rulesCarry)
-    const stored = rememberPlan(next, cid, {
-      number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
-      ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
+    // #59: everything ABOVE this line (composition, plot elicitation, rules, plan carry) is
+    // expensive and may cross a model call; the WRITE re-runs on a fresh row inside one section, so
+    // the reservation and manifest can no longer be rewound by a stale whole-row put — and the TOC
+    // text we are about to hand the host cites numbers that are durable at this point.
+    let tocText = ''
+    await store.mutate(session.id, (fresh) => {
+      const { plan, state: next } = planSummarize(session, fresh, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry, rulesCarry)
+      const stored = rememberPlan(next, cid, {
+        number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
+        ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
+      })
+      // The drift check that has existed with zero callers: a manifest whose reservation is not
+      // durable (or not the same numbers) means the TOC we are about to emit cites the unreachable.
+      assertReservationMatchesPlan(stored, cid, plan)
+      tocText = plan.tocText
+      return stored
     })
-    await store.put(session.id, stored) // reservation + manifest durable BEFORE the text cites them
-    return { summary: [{ type: 'text', text: plan.tocText }], provider: CHAPTERS_PROVIDER, model: DETERMINISTIC_MODEL }
+    return { summary: [{ type: 'text', text: tocText }], provider: CHAPTERS_PROVIDER, model: DETERMINISTIC_MODEL }
   }
 
   // ------------------------------------------------------------ entry points (finalize after commit)
@@ -839,12 +854,28 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   }
 
   /** Every provider-tagged summary without a finalized manifest, oldest first. */
+  /**
+   * Per-item containment (#59). The scan used to await `#finalizeOne` in a bare loop, and
+   * `#finalizeOne` THROWS when a manifest is missing — so one erased manifest (exactly what the
+   * SAIP lost-update produced) aborted the scan on its first iteration forever: every later
+   * compaction in that session could never write its chapters, and their numbers stayed burned.
+   * One bad item may never poison the items behind it: report it, name it, continue.
+   */
   async #finalizeAllOutstanding(session: EngineSession): Promise<void> {
     const { store } = await this.store()
-    const state = await store.get(session.id)
-    for (const found of scanChaptersSummaries(session)) {
-      if (isFinalized(state, found.compactionId)) continue
-      await this.#finalizeOne(session, store, found.compactionId, found.shadowedSeqs)
+    const out = await scanAndFinalize(
+      await store.get(session.id),
+      scanChaptersSummaries(session),
+      async (found) => { await this.#finalizeOne(session, store, found.compactionId, found.shadowedSeqs) },
+      (reason, error) => this.#diagnostic(
+        `dsh-chapters: chapter finalization deferred for compaction ${reason.compactionId} (${reason.reason}: `
+        + `${String((error as Error)?.message ?? error)}) — its chapter was never written and the `
+        + 'rest of the queue still proceeds. Run /chapters-repair (issue #60) to materialize it.',
+      ),
+    )
+    if (out.done.length > 0) {
+      const cwd = (session as unknown as { header?: { cwd?: string } }).header?.cwd
+      if (cwd !== undefined) void this.#scheduler().then((s2) => s2.schedule(cwd, 'archive:compaction')).catch(() => undefined)
     }
   }
 
@@ -886,9 +917,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // jointly account for what the surface replacement hid (legacy single-
     // chapter behavior generalized).
     const records = wrote.records.map((r) => ({ ...r, shadowedSeqs: [...shadowedSeqs] }))
-    let next: SessionState = appendChapters(state, records)
-    next = markFinalized(next, compactionId, numbers)
-    await store.put(session.id, next)
+    // #59: `state` was read BEFORE writeArchive (render + every artifact write). Committing from it
+    // would erase anything another door committed meanwhile — which is how the SAIP compaction lost
+    // its record while its 960 KB file stayed on disk. The commit re-reads inside one section.
+    await store.mutate(session.id, (fresh) => markFinalized(appendChapters(fresh, records), compactionId, numbers))
     // §5.1: compaction finalization is a push point (debounced).
     const cwdNow = (session as unknown as { header?: { cwd?: string } }).header?.cwd
     if (cwdNow !== undefined) void this.#scheduler().then((s) => s.schedule(cwdNow, 'archive:compaction')).catch(() => undefined)

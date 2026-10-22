@@ -17,7 +17,24 @@ import { deriveRanges } from './continue-core.ts'
 import { renderChapter } from './render.ts'
 import { chapterTopics } from './signature.ts'
 import { makeArchiveFs, commitChapters, type RegistryStore } from './store.ts'
-import { reserve, reservePlan as reservePlanNumber } from './registry.ts'
+import { releaseReservation, reserve, reservePlan as reservePlanNumber } from './registry.ts'
+
+/** One serialized read-allocate-write for a door that cannot use makeAllocator (same rule, #59). */
+async function reserveNumbers(
+  store: RegistryStore,
+  sessionId: string,
+  attemptId: string,
+  count: number,
+  plan = false,
+): Promise<{ numbers: number[] }> {
+  let numbers: number[] = []
+  await store.mutate(sessionId, (state) => {
+    const r = plan ? reservePlanNumber(state, attemptId, count) : reserve(state, attemptId, count)
+    numbers = r.numbers
+    return r.state
+  })
+  return { numbers }
+}
 import { writeArchive, attemptKey } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
 import type { RenderConfig, SessionEventLike } from './types.ts'
@@ -140,17 +157,18 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   const wrote = await writeArchive({
     fs: makeArchiveFs(cwd),
     allocator: {
+      // One section per allocation (#59) — identical semantics to makeAllocator, which is why the
+      // shared helper is used by every other door; this door had its own copy of the race.
       async reserve(attemptId, count) {
-        const fresh = await store.get(sessionId)
-        const r = reserve(fresh, attemptId, count)
-        await store.put(sessionId, r.state)
-        return r.numbers
+        const { numbers } = await reserveNumbers(store, sessionId, attemptId, count)
+        return numbers
       },
       async reservePlan(attemptId, count) {
-        const fresh = await store.get(sessionId)
-        const r = reservePlanNumber(fresh, attemptId, count)
-        await store.put(sessionId, r.state)
-        return r.numbers
+        const { numbers } = await reserveNumbers(store, sessionId, attemptId, count, true)
+        return numbers
+      },
+      async release(attemptId) {
+        await store.mutate(sessionId, (state) => releaseReservation(state, attemptId))
       },
     },
     // raw value: makeArchiveFs roots RELATIVE paths at the session cwd and
