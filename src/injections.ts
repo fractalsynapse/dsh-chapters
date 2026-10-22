@@ -57,6 +57,18 @@ export function isSessionStateNarration(data: Record<string, unknown>): boolean 
   // v4 (issue #43, measured against dsh-plan-mode/lib/index.js:395-410 on
   // 0.2.0-rc.2): the producer owns the kind — `{ kind: 'plan-mode', form: 'notice' }`.
   if (source?.kind === 'plan-mode' && source.form === 'notice') return true
+  // #61 Amendment B — a delegate's report is conversation about THIS session's work, not a project's
+  // private bytes. Measured shapes (0.2.x logs): `{ kind: 'agent-message', form: 'relay' }` carries
+  // "Agent <id> sent a message: <the result>", and `{ kind: 'subagent-settled', form: 'notice' }` is
+  // when that delegate finished. The old rule screened both, which cost 44 markers / 248,150 chars
+  // (~62K est tokens) in the first project built on this preset — delegated work vanished through BOTH
+  // doors meant to capture it, leaving chapters that recorded a delegation with no outcome.
+  // Named by producer AND form like the plan-mode arm above, so it cannot widen: the workspace
+  // instruction file (`{ kind: 'agent-instructions', form: 'instructions' }`) is still screened, and
+  // `isHumanAuthored` stays strict, because the topic-signature layer must not let a 2 KB report drag a
+  // signature toward the filenames it mentions (record r28).
+  if (source?.kind === 'agent-message' && source.form === 'relay') return true
+  if (source?.kind === 'subagent-settled' && source.form === 'notice') return true
   // v3 logs, still replayed from disk: the retired wrapper the exception was
   // written against. Both arms stay named by producer AND form — neither widens.
   return source?.kind === 'plugin' && source.plugin === 'plan-mode' && source.form === 'notice'

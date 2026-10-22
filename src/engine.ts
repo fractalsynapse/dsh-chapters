@@ -18,6 +18,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
 import { diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
+import { makeChildArchiveListener } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
@@ -56,6 +57,9 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   chapterTokenTarget?: number
   toolResultDeferFloorTokens?: number
   mergeThreshold?: number
+  /** #61 Amendment A: the seventh archive moment, and its re-arm lag. */
+  childAutoArchive?: boolean | undefined
+  childAutoArchiveMinTurns?: number | undefined
   chapterLimit?: number
   syncDebounceMs?: number
   toolResultArtifactTokens?: number
@@ -233,6 +237,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     chapterLimit: z.number().step(1).min(1).default(8000),
     syncDebounceMs: z.number().step(1).min(0).default(30000),
     toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
+    // #61 Amendment A — the seventh archive moment. A `ch-*` continuation child has origin `user`, so
+    // door 5 never sees it: the field case archived NOTHING across 2,363 events because no moment was
+    // watching. Save-only, fires at turn/end, thresholds are config and never literals.
+    childAutoArchive: z.boolean().default(true),
+    childAutoArchiveMinTurns: z.number().step(1).min(1).default(4),
     elicitedPlot: z.boolean().default(true),
     harnessId: z.string().default(''),
     sessionRulesEnabled: z.boolean().default(true),
@@ -305,6 +314,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const {
       artifactStoreRoot, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
+      childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
       harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
       projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
@@ -332,6 +342,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       mergeThreshold: mergeThreshold ?? 0.3,
       chapterLimit: chapterLimit ?? 8000,
       toolResultArtifactTokens: toolResultArtifactTokens ?? 8000,
+      childAutoArchive: childAutoArchive ?? true,
+      childAutoArchiveMinTurns: childAutoArchiveMinTurns ?? 4,
       planInlineChars: planInlineChars ?? 900,
       callArgArtifactTokens: callArgArtifactTokens ?? 0,
       plansInCheckpoint: plansInCheckpoint ?? true,
@@ -504,6 +516,25 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         onCollected: (id, sig) => {
           this.ctx.logger?.info?.(`dsh-chapters: signature collected for ${id} (${sig.seqs.length} events, ${sig.paths.length} paths, ${sig.size} est tokens)`)
         },
+      }))
+      // #61: the seventh moment, registered where the other turn/end doors already live. Its own
+      // watermark makes a re-run a no-op, and it creates NO session — the mid-step rule stays intact.
+      this.ctx.on('session/event', makeChildArchiveListener({
+        ctx: { logger: this.ctx.logger },
+        // the store opens lazily and once — same accessor the signature listener uses; a row that
+        // resolved it per turn would reopen the domain on every turn/end.
+        store: () => this.store().then(({ store }) => store),
+        wiring: {
+          presetId: 'chapters',
+          artifactStoreRoot: this.chaptersConfig.artifactStoreRoot,
+          chapterTokenTarget: this.chaptersConfig.chapterTokenTarget,
+          toolResultDeferFloorTokens: this.chaptersConfig.toolResultDeferFloorTokens,
+          mergeThreshold: this.chaptersConfig.mergeThreshold,
+          chapterLimit: this.chaptersConfig.chapterLimit,
+          scheduler: { schedule: (cwd: string, reason: string) => { void this.#scheduler().then((sc) => sc.schedule(cwd, reason)) } },
+        },
+        enabled: this.chaptersConfig.childAutoArchive ?? true,
+        minTurns: this.chaptersConfig.childAutoArchiveMinTurns ?? 4,
       }))
     } catch {
       // A non-cordis ctx (L0 construction) has no event bus — signatures are

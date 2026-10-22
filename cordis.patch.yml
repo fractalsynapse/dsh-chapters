@@ -69,6 +69,12 @@
 #                                  #   DSH_CHAPTERS_ENGINE_ERRORS overrides it; the literal 'off' is the
 #                                  #   only silence. Before this, unset meant NO TRACE ON DISK — the three
 #                                  #   SAIP compaction finalization failures left none.
+#   childAutoArchive: true           # the seventh archive moment (#61): a ch-* continuation child is not a
+#                                  #   subagent, so door 5 never sees it. `ch-dc3be3ab` reached 2,363
+#                                  #   events and 3 completed turns with chapters: [] — nothing failed,
+#                                  #   NO MOMENT WAS WATCHING. Set false to close this door.
+#   childAutoArchiveMinTurns: 4    # after the first archive, how many unarchived completed turns re-arm it
+#                                  #   (the first archive always fires: never-archived is the defect).
 #   chapterOversizeFactor: 2       # hard oversize multiple of chapterTokenTarget (#59): over the
 #                                  #   TARGET warns ("split at the next boundary, never clip"), over
 #                                  #   target × factor every door REFUSES with its numbers before

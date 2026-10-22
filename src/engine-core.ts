@@ -55,6 +55,9 @@ export interface EngineConfig {
   /** Composer tunables (record §4.2/§12) — same register, same defaults as the host plugin's. */
   mergeThreshold: number
   chapterLimit: number
+  /** #61 Amendment A — the seventh archive moment (see auto-save.ts `shouldForceChildArchive`). */
+  childAutoArchive?: boolean | undefined
+  childAutoArchiveMinTurns?: number | undefined
   /** Arrival-time artifacting floor (architecture.md amendment 2026-09-19):
    * tool results at/above this many estimated tokens are stored as artifacts
    * and replaced by reference stubs BEFORE the next request is composed. */
