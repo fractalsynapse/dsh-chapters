@@ -72,3 +72,23 @@ test(`${tool.text !== undefined ? 'RUN' : 'SKIP'} — the foreground path settle
   assert.ok(execution >= 0 && dispose >= 0 && execution < dispose,
     'F3: dispose now precedes awaiting the run result — subagent/end may fire after the handle is gone; the durable fallback becomes the primary arm')
 })
+
+/**
+ * F4 (#58) — the OTHER arm's ordering. F3 pins the *foreground* path, which settles before
+ * disposing; a **continuable** child is disposed first, and `settle` is what emits
+ * `subagent/end`. So for a continuable child the live handle is always gone at the event and
+ * the durable read is not a fallback — it is the only arm. The SAIP field data is 12/12
+ * `mode: "continuable"` children archived hollow, which is what this row now guards: if the
+ * host ever inverts this, the fast path must not be trusted either without re-measuring.
+ */
+test(`${subagent.text !== undefined ? 'RUN' : 'SKIP'} — the continuable path disposes BEFORE emitting end`, { skip: skip(subagent) }, () => {
+  assert.ok(subagent.text !== undefined)
+  const at = subagent.text.indexOf('this.resident.delete(childId)')
+  assert.ok(at >= 0, 'F4: resident.delete moved/renamed — re-derive which arm actually runs for a continuable child')
+  const window_ = subagent.text.slice(at - 1500, at + 600)
+  const dispose = window_.search(/await activation\.handle\.dispose\(\)/)
+  const settle = window_.search(/observer\.settle\(/)
+  assert.ok(dispose >= 0 && settle >= 0, 'F4: dispose or settle renamed — this row is guarding the arm selection, do not let it rot quietly')
+  assert.ok(dispose < settle,
+    'F4: the host now emits subagent/end BEFORE disposing a continuable child — the live snapshot becomes the primary arm again, so re-measure which read door 5 must trust')
+})

@@ -47,7 +47,15 @@ export interface SaveSessionArgs {
   subagentOf?: string | undefined
 }
 
-export type SaveSessionSkip = 'no-completed-turn' | 'nothing-new'
+export type SaveSessionSkip =
+  | 'no-completed-turn'
+  /** Everything in the span was already archived (watermark at or past the anchor). */
+  | 'nothing-new'
+  /**
+   * #58 — the span rendered zero conversation bytes. A payload read that went wrong, never a
+   * short conversation, and never a reason to reserve a number or write a file.
+   */
+  | 'payloadless'
 
 export interface SaveSessionOutcome {
   /** null → the archive was written. Otherwise WHY nothing was written. */
@@ -101,6 +109,34 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     ...(a.subagentOf !== undefined && a.subagentOf !== '' ? { subagentOf: a.subagentOf } : {}),
   }
   const rendered = chapters.map((range) => renderChapter(below, range, renderConfig, [], chapterTopics(below, range.startSeq, range.endSeq)))
+
+  // #58 — NEVER commit an archive that rendered nothing. A `tool/call` is always preceded by an
+  // `assistant/message`, so a non-empty range with zero rendered messages is not a short
+  // conversation: it is a read that carried no payloads. The real instance was
+  // `sessionQuery.listEvents`, whose `SessionEventRecord` rows have `seq`/`type`/`time`/`surface`
+  // and no `data` — 12 children on this machine archived as `**unknown**` / `{}` / `0 B` shells.
+  // The refusal is BEFORE `writeArchive`, so no number is reserved and no file is written: a
+  // committed husk would poison the watermark (`max(endSeq)`), and the child could then never be
+  // re-archived without a repair (#60). Refuse with numbers, never truncate — AGENTS.md.
+  const hollow = rendered.filter((r) => r.stats.events > 0 && r.stats.messages === 0)
+  if (hollow.length > 0) {
+    return {
+      skipped: 'payloadless',
+      fromSeq,
+      anchor,
+      lastArchived,
+      priorChapters: state.chapters.length,
+      records: [],
+      warnings: hollow.map((r) => {
+        const un = r.stats.unrenderedSeqs
+        return `"${r.range.title}" spans seqs ${r.range.startSeq}..${r.range.endSeq}: ${r.stats.events} events, `
+          + `${r.stats.toolCalls} tool calls, 0 rendered messages, ${un.length} unrendered`
+          + `${un.length > 0 ? ` (first: ${un.slice(0, 5).join(', ')})` : ''}`
+          + ' — the read carried event SHAPES but no payloads; nothing was reserved or written'
+      }),
+    }
+  }
+
   const wrote = await writeArchive({
     fs: makeArchiveFs(cwd),
     allocator: {

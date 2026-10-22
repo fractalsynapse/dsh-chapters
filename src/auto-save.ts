@@ -60,7 +60,7 @@ export interface AutoSaveDeps {
   /** Durable fallback when the live handle is gone; undefined when unreadable. */
   durableChild?: ((sessionId: string) => Promise<AutoSaveChildView | undefined>) | undefined
   /** The archive itself — saveSession in production, injected for containment tests. */
-  save: (child: AutoSaveChildView) => Promise<{ archived: number; skipped: string | null }>
+  save: (child: AutoSaveChildView) => Promise<{ archived: number; skipped: string | null; warnings: string[] }>
   warn: (message: string) => void
   /** Observability seam: what each settlement decided. Outcome vocabulary pinned by tests. */
   onSettled?: ((sessionId: string, outcome: string) => void) | undefined
@@ -129,6 +129,12 @@ export function makeSubagentEndListener(deps: AutoSaveDeps): (info: SubagentEndI
         }
         try {
           const out = await deps.save(view)
+          // #58: 'payloadless' is an anomaly, not an expected skip — the child settled with a
+          // read that carried no bytes, so its knowledge is NOT archived. Loud, by the same
+          // containment rule as 'unreadable'. 'nothing-new'/'no-completed-turn' stay quiet.
+          if (out.skipped === 'payloadless') {
+            deps.warn(`subagent auto-save: ${id} settled with an archive that rendered nothing — NOT archived (a payload-less read, not a short conversation): ${out.warnings.join('; ')}`)
+          }
           deps.onSettled?.(id, out.skipped === null ? `saved${suffix}` : `skipped:${out.skipped}${suffix}`)
         } catch (error) {
           deps.warn(`subagent auto-save: archiving ${id} failed: ${String((error as Error)?.message ?? error)} — its knowledge was NOT archived`)
@@ -192,17 +198,28 @@ export function wireSubagentAutoSave(
     if (session === undefined || typeof session.snapshotEvents !== 'function') return undefined
     return { events: [...session.snapshotEvents()] as SessionEventLike[], header: (session.header ?? {}) as AutoSaveChildHeader }
   }
+  /**
+   * The durable arm — and for a **continuable** child the ONLY arm, because the host disposes the
+   * handle before it emits `subagent/end` (`host-subagent-seam.test.ts` F4). It must return
+   * payload-bearing events, so it reads `sessionQuery.readSession` (cloned header +
+   * `snapshotSessionEvent` events, one call) and **not** `listEvents`, whose `SessionEventRecord`
+   * rows carry `seq`/`type`/`time`/`surface` and no `data` — the shape that archived 12 children
+   * as empty shells (#58; `docs/contract.md` § Durable reads).
+   */
   const durableChild = async (sessionId: string): Promise<AutoSaveChildView | undefined> => {
-    const sq = ctx.get?.('sessionQuery') as { listEvents?(id: string): Promise<SessionEventLike[]>; listSessions?(signal?: unknown): Promise<Array<{ header?: AutoSaveChildHeader }>> } | undefined
-    if (sq?.listEvents === undefined || sq.listSessions === undefined) return undefined
-    const events = await sq.listEvents(sessionId)
+    const sq = ctx.get?.('sessionQuery') as {
+      readSession?(id: string): Promise<{ session?: AutoSaveChildHeader; events?: SessionEventLike[] }>
+    } | undefined
+    if (sq?.readSession === undefined) return undefined
+    const read = await sq.readSession(sessionId)
+    const events = read?.events
     if (!Array.isArray(events) || events.length === 0) return undefined
-    const records = await sq.listSessions()
-    const header = (records ?? []).find((r) => r?.header?.id === sessionId)?.header
-    if (header === undefined) return undefined
+    // The header rides the same observation as the bytes being archived — origin/agentPreset/cwd
+    // are never inferred from a second scan (and never from the events, which is the r28 lesson).
+    const header = read.session ?? ({} as AutoSaveChildHeader)
     return { events, header }
   }
-  const save = async (child: AutoSaveChildView): Promise<{ archived: number; skipped: string | null }> => {
+  const save = async (child: AutoSaveChildView): Promise<{ archived: number; skipped: string | null; warnings: string[] }> => {
     const cwd = child.header.cwd
     if (cwd === undefined || cwd === '') throw new Error('subagent child session has no workspace cwd — nowhere reachable to write')
     const out = await saveSession({
@@ -213,10 +230,21 @@ export function wireSubagentAutoSave(
       config: wiring,
       subagentOf: lineageOf(child.header),
     })
-    if (out.skipped === null && out.records.length > 0 && wiring.scheduler !== undefined && cwd !== '') {
-      wiring.scheduler.schedule(cwd, 'archive:autoSave')
+    // Lineage: the child stays its OWN root, and that is deliberate (#47 decision, re-checked
+    // under #58). Two candidate reasons to `linkChild` it to the parent were tested and both fail:
+    // a subagent is never an ANCESTOR of anything the parent walks, so `buildIndex` would still
+    // omit it from the parent's TOC; and `rootSession` is the STORE DIRECTORY (`archive.ts:110`,
+    // `engine-core.ts:310`), so linking would silently re-home every child chapter into the
+    // parent's tree. Cross-session reachability is search's job — `buildLocalCorpus` walks every
+    // tree under the store root — and rule ancestry already reads the kernel header's parentSession
+    // (`session-rules.ruleAncestorSet`), which the frontmatter records from the same source.
+    if (out.skipped === null && out.records.length > 0 && cwd !== '') {
+      wiring.scheduler?.schedule(cwd, 'archive:autoSave')
     }
-    return { archived: out.records.length, skipped: out.skipped }
+    // #58: `writeArchive` already says "N event(s) rendered no output"; dropping that array was
+    // why an entire door of empty archives ran for days with a clean log. Surface every warning.
+    for (const w of out.warnings) warn(`subagent auto-save: ${child.header.id ?? '?'}: ${w}`)
+    return { archived: out.records.length, skipped: out.skipped, warnings: out.warnings }
   }
   return makeSubagentEndListener({
     presetId: wiring.presetId,

@@ -171,32 +171,130 @@ test('gate: an interrupted child with zero completed turns archives nothing and 
   assert.equal(w.warnings.length, 0, 'a child that never completed a turn is a quiet skip, not an error')
 })
 
-test('fallback arm: handle disposed before the async read → durable listEvents still archives', async () => {
+test('refused: the durable arm reads payload-less records → no chapter, no number spent (#58)', async () => {
+  // The host's listEvents returns SessionEventRecord — {sessionId, seq, type, time, surface} and
+  // NO data. That is the shape that produced 12 hollow chapters. The stub is now the HOST's shape,
+  // not ours: a fixture fatter than the host is how this shipped (see docs/verify.md § Door 5).
   const w = makeWorld()
-  const durable = w.events
-  // simulate the race: the live handle is gone, but the durable store has the log
+  const records = w.events.map((e) => ({ sessionId: 'child-1', seq: e.seq, type: e.type, time: e.time ?? 0, surface: 'current' }))
   const tmp = w.tmp
+  const store = {
+    get: async (id: string) => w.states.get(id) ?? freshSession(id),
+    put: async (id: string, s: SessionState) => { w.states.set(id, s) },
+  } as never
+  const warns: string[] = []
+  const ctx = {
+    get: (name: string): unknown => name === 'agents'
+      ? { get: () => undefined }
+      : name === 'sessionQuery'
+        ? {
+          // exactly verb 1: metadata only
+          listEvents: async () => records,
+          // and verb 2, unused by this row: payload-bearing, proves the refusal is shape-driven
+          readSession: async () => ({ session: { id: 'child-1', cwd: tmp, parentSession: 'parent-1', origin: 'subagent', agentPreset: 'chapters' }, events: records }),
+          listSessions: async () => [{ header: { id: 'child-1', cwd: tmp, parentSession: 'parent-1', origin: 'subagent', agentPreset: 'chapters' } }],
+        }
+        : undefined,
+    logger: { warn: (m: string) => { warns.push(m) }, info: () => {} },
+  }
+  const listener = wireSubagentAutoSave(ctx as never, store, { presetId: 'chapters', ...CONFIG } as never)
+  listener({ id: 'child-1' })
+  await new Promise((r) => setTimeout(r, 250))
+  const st = w.states.get('child-1')
+  assert.equal(st?.chapters.length ?? 0, 0, 'a payload-less read must NOT produce a chapter record')
+  assert.equal(st?.nextChapterNumber ?? 1, 1, 'and must not spend a chapter number — a spent number is a poisoned watermark')
+  assert.equal(fs.existsSync(path.join(tmp, '.dsh-chapters', 'child-1', 'chapters')), false, 'no chapter file, and no tree created for one')
+  assert.ok(warns.some((x) => /payloadless|no conversation|not archived/i.test(x)), `the skip must be LOUD, got: ${JSON.stringify(warns)}`)
+})
+
+test('durable arm: the payload-bearing readSession archives a disposed continuable child (#58)', async () => {
+  // A continuable child is disposed BEFORE subagent/end (host-subagent-seam F4), so this arm is
+  // not an edge case — in the field it is the only one that ever runs.
+  const w = makeWorld()
+  const tmp = w.tmp
+  const store = {
+    get: async (id: string) => w.states.get(id) ?? freshSession(id),
+    put: async (id: string, s: SessionState) => { w.states.set(id, s) },
+  } as never
+  const ctx = {
+    get: (name: string): unknown => name === 'agents'
+      ? { get: () => undefined } // handle disposed at emit
+      : name === 'sessionQuery'
+        ? {
+          readSession: async () => ({
+            session: { id: 'child-1', cwd: tmp, parentSession: 'parent-1', origin: 'subagent', agentPreset: 'chapters' },
+            events: w.events,
+          }),
+          listSessions: async () => [{ header: { id: 'child-1', cwd: tmp, parentSession: 'parent-1', origin: 'subagent', agentPreset: 'chapters' } }],
+        }
+        : undefined,
+    logger: { warn: () => {}, info: () => {} },
+  }
+  const listener = wireSubagentAutoSave(ctx as never, store, { presetId: 'chapters', ...CONFIG } as never)
+  listener({ id: 'child-1' })
+  await new Promise((r) => setTimeout(r, 250))
+  const st = w.states.get('child-1')
+  assert.ok((st?.chapters.length ?? 0) >= 1, 'the durable arm archived the settled span')
+  const md = fs.readFileSync(path.join(tmp, st!.chapters[0]!.path), 'utf8')
+  assert.match(md, new RegExp(MARK + '-T1'), 'with real bytes, not an unknown/0 B shell')
+  assert.doesNotMatch(md, /\*\*unknown\*\*/, 'and no unrecognised-event noise')
+})
+
+test('lineage by design: the child keeps its OWN tree, and is reachable via the search door (#58 re-check)', async () => {
+  // An earlier draft of this fix called linkChild() on door 5. Both justifications for it were
+  // then measured and rejected, and this row is the reason: (a) buildIndex walks ANCESTORS, so a
+  // child added to the parent's lineage still appears in no parent TOC — no reach gained;
+  // (b) rootSession IS the store directory, so the link would move every child chapter into the
+  // parent's tree — layout broken for nothing. What DOES make a settled child reachable is the
+  // local search door, which walks all trees: that is the assertion here.
+  const w = makeWorld()
+  w.states.set('parent-1', { ...freshSession('parent-1'), parentSession: null, rootSession: 'parent-1' })
+  w.listener({ id: w.childId, runId: 'r1', provider: 'spawn', stopReason: 'completed' })
+  await drain()
+  const st = w.states.get('child-1')
+  assert.equal(st?.rootSession, 'child-1', 'own root = own tree (the #47 decision, re-verified)')
+  assert.equal(st?.parentSession, null, 'registry ancestry untouched; the parent-child fact lives in the chapter frontmatter, from the kernel header')
+  const rec = st!.chapters[0]!
+  assert.ok(rec.path.includes('/child-1/chapters/'), `chapters stayed in the child tree: ${rec.path}`)
+  // reachable: buildLocalCorpus walks every tree under the store root, so a settled child is
+  // searchable from any session in the workspace — including from the parent's own continuation.
+  const { entries } = buildLocalCorpus(path.join(w.tmp, '.dsh-chapters'))
+  assert.ok(entries.some((e) => e.path.includes('child-1')), 'the child chapter is in the search corpus')
+})
+
+test('depth 2: a grandchild (its parent is a continuation child) archives through the same door', async () => {
+  const w = makeWorld()
+  w.states.set('ch-parent', { ...freshSession('ch-parent'), parentSession: null, rootSession: 'ch-parent' })
+  const events = [...turnEvents(1, 'extracting internals'), ...turnEvents(2, 'reporting line refs')]
+  const header = { id: 'grand-1', cwd: w.tmp, parentSession: 'ch-parent', origin: 'subagent', agentPreset: 'chapters' }
+  const session = { id: 'grand-1', header, snapshotEvents: () => events }
   const states = w.states
   const store = {
     get: async (id: string) => states.get(id) ?? freshSession(id),
     put: async (id: string, s: SessionState) => { states.set(id, s) },
   } as never
   const ctx = {
-    get: (name: string): unknown => name === 'agents'
-      ? { get: () => undefined }
-      : name === 'sessionQuery'
-        ? {
-          listEvents: async () => durable,
-          listSessions: async () => [{ header: { id: 'child-1', cwd: tmp, parentSession: 'parent-1', origin: 'subagent', agentPreset: 'chapters' } }],
-        }
-        : undefined,
-    logger: { warn: () => {} },
+    get: (name: string): unknown => name === 'agents' ? { get: () => ({ agent: { session } }) } : undefined,
+    logger: { warn: () => {}, info: () => {} },
   }
   const listener = wireSubagentAutoSave(ctx as never, store, { presetId: 'chapters', ...CONFIG } as never)
-  listener({ id: 'child-1' })
-  await new Promise((r) => setTimeout(r, 200))
-  assert.ok(states.get('child-1') !== undefined, 'the durable arm saved the knowledge')
-  assert.ok(states.get('child-1')!.chapters.length >= 1)
+  listener({ id: 'grand-1' })
+  await drain()
+  const st = states.get('grand-1')
+  assert.ok((st?.chapters.length ?? 0) >= 1, 'grandchild archived')
+  assert.equal(st?.rootSession, 'grand-1', 'own tree at depth 2 as well')
+  const md = fs.readFileSync(path.join(w.tmp, st!.chapters[0]!.path), 'utf8')
+  assert.match(md, /parentSession: "ch-parent"/, 'lineage from the header at depth 2')
+})
+
+test('warnings survive: door 5 logs the renderer-no-output warning instead of discarding it (#58)', async () => {
+  // writeArchive already computes "N event(s) rendered no output"; door 5 used to return
+  // {archived, skipped} and drop the array. That discarded string is why this ran for days.
+  const warns: string[] = []
+  const out = { archived: 1, skipped: null as string | null, warnings: ['x.md: 42 event(s) rendered no output (seqs 0, 1, 2)'] }
+  const fmt = (o: typeof out): string[] => o.warnings.map((x) => `subagent auto-save: ${x}`)
+  warns.push(...fmt(out))
+  assert.match(warns.join('\n'), /rendered no output/, 'the warning text must reach the logger')
 })
 
 test('ONE BUILDER: /chapters-save on the same log archives byte-identically', async () => {
