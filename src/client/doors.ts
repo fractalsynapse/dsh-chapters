@@ -143,6 +143,16 @@ export function makeDoorRunner(
   remote: ClientRemote,
   sessions: ClientSessions | undefined,
   door: DoorAction,
+  /**
+   * "Is THIS session the one the client is now showing?" #54: `sessions.open()` returns
+   * void, so a call that resolves proves the request was accepted, not that the app
+   * switched. Measured on host 0.2.0-rc.2: no note element (open resolved), yet
+   * `dsh.sessions.current` still named the parent and the child was absent from the
+   * sidebar after a full reload — the user got silence and a missing session. Absent
+   * (a client that cannot answer) the runner keeps the old behavior, and the wiring is
+   * pinned by a row so production can never quietly drop it.
+   */
+  verifySwitched?: (childSessionId: string) => Promise<boolean>,
 ): (sessionId: string) => Promise<DoorResult> {
   return async function run(sessionId: string): Promise<DoorResult> {
     try {
@@ -154,11 +164,24 @@ export function makeDoorRunner(
       if (result?.kind !== 'success') return { ok: false, message: (text || `the ${door.noun} was refused — see the command result`).slice(0, 90) }
       const child = CHILD_ID.exec(text)?.[1]
       if (child === undefined) return { ok: true, message: `${door.noun} created — appearing in the sidebar` }
-      const opened = await openByService(sessions, child)
-      if (opened) return { ok: true, message: '' }
+      const switched = async (): Promise<boolean> => {
+        if (verifySwitched === undefined) return true
+        // the client settles asynchronously; three short looks, then the honest answer
+        for (let i = 0; i < 3; i++) {
+          try { if (await verifySwitched(child)) return true } catch { return false }
+          await new Promise((r) => { setTimeout(r, 250).unref?.() })
+        }
+        return false
+      }
+      if (await openByService(sessions, child) && await switched()) return { ok: true, message: '' }
+      // the service path did not take — the sidebar row is the same affordance a human uses
       const title = doorTitle(door.noun).exec(text)?.[1]
-      if (title !== undefined && await openBranchRow(title)) return { ok: true, message: '' }
-      return { ok: true, message: `${door.noun} created — open it in the sidebar` }
+      if (title !== undefined && await openBranchRow(title) && await switched()) return { ok: true, message: '' }
+      // #54: a child that is created but not shown is a DIFFERENT fact from one the user
+      // has to open by hand, and the message must not blur them.
+      return verifySwitched === undefined
+        ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
+        : { ok: true, message: `${door.noun} created — the app did not switch; open it from the sidebar` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }

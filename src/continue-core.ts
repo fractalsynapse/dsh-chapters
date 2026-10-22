@@ -101,7 +101,7 @@ export interface ContinuePorts {
     modeEvents: SessionEventLike[]
     presetId: string
     title: string
-  }): Promise<void>
+  }): Promise<void | { warnings?: readonly string[] }>
   now(): number
   /**
    * The plane's diagnostics seam (#54). The core refuses a child creation with the kernel's
@@ -477,7 +477,12 @@ async function finishChild(
   const childId = `ch-${ports.newId()}`
   const presetId = args.callerPreset ?? config.fallbackPreset
   try {
-    await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    // The plane may come back with warnings of its own — an attached-but-unlisted child,
+    // a workspace service that no longer exposes attachSession. Those are facts about the
+    // continuation the user is being handed, so they belong in the door's reply, not only
+    // in a log the reply already summarizes.
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
     // Full detail to the sink, short detail to the composer. The UI string is sliced to fit
     // a note; the reason a kernel refused the seed is the part an investigator needs whole.
