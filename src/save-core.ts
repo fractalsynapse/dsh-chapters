@@ -233,8 +233,21 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   // The refusal is BEFORE `writeArchive`, so no number is reserved and no file is written: a
   // committed husk would poison the watermark (`max(endSeq)`), and the child could then never be
   // re-archived without a repair (#60). Refuse with numbers, never truncate — AGENTS.md.
+  //
+  // AMENDED #60: the test is on the ARCHIVE, not on each chapter. A repair may split one enormous turn
+  // into consecutive parts, and a part holding only tool calls legitimately renders zero messages —
+  // refusing the whole re-read over that stranded five SAIP children's knowledge again, which is the
+  // opposite of what the gate protects. "No payloads anywhere" is the anomaly; `describeHollow` keeps
+  // naming every message-free part so it is never silent, and the single-chapter case (#58's instance)
+  // still refuses exactly as before.
+  const describeHollow = (r: (typeof rendered)[number]): string => {
+    const un = r.stats.unrenderedSeqs
+    return `"${r.range.title}" spans seqs ${r.range.startSeq}..${r.range.endSeq}: ${r.stats.events} events, `
+      + `${r.stats.toolCalls} tool calls, 0 rendered messages, ${un.length} unrendered`
+      + `${un.length > 0 ? ` (first: ${un.slice(0, 5).join(', ')})` : ''}`
+  }
   const hollow = rendered.filter((r) => r.stats.events > 0 && r.stats.messages === 0)
-  if (hollow.length > 0) {
+  if (rendered.length > 0 && hollow.length === rendered.length) {
     return {
       skipped: 'payloadless',
       fromSeq,
@@ -242,15 +255,12 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
       lastArchived,
       priorChapters: state.chapters.length,
       records: [],
-      warnings: hollow.map((r) => {
-        const un = r.stats.unrenderedSeqs
-        return `"${r.range.title}" spans seqs ${r.range.startSeq}..${r.range.endSeq}: ${r.stats.events} events, `
-          + `${r.stats.toolCalls} tool calls, 0 rendered messages, ${un.length} unrendered`
-          + `${un.length > 0 ? ` (first: ${un.slice(0, 5).join(', ')})` : ''}`
-          + ' — the read carried event SHAPES but no payloads; nothing was reserved or written'
-      }),
+      warnings: hollow.map((r) => `${describeHollow(r)} — the read carried event SHAPES but no payloads; nothing was reserved or written`),
     }
   }
+  // Parts that carry tool calls but no prose are reported and STILL archived (#60): "what was
+  // attempted" is half the record, and silence about it is the defect class this issue is named for.
+  const hollowNotes = hollow.map((r) => `${describeHollow(r)} — archived for its tool calls, not a payload failure`)
 
   // #59: refuse before reserving anything, exactly like the payloadless gate — a spent number with no
   // file behind it is the burned-reservation state this whole round is eliminating. The factor is
@@ -297,5 +307,5 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     await commitChapters(store, sessionId, wrote.records)
   }
 
-  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...wrote.warnings] }
+  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...hollowNotes, ...wrote.warnings] }
 }

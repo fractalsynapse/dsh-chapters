@@ -36,7 +36,8 @@ export type FindingClass =
   | 'hollow-payload'          // messages === 0 with events > 0 — a payload-less read (#58)
   | 'empty-artifact'          // a 0-byte blob cited as knowledge (#59)
   | 'never-archived-span'     // a completed turn inside no chapter (#59)
-  | 'orphan-file'             // a file on disk that no record cites
+  | 'orphan-file'             // a RECORD whose chapter file is gone (re-render it from the log)
+  | 'unregistered-file'       // a FILE on disk that no record cites (re-register it; its bytes ARE the archive)
   | 'duplicate-number'        // two records spent on one number (#59)
   | 'countervalue-drift'      // a counter at or below the numbers already spent
   | 'ghost-plan-manifest'     // a finalize manifest whose chapter never landed
@@ -47,7 +48,7 @@ export type FindingClass =
   | 'unrecoverable'           // record and file both gone; the log is gone too
 
 export type Remedy =
-  | 'reread-span' | 'materialize-chapter' | 'quarantine-file' | 'release-reservation'
+  | 'reread-span' | 'materialize-chapter' | 're-register-file' | 'quarantine-file' | 'release-reservation'
   | 'expire-manifest' | 'raise-counter' | 'report-only'
 
 export interface RepairFinding {
@@ -70,6 +71,13 @@ export interface RepairFileSet {
   emptyArtifactPaths: string[]
   /** Other session roots sitting in the same store (rig litter shows up here). */
   roots?: string[]
+  /**
+   * Does this chapter file carry the #58 SHELL signature — `tool: unknown`, `arguments: {}`, a
+   * `0 B` result? That signature, not a zero message count, is what a payload-less read leaves behind:
+   * a repair split can legitimately produce a part with no prose (turn/step events only), and calling
+   * that a husk would report damage that is not damage. `false` when the caller cannot read files.
+   */
+  looksLikeShell?(path: string): boolean
   /**
    * FALSE when the caller cannot list a directory — which is the HOST's case: `ArchiveFs` is
    * write/read/exists only (src/archive.ts), so an in-host repair can never discover a file the registry
@@ -100,6 +108,7 @@ const REMEDY: Record<FindingClass, Remedy> = {
   'empty-artifact': 'quarantine-file',
   'never-archived-span': 'reread-span',
   'orphan-file': 'materialize-chapter',
+  'unregistered-file': 're-register-file',
   'duplicate-number': 'reread-span',
   'countervalue-drift': 'raise-counter',
   'ghost-plan-manifest': 'expire-manifest',
@@ -128,11 +137,29 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
 
   // 1. Hollow chapters: the pair that turned 12 recoverable archives into permanent ones (#58).
   for (const c of active) {
-    if ((c.messages ?? 0) === 0 && c.endSeq >= c.startSeq) {
+    // STRICT equality: `messages` is ABSENT on records written before counts existed, and on every row
+    // a repair re-registered from a file whose frontmatter has no such field (render.ts: "absent … never
+    // a lying zero"). Coercing undefined to 0 turned 162 legitimate re-registrations into false
+    // "hollow-payload" findings on the first real run — an auditor that invents damage is worse than one
+    // that misses it, because the operator learns to distrust the report.
+    // A record with `messages === 0` is suspect, but not always a wound: a repair that split one enormous
+    // turn into event-bounded parts knowingly produced parts holding tool calls and no prose (save-core
+    // names each in its warnings). The discriminator is CONTENT, not provenance — my first guess was a
+    // `repairs` stamp, and it missed, because parts made by the never-archived-span branch carry no
+    // stamp at all, so a healthy repaired tree reported 14 fresh "husks". A #58 shell deferred
+    // ZERO-BYTE blobs (its read had no payloads to defer); a real tool-only part has bytes. An empty
+
+    // Evidence, not arithmetic: a payload-less read left EITHER zero-byte deferred blobs (it "archived"
+    // 335 empty results) OR the shell signature in the bytes (`tool: unknown`, `arguments: {}`). A bare
+    // empty artifact list is NOT evidence — a repair split legitimately produces an empty part (turn and
+    // step events only), and three of those were reported as husks until this rule named its evidence.
+    const shellSignature = files.looksLikeShell?.(c.path) ?? false
+    const zeroByteBlobs = c.artifacts.length > 0 && c.artifacts.every((a) => a.bytes === 0)
+    if (c.messages === 0 && c.endSeq >= c.startSeq && (zeroByteBlobs || shellSignature)) {
       add({ class: 'hollow-payload', detail: `chapter ${c.number} ("${c.title}") has messages 0 over seqs ${c.startSeq}-${c.endSeq} — a payload read that went wrong, not a short conversation`, target: { number: c.number, path: c.path, fromSeq: c.startSeq, toSeq: c.endSeq } })
     } else if (!files.exists(c.path)) {
       // 2. A record whose file is gone: knowledge for the reader, a ghost for every tool.
-      add({ class: 'orphan-file', detail: `chapter ${c.number} is recorded at ${c.path} but no such file exists`, target: { number: c.number, path: c.path, fromSeq: c.startSeq, toSeq: c.endSeq } })
+      add({ class: 'orphan-file', detail: `chapter ${c.number} is recorded at ${c.path} but no such file exists — the record is a ghost: re-render it from the log`, target: { number: c.number, path: c.path, fromSeq: c.startSeq, toSeq: c.endSeq } })
     } else if (!files.shaMatches(c.path, c.sha256)) {
       add({ class: 'tampered-file', detail: `chapter ${c.number}'s body hash no longer matches ${c.path}`, target: { number: c.number, path: c.path } })
     }
@@ -149,7 +176,7 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
     if (!cited.has(p) && !p.includes('.repair-quarantine')) {
       const m = /\/(\d{3})-/.exec(p)
       const num = m ? Number(m[1]) : undefined
-      add({ class: 'orphan-file', detail: `${p} exists on disk and no chapter record cites it — the registry lost its commit${num !== undefined ? ` (number ${num})` : ''}`, ...(num !== undefined ? { target: { path: p, number: num } } : { target: { path: p } }) })
+      add({ class: 'unregistered-file', detail: `${p} exists on disk and no chapter record cites it — the registry lost its commit${num !== undefined ? ` (number ${num})` : ''}`, ...(num !== undefined ? { target: { path: p, number: num } } : { target: { path: p } }) })
     }
   }
 
@@ -249,6 +276,66 @@ export function supersedeChapter(
       : c)),
   }
   return appendChapters(withMarks, stamped)
+}
+
+/**
+ * Mark a record superseded by a chapter that ALREADY EXISTS — no new bytes (#60).
+ *
+ * The residue after a project-wide repair: a husk whose span was re-archived correctly by an earlier
+ * run, so re-rendering it now is a no-op and `supersedeChapter` (which commits replacements) can never
+ * run. The knowledge is safe; only the false record is still circulating. This closes that last step:
+ * point the husk at whatever active chapter covers its seqs, and let the derived layers drop it.
+ * Refuses (returns the state unchanged with a reason) when nothing covers the span — because silently
+ * superseding an uncovered span would delete the only claim that content exists.
+ */
+export function markSupersededBy(
+  state: SessionState,
+  overNumber: number,
+  byNumber: number,
+  reason: FindingClass,
+  at: number = Date.now(),
+): { state: SessionState; problem?: string } {
+  const over = state.chapters.find((c) => c.number === overNumber)
+  const by = state.chapters.find((c) => c.number === byNumber)
+  if (over === undefined) return { state, problem: `no record for chapter ${overNumber}` }
+  if (by === undefined) return { state, problem: `no covering chapter ${byNumber} to supersede ${overNumber} with` }
+  if (byNumber === overNumber) return { state, problem: `chapter ${overNumber} cannot supersede itself` }
+  // Full coverage is the caller's job (`coveringChapter` returns a SET); this guard only insists the
+  // named successor starts no later than the husk, so the citation never claims a partial span.
+  if (by.startSeq > over.startSeq) {
+    return { state, problem: `chapter ${byNumber} starts at ${by.startSeq}, above ${overNumber}'s span start ${over.startSeq}` }
+  }
+  return {
+    state: {
+      ...state,
+      chapters: state.chapters.map((c) => (c.number === overNumber
+        ? { ...c, status: 'superseded' as const, supersededBy: byNumber, repairs: [...(c.repairs ?? []), { class: reason, over: overNumber, at }] }
+        : c)),
+    },
+  }
+}
+
+/**
+ * The active chapter whose span fully covers `[from..to]`, if any — the candidate a husk defers to.
+ * `exceptNumber` is not cosmetic: the husk covers its OWN span, so without excluding it the search
+ * returns the record about to be superseded and `markSupersededBy` would point a chapter at itself
+ * (caught by `tests/unit/repair.test.ts`).
+ */
+export function coveringChapter(state: SessionState, from: number, to: number, exceptNumber?: number): ChapterRecord[] {
+  // A REPAIR may have split the span across several chapters, so coverage is a UNION, not one record:
+  // insisting on a single coverer left 14 husks unsuperseded in the first full project run, each
+  // "not covered" when in fact three chapters carried it between them.
+  const pool = state.chapters.filter((c) => isActiveChapter(c) && c.number !== exceptNumber && c.startSeq <= to && c.endSeq >= from)
+  const sorted = [...pool].sort((a, b) => a.startSeq - b.startSeq)
+  let cursor = from
+  const chosen: ChapterRecord[] = []
+  for (const c of sorted) {
+    if (c.startSeq > cursor) break // a real hole: nothing reaches `cursor`
+    chosen.push(c)
+    cursor = Math.max(cursor, c.endSeq + 1)
+    if (cursor > to) return chosen
+  }
+  return []
 }
 
 /** Raise a counter to the first number nothing has spent. Upward ONLY — never a rewind. */

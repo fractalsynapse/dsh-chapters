@@ -20,8 +20,9 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { audit, journalEntryInverse, raiseCounters, expireBookkeeping, supersedeChapter, type FindingClass, type Journal, type JournalEntry, type RepairFinding, type RepairFileSet } from './repair.ts'
-import { releaseReservation, type SessionState } from './registry.ts'
+import { audit, coveringChapter, journalEntryInverse, markSupersededBy, raiseCounters, expireBookkeeping, supersedeChapter, type FindingClass, type Journal, type JournalEntry, type RepairFinding, type RepairFileSet } from './repair.ts'
+import { appendChapters, releaseReservation, type SessionState } from './registry.ts'
+import { parseFrontmatter } from './indexing.ts'
 import type { ChapterRecord } from './archive.ts'
 import type { RegistryStore } from './store.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
@@ -56,7 +57,7 @@ const ACTABLE: Record<FindingClass, boolean> = {
   // 0-byte ref disappears when its chapter is superseded and re-rendered by the fixed renderer, and a
   // duplicate number is fixed by re-spending it correctly. Half-fixing them separately would leave a
   // record citing a file we moved. Report-only until their parent finding runs.
-  'empty-artifact': false, 'duplicate-number': false, 'orphan-file': false,
+  'empty-artifact': false, 'duplicate-number': false, 'orphan-file': false, 'unregistered-file': true,
   'tampered-file': false, 'test-litter': false, unrecoverable: false,
 }
 
@@ -101,6 +102,13 @@ export function fileSetFromDisk(cwd: string, storeRoot: string, rootSession: str
     // "second root" (36,000 findings), and then every OTHER SESSION's legitimate tree did (634). One
     // directory per root session is the normal shape of this store — litter is a directory nothing owns.
     roots: subdirs(path.join(cwd, storeRoot)).filter((d) => !knownRoots.includes(path.basename(d))),
+    // the #58 signature is a fact about the BYTES, so read it from the bytes
+    looksLikeShell: (p) => {
+      try {
+        const t = fs.readFileSync(abs(p), 'utf8')
+        return /tool: unknown/.test(t) || /arguments: \{\}/.test(t) || /result \(seq \d+, 0 B\)/.test(t)
+      } catch { return false }
+    },
     canScan: true,
   }
 }
@@ -145,10 +153,6 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
   const journalId = new Date().toISOString().replace(/[:.]/g, '-')
   const state0 = await store.get(opts.sessionId)
 
-  const files = opts.listedPaths !== undefined
-    ? { ...fileSetFromRegistry(state0.chapters, () => false), canScan: false }
-    : fileSetFromDisk(cwd, config.artifactStoreRoot, state0.rootSession, ports.knownRoots ?? [])
-
   const logEvents = await ports.readLog(opts.sessionId)
   if (logEvents === null || logEvents.length === 0) {
     // Invariant 1 is the whole reason repair exists. No log, nothing to re-derive from: say WHICH
@@ -159,7 +163,19 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
     }
   }
 
-  const before = audit({ sessionId: opts.sessionId, state: state0, files, log: logFacts(logEvents) as never })
+  // ONE closure does both audits. Two separate call sites drifted: the after-audit forgot
+  // `ports.knownRoots`, so it called every sibling session tree `test-litter`, and a journal reported
+  // "25 findings remain" where 1 was real. A before/after number is only worth printing — or storing in
+  // a journal — if both sides are computed by the same call with the same inputs (#60).
+  const auditNow = (st: SessionState) => audit({
+    sessionId: opts.sessionId,
+    state: st,
+    files: opts.listedPaths !== undefined
+      ? fileSetFromRegistry(st.chapters, () => false)
+      : fileSetFromDisk(cwd, config.artifactStoreRoot, st.rootSession, ports.knownRoots ?? []),
+    log: logFacts(logEvents) as never,
+  })
+  const before = auditNow(state0)
   const wanted = opts.classes === 'all' ? before.findings : before.findings.filter((f) => (opts.classes as FindingClass[]).includes(f.class))
   const actionable = wanted.filter((f) => ACTABLE[f.class])
   const deferred = wanted.filter((f) => !ACTABLE[f.class])
@@ -211,14 +227,38 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
     try {
       if (f.class === 'hollow-payload' && f.target.fromSeq !== undefined && f.target.toSeq !== undefined && f.target.number !== undefined) {
         const huskPath = state0.chapters.find((c) => c.number === f.target.number)?.path
-        const out = await saveSession({
-          events: logEvents as SessionEventLike[], sessionId: opts.sessionId, cwd, store, config,
-          span: { fromSeq: f.target.fromSeq, toSeq: f.target.toSeq },
-          supersede: { over: f.target.number, reason: 'hollow-payload' },
-          attemptSalt: `repair:${journalId}`,
-        })
+        // "already in the archive" is a THROW inside save-core, not an outcome — and for a repair it is
+        // an EXPECTED answer (an earlier run, or the door itself, archived the span). Swallow it into the
+        // same no-records shape so the coverage check below can supersede the husk by what already covers
+        // it; a throw reaching the per-finding catch would strand the record forever (#60).
+        let out: { records: ChapterRecord[]; skipped: string | null; warnings: string[] }
+        try {
+          out = await saveSession({
+            events: logEvents as SessionEventLike[], sessionId: opts.sessionId, cwd, store, config,
+            span: { fromSeq: f.target.fromSeq!, toSeq: f.target.toSeq! },
+            supersede: { over: f.target.number!, reason: 'hollow-payload' },
+            attemptSalt: `repair:${journalId}`,
+          })
+        } catch (error) {
+          out = { records: [], skipped: 'already-archived', warnings: [] }
+          ports.log(`ch.${f.target.number}: the re-read said "already archived" (${String((error as Error).message).slice(0, 60)}) — looking for what covers the span`)
+        }
         if (out.records.length === 0) {
-          refused.push(`hollow-payload ch.${f.target.number}: the re-read rendered nothing again (${out.skipped ?? 'no records'}) — the husk was NOT superseded`)
+          // #60: a repair run after the first one finds the span ALREADY re-archived, so the re-read is
+          // a legitimate no-op — and the husk record would circulate forever. Hand it to whichever
+          // active chapter now covers its span instead of refusing.
+          const fresh = await store.get(opts.sessionId)
+          const cover = coveringChapter(fresh, f.target.fromSeq, f.target.toSeq, f.target.number)
+          if (cover.length === 0 || f.target.number === undefined) {
+            refused.push(`hollow-payload ch.${f.target.number}: the re-read rendered nothing (${out.skipped ?? 'no records'}) and no active chapter covers ${f.target.fromSeq}-${f.target.toSeq} — left in place, nothing was superseded`)
+            continue
+          }
+          const marked = markSupersededBy(fresh, f.target.number, cover[0]!.number, 'hollow-payload')
+          if (marked.problem !== undefined) { refused.push(`hollow-payload ch.${f.target.number}: ${marked.problem}`); continue }
+          await store.mutate(opts.sessionId, () => marked.state)
+          journal.entries.push({ kind: 'registry', path: fresh.chapters.find((c) => c.number === f.target.number)?.path ?? `ch.${f.target.number}`, beforeSha: null, afterSha: cover[0]!.sha256 })
+          flush()
+          ports.log(`superseded hollow ch.${f.target.number} by ${cover.length} chapter(s) [${cover.map((c) => c.number).join(', ')}] that together carry seqs ${f.target.fromSeq}-${f.target.toSeq}`)
           continue
         }
         if (huskPath !== undefined) await quarantine(huskPath)
@@ -261,6 +301,53 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
           flush()
           ports.log(`dead citation satisfied: ${f.target.path} now exists with the re-rendered bytes (chapter ${written.number})`)
         }
+      } else if (f.class === 'unregistered-file' && f.target.path !== undefined) {
+        // The bytes ARE the archive; only the registry row was lost. Re-read the file's own
+        // frontmatter (the store's ONE parser, src/indexing.ts) and hand the row back. Nothing on disk
+        // moves — this is not a rewrite, it is the registry catching up with the store.
+        const relPath = f.target.path
+        const absFile = path.join(cwd, relPath)
+        if (!fs.existsSync(absFile)) { refused.push(`unregistered-file ${relPath}: vanished between audit and apply — re-run`); continue }
+        const fm = parseFrontmatter(fs.readFileSync(absFile, 'utf8'))
+        const range = Array.isArray(fm.seqRange) ? fm.seqRange.map((x) => Number(x)) : []
+        const num = /\/(\d{3})-/.exec(relPath)?.[1]
+        if (range.length !== 2 || Number.isNaN(range[0]) || num === undefined) {
+          refused.push(`unregistered-file ${relPath}: frontmatter has no usable seqRange — it cannot be re-registered honestly`)
+          continue
+        }
+        const taken = state0.chapters.some((c) => c.number === Number(num))
+        if (taken) {
+          // Two files claiming one number is #59's twin. Choosing a winner is a HUMAN call: the loser's
+          // bytes stay, and the run says so instead of silently demoting knowledge.
+          refused.push(`unregistered-file ${relPath}: number ${Number(num)} is already carried by another record — a lost-update twin. Re-registering it would need a new number, which means renumbering a chapter; forbidden. A human decides which of the two survives.`)
+          continue
+        }
+        const tokensField = typeof fm.tokens === 'string' ? Number(fm.tokens.split('#')[0]?.trim() ?? NaN) : NaN
+        const record: ChapterRecord = {
+          number: Number(num),
+          path: relPath,
+          title: typeof fm.title === 'string' ? fm.title : relPath,
+          summary: typeof fm.summary === 'string' ? fm.summary : '',
+          startSeq: range[0]!, endSeq: range[1]!,
+          topics: Array.isArray(fm.topics) ? fm.topics : [],
+          // `messages` is NOT in chapter frontmatter. An absent field means "unknown"; writing 0 would
+          // claim a husk (render.ts: "absent for records written before counts existed — never a lying
+          // zero"), so it stays absent and the audit reads it as unknown, not as damage.
+          // The registry's anchor is the hash of the WHOLE file (archive.ts: "Hash the whole file, so
+          // verifyChapter() can re-check it with no knowledge of frontmatter layout"). The `sha256:`
+          // field INSIDE the frontmatter is a different thing — the body-hash that anchors enrichment —
+          // and copying it into the record made 162 honest re-registrations look tampered.
+          sha256: sha256(fs.readFileSync(absFile)),
+          estimatedTokens: Number.isFinite(tokensField) ? tokensField : 0,
+          artifacts: [],
+          repairs: [{ class: 'unregistered-file', over: 0, at: Date.now() }],
+        }
+        // append + counter-raise in ONE section: a re-registered number must never sit at or above
+        // `nextChapterNumber`, or the next door collides with it (#59's twin).
+        await store.mutate(opts.sessionId, (fresh) => raiseCounters(appendChapters(fresh, [record])))
+        journal.entries.push({ kind: 'registry', path: relPath, beforeSha: null, afterSha: record.sha256 })
+        flush()
+        ports.log(`re-registered ${relPath} (seqs ${record.startSeq}-${record.endSeq}, ${record.estimatedTokens} tokens) — file untouched, row restored`)
       } else if (f.class === 'unreleased-reservation') {
         const key = /reservation (\S+) holds/.exec(f.detail)?.[1]
         if (key !== undefined) {
@@ -288,11 +375,8 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
     }
   }
 
-  const stateAfter = await store.get(opts.sessionId)
-  const filesAfter = opts.listedPaths !== undefined
-    ? fileSetFromRegistry(stateAfter.chapters, () => false)
-    : fileSetFromDisk(cwd, config.artifactStoreRoot, stateAfter.rootSession)
-  const after = audit({ sessionId: opts.sessionId, state: stateAfter, files: filesAfter, log: logFacts(logEvents) as never })
+  // the same call, the same inputs — see `auditNow` above
+  const after = auditNow(await store.get(opts.sessionId))
   journal.completedAt = Date.now()
   journal.findingsAfter = after.findings.length
   flush()

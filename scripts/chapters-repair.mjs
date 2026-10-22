@@ -57,11 +57,24 @@ const LIST = flag('list')
 const CLASS_ALIASES = {
   hollow: 'hollow-payload', gaps: 'never-archived-span', citations: 'dead-citation',
   bookkeeping: ['ghost-plan-manifest', 'unreleased-reservation', 'countervalue-drift'],
+  files: 'unregistered-file', orphans: 'unregistered-file',
   all: 'all',
 }
 const classes = () => {
   if (APPLY === 'all' || flag('all')) return 'all'
-  return String(APPLY ?? '').split(',').flatMap((c) => CLASS_ALIASES[c.trim()] ?? c.trim()).filter(Boolean)
+  const raw = String(APPLY ?? '').split(',').map((c) => c.trim()).filter(Boolean)
+  const out = raw.flatMap((c) => CLASS_ALIASES[c] ?? c)
+  // An alias that matches nothing used to yield "applied 0 move(s)" and a clean exit — a silent no-op
+  // with a success code, which is the failure mode this whole round exists to eliminate. Now it refuses.
+  const KNOWN = ['hollow-payload', 'never-archived-span', 'dead-citation', 'ghost-plan-manifest',
+    'unreleased-reservation', 'countervalue-drift', 'unregistered-file', 'empty-artifact',
+    'duplicate-number', 'orphan-file', 'tampered-file', 'test-litter', 'unrecoverable']
+  const unknown = out.filter((c) => !KNOWN.includes(c))
+  if (unknown.length > 0) {
+    console.error(`unknown repair class(es): ${unknown.join(', ')}\n  known: ${Object.keys(CLASS_ALIASES).join(', ')}\n  (nothing will be applied — fix the name or pass --apply all)`)
+    process.exit(2)
+  }
+  return out
 }
 
 // ──────────────────────────────────────────────────────────── durable logs
@@ -250,6 +263,7 @@ for (const id of targets) {
     else grouped.set(key, { first: prev.first, n: prev.n + 1 })
   }
   for (const { first, n } of grouped.values()) console.log(`    refused: ${first}${n > 1 ? `  (+${n - 1} more of this class)` : ''}`)
+  if (flag('json')) console.log(JSON.stringify({ sessionId: id, before: out.findingsBefore, after: out.findingsAfter, journal: out.journalId }))
   if (!DRY) console.log(`    → ${out.applied.length} move(s) journalled as ${out.journalId}; ${out.findingsAfter.length} finding(s) remain`)
 }
 

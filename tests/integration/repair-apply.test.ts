@@ -160,3 +160,29 @@ test('restore walks the journal backwards and brings the quarantined bytes back 
   for (const p of created) assert.ok(!fs.existsSync(p), `${p} was removed by the restore`)
   assert.ok(fs.existsSync(path.join(tree, '002-ch-2.md')), 'the husk file itself is still there (it was copied, not moved)')
 })
+
+test('a run that changes nothing reports the SAME findings before and after, sibling trees included (#60)', async () => {
+  // Regression: the after-audit was a second call site that forgot `knownRoots`, so every OTHER
+  // session's legitimate tree in the shared store came back as `test-litter`. A journal printed
+  // "25 findings remain" where 1 was real — and a before/after number that lies is worse than none.
+  const w = world()
+  const tree = path.join(w.cwd, '.dsh-chapters')
+  fs.mkdirSync(path.join(tree, 'sibling-root-2', 'chapters'), { recursive: true })
+  fs.writeFileSync(path.join(tree, 'sibling-root-2', 'chapters', '001-other.md'), '---\ntitle: other\n---\n')
+  const store = makeStore(w.states)
+  const ports = {
+    store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG,
+    knownRoots: ['root-1', 'sibling-root-2'], log: () => {}, warn: () => {},
+  }
+  const out = await runRepair(ports, { sessionId: 'root-1', classes: [] as never })
+  assert.deepEqual(out.findingsAfter.map((f) => f.class).sort(), out.findingsBefore.map((f) => f.class).sort(),
+    `nothing was applied, so nothing may appear: before=${out.findingsBefore.length} after=${out.findingsAfter.length}`)
+  assert.ok(!out.findingsAfter.some((f) => f.class === 'test-litter'),
+    'a claimed sibling root is NOT litter')
+  // and a source-shape guard: exactly ONE audit call site, so the two sides cannot drift again
+  const src = fs.readFileSync(new URL('../../src/repair-run.ts', import.meta.url), 'utf8')
+  // match the CALL (`audit({`), not the word: the file's own header prose mentions audit(), and a
+  // guard that counts prose is a guard that fails for the wrong reason.
+  const calls = (src.match(/\baudit\(\{/g) ?? []).length
+  assert.equal(calls, 1, `audit() must be called from ONE place in the runner — found ${calls}`)
+})

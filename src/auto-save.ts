@@ -182,6 +182,32 @@ export interface AutoSaveWiring extends SaveSessionConfig {
  * for the idle/afterPush ladders exactly like a `/chapters-save` that skipped
  * the manual nudge. A test pins that nothing here calls runNow.
  */
+/**
+ * The ONE payload-bearing durable read (docs/contract.md § Durable reads, issue #58).
+ *
+ * Door 5 needs it because a continuable child is disposed before `subagent/end`; the repair door
+ * (`/chapters-repair`, #60) needs the same thing because re-deriving a chapter is worthless if the read
+ * returns metadata rows. Two copies of "read the log" is how 12 children were archived as empty shells
+ * and the seam still looked alive: `listEvents` succeeds, returns 10 correctly-typed
+ * `SessionEventRecord`s, and none of them has `data`. So this function is exported and pinned by a
+ * source-shape row that fails if a door starts reading the log by hand again.
+ */
+export async function readDurableSession(
+  get: (name: string) => unknown,
+  sessionId: string,
+): Promise<AutoSaveChildView | undefined> {
+  const sq = get('sessionQuery') as {
+    readSession?(id: string): Promise<{ session?: AutoSaveChildHeader; events?: SessionEventLike[] }>
+  } | undefined
+  if (sq?.readSession === undefined) return undefined
+  const read = await sq.readSession(sessionId)
+  const events = read?.events
+  if (!Array.isArray(events) || events.length === 0) return undefined
+  // The header rides the same observation as the bytes being archived — origin/agentPreset/cwd are
+  // never inferred from a second scan (and never from the events, which is the r28 lesson).
+  return { events, header: read.session ?? ({} as AutoSaveChildHeader) }
+}
+
 export function wireSubagentAutoSave(
   ctx: AutoSaveCtx,
   store: RegistryStore,
@@ -206,19 +232,8 @@ export function wireSubagentAutoSave(
    * rows carry `seq`/`type`/`time`/`surface` and no `data` — the shape that archived 12 children
    * as empty shells (#58; `docs/contract.md` § Durable reads).
    */
-  const durableChild = async (sessionId: string): Promise<AutoSaveChildView | undefined> => {
-    const sq = ctx.get?.('sessionQuery') as {
-      readSession?(id: string): Promise<{ session?: AutoSaveChildHeader; events?: SessionEventLike[] }>
-    } | undefined
-    if (sq?.readSession === undefined) return undefined
-    const read = await sq.readSession(sessionId)
-    const events = read?.events
-    if (!Array.isArray(events) || events.length === 0) return undefined
-    // The header rides the same observation as the bytes being archived — origin/agentPreset/cwd
-    // are never inferred from a second scan (and never from the events, which is the r28 lesson).
-    const header = read.session ?? ({} as AutoSaveChildHeader)
-    return { events, header }
-  }
+  const durableChild = (sessionId: string): Promise<AutoSaveChildView | undefined> =>
+    readDurableSession((name) => { try { return ctx.get?.(name) } catch { return undefined } }, sessionId)
   const save = async (child: AutoSaveChildView): Promise<{ archived: number; skipped: string | null; warnings: string[] }> => {
     const cwd = child.header.cwd
     if (cwd === undefined || cwd === '') throw new Error('subagent child session has no workspace cwd — nowhere reachable to write')

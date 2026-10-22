@@ -75,7 +75,10 @@ test('an orphan file, a reused number and counter drift are each found', () => {
   const out = audit({ sessionId: 'S', state: state0, files, log: { turnEndSeqs: [], collections: [] } as never })
   const classes = out.findings.map((f) => f.class)
   assert.ok(classes.includes('duplicate-number'), `two records on one number: ${classes}`)
-  assert.ok(classes.includes('orphan-file'), 'a file no record cites: unregistered knowledge')
+  // AMENDED #60: this used to be `orphan-file`, one class for two opposite defects. A record whose file
+  // is gone must be RE-RENDERED; a file whose record is gone must be RE-REGISTERED from its own bytes.
+  // Folding them together meant the runner offered the wrong remedy to half of them.
+  assert.ok(classes.includes('unregistered-file'), 'a file no record cites: unregistered knowledge')
   assert.ok(classes.includes('countervalue-drift'), `nextChapterNumber 1 under spent numbers: ${classes}`)
 })
 
@@ -174,4 +177,66 @@ test('an audit that cannot list files SAYS so instead of reporting no orphans (#
     'and the classes it could not check are named — the host port has no readdir')
   const scanned = audit({ sessionId: 'S', state: state(cs), files: { ...cleanFiles(cs), canScan: true }, log: { turnEndSeqs: [9], collections: [{ from: 0, to: 9 }] } as never })
   assert.deepEqual(scanned.blindSpots, [], 'a port that CAN scan reports no blind spots')
+})
+
+test('markSupersededBy hands a husk to the chapter that already covers it — and refuses when none does (#60)', async () => {
+  const { markSupersededBy, coveringChapter } = await import('../../src/repair.ts')
+  const husk = rec(2, { messages: 0, startSeq: 10, endSeq: 19 })
+  const cover = rec(7, { startSeq: 10, endSeq: 19 })
+  const s = state([rec(1, { startSeq: 0, endSeq: 9 }), husk, cover])
+  assert.deepEqual(coveringChapter(s, 10, 19, 2).map((c) => c.number), [7], 'the covering chapter is found by SPAN, excluding the husk (it covers its own span)')
+  assert.deepEqual(coveringChapter(s, 10, 19).map((c) => c.number), [2], 'and WITHOUT the exclusion it returns the husk — the trap this row exists for')
+  // a span split across three repaired chapters is COVERED — the union, not one record
+  const split = state([rec(1, { startSeq: 0, endSeq: 9 }), rec(2, { startSeq: 10, endSeq: 19, messages: 0 }),
+    rec(7, { startSeq: 10, endSeq: 13 }), rec(8, { startSeq: 14, endSeq: 16 }), rec(9, { startSeq: 17, endSeq: 19 })])
+  assert.deepEqual(coveringChapter(split, 10, 19, 2).map((c) => c.number), [7, 8, 9],
+    '14 husks were stranded because coverage demanded a single chapter where three sufficed')
+  assert.deepEqual(coveringChapter(split, 10, 19, 2).length, 3)
+  const realHole = state([rec(1, { startSeq: 0, endSeq: 9 }), rec(2, { startSeq: 10, endSeq: 19, messages: 0 }), rec(7, { startSeq: 10, endSeq: 13 })])
+  assert.deepEqual(coveringChapter(realHole, 10, 19, 2), [], 'a genuine hole (14-19 uncovered) is still no cover')
+  assert.match(markSupersededBy(s, 2, 2, 'hollow-payload').problem ?? '', /supersede itself/, 'self-supersede is refused outright')
+  const ok = markSupersededBy(s, 2, 7, 'hollow-payload')
+  assert.equal(ok.problem, undefined)
+  assert.equal(ok.state.chapters.find((c) => c.number === 2)!.status, 'superseded')
+  assert.equal(ok.state.chapters.find((c) => c.number === 2)!.supersededBy, 7)
+  assert.equal(ok.state.chapters.length, 3, 'nothing was appended or deleted — only the mark moved')
+
+  // the successor must START no later than the husk: citing a chapter that begins mid-span would claim
+  // the earlier seqs live somewhere they do not.
+  const late = markSupersededBy(state([rec(1, { startSeq: 0, endSeq: 9 }), husk, rec(8, { startSeq: 12, endSeq: 19 })]), 2, 8, 'hollow-payload')
+  assert.match(late.problem ?? '', /starts at 12, above/, `a successor that starts mid-span must refuse: ${late.problem}`)
+  const ghost = markSupersededBy(s, 2, 99, 'hollow-payload')
+  assert.match(ghost.problem ?? '', /no covering chapter/, 'and a missing cover must refuse')
+  assert.equal(ghost.state.chapters.find((c) => c.number === 2)!.status, undefined, 'a refused mark changes NOTHING')
+})
+
+test('an absent `messages` field is not a husk — undefined is never zero (#60)', async () => {
+  const { audit } = await import('../../src/repair.ts')
+  const legacy = rec(3, { startSeq: 20, endSeq: 29, messages: undefined })
+  const out = audit({ sessionId: 'S', state: state([rec(1, { startSeq: 0, endSeq: 9 }), rec(2, { startSeq: 10, endSeq: 19 }), legacy]), files: cleanFiles([rec(1, { startSeq: 0, endSeq: 9 }), rec(2, { startSeq: 10, endSeq: 19 }), legacy]), log: { turnEndSeqs: [9, 19, 29], collections: [] } as never })
+  assert.ok(!out.findings.some((f) => f.class === 'hollow-payload'),
+    `162 re-registered rows looked hollow when the audit coerced undefined→0: ${JSON.stringify(out.findings.map((f) => f.class))}`)
+})
+
+test('a repaired tool-only part is NOT called a husk; an unrepaired zero is (#60)', async () => {
+  const { audit } = await import('../../src/repair.ts')
+  const splitPart = rec(4, { startSeq: 30, endSeq: 39, messages: 0, artifacts: [{ path: '.dsh-chapters/S/artifacts/aa/aabb.txt', sha256: 'a'.repeat(64), bytes: 4211 }] })
+  const shell = rec(5, { startSeq: 40, endSeq: 49, messages: 0, artifacts: [{ path: '.dsh-chapters/S/artifacts/e3/e3b0.txt', sha256: EMPTY_SHA, bytes: 0 }] })  // zero-byte blobs = the payloadless signature
+  const cs = [rec(1, { startSeq: 0, endSeq: 9 }), rec(2, { startSeq: 10, endSeq: 19 }), rec(3, { startSeq: 20, endSeq: 29 }), splitPart, shell]
+  const out = audit({ sessionId: 'S', state: state(cs), files: cleanFiles(cs), log: { turnEndSeqs: [9, 19, 29, 39, 49], collections: [] } as never })
+  const hollows = out.findings.filter((f) => f.class === 'hollow-payload').map((f) => f.target.number)
+  assert.deepEqual(hollows, [5], 'the zero-byte shell is the husk; the part with real tool bytes is not')
+})
+
+test('an EMPTY split part is not a husk; a file carrying the #58 shell signature is (#60)', async () => {
+  const { audit } = await import('../../src/repair.ts')
+  const emptyPart = rec(13, { startSeq: 60, endSeq: 61, messages: 0, artifacts: [] })   // no prose, no tools
+  const cs = [rec(1, { startSeq: 0, endSeq: 9 }), rec(2, { startSeq: 10, endSeq: 19 }), emptyPart]
+  const base = { ...cleanFiles(cs), looksLikeShell: (p: string) => p === emptyPart.path }
+  const flagged = audit({ sessionId: 'S', state: state(cs), files: base, log: { turnEndSeqs: [9, 19, 61], collections: [] } as never })
+  assert.deepEqual(flagged.findings.filter((f) => f.class === 'hollow-payload').map((f) => f.target.number), [13],
+    'the signature alone is enough to call it a shell')
+  const clean = audit({ sessionId: 'S', state: state(cs), files: { ...base, looksLikeShell: () => false }, log: { turnEndSeqs: [9, 19, 61], collections: [] } as never })
+  assert.deepEqual(clean.findings.filter((f) => f.class === 'hollow-payload'), [],
+    'an empty part with no shell bytes is NOT damage — three of these were reported as husks on the first full run')
 })
