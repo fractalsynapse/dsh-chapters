@@ -13,6 +13,7 @@ import { estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
+import { diagnosticWarn } from './diag.ts'
 import { DEFAULT_CLONE_DIR } from './sync.ts'
 import { lineageOf, type ChapterRange, type SessionEventLike, type ToolResultOverride } from './types.ts'
 import { composeChapters } from './compose.ts'
@@ -149,6 +150,7 @@ export function buildChaptersTools(
         return { windowTokens, headerBoundTokens }
       },
       newId: () => randomUUID(),
+      diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
       createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
         const callerOptions = caller.options
         // The seed is contiguous from seq 0: the notice, then any STATE events this

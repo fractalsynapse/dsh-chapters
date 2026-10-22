@@ -25,7 +25,7 @@
  * non-archive is either a quiet, expected skip (wrong preset, no completed turn)
  * or a LOUD warn (unreadable, save failed).
  */
-import { appendFileSync } from 'node:fs'
+import { diagnosticWarn } from './diag.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import { lineageOf, type SessionEventLike } from './types.ts'
 import type { RegistryStore } from './store.ts'
@@ -182,13 +182,8 @@ export function wireSubagentAutoSave(
   wiring: AutoSaveWiring,
 ): (info: SubagentEndInfoLike) => void {
   const warn = (message: string): void => {
-    ctx.logger?.warn?.(message)
-    // the engine's precedent (r19): a headless profile routes ctx.logger where
-    // nobody can see it; the sink env makes the loss readable from outside.
-    try {
-      const sink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
-      if (sink !== undefined) appendFileSync(sink, `[${new Date().toISOString()}] ${message}\n`)
-    } catch { /* diagnostics must never mask the real failure */ }
+    // #54: the shared seam (logger warn + sink), not a second copy of the same three lines.
+    diagnosticWarn(ctx.logger, 'auto-save', message)
   }
   const liveChild = (sessionId: string): AutoSaveChildView | undefined => {
     const agents = ctx.get?.('agents') as { get?(id: string): unknown } | undefined

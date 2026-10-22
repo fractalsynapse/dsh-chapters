@@ -103,6 +103,15 @@ export interface ContinuePorts {
     title: string
   }): Promise<void>
   now(): number
+  /**
+   * The plane's diagnostics seam (#54). The core refuses a child creation with the kernel's
+   * own words — and on host 0.2.x those words ended the whole acceptance chain while the
+   * error sink stayed empty, because only the engine had ever written to it. The core cannot
+   * touch the filesystem (it is L0-pure, and its tests run everywhere), so each plane injects
+   * its own: `src/diag.ts` for both of them in practice, but injected so a caller can also
+   * surface it. OPTIONAL on purpose: absence must never break a door.
+   */
+  diagnostic?(where: string, message: string, error?: unknown): void
 }
 
 export interface ContinueResult {
@@ -470,6 +479,9 @@ async function finishChild(
   try {
     await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
   } catch (error) {
+    // Full detail to the sink, short detail to the composer. The UI string is sliced to fit
+    // a note; the reason a kernel refused the seed is the part an investigator needs whole.
+    ports.diagnostic?.(`door:${args.intent ?? 'continue'}`, `child creation refused for ${childId}`, error)
     throw new Refusal({ ok: false, reason: `child creation refused: ${(error as Error).message}`, warnings })
   }
   if (commitRecords.length > 0) {

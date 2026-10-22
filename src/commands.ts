@@ -25,6 +25,7 @@ import { selectProvider } from './provider.ts'
 import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
 import { resolveStoreRoot } from './store.ts'
+import { diagnosticStatusLine } from './diag.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
 export interface EnrichCommandSurface {
@@ -138,6 +139,7 @@ export function registerHostCommands(
                 ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
                 : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${rec.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`
             })(),
+            diagnosticStatusLine(),
             `Mirror:   ${fs.existsSync(mirrorAbs) ? DEFAULT_CLONE_DIR : '(not created yet)'}` +
               (treedx ? `  head ${head ?? (tstate === null ? 'not cloned' : 'empty repo')}${tstate?.offline === true ? ' · OFFLINE (push deferred)' : ''}` : `  branch ${head ?? 'main'}`) +
               (origin !== null && origin !== (treedx ? rec.remote : local ? resolveLocalUpstreamPath(rec.remote, cwd) : rec.remote) ? `  [origin drift: ${origin} — will rebuild]` : ''),
@@ -293,6 +295,7 @@ export function registerHostCommands(
         lines.push(`  ${(status.steps ?? []).join(' \u2192 ')}`)
       }
       if (config.enrich !== undefined) lines.push(config.enrich.statusLine())
+      lines.push(diagnosticStatusLine())
       lines.push(AUTO_SAVE_LINE(config))
       return { kind: 'success', text: lines.join('\n') }
     },
