@@ -163,3 +163,15 @@ test('a journal entry knows how to undo itself', () => {
   const reg = journalEntryInverse({ kind: 'registry', path: 'row', beforeSha: 'old', afterSha: 'new' })
   assert.equal(reg.undo, 'restore-registry-rev', 'and a registry change records the rev it replaced')
 })
+
+test('an audit that cannot list files SAYS so instead of reporting no orphans (#60)', async () => {
+  const { audit } = await import('../../src/repair.ts')
+  const cs = [rec(1)]
+  const files = { ...cleanFiles(cs), canScan: false }
+  const out = audit({ sessionId: 'S', state: state(cs), files, log: { turnEndSeqs: [9], collections: [{ from: 0, to: 9 }] } as never })
+  assert.deepEqual(out.findings, [], 'nothing is claimed to be wrong')
+  assert.deepEqual(out.blindSpots, ['orphan-file', 'test-litter'],
+    'and the classes it could not check are named — the host port has no readdir')
+  const scanned = audit({ sessionId: 'S', state: state(cs), files: { ...cleanFiles(cs), canScan: true }, log: { turnEndSeqs: [9], collections: [{ from: 0, to: 9 }] } as never })
+  assert.deepEqual(scanned.blindSpots, [], 'a port that CAN scan reports no blind spots')
+})

@@ -96,8 +96,13 @@ export const chapterFileName = (n: number, title: string): string =>
   `${String(n).padStart(3, '0')}-${slugify(title)}.md`
 
 /** Idempotency key: the same source session + ceiling reuses reserved numbers instead of duplicating. */
-export const attemptKey = (sourceSessionId: string, archiveCeiling: number): string =>
-  `${sourceSessionId}@${archiveCeiling}`
+/**
+ * The idempotence key for one archive attempt. `salt` exists for REPAIR (#60): a repair re-rendering a
+ * span the original door keyed would otherwise be swallowed as a retry of that attempt, and a swallowed
+ * repair is indistinguishable from one that worked.
+ */
+export const attemptKey = (sourceSessionId: string, archiveCeiling: number, salt?: string): string =>
+  `${sourceSessionId}@${archiveCeiling}${salt !== undefined ? `+${salt}` : ''}`
 
 /** Join without importing path, so the seam stays portable between ctx.fs and node:fs. */
 const join = (...parts: string[]): string =>

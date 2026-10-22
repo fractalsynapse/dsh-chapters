@@ -70,6 +70,15 @@ export interface RepairFileSet {
   emptyArtifactPaths: string[]
   /** Other session roots sitting in the same store (rig litter shows up here). */
   roots?: string[]
+  /**
+   * FALSE when the caller cannot list a directory — which is the HOST's case: `ArchiveFs` is
+   * write/read/exists only (src/archive.ts), so an in-host repair can never discover a file the registry
+   * does not cite. Reporting "no orphan files" from a port that cannot see them would be a lie of
+   * omission, exactly the class of defect this issue is about; so the audit returns BLIND SPOTS and the
+   * command says them out loud. The offline script (`scripts/chapters-repair.mjs`) has `readdir` and
+   * leaves this true.
+   */
+  canScan?: boolean
 }
 
 export interface RepairLogFacts {
@@ -109,7 +118,7 @@ const REMEDY: Record<FindingClass, Remedy> = {
  * A clean store must return an EMPTY list: a repair that prints friendly noise is a repair whose output
  * nobody reads.
  */
-export function audit(input: AuditInput): { findings: RepairFinding[] } {
+export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpots: FindingClass[] } {
   const { sessionId, state, files, log } = input
   const findings: RepairFinding[] = []
   const add = (f: Omit<RepairFinding, 'session' | 'remedy'> & { class: FindingClass }): void => {
@@ -210,7 +219,10 @@ export function audit(input: AuditInput): { findings: RepairFinding[] } {
     add({ class: 'test-litter', detail: `the store holds a second root ${root} (not this session's tree); it is not touched automatically — inspect it before removing anything`, target: { path: root } })
   }
 
-  return { findings }
+  // What we could NOT look at, stated rather than implied. The host port has no directory listing, so
+  // unlisted files and stray roots are invisible there; the offline script sees them.
+  const blindSpots: FindingClass[] = files.canScan === false ? ['orphan-file', 'test-litter'] : []
+  return { findings, blindSpots }
 }
 
 // ─────────────────────────────────────────────────── supersede (pure)

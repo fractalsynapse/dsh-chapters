@@ -36,7 +36,9 @@ async function reserveNumbers(
   return { numbers }
 }
 import { writeArchive, attemptKey } from './archive.ts'
+import { supersedeChapter, type FindingClass } from './repair.ts'
 import type { ChapterRecord } from './archive.ts'
+import type { ChapterRange } from './types.ts'
 import type { RenderConfig, SessionEventLike } from './types.ts'
 
 export interface SaveSessionConfig extends RenderConfig {
@@ -64,6 +66,18 @@ export interface SaveSessionArgs {
    * renders byte-identically to the pre-feature shape.
    */
   subagentOf?: string | undefined
+  /**
+   * REPAIR ONLY (#60): archive this exact span instead of the watermark tail. A repair must re-derive a
+   * specific hole (a hollow chapter's seqs, an unsigned completed turn), not "everything new".
+   */
+  span?: { fromSeq: number; toSeq: number } | undefined
+  /**
+   * REPAIR ONLY (#60): mark chapter `over` superseded by what this call writes, in the SAME registry
+   * section that commits the replacement — so a record and its replacement can never be observed apart.
+   */
+  supersede?: { over: number; reason: FindingClass } | undefined
+  /** REPAIR ONLY: a distinct idempotence key per repair run, so a repair is not eaten by the original save's key. */
+  attemptSalt?: string | undefined
 }
 
 export type SaveSessionSkip =
@@ -93,12 +107,40 @@ export interface SaveSessionOutcome {
   warnings: string[]
 }
 
+/**
+ * Force a repaired archive to cover exactly the span the finding named (#60). Composition may still cut
+ * it into topics - a cut is a chapter boundary, not a loss - but nothing may start above `fromSeq` or
+ * stop before the last completed turn inside the span, or the hole the finding reported stays open while
+ * the repair reports success.
+ */
+function clampSpan(
+  chapters: ChapterRange[],
+  fromSeq: number,
+  toSeq: number,
+  events: readonly { type: string; seq: number }[],
+): ChapterRange[] {
+  // Nothing to clamp: the span held no completed turn at all. Returning EMPTY is the honest answer —
+  // inventing a title here would fabricate a chapter, and an empty `records` makes the caller skip the
+  // supersede, which is exactly right: a record is never marked superseded without its replacement (#60).
+  if (chapters.length === 0) return []
+  const lastCompleted = events.reduce(
+    (m, e) => (e.type === 'turn/end' && e.seq <= toSeq && e.seq > m ? e.seq : m), fromSeq,
+  )
+  return chapters.map((c, i) => ({
+    ...c,
+    startSeq: i === 0 ? Math.min(c.startSeq, fromSeq) : Math.max(c.startSeq, chapters[i - 1]!.endSeq + 1),
+    endSeq: i === chapters.length - 1 ? lastCompleted : Math.min(c.endSeq, lastCompleted),
+  }))
+}
+
 export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcome> {
   const { events, sessionId, cwd, store, config } = a
   if (cwd === '') throw new Error('saveSession: session has no workspace cwd — nowhere reachable to write')
   if (sessionId === '') throw new Error('saveSession: no session id to own the archive')
 
-  const anchor = [...events].reverse().find((e) => e.type === 'turn/end')?.seq
+  // A repair targets a span it chose; every other door archives the watermark tail up to the last
+  // completed turn. One pipeline, one difference (#60).
+  const anchor = a.span !== undefined ? a.span.toSeq : [...events].reverse().find((e) => e.type === 'turn/end')?.seq
   if (anchor === undefined) {
     return { skipped: 'no-completed-turn', fromSeq: 0, anchor: -1, lastArchived: 0, priorChapters: 0, records: [], warnings: [] }
   }
@@ -106,8 +148,11 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   // Watermark: only archive what is newer than the last saved chapter.
   const state = await store.get(sessionId)
   const lastArchived = state.chapters.reduce((m, c) => Math.max(m, c.endSeq), 0)
-  const fromSeq = lastArchived > 0 ? lastArchived + 1 : 0
-  if (fromSeq > 0 && anchor <= lastArchived) {
+  const fromSeq = a.span !== undefined ? a.span.fromSeq : (lastArchived > 0 ? lastArchived + 1 : 0)
+  // A REPAIR span is deliberate re-derivation of seqs the watermark has already passed (#60): the
+  // nothing-new guard is about not re-archiving a tail, and would otherwise refuse to fix the hole a
+  // hollow chapter sits exactly on top of. The span caller has already decided what needs re-rendering.
+  if (a.span === undefined && fromSeq > 0 && anchor <= lastArchived) {
     return { skipped: 'nothing-new', fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: [], warnings: [] }
   }
 
@@ -116,9 +161,15 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     mergeThreshold: config.mergeThreshold,
     chapterLimit: config.chapterLimit,
   })
-  const chapters = composed.chapters.length > 0
+  let chapters = composed.chapters.length > 0
     ? composed.chapters
     : deriveRanges(events, anchor, config.chapterTokenTarget, fromSeq).chapters
+  if (a.span !== undefined) {
+    // A repair's span is bounded by the finding, so force exactly that range: composition inside a hole
+    // may cut it into topics, and a cut is fine, but nothing may start above `fromSeq` or end below the
+    // last completed turn inside the span.
+    chapters = clampSpan(chapters, a.span.fromSeq, a.span.toSeq, events)
+  }
 
   // Render + write archive (same as runContinue steps 2-3, minus child creation).
   const below = events.filter((e) => e.seq <= anchor)
@@ -191,11 +242,17 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     storeRoot: config.artifactStoreRoot,
     rootSessionId: state.rootSession,
     chapters: rendered,
-    attemptId: attemptKey(sessionId, anchor),
+    attemptId: attemptKey(sessionId, anchor, a.attemptSalt),
   })
 
   // Commit chapter records to session state so search index picks them up.
-  await commitChapters(store, sessionId, wrote.records)
+  if (a.supersede !== undefined && wrote.records.length > 0) {
+    // Commit AND mark in one section: no reader can ever see the replacement without the old record
+    // marked, or the mark without its replacement (#60).
+    await store.mutate(sessionId, (fresh) => supersedeChapter(fresh, a.supersede!.over, wrote.records, a.supersede!.reason))
+  } else {
+    await commitChapters(store, sessionId, wrote.records)
+  }
 
   return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: wrote.warnings }
 }
