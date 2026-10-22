@@ -26,6 +26,8 @@ import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
 import { resolveStoreRoot } from './store.ts'
 import { diagnosticStatusLine } from './diag.ts'
+import { registryHealth } from './repair.ts'
+import type { SessionState } from './registry.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
 export interface EnrichCommandSurface {
@@ -263,10 +265,14 @@ export function registerHostCommands(
       const cwd = cwdOf(invocation.agent)
       const project = projectForCwd(domain.table('projects').entries(), cwd)
       const status = readSyncStatus(cwd, config.artifactStoreRoot)
-      if (project === undefined && status === null) {
-        return { kind: 'success', text: 'No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token].' + AUTO_SAVE_LINE(config) }
-      }
+      // #61: this command used to RETURN here when nothing was linked — one sentence, and every health
+      // line below it (Enrichment, Diagnostics, Auto-save, Findings) was unreachable precisely for the
+      // users who most needed it. An unlinked project is a STATE, not an absence of health.
       const lines: string[] = []
+      if (project === undefined && status === null) {
+        lines.push('No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token] — '
+          + 'until then this project\u2019s chapters, rules and index stay on THIS machine only.')
+      }
       if (project !== undefined) {
         const pending = config.scheduler?.hasPending(cwd) === true
         lines.push(`Project: ${project.slug} \u00B7 key ${project.projectKey}`)
@@ -294,9 +300,41 @@ export function registerHostCommands(
         lines.push(`Last sync: ${status.at} \u2014 ${status.lastOk ? 'synced' : `${status.mode ?? 'local-only'}: ${status.detail}`}`)
         lines.push(`  ${(status.steps ?? []).join(' \u2192 ')}`)
       }
-      if (config.enrich !== undefined) lines.push(config.enrich.statusLine())
+      // #61: an unwired surface is STATED, not omitted. A reader who sees no enrichment line cannot tell
+      // whether enrichment is off, broken, or simply not printed here — which is how "the feature never
+      // ran" hides for three days behind a logger nobody reads.
+      lines.push(config.enrich !== undefined ? config.enrich.statusLine() : 'Enrichment: not wired on this plane (no model route registered)')
       lines.push(diagnosticStatusLine())
       lines.push(AUTO_SAVE_LINE(config))
+      // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
+      // the durable log is named as unchecked rather than counted as clean: coverage holes, orphan
+      // files and dead citations need `/chapters-repair audit`.
+      {
+        const states = [...(domain.table('sessions').entries() as Iterable<[string, SessionState]>)]
+          .map(([, st]) => st)
+          .filter((st) => (st as { rootSession?: string }).rootSession !== undefined)
+        const health = registryHealth(states)
+        const dead = states.reduce((m, st) => m + (st.chapters?.length ?? 0), 0)
+        lines.push(`Findings (registry-level, this machine): ${health.text}`)
+        lines.push(`  NOT checked here: coverage holes, orphan files, dead citations — run /chapters-repair audit${dead === 0 ? ' (no chapter records at all yet)' : ''}`)
+      }
+      // The retrievability line: a long session that has never tripped an archive moment is the field
+      // case #61 found (2,363 events, 414 tool calls, `chapters: []`) — knowledge that exists only in
+      // the log and is invisible to every search on this machine.
+      {
+        const session = (invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } })
+        const sess = session.session ?? session.agent?.session
+        const events = sess?.snapshotEvents?.() ?? []
+        const ends = events.filter((e) => (e as { type?: string }).type === 'turn/end').length
+        const mine = sess?.id !== undefined
+          ? ((domain.table('sessions').get(sess.id) as SessionState | undefined)?.chapters.length ?? 0)
+          : 0
+        if (mine === 0 && ends > 0) {
+          lines.push(`This session: ${events.length} events, ${ends} completed turn(s), 0 chapters — NOTHING it does is retrievable. /chapters-save archives it, or /chapters-continue opens a child on the archive.`)
+        } else if (mine > 0) {
+          lines.push(`This session: ${events.length} events, ${ends} completed turn(s), ${mine} chapter record(s) archived.`)
+        }
+      }
       return { kind: 'success', text: lines.join('\n') }
     },
   }

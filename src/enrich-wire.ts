@@ -128,7 +128,14 @@ export function renderGeneratedBlock(gen: GeneratedProvenance): string {
     if (chain === undefined || chain.length === 0) continue
     lines.push(`  ${key}:`)
     for (const m of chain) {
-      if (m.by === 'model') lines.push(`    - by: model`, `      model: ${m.model}`, `      at: ${m.at ?? ''}`)
+      if (m.by === 'model') lines.push(
+        `    - by: model`,
+        `      model: ${m.model}`,
+        `      at: ${m.at ?? ''}`,
+        // #61: which build wrote it. Absent on records from before the field existed — rendering
+        // `pluginVersion: undefined` would be a lie about a legacy row.
+        ...(m.pluginVersion !== undefined && m.pluginVersion !== '' ? [`      pluginVersion: ${m.pluginVersion}`] : []),
+      )
       else lines.push(`    - by: deterministic`)
     }
   }
@@ -162,6 +169,24 @@ export function humanBytesOf(body: string): string {
 }
 
 type ChapterLike = { number: number; title: string; generated?: Record<string, { by: string; model?: string }[]> }
+/**
+ * The ONE "does this chapter still need annotating?" test, used by BOTH the queue and `pendingCount`
+ * (#61). They were two hand-written loops over `chaptersOf` that had already drifted in shape, and the
+ * missing half was the minimum-content gate: five model calls in the field were spent titling husks
+ * ("Empty conversation span with unknown events and zero-byte results") — money thrown at nothing to
+ * annotate, and worse, the AI rename replaced a `FRAGMENT_TITLE`-shaped title so `indexing.ts` could no
+ * longer stitch adjacent legacy fragments (indexing.ts:43). So an empty chapter is not a candidate, and
+ * its deterministic title survives to be stitched.
+ */
+export function isPendingChapter(
+  c: { messages?: number; generated?: { title?: { by: string; model?: string }[] } },
+  modelKey: string,
+): boolean {
+  if ((c.messages ?? 1) === 0) return false
+  const top = c.generated?.title?.[0]
+  return !(top?.by === 'model' && top.model === modelKey)
+}
+
 function chaptersOf(state: unknown): ChapterLike[] {
   const c = (state as { chapters?: unknown } | undefined)?.chapters
   // #60: the enrichment queue reads registry chapters through the ONE supersede predicate, so a
@@ -343,8 +368,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const out: { key: string; label: string }[] = []
       for (const [sid, st] of deps.store.sessions()) {
         for (const c of chaptersOf(st)) {
-          const top = c.generated?.title?.[0]
-          if (top?.by === 'model' && top.model === modelKey2) continue
+          if (!isPendingChapter(c, modelKey2)) continue
           out.push({ key: `${sid}#${c.number}`, label: c.title.slice(0, 48) })
           if (out.length >= cap) return out
         }
@@ -375,8 +399,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const key2 = modelKey()
       for (const [, st] of deps.store.sessions()) {
         for (const c of chaptersOf(st)) {
-          const top = c.generated?.title?.[0]
-          if (!(top?.by === 'model' && top.model === key2)) n += 1
+          if (isPendingChapter(c, key2)) n += 1
         }
       }
       return n

@@ -151,10 +151,8 @@ export function oversizeRanges(
 }
 
 /** Enumerate tool results in a range so the model can decide keep/defer against real sizes. */
-export function toolResultCandidates(
-  events: SessionEventLike[],
-  range: ChapterRange,
-): ToolResultCandidate[] {
+/** Every oversized tool result in a range, ranked by size DESCENDING (dedupe keeps the last copy). */
+function collectCandidates(events: SessionEventLike[], range: ChapterRange): ToolResultCandidate[] {
   const out: ToolResultCandidate[] = []
   for (const ev of events) {
     if (ev.type !== 'tool/result' || ev.seq < range.startSeq || ev.seq > range.endSeq) continue
@@ -180,7 +178,45 @@ export function toolResultCandidates(
       excerpt: text.slice(0, 160),
     })
   }
+  // NO sort without a cap: log order is what every existing caller (and the model's own
+  // `toolResultOverrides` list) already sees, and reordering it would be an undocumented behavior
+  // change riding along with a loudness fix. Ranking belongs to the cap alone.
   return out
+}
+
+/**
+ * The capped public form (#61). `chapters_segment` once emitted 49,932 characters of its OWN output while
+ * also reporting `(Omitted 275266 bytes …)` — ≈81K est tokens into a 32K-class window, asking a small
+ * model to judge a candidate list it never received. Ranking is by size descending, so what a cap
+ * removes is the SMALL stuff: the judgment the model is actually asked for stays intact.
+ *
+ * The caller reports what was withheld — see `candidateTotals` — because a capped list that does not say
+ * it is capped is a silent truncation, and AGENTS.md forbids truncating to fit.
+ */
+export function toolResultCandidates(
+  events: SessionEventLike[],
+  range: ChapterRange,
+  capTokens?: number,
+): ToolResultCandidate[] {
+  if (capTokens === undefined) return collectCandidates(events, range)
+  const ranked = [...collectCandidates(events, range)].sort((a, b) => b.bytes - a.bytes)
+  let used = 0
+  const kept: ToolResultCandidate[] = []
+  for (const c of ranked) {
+    if (used + c.estimatedTokens > capTokens && kept.length > 0) break
+    kept.push(c)
+    used += c.estimatedTokens
+  }
+  return kept
+}
+
+/** Totals for the WHOLE candidate set, so a capped response can name what it left out. */
+export function candidateTotals(
+  events: SessionEventLike[],
+  range: ChapterRange,
+): { count: number; bytes: number } {
+  const all = collectCandidates(events, range)
+  return { count: all.length, bytes: all.reduce((m, c) => m + c.bytes, 0) }
 }
 
 /**

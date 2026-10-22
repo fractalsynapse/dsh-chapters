@@ -137,6 +137,22 @@ test('fork tool: no scheduler + no rules + no project still forks', async () => 
   } finally { h.dispose() }
 })
 
+test('segment names its own cap: showing X of Y by size, Z KB withheld (#61)', async () => {
+  const h = w()
+  try {
+    const seg = await h.built.segment.execute({} as never, h.exec as never) as {
+      ok: boolean
+      toolResults?: unknown[]
+      toolResultsReport?: string
+    }
+    assert.equal(seg.ok, true)
+    assert.match(seg.toolResultsReport ?? '', /showing \d+ of \d+ candidates by size/,
+      `the tool must state its own truncation, not emit 50 KB silently: ${JSON.stringify(seg.toolResultsReport)}`)
+    assert.match(seg.toolResultsReport ?? '', /withheld/, 'and name the withheld amount')
+    assert.equal(Array.isArray(seg.toolResults) && (seg.toolResults?.length ?? 0) <= 4000, true, 'a capped list cannot exceed the cap')
+  } finally { h.dispose() }
+})
+
 test('segment tool with NO completed turn (only a mid-turn) → honest refusal arm', async () => {
   const h = w()
   try {

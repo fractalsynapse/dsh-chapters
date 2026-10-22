@@ -126,11 +126,16 @@ test('THE ACTUAL BUG: a door whose child creation is refused reaches the sink fr
 test('the status line names the blindness, so an unconfigured sink is visible BEFORE the incident', () => {
   const saved = process.env.DSH_CHAPTERS_ENGINE_ERRORS
   delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
-  try { assert.match(diagnosticStatusLine(), /NO ERROR SINK/) } finally {
+  // AMENDED #61: this row asserted 'NO ERROR SINK' for the unset case, because blindness was the
+  // designed default. #61 inverted the default — the first door that touches a project resolves
+  // <store-root>/diagnostics.log — so the unset-and-unresolved state is now an ANOMALY (no store root
+  // at all), and the line says so. The env override is also named, because an operator who set both a
+  // profile path and the env deserves to know which one is live.
+  try { assert.match(diagnosticStatusLine(), /NO SINK AT ALL/) } finally {
     if (saved !== undefined) process.env.DSH_CHAPTERS_ENGINE_ERRORS = saved
   }
   process.env.DSH_CHAPTERS_ENGINE_ERRORS = '/tmp/x.log'
-  try { assert.match(diagnosticStatusLine(), /^Diagnostics: sink → \/tmp\/x\.log$/) }
+  try { assert.match(diagnosticStatusLine(), /^Diagnostics: sink → \/tmp\/x\.log \(env override\)$/) }
   finally { if (saved === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS; else process.env.DSH_CHAPTERS_ENGINE_ERRORS = saved }
 })
 

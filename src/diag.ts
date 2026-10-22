@@ -23,10 +23,34 @@
  */
 import fs from 'node:fs'
 
-/** The opt-in sink: an append-only file path, or undefined when unset/empty. */
+/**
+ * The sink, in resolution order: `DSH_CHAPTERS_ENGINE_ERRORS` (explicit wins), then the plugin-configured
+ * default, then NO file only when the operator wrote the literal `off`.
+ *
+ * #61 changed the default from silence to a file. Every compaction finalization failure in the SAIP field
+ * data left zero trace, and door 5 logged `saved` to a logger nobody reads for three days — a sink that
+ * must be configured before it works is a sink that is not configured at the moment you need it.
+ */
+let configured: string | undefined
+
+/** Called once per plane at boot with `<store-root>/diagnostics.log` (config `diagnosticsLog`). */
+export function configureDiagnostics(path: string | undefined): void { configured = path }
+
+/**
+ * First door wins: the sink lives in the project whose store we are already writing to, so a session
+ * that never touches a door leaves no stray file, and a session that does gets its failures next to its
+ * chapters. Idempotent — later projects do not relocate the log mid-process.
+ */
+export function ensureDiagnosticsDefault(path: string): void {
+  if (configured === undefined) configured = path
+}
+
+export const DIAGNOSTICS_OFF = 'off'
+
 export function diagnosticSink(): string | undefined {
   const p = process.env.DSH_CHAPTERS_ENGINE_ERRORS
-  return p !== undefined && p !== '' ? p : undefined
+  if (p !== undefined && p !== '') return p === DIAGNOSTICS_OFF ? undefined : p
+  return configured
 }
 
 /**
@@ -36,9 +60,14 @@ export function diagnosticSink(): string | undefined {
  */
 export function diagnosticStatusLine(): string {
   const sink = diagnosticSink()
-  return sink === undefined
-    ? 'Diagnostics: NO ERROR SINK — door/child failures reach only the profile logger; set DSH_CHAPTERS_ENGINE_ERRORS=/path/to/file to keep them readable outside the app'
-    : `Diagnostics: sink → ${sink}`
+  const envSet = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  if (sink === undefined) {
+    return envSet === DIAGNOSTICS_OFF
+      // the operator chose silence — say THAT, not "you forgot to configure it"
+      ? 'Diagnostics: file sink explicitly disabled (DSH_CHAPTERS_ENGINE_ERRORS=off); door/child failures reach only the profile logger'
+      : 'Diagnostics: NO SINK AT ALL — no store root was resolved, so door/child failures reach only the profile logger (this is a bug, not a setting)'
+  }
+  return `Diagnostics: sink → ${sink}${envSet !== undefined && envSet !== '' ? ' (env override)' : ''}`
 }
 
 /** True when SOME diagnostic was written since import — for the status line's honest "no sink" arm. */

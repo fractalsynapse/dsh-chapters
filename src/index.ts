@@ -37,7 +37,7 @@ import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
-import { diagnosticStatusLine } from './diag.ts'
+import { configureDiagnostics, diagnosticStatusLine } from './diag.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -83,6 +83,24 @@ export interface Config {
   chapterLimit: number
   /** Past `chapterTokenTarget × this` a door refuses the archive (#59). ≥1; 2 by default. */
   chapterOversizeFactor: number
+  /**
+   * #61 loudness. How many warning TEXTS a door prints before switching to `…and M more`. The field
+   * failure was delivery, not detection: 86 warnings — naming a hollow chapter and an unarchived
+   * 0-4082 hole — reached a human as `(86 warning(s))`.
+   */
+  warningsDisplayCap: number
+  /**
+   * #61: token ceiling on the oversized-result candidate list `chapters_segment` returns. Measured at
+   * 49,932 chars emitted while ALSO reporting `Omitted 275266 bytes`, ≈81K est tokens into a 32K-class
+   * window — the model was asked to judge a list it never received.
+   */
+  segmentCandidateCapTokens: number
+  /**
+   * #61: where door/child failures are appended. Empty (the default) resolves to
+   * `<store-root>/diagnostics.log`; the literal `off` disables the file sink, and
+   * `DSH_CHAPTERS_ENGINE_ERRORS` overrides everything. Before this, unset meant NO TRACE ON DISK.
+   */
+  diagnosticsLog: string
   /** Plans (docs/plans-carriage.md § 7): verbatim plan chars shown in a chapter,
    * the tool-call-argument artifact floor (0 = off), and whether the notice
    * carries the `## Plans on this path` block. */
@@ -186,6 +204,9 @@ export const Config = Schema.object({
   subagentAutoSave: Schema.boolean().default(true),
   chapterLimit: Schema.number().default(8000),
   chapterOversizeFactor: Schema.number().default(2),
+  warningsDisplayCap: Schema.number().default(6),
+  segmentCandidateCapTokens: Schema.number().default(4000),
+  diagnosticsLog: Schema.string().default(''),
   // Plans (docs/plans-carriage.md § 7). A plan's full text is ALWAYS
   // artifact-backed, so planInlineChars is display economy and never a data
   // decision. callArgArtifactTokens defaults to 0 = OFF: turning it on changes
@@ -265,6 +286,14 @@ const PKG_ROOT = join(HERE, '..')
 const heldDisposers: Array<() => Promise<void>> = []
 
 export async function apply(ctx: HostCtx, config: Config): Promise<void> {
+  // #61: the diagnostics sink defaults ON. An operator who set `diagnosticsLog` in the profile gets
+  // that path; `DSH_CHAPTERS_ENGINE_ERRORS` beats it; the literal `off` is the only silence. With
+  // neither set, the FIRST door that touches a project resolves `<store-root>/diagnostics.log`
+  // (ensureDiagnosticsDefault in tools/engine), which is why nothing is configured here yet — the
+  // three SAIP compaction finalization failures left no trace precisely because the sink had to be
+  // turned on before it could help.
+  if (config.diagnosticsLog !== '') configureDiagnostics(config.diagnosticsLog)
+
   // § Preset delivery lives in `src/preset.ts` — the `preset-chapters` declaration row in
   // this bundle's patch, NOT here. A row is visible (`dsh --dump-default-config`, the config
   // editor, `list_plugins`), overridable and disable-able from a profile patch, and its
@@ -365,6 +394,8 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       mergeThreshold: config.mergeThreshold,
       chapterLimit: config.chapterLimit,
       chapterOversizeFactor: config.chapterOversizeFactor,
+      warningsDisplayCap: config.warningsDisplayCap,
+      segmentCandidateCapTokens: config.segmentCandidateCapTokens,
       planInlineChars: config.planInlineChars,
       callArgArtifactTokens: config.callArgArtifactTokens,
       plansInNotice: config.plansInNotice,
