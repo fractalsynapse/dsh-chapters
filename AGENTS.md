@@ -332,6 +332,11 @@ not a plugin bug.
   `spikes/probe/FINDINGS.md` r28: "the L0 test had stubbed the fictional shape and passed a dead
   listener".
 - **Never truncate to fit.** Refuse with measured numbers instead.
+- **One predicate per semantic decision.** The body screen (`injections.ts`) and the title chooser must
+  not hold two lists of what counts as injected context — the second one lagged and a
+  `time-context` snapshot became a chapter title, slug, filename and TOC citation (#59). Same rule
+  already holds for the save core, `renderRulesBlock`, `search.rankEntries` and `deterministicCommand`,
+  and a source-shape row now fails if a second title predicate reappears.
 - **Never create a session automatically mid-step.** Continuation-creating actions fire at `turn/end`
   boundaries only. (In-place *surface* compaction is different and is the harness's own design: the base
   engine compacts at `agent/pre-step` — between steps, never mid-request, bounded retries — measured
