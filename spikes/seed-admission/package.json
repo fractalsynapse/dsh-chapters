@@ -1,0 +1,20 @@
+{
+  "name": "dsh-seed-admission",
+  "version": "0.0.0",
+  "description": "#54 spike: what does host 0.2.x ACTUALLY refuse when a session is created with our seed, and is it our row at all?",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "license": "Apache-2.0",
+  "private": true,
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-cordis": "^0.2.0"
+  }
+}

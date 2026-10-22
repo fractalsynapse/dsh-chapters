@@ -1,0 +1,5 @@
+# #54 probe bundle patch — mounts the seed-admission matrix into a SCRATCH profile.
+# Scratch only: never install this into the profile the working session runs inside.
+- insert:
+    - id: dsh-seed-admission
+      name: 'dsh-seed-admission'

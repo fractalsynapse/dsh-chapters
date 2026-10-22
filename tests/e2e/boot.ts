@@ -190,6 +190,27 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       fs.writeFileSync(patchPath, p)
     }
   }
+  // WHICH BUILD IS THIS BOOT RUNNING? Assert it, do not assume it (the #54 lesson, earned
+  // over hours): the home is copied from `.dshdev-local`, and that directory's plugin entry
+  // had silently become a COPIED tree from Oct 16 — so every browser probe, every
+  // "0.2.x refuses our seed" conclusion, and two re-distill attempts were measuring a build
+  // that predated the feature under test. The docs said "the plugin is link-installed, so
+  // every boot runs the CURRENT build in lib/" and nothing checked it. A copy is not a link.
+  {
+    const mounted = path.join(E2E_HOME, 'profiles', 'web', 'node_modules', '@treeseed', 'dsh-chapters')
+    let resolved: string | null = null
+    try { resolved = fs.realpathSync(mounted) } catch { resolved = null }
+    if (resolved === null) {
+      throw new Error(`e2e boot: no @treeseed/dsh-chapters in the dev home profile (${mounted}). `
+        + 'Install the CURRENT build: DSH_HOME=$PWD/.dshdev-local dsh plugin --profile web add "link:" + process.cwd()')
+    }
+    if (path.resolve(resolved) !== ROOT) {
+      throw new Error(`e2e boot: the dev home mounts a COPIED plugin tree (${resolved}), not this working copy (${ROOT}). `
+        + 'A copy silently ages: assertions would be measuring an old build. Re-link: '
+        + 'rm -rf .dshdev-local/profiles/web/node_modules/@treeseed/dsh-chapters && '
+        + 'DSH_HOME=$PWD/.dshdev-local dsh plugin --profile web add "link:" + process.cwd()')
+    }
+  }
   const liveSettings = path.join(E2E_HOME, 'settings.yaml')
   if (fs.existsSync(liveSettings)) {
     const s = fs.readFileSync(liveSettings, 'utf8')
@@ -234,6 +255,14 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // answers), so the dummy fills only when neither the environment NOR
       // the home's .credentials.yaml carries a real key — a machine distilling
       // tapes against a key-guarded llama must keep using its real one.
+      // #54: forward the diagnostics sink. The boot hands the server an EXPLICIT env
+      // object, so a variable set in the invoking shell never reached the process that
+      // actually refused the child — which is how a browser-path refusal with a full
+      // stack in hand still produced an empty log file. Traceability that stops at the
+      // process boundary is not traceability.
+      ...(process.env.DSH_CHAPTERS_ENGINE_ERRORS !== undefined && process.env.DSH_CHAPTERS_ENGINE_ERRORS !== ''
+        ? { DSH_CHAPTERS_ENGINE_ERRORS: process.env.DSH_CHAPTERS_ENGINE_ERRORS }
+        : {}),
       ...(proxy !== null && process.env.LOCAL_API_KEY === undefined
         && !fs.existsSync(path.join(E2E_HOME, '.credentials.yaml'))
         ? { LOCAL_API_KEY: 'e2e-tape-proxy-dummy' }
