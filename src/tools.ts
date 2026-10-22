@@ -9,10 +9,12 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import { runRepair, restoreRepair } from './repair-run.ts'
+import { formatWarnings } from './warnings.ts'
+import { ensureDiagnosticsDefault } from './diag.ts'
 import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
 import { readDurableSession } from './auto-save.ts'
 import * as path from 'node:path'
-import { estimateTokens, toolResultCandidates } from './render.ts'
+import { candidateTotals, estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
@@ -66,6 +68,10 @@ function callerOf(exec: ToolRunContext): CallerAgent | typeof CALLER_MISSING {
 }
 
 export interface ToolsConfig extends ContinueConfig {
+  /** #61: how many warning TEXTS a door prints before `…and M more`. */
+  warningsDisplayCap?: number
+  /** #61: token ceiling on `chapters_segment`'s candidate list (0 = uncapped). */
+  segmentCandidateCapTokens?: number
   /** Token budget for chapters_search result packing (record §8). */
   searchMaxTokens?: number
   /** The §5 sync scheduler: pull at fork, debounced push after archives. */
@@ -116,6 +122,9 @@ export function buildChaptersTools(
 
   const portsFor = async (caller: CallerAgent): Promise<ContinuePorts> => {
     const cwd = caller.session.header.cwd ?? ''
+    // #61: a door is touching this project's store, so THIS is where failures get written unless the
+    // operator said otherwise. First door wins; `off` in the env still means no file at all.
+    if (cwd !== '') ensureDiagnosticsDefault(path.join(cwd, config.artifactStoreRoot, 'diagnostics.log'))
     // every real tool use carries the caller's routed model — record it for
     // the enrichment resolver (the only route source the host plane can have)
     if (caller.options.provider !== undefined && caller.options.model !== undefined) {
@@ -263,8 +272,25 @@ export function buildChaptersTools(
           : { planHint: 'a submitted plan is a topic boundary: the chapter that carries it ENDS there, and its title becomes the chapter title' }),
         // fresh literals, not the ToolResultCandidate interface: anonymous
         // object types carry the implicit index signature JsonValue needs.
-        toolResults: toolResultCandidates(below, { title: '', summary: '', startSeq: 0, endSeq: ceiling })
-          .map((c) => ({ seq: c.seq, toolName: c.toolName, bytes: c.bytes, estimatedTokens: c.estimatedTokens, excerpt: c.excerpt })),
+        // #61: the candidate list is CAPPED and says so. The field version returned 49,932 characters
+        // while also reporting `Omitted 275266 bytes` — ~81K est tokens into a 32K-class window, asking
+        // the model to keep/drop-judge a list it had not received. Ranking is by size descending, so the
+        // cap removes the SMALL entries and the big ones a real decision turns on stay visible.
+        ...(() => {
+          const range = { title: '', summary: '', startSeq: 0, endSeq: ceiling } as const
+          const cap = config.segmentCandidateCapTokens ?? 4000
+          const kept = cap > 0
+            ? toolResultCandidates(below, range, cap)
+            : toolResultCandidates(below, range)
+          const totals = candidateTotals(below, range)
+          const withheld = Math.max(0, totals.count - kept.length)
+          const withheldBytes = Math.max(0, totals.bytes - kept.reduce((m, c) => m + c.bytes, 0))
+          return {
+            toolResults: kept.map((c) => ({ seq: c.seq, toolName: c.toolName, bytes: c.bytes, estimatedTokens: c.estimatedTokens, excerpt: c.excerpt })),
+            toolResultsReport: `showing ${kept.length} of ${totals.count} candidates by size, ${(withheldBytes / 1024).toFixed(0)} KB withheld`
+              + (cap > 0 ? ` (segmentCandidateCapTokens=${cap})` : ' (uncapped)'),
+          }
+        })(),
         existingChapters: callerState.chapters.map((c) => ({
           number: c.number, path: c.path, title: c.title, startSeq: c.startSeq, endSeq: c.endSeq,
         })),
@@ -523,12 +549,16 @@ export function buildChaptersTools(
         const result = await runContinue(ports, { ...callerArgs, handoffNote, chapters }, config)
         if (result.ok && cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:fork')
         const budgetText = result.budget !== undefined ? `; TOC ~${result.budget.usedTokens} tokens, allowance ${result.budget.allowanceTokens}` : ''
-        return { kind: 'success' as const, text: `${door.verb}: ${chapters.length} new chapter(s) archived (watermark respected: seqs ${fromSeq}..${anchor}), ${door.noun} \u201C${title}\u201D is session ${result.childSessionId ?? '(created)'}${budgetText}. Switch to it from the sidebar — its first message is the table of contents.` }
+        // #61: the archive happened; the caveats were in `result.warnings` and were NEVER printed here.
+        const dWarn = formatWarnings(result.warnings ?? [], config.warningsDisplayCap ?? 6)
+        return { kind: 'success' as const, text: `${door.verb}: ${chapters.length} new chapter(s) archived (watermark respected: seqs ${fromSeq}..${anchor}), ${door.noun} \u201C${title}\u201D is session ${result.childSessionId ?? '(created)'}${budgetText}. Switch to it from the sidebar — its first message is the table of contents.`
+          + (dWarn === '' ? '' : `\n  warnings: ${dWarn}`) }
       } catch (error) {
         const refusal = refusalResult(error)
         if (refusal !== null) {
           const budget = refusal.budget !== undefined ? ` (notice ~${refusal.budget.usedTokens} > allowance ${refusal.budget.allowanceTokens})` : ''
-          return { kind: 'error' as const, text: `${door.name} refused: ${refusal.reason ?? 'refused'}${budget}` }
+          const rWarn = formatWarnings(refusal.warnings ?? [], config.warningsDisplayCap ?? 6)
+          return { kind: 'error' as const, text: `${door.name} refused: ${refusal.reason ?? 'refused'}${budget}${rWarn === '' ? '' : `\n  warnings: ${rWarn}`}` }
         }
         return { kind: 'error' as const, text: `${door.name} failed: ${String((error as Error)?.message ?? error)}`.slice(0, 500) }
       }
@@ -610,8 +640,12 @@ export function buildChaptersTools(
         // Schedule sync so saved chapters travel to the pool.
         if (cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:save')
 
-        const warnings = out.warnings.length > 0 ? ` (${out.warnings.length} warning(s))` : ''
-        return { kind: 'success' as const, text: `Saved: ${out.records.length} chapter(s) archived (seqs ${out.fromSeq}..${out.anchor})${warnings}. Enrichment queued. Content is searchable via chapters_search from any session in this workspace.` }
+        // #61: this used to be ` (86 warning(s))` — a COUNT that carried none of the 86 messages, six of
+        // which named the hollow chapter and an unarchived 0-4082 hole. A count is not a message.
+        const warnText = formatWarnings(out.warnings, config.warningsDisplayCap ?? 6)
+        return { kind: 'success' as const, text: `Saved: ${out.records.length} chapter(s) archived (seqs ${out.fromSeq}..${out.anchor}).`
+          + (warnText === '' ? '' : `\n  warnings: ${warnText}`)
+          + ` Enrichment queued. Content is searchable via chapters_search from any session in this workspace.` }
       } catch (error) {
         return { kind: 'error' as const, text: `chapters-save failed: ${String((error as Error)?.message ?? error)}`.slice(0, 500) }
       }

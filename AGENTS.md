@@ -339,6 +339,13 @@ not a plugin bug.
   `spikes/probe/FINDINGS.md` r28: "the L0 test had stubbed the fictional shape and passed a dead
   listener".
 - **Never truncate to fit.** Refuse with measured numbers instead.
+- **A detected failure is a delivered failure** (#61). If code already knows — a warning string, a
+  counted oversize chapter, a diagnostic it built and dropped — it must reach a human or a file. The
+  diagnostics sink defaults ON (`<store-root>/diagnostics.log`; `off` is the only silence), `/chapters-status`
+  prints its whole block in every state including unlinked, doors print warning TEXT with a withheld
+  count instead of a bare number, and a tool caps and names its own output rather than emitting 50 KB
+  into a 32K window. Every P0 in #58/#59/#60 was detected first and thrown away; adding more checks
+  without delivery is the same bug.
 - **One predicate per semantic decision.** The body screen (`injections.ts`) and the title chooser must
   not hold two lists of what counts as injected context — the second one lagged and a
   `time-context` snapshot became a chapter title, slug, filename and TOC citation (#59). Same rule

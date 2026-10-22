@@ -1,3 +1,4 @@
+import { PLUGIN_VERSION } from './version.ts'
 /**
  * P2 S1 — the enrichment pass, pure core (record §6.1).
  *
@@ -44,7 +45,8 @@ export interface MinedRuleOut {
 
 export type GeneratedMark =
   | { by: 'deterministic' }
-  | { by: 'model', model: string, at: string }
+  // `pluginVersion` (#61): which build wrote this annotation. The audit could only infer it from mtimes.
+  | { by: 'model', model: string, at: string, pluginVersion?: string | undefined }
 
 export interface GeneratedProvenance {
   title: GeneratedMark[]
@@ -286,7 +288,9 @@ export function applyEnrich(
   })
   if (sameValues && authoredBySame) return { values: current, changed: false }
   const gen: GeneratedProvenance = { title: [], summary: [], topics: [] }
-  const mark: GeneratedMark = { by: 'model', model, at }
+  // pluginVersion rides with the model name (#61): a row must say WHICH build annotated it, not just
+  // when, or attribution is mtime-archaeology for the next person.
+  const mark: GeneratedMark = { by: 'model', model, at, pluginVersion: PLUGIN_VERSION }
   for (const f of ['title', 'summary', 'topics'] as const) {
     const chain = current.generated?.[f] ?? []
     gen[f] = [mark, ...chain.filter((c) => !(c.by === 'model' && (c as { model?: string }).model === model))]

@@ -56,6 +56,19 @@
 #   # ---- chapters & composition ----------------------------------------
 #   chapterTokenTarget: 8000       # soft per-chapter size target
 #   chapterLimit: 8000             # hard split threshold
+#   warningsDisplayCap: 6            # how many warning TEXTS a door prints before '…and M more' (#61).
+#                                  #   The field failure was delivery: 86 warnings — naming a hollow
+#                                  #   chapter and an unarchived 0-4082 hole — reached a human as
+#                                  #   '(86 warning(s))'. A count is not a message.
+#   segmentCandidateCapTokens: 4000 # ceiling on chapters_segment's oversized-result candidate list (#61):
+#                                  #   it emitted 49,932 chars while reporting 'Omitted 275266 bytes',
+#                                  #   ~81K est tokens into a 32K window. Ranked by size DESC, so the cap
+#                                  #   removes the small stuff, and the response names what was withheld.
+#   diagnosticsLog: ''             # where door/child failures are appended (#61). Empty ⇒ the FIRST door
+#                                  #   that touches a project resolves <store-root>/diagnostics.log;
+#                                  #   DSH_CHAPTERS_ENGINE_ERRORS overrides it; the literal 'off' is the
+#                                  #   only silence. Before this, unset meant NO TRACE ON DISK — the three
+#                                  #   SAIP compaction finalization failures left none.
 #   chapterOversizeFactor: 2       # hard oversize multiple of chapterTokenTarget (#59): over the
 #                                  #   TARGET warns ("split at the next boundary, never clip"), over
 #                                  #   target × factor every door REFUSES with its numbers before

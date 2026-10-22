@@ -252,6 +252,45 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
   return { findings, blindSpots }
 }
 
+/**
+ * A health line from the REGISTRY ALONE (#61), for `/chapters-status` — no log read, no directory scan.
+ *
+ * `audit()` needs the durable log and the files to judge coverage and orphans; a status command must
+ * still say something true at boot, in a project it cannot scan. So this counts only what a row knows
+ * about itself, and the caller must say what was NOT checked. A "0 findings" line from a partial check
+ * would be a lie of omission, and that is the defect family this issue exists to end.
+ */
+export interface RegistryHealth {
+  hollow: number; duplicate: number; drift: number; unreleased: number; ghost: number
+  superseded: number; chapters: number; sessions: number
+}
+
+export function registryHealth(states: readonly SessionState[]): { text: string; counts: RegistryHealth } {
+  const counts: RegistryHealth = { hollow: 0, duplicate: 0, drift: 0, unreleased: 0, ghost: 0, superseded: 0, chapters: 0, sessions: states.length }
+  for (const st of states) {
+    counts.chapters += st.chapters.length
+    counts.superseded += st.chapters.filter((c) => c.status === 'superseded').length
+    counts.hollow += st.chapters.filter((c) => c.messages === 0 && c.artifacts.every((a) => a.bytes === 0)).length
+    const seen = new Set<number>()
+    for (const c of st.chapters) { if (seen.has(c.number)) counts.duplicate += 1; seen.add(c.number) }
+    if (st.chapters.length > 0 && st.nextChapterNumber <= Math.max(...st.chapters.map((c) => c.number))) counts.drift += 1
+    for (const [key, nums] of Object.entries(st.reservations ?? {})) {
+      if (!nums.every((n) => st.chapters.some((c) => c.number === n))) counts.unreleased += 1
+      void key
+    }
+    for (const plan of Object.values(st.plans ?? {})) {
+      if (!st.chapters.some((c) => c.path === plan.path) && plan.path !== '') counts.ghost += 1
+    }
+  }
+  const parts = (Object.keys(counts) as (keyof RegistryHealth)[])
+    .filter((k) => k !== 'chapters' && k !== 'sessions')
+    .map((k) => `${k}=${counts[k]}`)
+  return {
+    text: `${counts.sessions} session row(s), ${counts.chapters} chapter record(s) — ${parts.join(' · ')}`,
+    counts,
+  }
+}
+
 // ─────────────────────────────────────────────────── operator vocabulary (pure, ONE list)
 
 /**

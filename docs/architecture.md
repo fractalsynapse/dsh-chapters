@@ -438,6 +438,34 @@ Three invariants in the same family: an identity is `(number, sha256)`, never `n
 whose files never landed is **released** (or expires) instead of burning a number forever; and one
 unresolvable item in the finalize queue may not poison the items behind it.
 
+## Observability — a detected failure is a delivered failure (#61)
+
+Every P0 in #58/#59/#60 was **already detected by the code** before a human ever looked: `writeArchive`
+warned "N event(s) rendered no output", `planSummarize` counted the oversize chapters, the finalize
+catch built a full diagnostic — and then the value was discarded. So the rule is not "add checks", it is
+**deliver what the checks already say**:
+
+- **The diagnostics sink defaults ON.** `DSH_CHAPTERS_ENGINE_ERRORS` unset now means
+  `<store-root>/diagnostics.log`, not "nowhere". All three SAIP compaction finalization failures left
+  zero trace on disk, and door 5 logged `saved` to a logger nobody reads for three days. The env var
+  still wins; the literal `off` is honoured, because an operator must be able to silence it — but
+  silence is now a choice, never a default. `diagnosticsLog` in the profile config sets the path
+  declaratively; resolution order is env → config → `<store-root>/diagnostics.log`.
+- **Warnings reach humans, with a limit and a withheld count.** `(86 warning(s))` told a user nothing
+  about 86 real findings; the ones that mattered named the husk and the unarchived 0–4082 hole. Doors
+  print the first `warningsDisplayCap` texts and `…and M more`, through ONE formatter — a per-door copy
+  is how one door would show text and another show a count.
+- **`/chapters-status` never early-returns.** It prints Identity · Provider · Enrichment · Diagnostics ·
+  Auto-save · **Findings** (read-only, from the #60 auditor) in every state, including unlinked. An
+  unlinked user used to see one sentence and no health at all. A session with events and **no** chapters
+  says so: *"N events, M completed turns, 0 chapters — nothing it does is retrievable."*
+- **A tool's own output is bounded and self-reporting.** `chapters_segment` returned 49,932 characters
+  while also reporting `(Omitted 275266 bytes …)` — ≈81K est tokens into a 32K-class window, asking a
+  small model to judge a candidate list it never received. Candidates are ranked by size, capped by
+  `segmentCandidateCapTokens`, and the result always says `showing X of Y by size, Z KB withheld`.
+- **Attribution is durable.** `generated:` carries `pluginVersion`, because "which build wrote this row"
+  must not be inferred from mtimes after the fact — this audit had to.
+
 ## Repair — re-deriving the archive from the log (#60)
 
 Invariant 1 (the durable log is append-only and complete) is what makes every defect in #58/#59

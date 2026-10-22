@@ -47,7 +47,15 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `planSeedMode` | true | seed `plan/mode {active:true}` into a **continuation** child when the archived span was still in plan mode, so the gate survives the boundary (measured: kernel accepts the two-event seed, the host's own projection folds it). Never for a branch, never after an approval — approving a plan exits plan mode |
 | `plansInCheckpoint` | true | carry the operative plan into every in-place compaction checkpoint, the way the plot is carried — because shadowing can hide the chapter that holds it |
 | `planCheckpointChars` | 1600 | how much plan text a checkpoint carries; the archive keeps all of it, and a truncated carry says so in the text |
-| `retrievalHints` | true | put `## Finding things` in the child's notice — the three lookup verbs (`read`, `chapters_artifact`, `chapters_search`). Off ⇒ the notice is byte-identical to the pre-hint shape |
+| `retrievalHints` | true | put `## Loudness (issue #61)
+
+| key | default | what it changes |
+|---|---|---|
+| `diagnosticsLog` | unset → `<store-root>/diagnostics.log` | where refusals, deferred finalizations and door failures are appended. `DSH_CHAPTERS_ENGINE_ERRORS` overrides it; the literal `off` disables file logging (the profile logger still gets them). Before this, an unset variable meant **no trace on disk** — and three real compaction failures left none. |
+| `warningsDisplayCap` | 6 | how many warning TEXTS a door prints before switching to `…and M more`. Counts alone hid 86 warnings across six saves, including the one that named a hollow chapter. |
+| `segmentCandidateCapTokens` | 4000 | the ceiling on the oversized-result candidate list `chapters_segment` returns. Ranked by size, and the response always names what was withheld. |
+
+## Finding things` in the child's notice — the three lookup verbs (`read`, `chapters_artifact`, `chapters_search`). Off ⇒ the notice is byte-identical to the pre-hint shape |
 | `callArgArtifactTokens` | 0 (off) | above this, a tool-call *argument* is artifact-backed and the inline text is a bounded head. Off by default on purpose: switching it on changes chapter bytes wherever a `write` carried a whole file, which means your model tapes need re-recording |
 | `toolResultDeferFloorTokens` | 200 | archive-time inline/defer floor (realm `toolResultArtifactTokens` is the *arrival* floor — keep it **above** your chunk size: below it, stubs hide compaction and thresholds silently stop firing — measured) |
 | `artifactStoreRoot` | `.dsh-chapters` | workspace store (must be `read`-reachable) |

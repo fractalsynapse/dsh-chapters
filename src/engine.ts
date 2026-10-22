@@ -17,7 +17,7 @@ import type { SessionEventLike } from './types.ts'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
-import { diagnosticWarn } from './diag.ts'
+import { diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
@@ -124,6 +124,8 @@ export function makeSignatureListener(deps: {
   onCollected?: (id: string, sig: { seqs: number[]; paths: string[]; terms: string[]; size: number }) => void
   /** Optional subprocess service for CodeGraph symbol verification. */
   subprocess?: import('./codegraph.ts').SubprocessLike | undefined
+  /** #61: `<store-root>` so the diagnostics sink can default to a file without any env setup. */
+  storeRoot?: string | undefined
 }): (session: unknown, event: unknown) => void {
   // Per-session promise chain: the store write is a read-modify-append, so
   // two turn-ends landing the same tick must serialize or the second put
@@ -145,6 +147,12 @@ export function makeSignatureListener(deps: {
       // CodeGraph symbol verification is async and fire-and-forget. The cwd
       // comes from the session header; missing cwd or missing CLI → silent no-op.
       const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+      // #61: the compaction realm is where the SAIP finalization failures happened, and all three left
+      // zero trace because the sink had to be configured before it existed. Resolve it from the session
+      // that is compacting, first one wins.
+      if (cwd !== undefined && deps.storeRoot !== undefined) {
+        ensureDiagnosticsDefault(path.join(cwd, deps.storeRoot, 'diagnostics.log'))
+      }
       const enrichPromise = cwd !== undefined
         ? enrichSignatureWithCodegraph(sig, span, deps.subprocess, cwd).catch(() => {})
         : Promise.resolve()
@@ -492,6 +500,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         store: () => this.store(),
         warn: (error) => { this.ctx.logger?.warn?.(`dsh-chapters: signature capture failed (${String(error)})`) },
         subprocess,
+        storeRoot: this.chaptersConfig.artifactStoreRoot,
         onCollected: (id, sig) => {
           this.ctx.logger?.info?.(`dsh-chapters: signature collected for ${id} (${sig.seqs.length} events, ${sig.paths.length} paths, ${sig.size} est tokens)`)
         },

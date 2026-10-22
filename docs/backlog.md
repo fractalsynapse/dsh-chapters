@@ -297,3 +297,16 @@ Two local truths to save the next agent an hour: the suites need **Node ≥ 24**
 fails for a reason that looks like your diff), and `coverage:ci` intermittently reddens
 `git-auth-classification`/`sync-remote` on this box under parallel load — **verified pre-existing** by
 running it in a worktree at the last docs-only commit. Re-run before blaming the change.
+
+
+## Retrieval is untested in the field (#61, record only — do not "fix" it speculatively)
+
+Measured over 26 SAIP sessions / 4,049 tool calls: `chapters_search`, `chapters_artifact` and
+`chapters_rules` were called **0 times**, and no tool call anywhere referenced a `.dsh-chapters` path.
+So the archive's retrieval promise is **unverified in the field**, not proven broken: the deterministic
+and browser planes both exercise those doors, and a real long session may simply never have needed them.
+
+Deliberately NOT acted on in #61: no persona rewrite, no "make the model search more" prompt change. The
+persona is a product-prompt surface and every byte of it costs a tape re-distill (#56/#57), so a change
+there needs a measured defect, not an inference from an unused-tool count. If a future project shows
+knowledge that WAS archived and never retrievable when asked for, that is the evidence that opens this.
