@@ -262,7 +262,17 @@ environment `Production`. Prerelease versions publish under a matching
 dist-tag so 'latest' stays stable. `0.1.1` is the first OIDC + provenance
 ship; `0.1.0` itself carries no attestation.
 
-### Hosted CI (`.github/workflows/`, wired + dress-rehearsed 2026-09-23)
+### Hosted CI
+**The rig writes into its own port's store, never the project's (#61 item 8).** Each boot pins
+`artifactStoreRoot` to `var/e2e-home-<port>/chapters` through the profile patch
+(`tests/e2e/boot.ts::applyRigPluginPatch`), and CI brackets the replay job with
+`scripts/assert-store-untouched.mjs snapshot` / `verify` — a listing comparison (names, sizes, mtimes)
+that fails the job if the production `.dsh-chapters/` changed, including the pristine-runner case where
+the store did not exist and a run CREATED one. Before this, every acceptance run left its chapters in the
+repo's real store: 42 test trees and 29 of 47 live registry rows with e2e-shaped ids, which #60's auditor
+then reported as 441 `test-litter` findings. Contamination like that does not just waste disk; it teaches
+people to ignore a report that is telling them the truth about something else.
+ (`.github/workflows/`, wired + dress-rehearsed 2026-09-23)
 
 - **`ci.yml`** — two jobs. `test`: `npm ci` (all deps public on
   registry.npmjs.org — **no install secret**), typecheck, build,
