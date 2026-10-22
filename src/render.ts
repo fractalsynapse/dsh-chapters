@@ -86,6 +86,8 @@ const textOf = textOfBlocks
 export function validateRanges(
   chapters: ChapterRange[],
   archiveCeiling: number,
+  /** The watermark: ranges must start HERE, not wherever the submitter liked (#59). */
+  archiveFloor = 0,
 ): ChapterRange[] {
   if (chapters.length === 0) throw new Error('no chapters supplied')
   chapters.forEach((c, i) => {
@@ -107,8 +109,24 @@ export function validateRanges(
           `chapter ${i} ("${c.title}") overlaps "${prev.title}": ${c.startSeq}-${prev.endSeq} in both`,
         )
       }
+      // #59: the overlap check existed; its twin did not. An overlap duplicates text, a GAP drops
+      // it, and AGENTS.md has always said so — a submitted list with a hole was accepted silently.
+      if (c.startSeq > prev.endSeq + 1) {
+        throw new Error(
+          `chapter ${i} ("${c.title}") starts at seq ${c.startSeq}, leaving a gap at `
+          + `${prev.endSeq + 1}-${c.startSeq - 1} — those seqs would be archived by nobody`,
+        )
+      }
     }
   })
+  // The watermark floor, checked LAST: shape, ceiling, order and contiguity each report their own
+  // problem first, and this is the one that only makes sense once they are all sound (#59).
+  if (chapters[0]!.startSeq > archiveFloor) {
+    throw new Error(
+      `chapter 0 ("${chapters[0]!.title}") starts at seq ${chapters[0]!.startSeq}, above the watermark ${archiveFloor} — `
+      + `seqs ${archiveFloor}-${chapters[0]!.startSeq - 1} would be dropped without a word (a gap is loss, AGENTS.md)`,
+    )
+  }
   return chapters
 }
 

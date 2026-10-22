@@ -294,6 +294,33 @@ cannot produce one, §4.1), the composition clamps to the last completed collect
 TOC notes the clamp. The unfinished collection stays in the live context, per the user
 requirement, and composes at the next archive.
 
+**Amendment 2026-10-22 (#59, measured in the first real `chapters`-preset project).** This guard is
+one-directional: it keeps unfinished work OUT, and says nothing about what may silently fail to come
+IN. Composing from collections alone means a completed turn that never got a signature vanishes — not
+truncated, not deferred, **absent from every chapter and from every index**, with no warning. That is
+what happened: `session-2edf9694` had 32 `turn/end` events and 31 collections, and the 203-event span
+between chapters 27 and 28 — a complete turn including the maintainer's "I consider it foundational to
+the project" hosting brief and its implementation — exists in no chapter in any tree, and the three
+verbatim phrases from it match zero files in the store.
+
+The guard is therefore **bidirectional** now:
+
+1. Nothing unfinished is archived (the rule as written above).
+2. **Nothing finished is dropped.** The composed ranges must cover `[spanStart..spanEnd]`
+   contiguously; an unsigned but *completed* span is absorbed into its neighbouring chapter (a
+   wider range, never a re-titled one), and every door asserts the coverage before writing,
+   refusing with the exact seqs rather than proceeding. The claim a chapter makes is
+   "everything in this range is here", so a hole is a false statement, not a small one.
+3. A door may not treat "no collection covered it" as "incomplete turn": completeness is a
+   `turn/end` fact, read from the log, not inferred from the presence of a signature — a lost
+   signature is a registry defect (see docs/architecture.md § The row is shared), and the note the
+   composer used to emit claimed the opposite while dropping completed work.
+
+`coverage()` (`src/archive.ts`) existed for exactly this and was called in one door, for a warning
+that got counted and thrown away. The same rule now covers model-submitted ranges:
+`validateRanges` refuses a **gap**, not only an overlap — AGENTS.md already said "a gap silently
+drops it"; the check did not exist.
+
 ### 4.4 Consequence: composition is archive-time-only
 
 Because chapters are append-only (invariant 3), the merge threshold must be right *when the

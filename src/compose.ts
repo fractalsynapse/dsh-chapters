@@ -97,11 +97,18 @@ export function composeChapters(
   const unarchivedSeqs = events
     .filter((e) => e.seq >= spanStart && e.seq <= spanEnd && !covered.has(e.seq))
     .map((e) => e.seq)
+  // #59 — this set is NOT evidence of unfinished work. It is simply "no collection signed it", and
+  // a collection can be missing because the signature was lost in a registry lost-update while the
+  // TURN COMPLETED (measured: session-2edf9694, 32 turn/ends vs 31 collections → 203 events in no
+  // chapter, while the note below used to assert they were unfinished). Those seqs are ABSORBED into
+  // the neighbouring ranges by `close()` below, so nothing finished is ever dropped; the note now
+  // says which of them actually belong to an unfinished turn, derived from `turn/end`, not assumed.
   if (unarchivedSeqs.length > 0) {
-    notes.push(
-      `incomplete turn content (seqs ${unarchivedSeqs[0]}..${unarchivedSeqs[unarchivedSeqs.length - 1]}) `
-      + 'stays live — a chapter only archives completed turns',
-    )
+    const lastTurnEnd = events.reduce((m: number, e) => (e.type === 'turn/end' && e.seq <= spanEnd && e.seq > m ? e.seq : m), -1)
+    const unsignedDone = unarchivedSeqs.filter((sq) => sq <= lastTurnEnd)
+    notes.push(unsignedDone.length > 0
+      ? `${unsignedDone.length} unsigned event(s) in ${spanStart}..${lastTurnEnd} are inside COMPLETED turns — absorbed into the adjacent chapter (record §4.3, #59)`
+      : `only unfinished tail content (${unarchivedSeqs[0]}..${unarchivedSeqs[unarchivedSeqs.length - 1]}) stays live, per §4.3`)
   }
 
   interface Running { first: CollectionSignature; last: CollectionSignature; paths: Set<string>; commands: Set<string>; terms: Set<string>; size: number; startSeq: number; endSeq: number }
@@ -135,6 +142,11 @@ export function composeChapters(
   }
 
   const chapters: ChapterRange[] = []
+  // Contiguity bookkeeping (#59): the first range starts at the SPAN, not at its collection, and each
+  // later range starts one past the previous end — that is what absorbs an unsigned-but-completed
+  // turn instead of dropping it. `pendingLo` is the next legal start.
+  let pendingLo = spanStart
+
   let running = runningOf(usable[0]!)
   // True after a plan closed the chapter: the NEXT collection opens the next
   // chapter, it is never merged backwards (and never re-added — a duplicate
@@ -173,11 +185,19 @@ export function composeChapters(
     // The chapter that carries a plan ENDS there (docs/plans-carriage.md § 6).
     if (holdsPlan(running.startSeq, running.endSeq)) { close(); closedAtPlan = true }
   }
-  if (!closedAtPlan) close()
+  // Half one of §4.3 still binds: never archive past the last COMPLETED turn. `spanEnd` is the
+  // caller's anchor and normally IS a turn/end, so this is the identity; when a manual `/compact`
+  // hands a span that cuts a turn, the clamp keeps the unfinished tail live instead of absorbing
+  // it. Both halves of the guard, one line: nothing unfinished in, nothing finished out.
+  const lastCompletedEnd = events.reduce(
+    (m, e) => (e.type === 'turn/end' && e.seq <= spanEnd && e.seq > m ? e.seq : m),
+    spanStart,
+  )
+  if (!closedAtPlan) close(lastCompletedEnd)
 
-  function close(): void {
-    const lo = running.startSeq
-    const hi = running.endSeq
+  function close(hiOverride?: number): void {
+    const lo = pendingLo
+    const hi = hiOverride ?? running.endSeq
     const identity = deriveIdentity(messagesOf(events, lo, hi), false, firstPlanTitleIn(lo, hi))
     const pathsHint = [...running.paths].slice(0, 3).join(', ')
     chapters.push({
@@ -186,6 +206,7 @@ export function composeChapters(
       startSeq: lo,
       endSeq: hi,
     })
+    pendingLo = hi + 1
   }
   return { chapters, notes, unarchivedSeqs }
 }
