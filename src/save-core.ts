@@ -293,6 +293,7 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     // raw value: makeArchiveFs roots RELATIVE paths at the session cwd and
     // passes absolute ones through — resolving here would double-root relative stores
     storeRoot: config.artifactStoreRoot,
+    cwd,  // #69: records are stored workspace-relative
     rootSessionId: state.rootSession,
     chapters: rendered,
     attemptId: attemptKey(sessionId, anchor, a.attemptSalt),

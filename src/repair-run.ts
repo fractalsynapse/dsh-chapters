@@ -169,6 +169,7 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
   // a journal — if both sides are computed by the same call with the same inputs (#60).
   const auditNow = (st: SessionState) => audit({
     sessionId: opts.sessionId,
+    cwd,
     state: st,
     files: opts.listedPaths !== undefined
       ? fileSetFromRegistry(st.chapters, () => false)

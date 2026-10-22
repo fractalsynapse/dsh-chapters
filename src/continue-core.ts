@@ -56,6 +56,12 @@ export interface ContinueConfig extends RenderConfig {
   /** Estimated-token cap per composed chapter. */
   chapterLimit: number
   /**
+   * Workspace cwd of the session archiving, when the caller knows it (#69). `writeArchive` normalizes
+   * stored paths to workspace-relative with it; absent, the paths keep the store root's own dialect and
+   * every comparison must go through `sameStoredPath`.
+   */
+  workspaceCwd?: string | undefined
+  /**
    * Hard oversize multiple of `chapterTokenTarget` (#59): over the target warns, over
    * `target × factor` the door refuses before reserving a number. Optional so a profile that predates
    * the key keeps the pre-#59 behaviour of warning only — the default lives in `Config`, not here.
@@ -333,6 +339,7 @@ export async function runContinue(
       },
     },
     storeRoot: config.artifactStoreRoot,
+    cwd: config.workspaceCwd,  // #69: records are stored workspace-relative
     rootSessionId: callerState.rootSession,
     chapters: rendered,
     attemptId: attemptKey(args.callerSessionId, ceiling),

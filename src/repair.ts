@@ -27,6 +27,7 @@
  */
 import { appendChapters, isActiveChapter, releaseReservation, type SessionState } from './registry.ts'
 import type { ChapterRecord } from './archive.ts'
+import { sameStoredPath } from './archive.ts'
 import type { RenderConfig } from './types.ts'
 
 // ─────────────────────────────────────────────────── findings (pure)
@@ -98,6 +99,8 @@ export interface RepairLogFacts {
 
 export interface AuditInput {
   sessionId: string
+  /** Workspace cwd, so an absolute record path and the same file listed relatively are ONE path (#69). */
+  cwd?: string | undefined
   state: SessionState
   files: RepairFileSet
   log: RepairLogFacts
@@ -128,7 +131,7 @@ const REMEDY: Record<FindingClass, Remedy> = {
  * nobody reads.
  */
 export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpots: FindingClass[] } {
-  const { sessionId, state, files, log } = input
+  const { sessionId, state, files, log, cwd } = input
   const findings: RepairFinding[] = []
   const add = (f: Omit<RepairFinding, 'session' | 'remedy'> & { class: FindingClass }): void => {
     findings.push({ ...f, session: sessionId, remedy: REMEDY[f.class] })
@@ -171,9 +174,12 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
   }
 
   // 3. Files the registry does not cite — the shape a lost update leaves behind (#59: the 960 KB case).
-  const cited = new Set(state.chapters.map((c) => c.path))
+  // #69: cited-ness is compared with `sameStoredPath`, NEVER string equality — that is how one file at
+  // one path became a cited record AND its own unregistered twin, and the auditor reported its own
+  // archive as lost knowledge.
+  const cited = state.chapters.map((c) => c.path)
   for (const p of files.chapterPaths) {
-    if (!cited.has(p) && !p.includes('.repair-quarantine')) {
+    if (!cited.some((q) => sameStoredPath(q, p, cwd)) && !p.includes('.repair-quarantine')) {
       const m = /\/(\d{3})-/.exec(p)
       const num = m ? Number(m[1]) : undefined
       add({ class: 'unregistered-file', detail: `${p} exists on disk and no chapter record cites it — the registry lost its commit${num !== undefined ? ` (number ${num})` : ''}`, ...(num !== undefined ? { target: { path: p, number: num } } : { target: { path: p } }) })
@@ -218,7 +224,7 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
   //    commit, `number` its reserved chapter number, `chapters` the bullets it already handed the host
   //    as TOC text (src/registry.ts PlanManifest). Read the real shape, not an imagined one.
   for (const [key, plan] of Object.entries(state.plans ?? {})) {
-    if (!state.chapters.some((c) => c.path === plan.path) && !files.exists(plan.path)) {
+    if (!state.chapters.some((c) => sameStoredPath(c.path, plan.path, cwd)) && !files.exists(plan.path)) {
       add({ class: 'ghost-plan-manifest', detail: `finalize manifest ${key} promises chapter ${plan.number} at ${plan.path}, which never landed`, target: { path: plan.path, number: plan.number } })
     }
     // 8. Dead citations: the manifest's OWN committed TOC bullets naming files that do not exist.

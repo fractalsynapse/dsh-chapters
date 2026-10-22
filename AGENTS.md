@@ -315,6 +315,11 @@ not a plugin bug.
   bad file **copied** (never moved-away-from-truth or deleted) into `.repair-quarantine/`, and the whole run
   journalled so it is reversible. A dead citation is made true by writing the file it names, not by editing
   the text that names it.
+- **Stored paths are workspace-relative, and comparisons are never `===`.** `ChapterRecord.path` is one
+  dialect: minted through `toStoredPath(cwd, p)` and compared through `sameStoredPath(a, b, cwd)` (#69).
+  Absolute from one door and relative-from-disk looked like two files, so the auditor reported a chapter
+  as its own unregistered twin and offered to re-register knowledge it had just written. An absolute path
+  outside the workspace stays absolute — a per-port absolute `artifactStoreRoot` is supported config.
 - **Never reorganize chapters mid-session.** Continuation boundaries only.
 - **Never trust agent-supplied ranges.** Validate ascending, non-overlapping, coverage ≤ archive
   ceiling, **and contiguous** — `validateRanges` refuses a gap, not only an overlap. An overlap
