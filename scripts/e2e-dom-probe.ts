@@ -199,6 +199,21 @@ try {
     dump.afterReload = await page.evaluate(() => ({
       rows: Array.from(document.querySelectorAll('[role="treeitem"]')).map((r) => (r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 42)),
     }))
+    // The runner's OWN words. src/client/doors.ts returns a note ONLY when it could not
+    // switch: '' means sessions.open(child) worked, 'branch created — appearing in the
+    // sidebar' / '… open it in the sidebar' means the service path failed and the row-click
+    // fallback fell through too. That distinguishes a client-service drift from a
+    // switch-that-happened-but-didn't-stick without reading a minified bundle.
+    dump.doorNote = await page.evaluate(() => {
+      const n = document.querySelector('[class*="forkNote"]')
+      const dlg = document.querySelector('[role="dialog"], [aria-label*="Notice"]')
+      return {
+        note: n === null ? '(no note element — the runner reported success)' : (n.textContent ?? '').trim().slice(0, 160),
+        dialog: dlg === null ? null : (dlg.getAttribute('aria-label') ?? '?'),
+        active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? 'none',
+        current: (JSON.parse(localStorage.getItem('dsh.sessions.current') ?? 'null') as { sessionId?: string } | null)?.sessionId ?? null,
+      }
+    })
     const kids = (() => { try { return fs.readdirSync(E2E_SESS_DIR).filter((d) => d.startsWith('ch-')) } catch { return [] } })()
     dump.child = {
       clicked, dirs: kids.length,
