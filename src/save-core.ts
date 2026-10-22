@@ -14,7 +14,7 @@
  */
 import { composeChapters } from './compose.ts'
 import { deriveRanges } from './continue-core.ts'
-import { renderChapter } from './render.ts'
+import { oversizeRanges, renderChapter } from './render.ts'
 import { chapterTopics } from './signature.ts'
 import { makeArchiveFs, commitChapters, type RegistryStore } from './store.ts'
 import { releaseReservation, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -45,6 +45,8 @@ export interface SaveSessionConfig extends RenderConfig {
   mergeThreshold: number
   /** Estimated-token cap per composed chapter. */
   chapterLimit: number
+  /** Hard oversize multiple of `chapterTokenTarget`; past it a door refuses (#59). */
+  chapterOversizeFactor?: number | undefined
 }
 
 export interface SaveSessionArgs {
@@ -73,6 +75,8 @@ export type SaveSessionSkip =
    * short conversation, and never a reason to reserve a number or write a file.
    */
   | 'payloadless'
+  /** The archive rendered, but a chapter blew past the hard oversize ceiling (#59). */
+  | 'oversize'
 
 export interface SaveSessionOutcome {
   /** null → the archive was written. Otherwise WHY nothing was written. */
@@ -151,6 +155,17 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
           + `${un.length > 0 ? ` (first: ${un.slice(0, 5).join(', ')})` : ''}`
           + ' — the read carried event SHAPES but no payloads; nothing was reserved or written'
       }),
+    }
+  }
+
+  // #59: refuse before reserving anything, exactly like the payloadless gate — a spent number with no
+  // file behind it is the burned-reservation state this whole round is eliminating. The factor is
+  // config, never a literal: over `chapterTokenTarget` warns, over `target × factor` refuses.
+  const tooBig = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  if (tooBig.length > 0) {
+    return {
+      skipped: 'oversize', fromSeq, anchor, lastArchived,
+      priorChapters: state.chapters.length, records: [], warnings: tooBig,
     }
   }
 

@@ -26,6 +26,7 @@ import type { ChapterRange, RenderedChapter, SessionEventLike } from './types.ts
 import { chapterTopics } from './signature.ts'
 import type { ChapterRecord } from './archive.ts'
 import { estimateTokens, renderChapter, renderIndex } from './render.ts'
+import { isInjectedProse } from './injections.ts'
 import { lineageOf } from './types.ts'
 import { slugify } from './archive.ts'
 import { isFinalized } from './registry.ts'
@@ -267,7 +268,6 @@ export interface SummarizePlan {
   chapters?: PlanChapter[]
 }
 
-const HARNESS_PROSE = /^\s*(<system-reminder>|system reminder\b|current runtime context\.|\[workspace instructions?\b|this session is running under)/i
 
 /** Deterministic title/summary from region content. Never model-authored (invariant 4 — the model is absent). */
 export function deriveIdentity(
@@ -287,9 +287,11 @@ export function deriveIdentity(
   // user messages too — an earlier fork titled a chapter "System reminder 1"
   // from a runtime snapshot that happened to open the span. Skip them; the
   // r29 command tests pin this behavior.
+  // The same predicate that screens chapter BODIES chooses a title (#59). Two lists of what counts as
+  // injected context is how a runtime snapshot became a filename and a TOC citation.
   const firstUser = messages.find((m) => m.role === 'user'
     && !messageText(m).includes(SUMMARY_OPEN_TAG)
-    && !HARNESS_PROSE.test(messageText(m).trimStart()))
+    && !isInjectedProse(messageText(m)))
   const userCount = messages.filter((m) => m.role === 'user').length
   const assistantCount = messages.filter((m) => m.role === 'assistant').length
   const headLine = planTitle !== undefined && planTitle.trim() !== ''

@@ -56,6 +56,12 @@
 #   # ---- chapters & composition ----------------------------------------
 #   chapterTokenTarget: 8000       # soft per-chapter size target
 #   chapterLimit: 8000             # hard split threshold
+#   chapterOversizeFactor: 2       # hard oversize multiple of chapterTokenTarget (#59): over the
+#                                  #   TARGET warns ("split at the next boundary, never clip"), over
+#                                  #   target × factor every door REFUSES with its numbers before
+#                                  #   reserving one. The field shipped an 89,982-token chapter and a
+#                                  #   237,870-token orphan against an 8K target; a chapter nobody can
+#                                  #   re-read is not an archive. 0/unset behaviour = warn only.
 #   mergeThreshold: 0.3            # τ for merging turns into one chapter at
 #                                  # archive time. Composition is archive-time
 #                                  # only: tune for future archives.

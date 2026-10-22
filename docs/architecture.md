@@ -97,6 +97,24 @@ Division of labour:
   results with `seq`, tool name, and size. The model never guesses at byte counts.
 - **Default is defer** for anything above `toolResultDeferFloorTokens`; trivial results stay inline without
   being itemized, so the narrative reads naturally and the exception list stays short.
+- **A zero-length tool result defers nothing** (#59). `arrival.ts` has always skipped the empty string;
+  the renderer did not, so every hollow chapter wrote references to `sha256("")` and reported
+  `artifacts: 102` while holding one 0-byte file. An empty result renders `result (seq N, empty)` with
+  no `ArtifactRef` at all. `artifacts:` now means **distinct blobs** and `artifactRefs:` the total
+  references — the two were conflated, which made both the field diagnostic and the registry bloat
+  (90.6 % of chapter-record bytes here were duplicate references) unreadable.
+- **Over-target is a warning; far over-target is a refusal** (#59). `chapterTokenTarget` stays the soft
+  target (split at the next boundary, never clip). Past `chapterTokenTarget × chapterOversizeFactor`
+  a range is refused with its own number, on every door including compaction: the field produced an
+  89,982-token chapter, an unrepaired 237,870-token orphan, and eleven chapters over 32K — against a
+  8K target and 32K-class hardware. A chapter that cannot be re-read is not an archive.
+- **A title is chosen by the same predicate that screens bodies** (#59). Bodies use `injections.ts`
+  (`source.kind`); title derivation sees provider messages with no source, so it carried its own
+  regex — which drifted behind the host and let an injected `time-context` snapshot become a chapter
+  **title, slug and filename** (`020-time-sampled-while-preparing-turn-11-step-24-202.md`, cited in a
+  live checkpoint). `isInjectedProse` is now the one predicate, fed by the same list of injected
+  shapes; a row pins that both callers use it and that the regex file is gone.
+
 - **Model submits exceptions only**: `toolResultOverrides: [{seq, inline}]`. Usually empty or one entry, so
   the judgment costs almost no output tokens — which is why this is affordable where "the model writes the
   chapter bodies" was not.

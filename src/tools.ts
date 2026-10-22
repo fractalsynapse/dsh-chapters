@@ -584,6 +584,7 @@ export function buildChaptersTools(
             toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
             mergeThreshold: config.mergeThreshold,
             chapterLimit: config.chapterLimit,
+            chapterOversizeFactor: config.chapterOversizeFactor,
             ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),
             ...(config.callArgArtifactTokens !== undefined ? { callArgArtifactTokens: config.callArgArtifactTokens } : {}),
           },

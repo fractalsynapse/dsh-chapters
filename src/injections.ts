@@ -94,6 +94,26 @@ export function sourceLabel(data: Record<string, unknown>): string {
  * `[\s\S]*?(</system-reminder>|$)` mirrors the tape's masking of truncated
  * injections.
  */
+/**
+ * The ONE predicate for "this text is host-injected context, not something the human wrote".
+ *
+ * `source.kind` remains the primary gate (`isHumanAuthored`, `screenConversation`) — but some consumers
+ * see only flattened provider text with NO source at all, first among them `deriveIdentity` choosing a
+ * chapter TITLE. Until #59 that path carried a private regex (`HARNESS_PROSE`) that had silently fallen
+ * behind the host's injected kinds, so a `time-context` snapshot became a chapter title, slug, FILENAME
+ * and a live TOC citation (`020-time-sampled-while-preparing-turn-11-step-24-202.md`, cited by a
+ * checkpoint and never written). AGENTS.md: one predicate per semantic decision, and a source-shape row
+ * fails if a second list reappears.
+ *
+ * Anchored at the START on purpose: a human quoting "time sampled while preparing" mid-sentence is
+ * conversation and stays verbatim — the same line the body screen draws.
+ */
+const INJECTED_PROSE = /^\s*(<system-reminder>|<codegraph_context|system reminder\b|current runtime context\.|time sampled while preparing|browser time zone for this request|\[workspace instructions?\b|this session is running under|the following workspace instructions|agent [A-Za-z0-9_-]{8,} sent a message|background subagent [A-Za-z0-9_-]{8,} finished)/i
+
+export function isInjectedProse(text: string): boolean {
+  return INJECTED_PROSE.test(text)
+}
+
 const REMINDER_SPAN = /<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g
 
 /** Strip every injected span from a message's text; deterministic, idempotent
