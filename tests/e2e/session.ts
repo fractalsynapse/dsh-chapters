@@ -28,6 +28,14 @@ export const E2E_REGISTRY = path.join(E2E_HOME, 'storages', 'dsh_chapters.json')
 // while three specs polled an invisible log for 7 minutes each).
 const sessSlug = (p: string): string => `-${(p.endsWith('/') ? p : p + '/').replace(/[^a-zA-Z0-9]/g, '-')}-`
 export const E2E_SESS_DIR = path.join(E2E_HOME, 'sessions', sessSlug(ROOT))
+/**
+ * Where THIS boot's chapters actually land. #70 pinned `artifactStoreRoot` per port (so the
+ * rig stops writing 42 test trees into the project's own production `.dsh-chapters/`), but the
+ * specs kept reading `ROOT/.dsh-chapters` — and then reported "the archive never landed" about
+ * files that were sitting in the port store the whole time (#56: enrich waited 6 min, heavy 8).
+ * One constant, derived exactly like `boot.rigStoreRoot`; a row pins that the two agree.
+ */
+export const E2E_STORE_ROOT = path.join(ROOT, 'var', `e2e-home-${bootPort()}`, 'chapters')
 const REGISTRY = E2E_REGISTRY
 let zstdWarned = false // one loud zstd failure per process (see logHasEvent/sessionLogTextById catches)
 

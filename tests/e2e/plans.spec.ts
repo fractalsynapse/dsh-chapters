@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { openApp, localModelUp, currentSessionId, sessionLogTextById, logEvents, typeComposer, findSessionIdWhoseLogContains, sessIdsWithPrefix, ROOT } from './session.ts'
+import {openApp, localModelUp, currentSessionId, sessionLogTextById, logEvents, typeComposer, findSessionIdWhoseLogContains, sessIdsWithPrefix, ROOT, E2E_STORE_ROOT} from './session.ts'
 
 /**
  * A SESSION PLAN, carried: plan mode in the browser, a real `exit_plan_mode`
@@ -37,7 +37,7 @@ import { openApp, localModelUp, currentSessionId, sessionLogTextById, logEvents,
  * addressed by the identity localStorage reports.
  */
 
-const storeRoot = path.join(ROOT, '.dsh-chapters')
+const storeRoot = E2E_STORE_ROOT // #70: per-port store root, not the workspace tree (#56)
 
 const walkMd = (dir: string): string[] => {
   const out: string[] = []
