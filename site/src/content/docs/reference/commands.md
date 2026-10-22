@@ -111,6 +111,48 @@ parallel sessions via `chapters_search` without disrupting the active conversati
 Idempotent: re-running saves only what has not yet been archived (respects the watermark).
 If nothing new was said since the last save, reports "nothing to save" without error.
 
+## `/chapters-repair` — re-derive the archive from the durable log
+
+The durable session log is append-only and complete (invariant 1), which is the only reason any of the
+defects in issues #58/#59 are recoverable at all. `/chapters-repair` audits the three things that can
+disagree — **the log**, **the store's files**, and **the registry's records** — and repairs what the
+current code can now produce correctly.
+
+```
+/chapters-repair status                     # last journal, findings count by class
+/chapters-repair audit [--json]             # read-only; reports every finding and its remedy
+/chapters-repair dry-run [class]            # the exact mutations a run would make, with numbers
+/chapters-repair apply hollow|gaps|citations|bookkeeping|all
+/chapters-repair journal [<id>]             # list applied journals / print one
+/chapters-repair restore <journal-id>       # undo a whole applied run, newest action first
+```
+
+What it fixes, by class:
+
+| class | what it was | remedy |
+|---|---|---|
+| `hollow-payload` | a chapter that rendered nothing (`**unknown**` / `0 B`), from a payload-less read (#58) | re-render the span from the log under a NEW number; supersede the old record |
+| `unsiged-completed-turn` | a completed turn inside no chapter, from a lost signature (#59) | archive the gap span through the normal save core |
+| `never-archived-subagent` | a settled child that tripped no archive moment | archive it from its durable log, with subagent lineage |
+| `dead-citation` | a checkpoint that cites a chapter file never written (#59) | **materialize the file at the cited path and reserved number** — the lie becomes true, no text is edited |
+| `ghost-plan-manifest` / `unreleased-reservation` | a manifest with no body; a retry key that can never land | expire/release, keeping every spent number spent |
+| `orphan-file` / `duplicate-number` / `countervalue-drift` | files no record cites; a number spent twice; a counter behind its own max | classify, supersede, raise the counter **upward only** |
+| `test-litter` | chapters written into a real store by the acceptance rig | quarantine, never delete |
+
+### The repair contract (why it never edits a chapter)
+
+Append-only has no exceptions, and a body-hash guard is the only sanctioned mutation of a chapter file.
+So repair **supersedes**: it writes a new chapter number carrying `repairs: <n>`, marks the old registry
+record `status: 'superseded'`, and **copies** the corrupt file into `<tree>/.repair-quarantine/`. Nothing
+is deleted, nothing is rewritten, and every applied run is journalled to
+`<tree>/repairs/<utc-stamp>.json` — one record per move, with hashes, so `restore` can walk it backwards.
+Derived layers (TOC, index shards, vocabulary, plan status, counters) are re-derivable and repair may
+rewrite **those**; verbatim bytes are read-only input.
+
+Refusals, deliberately: it will not merge, split or renumber existing chapters; will not touch a session
+log or a checkpoint's text; will not re-cite a file it cannot verify byte-for-byte; and will not run
+against a workspace whose registry row it cannot serialize through the #59 write discipline.
+
 ## Auto-save when a subagent settles
 
 No command. With `subagentAutoSave` on (the default), every subagent run that carries the

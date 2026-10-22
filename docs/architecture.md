@@ -273,8 +273,11 @@ that never enters the index. Four are session-facing, all idempotent over a per-
    any file is written: a committed husk would poison the watermark, which is `max(endSeq)`, and the
    child could then never be re-archived without a repair (#60). Door 5 also stops discarding
    `writeArchive`'s warnings — it already says "N event(s) rendered no output", and dropping that
-   string is what let the defect run for days — and it links lineage through `linkChild`, so a
-   child's chapters sit on its ancestor path instead of orphaned on a self-root. Save-only, so the
+   string is what let the defect run for days. It does **not** `linkChild` the parent (#58, measured
+   after the plan assumed otherwise): `rootSession` *is* the store directory name, so linking re-homes
+   every file the child already wrote, while `buildIndex` walks ancestors only — the link buys zero
+   reach and costs the tree. A child keeps its OWN tree and is reached through `chapters_search` and
+   `linkChild`-free ancestry of the PARENT's own rows. Save-only, so the
    "no continuation-creating actions mid-step" rule is not engaged: no session is created, no surface
    is compacted. Enrichment is **queued** per settlement — a 10-child fanout must not `runNow` ten
    annotator passes — and an empty or refused chapter is never enqueued (#61). A continuable child
@@ -434,6 +437,37 @@ silently clobber: a refused write is visible and retryable, a lost update is nei
 Three invariants in the same family: an identity is `(number, sha256)`, never `number` alone; a reservation
 whose files never landed is **released** (or expires) instead of burning a number forever; and one
 unresolvable item in the finalize queue may not poison the items behind it.
+
+## Repair — re-deriving the archive from the log (#60)
+
+Invariant 1 (the durable log is append-only and complete) is what makes every defect in #58/#59
+recoverable. Repair is the door that spends that guarantee. It is **not** a compaction, not a rewrite,
+and not a second archive implementation: it calls the same save core every door calls
+(`composeChapters`/`deriveRanges` → `renderChapter` → `writeArchive` → `commitChapters`), so a repaired
+chapter is byte-for-byte a normal chapter.
+
+The three-way disagreement it looks for, and the one rule that keeps it honest:
+
+- **Log vs store vs registry.** `audit()` compares the reserved numbers, the records, and the files on
+  disk, and classifies each mismatch. A store can hold a file no record cites (a lost update erased the
+  commit), and a registry can hold a record whose file was never written (a poisoned finalize queue).
+- **Supersede, never mutate.** Append-only has no exceptions and the body-hash guard is the only
+  sanctioned chapter-file mutation, so a repair writes a NEW number carrying `repairs: <n>`, marks the
+  old record `status: 'superseded'`, and **copies** the bad file into `<tree>/.repair-quarantine/`.
+  Nothing is deleted. Every superseded record is excluded from the TOC, the index and enrichment — a
+  husk left in the corpus is a lie a later reader cannot see past.
+- **A dead citation is satisfied, not edited.** A compaction manifest already handed the host TOC text
+  citing `…/020-<title>.md`. Repair renders the shadowed span and writes it to **that path, with that
+  reserved number**. The session's committed text becomes true; no log byte moves.
+- **Numbers stay spent.** A released reservation frees its retry key, never its numbers, and a counter
+  is only ever raised to `max(spent)+1`. Re-using a number is how two files end up named `015-` in one
+  tree (#59), so allocation additionally skips any number the row already carries.
+- **Journalled and reversible.** An applied run writes `<tree>/repairs/<utc-stamp>.json` first: one
+  entry per move with before/after hashes. `restore <journal-id>` walks it backwards. If the journal
+  cannot be written, the run refuses to start.
+
+Repair runs as one serialized section per session row (#59) — a repair that clobbered a live door's
+commit would be the same bug with better intentions.
 
 ## Integrity
 

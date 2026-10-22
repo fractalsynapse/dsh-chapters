@@ -178,12 +178,15 @@ agent turn ──► chapters_segment ──► {archiveCeiling, chapters:[{titl
 The two things the model never does: produce archived text, and traverse the ancestry graph. Both are
 the plugin's job. See [docs/architecture.md](docs/architecture.md).
 
-**The archive moments are exactly five** (docs/architecture.md § The archive moments): continue, fork,
-save, compaction finalize, and **subagent settlement** (#47: a host-plane listener on the host's
+**The archive moments are exactly six** (docs/architecture.md § The archive moments): continue, fork,
+save, compaction finalize, **subagent settlement** (#47: a host-plane listener on the host's
 `subagent/end` event runs the *same* save pipeline for chapters-preset children — save-only, so it
 creates no session and engages no mid-step rule; watermark-idempotent across repeated settlements of a
-continuable child; chapters land in the child's own tree with `subagent`/`parentSession` frontmatter
-from the durable header the host stamps, and are `linkChild`-ed onto the ancestor path (#58)).
+continuable child; chapters land in the child's OWN tree with `subagent`/`parentSession` frontmatter from
+the durable header the host stamps — deliberately NOT `linkChild`-ed, because `rootSession` *is* the store
+directory and `buildIndex` walks ancestors only, so a link re-homes files for no reach (#58, measured)),
+and **operator repair** (#60: `/chapters-repair` re-derives a span from the durable log through the SAME
+save core, supersedes the bad chapter under a new number, and edits no chapter body and no log byte).
 **Settlement has two arms and they are not symmetric** (#58): a *one-shot* child is still live when
 `end` fires, so the synchronous `snapshotEvents()` read works; a *continuable* child is disposed
 **first**, so the durable arm is the only arm — and it must be a payload-bearing read
@@ -191,7 +194,7 @@ from the durable header the host stamps, and are `linkChild`-ed onto the ancesto
 valid, semantically **empty** chapter. No door commits an archive that rendered nothing:
 `stats.messages === 0` over `stats.events > 0` is a `payloadless` refusal **before any number is
 reserved** — a committed husk poisons the watermark (`max(endSeq)`) so the child can never be re-archived
-without repair. Knowledge that trips none of the five never enters the index — when adding a sixth door,
+without repair. Knowledge that trips none of the six never enters the index — when adding another door,
 extend the list, never copy the pipeline.
 
 ## Continuation Budget, Not a Handoff Cap
@@ -296,7 +299,11 @@ not a plugin bug.
 ## Hard Rules
 
 - **Never renumber, rewrite, or copy a chapter, and never add a second index.** The store is append-only
-  with no exceptions.
+  with no exceptions. Damage is therefore **superseded, not repaired in place** (#60): a new number with
+  `repairs: <n>`, the old record marked `status: 'superseded'` and excluded from TOC/index/enrichment, the
+  bad file **copied** (never moved-away-from-truth or deleted) into `.repair-quarantine/`, and the whole run
+  journalled so it is reversible. A dead citation is made true by writing the file it names, not by editing
+  the text that names it.
 - **Never reorganize chapters mid-session.** Continuation boundaries only.
 - **Never trust agent-supplied ranges.** Validate ascending, non-overlapping, coverage ≤ archive
   ceiling, **and contiguous** — `validateRanges` refuses a gap, not only an overlap. An overlap
