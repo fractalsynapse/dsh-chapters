@@ -254,15 +254,25 @@ export async function runContinue(
     throw new Refusal({ ok: false, reason: 'no completed turn to archive — the conversation has not reached a turn/end boundary' })
   }
   const ceiling = lastTurnEnd.seq
+  // The watermark first: it is the FLOOR the submitted ranges must start at (#59). Reading state is
+  // also what step 2 needs, so this is a hoist, not an extra round-trip — and every later step
+  // re-reads through a fresh getState inside its own section.
+  const callerState0 = await ports.getState(args.callerSessionId)
+  const watermark = callerState0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
+  const fromSeq = watermark + 1
   try {
-    validateRanges(args.chapters, ceiling)
+    validateRanges(args.chapters, ceiling, fromSeq)
   } catch (error) {
     throw new Refusal({ ok: false, reason: `ranges refused: ${(error as Error).message}` })
   }
   const below = allEvents.filter((e) => e.seq <= ceiling)
-  const gaps = coverage(args.chapters, ceiling).gaps
+  // Internal gaps and a start above the watermark are now REFUSALS inside validateRanges, so the
+  // only gap left for `coverage` to report is the TAIL (ranges that stop short of the ceiling) —
+  // which is not a loss: the watermark advances to the last archived seq and the rest archives on
+  // the next door. Keeping the check for what it can still see, and saying so.
+  const gaps = coverage(args.chapters, ceiling, fromSeq).gaps
   const warnings: string[] = gaps.map(
-    (g) => `seqs ${g.from}-${g.to} fall outside the supplied ranges — NOT archived (gaps are reported, never silent)`,
+    (g) => `seqs ${g.from}-${g.to} are not archived by this call — they stay live for the next door (a tail is deferred, a hole is refused)`,
   )
 
   // ---- Seed-vocabulary preflight (issue #43). The live failure sequence was: chapters
@@ -280,7 +290,7 @@ export async function runContinue(
   }
 
   // ---- 2. Render + reserve + write (idempotent per attempt key).
-  const callerState = await ports.getState(args.callerSessionId)
+  const callerState = callerState0
   const renderConfig: RenderConfig = {
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     chapterTokenTarget: config.chapterTokenTarget,

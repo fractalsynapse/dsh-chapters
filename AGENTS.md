@@ -299,7 +299,11 @@ not a plugin bug.
   with no exceptions.
 - **Never reorganize chapters mid-session.** Continuation boundaries only.
 - **Never trust agent-supplied ranges.** Validate ascending, non-overlapping, coverage ≤ archive
-  ceiling. An overlap duplicates archived text; a gap silently drops it.
+  ceiling, **and contiguous** — `validateRanges` refuses a gap, not only an overlap. An overlap
+  duplicates archived text; a gap silently drops it. The same bidirectional guard binds the
+  deterministic composer: nothing unfinished is archived, and **nothing finished is dropped**
+  (docs/knowledge-repo.md §4.3 amendment 2026-10-22 — a completed turn that lost its signature
+  vanished from the archive with a note claiming it was unfinished).
 - **Never commit an archive that rendered nothing.** A chapter whose `stats.events > 0` but
   `stats.messages === 0` is a **payload read that went wrong**, not a short conversation — a tool call
   always follows an assistant message. Every door refuses it, before reserving a number, and says so with
