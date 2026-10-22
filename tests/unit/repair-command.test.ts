@@ -124,3 +124,34 @@ test('the durable log is read through ONE seam (#60 anti-drift)', async () => {
   const defs = (auto.match(/sq\.readSession\(sessionId\)/g) ?? []).length
   assert.equal(defs, 1, `exactly one place in the plugin reads the durable log by hand, in readDurableSession — found ${defs}`)
 })
+
+test('the command surface: every verb answers in its own terms (#60)', async () => {
+  const w = world({ hollow: true })
+  // apply a class the project does not have → a clean, non-error "nothing to do"
+  const r1 = await run(w, 'apply citations')
+  assert.equal(r1.kind, 'success')
+  assert.match(r1.text ?? '', /0 move/, `applied nothing: ${r1.text?.slice(0, 80)}`)
+  // status before any journal existed for THAT run is honest (a dry run writes none)
+  const r2 = await run(w, 'status')
+  assert.match(r2.text ?? '', /journalled|move\(s\)|no repair journals/, `status speaks: ${r2.text?.slice(0, 60)}`)
+  // journal <id> found: pull the id out of the apply output and look it up
+  const r3 = await run(w, 'apply all')
+  const id = /journalled ([0-9T:.Z-]+)/.exec(r3.text ?? '')?.[1]
+  assert.ok(id !== undefined, `apply must name its journal; got ${r3.text?.slice(0, 120)}`)
+  const r4 = await run(w, `journal ${id}`)
+  assert.match(r4.text ?? '', /move\(s\)/, 'and the journal is readable back by id')
+  // restore that id: the run said what it undoes, and a second restore of the same id is not silence
+  const r5 = await run(w, `restore ${id}`)
+  assert.ok(r5.kind === 'success' || /journal/.test(r5.text ?? ''), `restore answered: ${r5.text?.slice(0, 80)}`)
+  // an unknown class name is a refusal, not a no-op with a success code
+  const r6 = await run(w, 'apply bogus-class')
+  assert.equal(r6.kind, 'error', 'unknown class must not pretend to have worked')
+})
+
+test('a session with no cwd is refused rather than writing into the plugin checkout (#60)', async () => {
+  const w = world({ hollow: true })
+  const agent = { session: { id: 'root-1', header: { cwd: '', id: 'root-1' } }, options: {} }
+  const r = await w.built.repairCommand.handler({ agent: agent as never, rawInput: 'audit' }) as { kind: string; text?: string }
+  assert.equal(r.kind, 'error')
+  assert.match(r.text ?? '', /no workspace cwd/)
+})

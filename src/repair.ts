@@ -252,6 +252,40 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
   return { findings, blindSpots }
 }
 
+// ─────────────────────────────────────────────────── operator vocabulary (pure, ONE list)
+
+/**
+ * The class names an operator may type, and what each expands to (#60). BOTH `/chapters-repair` and
+ * `scripts/chapters-repair.mjs` read this table — two lists is how the command quietly accepted
+ * `--apply bogus` and reported "0 moves" as success while the script refused it. Unknown names must
+ * fail loudly: a repair that does nothing and says nothing is the defect this whole issue is named for.
+ */
+export const REPAIR_CLASS_ALIASES: Record<string, string | string[]> = {
+  hollow: 'hollow-payload',
+  gaps: 'never-archived-span',
+  citations: 'dead-citation',
+  bookkeeping: ['ghost-plan-manifest', 'unreleased-reservation', 'countervalue-drift'],
+  files: 'unregistered-file',
+  orphans: 'unregistered-file',
+  all: 'all',
+}
+
+/** Resolve operator words into finding classes, or return the unknown names it must refuse. */
+export function resolveRepairClasses(input: readonly string[]): { classes: FindingClass[]; unknown: string[] } {
+  if (input.length === 0 || input.includes('all')) return { classes: 'all' as never, unknown: [] }
+  const expanded = input.flatMap((c) => REPAIR_CLASS_ALIASES[c] ?? c)
+  if (expanded.includes('all')) return { classes: 'all' as never, unknown: [] }
+  const unknown = expanded.filter((c) => !(FINDING_CLASSES as readonly string[]).includes(c))
+  return { classes: expanded as FindingClass[], unknown }
+}
+
+/** Every class the auditor can produce — the accept-list for operator words. */
+export const FINDING_CLASSES: readonly FindingClass[] = [
+  'hollow-payload', 'empty-artifact', 'never-archived-span', 'orphan-file', 'unregistered-file',
+  'duplicate-number', 'countervalue-drift', 'ghost-plan-manifest', 'unreleased-reservation',
+  'dead-citation', 'tampered-file', 'test-litter', 'unrecoverable',
+]
+
 // ─────────────────────────────────────────────────── supersede (pure)
 
 /**

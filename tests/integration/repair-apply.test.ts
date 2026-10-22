@@ -186,3 +186,118 @@ test('a run that changes nothing reports the SAME findings before and after, sib
   const calls = (src.match(/\baudit\(\{/g) ?? []).length
   assert.equal(calls, 1, `audit() must be called from ONE place in the runner — found ${calls}`)
 })
+
+// ─────────────────────────────────────────────────────────── the remedies the first rows never reached
+
+const EMPTY = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
+test('a file with no record is RE-REGISTERED from its own bytes; a twin is refused (#60)', async () => {
+  const w = world()
+  const tree = path.join(w.cwd, '.dsh-chapters', 'root-1', 'chapters')
+  // one orphan with a FREE number, one that collides with the live record 1
+  const body = (n: number, from: number, to: number) => `---\ntitle: "Recovered ${n}"\nseqRange: [${from}, ${to}]\ntopics: ["x"]\ntokens: 812\n---\n\n**User:** old ask\n\n**Assistant:** old answer\n`
+  fs.writeFileSync(path.join(tree, '015-recovered-free.md'), body(15, 40, 51))
+  fs.writeFileSync(path.join(tree, '001-twin-of-live-record.md'), body(1, 0, 3))
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  const out = await runRepair(ports, { sessionId: 'root-1', classes: ['unregistered-file'] as never })
+  const after = await store.get('root-1')
+  assert.ok(after.chapters.some((c) => c.number === 15 && c.repairs?.[0]?.class === 'unregistered-file'),
+    'the free file became a record, stamped with why')
+  assert.match(out.refused.join(' '), /twin/, 'the colliding one is refused with a reason')
+  assert.ok(out.applied.some((e) => e.kind === 'registry'), 'and the registry move is journalled')
+  assert.ok(after.nextChapterNumber > 15, `the counter moved UPWARD only: ${after.nextChapterNumber}`)
+  assert.ok(fs.existsSync(path.join(tree, '015-recovered-free.md')), 'the file itself never moved')
+})
+
+test('bookkeeping remedies: ghost manifest expired, stuck reservation released, counter raised (#60)', async () => {
+  const w = world()
+  const base = w.states.get('root-1')!
+  w.states.set('root-1', {
+    ...base,
+    nextChapterNumber: 1, // below the spent numbers -> drift
+    plans: { 'cmp-ghost': { number: 9, path: '.dsh-chapters/root-1/chapters/009-never.md', title: 't', summary: 's' } },
+    reservations: { 'att-stuck': [7] },
+  })
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  await runRepair(ports, { sessionId: 'root-1', classes: ['ghost-plan-manifest', 'unreleased-reservation', 'countervalue-drift'] as never })
+  const after = await store.get('root-1')
+  assert.equal(after.plans['cmp-ghost'], undefined, 'the manifest that could never land is gone')
+  assert.equal(after.reservations['att-stuck'], undefined, 'the reservation key is released')
+  assert.ok(after.nextChapterNumber > Math.max(...after.chapters.map((c) => c.number)), 'and the counter is above every spent number')
+})
+
+test('a dead citation is satisfied by writing the file its own checkpoint names (#60)', async () => {
+  const w = world()
+  const promised = '.dsh-chapters/root-1/chapters/020-time-sampled-while-preparing-turn.md'
+  const base = w.states.get('root-1')!
+  w.states.set('root-1', {
+    ...base,
+    plans: { 'cmp-1': { number: 1, path: base.chapters[0]!.path, title: 't', summary: 's', chapters: [{ number: 20, path: promised, title: 'Time sampled', summary: 's', startSeq: 4, endSeq: 7 }] } },
+  })
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  const out = await runRepair(ports, { sessionId: 'root-1', classes: ['dead-citation'] as never })
+  assert.ok(fs.existsSync(path.join(w.cwd, promised)), `the cited path now exists — out: ${JSON.stringify(out.refused)}`)
+  assert.match(out.applied.map((e) => e.path).join(' '), /020-time-sampled/, 'and the write is journalled')
+})
+
+test('no journal, no run: an unwritable store refuses before touching the registry (#60)', async () => {
+  const w = world()
+  const store = makeStore(w.states)
+  const before = JSON.stringify(w.states.get('root-1'))
+  // Make the store root genuinely unwritable (not merely absent — mkdir -p "succeeds" at absent).
+  const rootDir = path.join(w.cwd, '.dsh-chapters', 'root-1')
+  fs.chmodSync(rootDir, 0o500)
+  try {
+    const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+    const out = await runRepair(ports, { sessionId: 'root-1', classes: 'all' })
+    assert.ok(out.refused.some((r) => /journal|refusing/i.test(r)), `expected a journal refusal, got ${JSON.stringify(out.refused)}`)
+    assert.equal(out.applied.length, 0, 'nothing applied')
+    assert.equal(JSON.stringify(w.states.get('root-1')), before, 'and the registry did not move')
+  } finally {
+    fs.chmodSync(rootDir, 0o700)
+  }
+})
+
+test('an audit with no directory listing reports its blind spots (#60)', async () => {
+  const w = world()
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  const out = await runRepair(ports, { sessionId: 'root-1', classes: 'all', dryRun: true, listedPaths: [] })
+  assert.deepEqual(out.blindSpots, ['orphan-file', 'test-litter'], `blind spots must be named: ${out.blindSpots}`)
+})
+
+test('restore of an unknown journal id is an error and touches nothing (#60)', async () => {
+  const w = world()
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  const res = await restoreRepair(ports, 'no-such-journal', 'root-1')
+  assert.equal(res.undone, 0)
+  assert.match(res.problems.join(' '), /no journal/i)
+})
+
+test('a file whose frontmatter cannot be read honestly is refused, not registered on a guess (#60)', async () => {
+  const w = world()
+  const tree = path.join(w.cwd, '.dsh-chapters', 'root-1', 'chapters')
+  fs.writeFileSync(path.join(tree, '021-no-seqrange.md'), '---\ntitle: "Undated fragment"\n---\n\n**User:** no range recorded\n')
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  const out = await runRepair(ports, { sessionId: 'root-1', classes: ['unregistered-file'] as never })
+  assert.match(out.refused.join(' '), /no usable seqRange/, 'it says what is missing')
+  const after = await store.get('root-1')
+  assert.ok(!after.chapters.some((c) => c.number === 21), 'and NO record was invented for it')
+})
+
+test('restore names the registry moves it cannot undo, instead of pretending a full revert (#60)', async () => {
+  const w = world()
+  const base = w.states.get('root-1')!
+  w.states.set('root-1', { ...base, reservations: { 'att-stuck': [7] } })
+  const store = makeStore(w.states)
+  const ports = { store: store as never, readLog: async () => w.events, cwd: w.cwd, config: CONFIG, log: () => {}, warn: () => {} }
+  const out = await runRepair(ports, { sessionId: 'root-1', classes: ['unreleased-reservation'] as never })
+  assert.ok(out.applied.some((e) => e.kind === 'registry'), 'the release journalled a registry move')
+  const res = await restoreRepair(ports, out.journalId, 'root-1')
+  assert.match(res.problems.join(' '), /cannot be un-applied by file restore/, 'and restore says so plainly')
+})

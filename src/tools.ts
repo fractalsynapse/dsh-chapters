@@ -9,6 +9,7 @@ import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import { runRepair, restoreRepair } from './repair-run.ts'
+import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
 import { readDurableSession } from './auto-save.ts'
 import * as path from 'node:path'
 import { estimateTokens, toolResultCandidates } from './render.ts'
@@ -1003,15 +1004,14 @@ export function buildChaptersTools(
       }
 
       const dryRun = verb !== 'apply'
-      const CLASS_SET: Record<string, string[]> = {
-        hollow: ['hollow-payload'], gaps: ['never-archived-span'], citations: ['dead-citation'],
-        bookkeeping: ['ghost-plan-manifest', 'unreleased-reservation', 'countervalue-drift'],
-        files: ['unregistered-file'], all: ['all'],
+      // ONE resolver, shared with the offline script (src/repair.ts). An unknown name is a REFUSAL:
+      // the first version fell through to `[which]`, matched nothing, and reported success while doing
+      // nothing — the silent no-op is the defect class this issue exists to end (#60).
+      const resolved = resolveRepairClasses((parts[1] ?? 'all').split(','))
+      if (resolved.unknown.length > 0) {
+        return { kind: 'error' as const, text: `chapters-repair: unknown class(es) ${resolved.unknown.join(', ')}\n  known: ${Object.keys(REPAIR_CLASS_ALIASES).join(', ')} — nothing was applied` }
       }
-      const which = parts[1] ?? 'all'
-      // 'all' means the RUNNER's sentinel, not a class named "all" — wrapping it in a list filtered
-      // every finding out and the apply reported success while doing nothing (#60).
-      const classes = which === 'all' ? ('all' as const) : ((CLASS_SET[which] ?? [which]) as never)
+      const classes = resolved.classes
       const outcomes: string[] = []
       let actionable = 0
       for (const id of ids) {

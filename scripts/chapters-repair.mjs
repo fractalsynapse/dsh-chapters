@@ -54,27 +54,16 @@ const DRY = flag('dry-run') || APPLY === undefined
 const YES = flag('yes')
 const LIST = flag('list')
 
-const CLASS_ALIASES = {
-  hollow: 'hollow-payload', gaps: 'never-archived-span', citations: 'dead-citation',
-  bookkeeping: ['ghost-plan-manifest', 'unreleased-reservation', 'countervalue-drift'],
-  files: 'unregistered-file', orphans: 'unregistered-file',
-  all: 'all',
-}
+const { REPAIR_CLASS_ALIASES, resolveRepairClasses } = await import(path.join(LIB, 'repair.js'))
 const classes = () => {
-  if (APPLY === 'all' || flag('all')) return 'all'
+  // the SAME resolver the /chapters-repair command uses — two lists drift, one cannot
   const raw = String(APPLY ?? '').split(',').map((c) => c.trim()).filter(Boolean)
-  const out = raw.flatMap((c) => CLASS_ALIASES[c] ?? c)
-  // An alias that matches nothing used to yield "applied 0 move(s)" and a clean exit — a silent no-op
-  // with a success code, which is the failure mode this whole round exists to eliminate. Now it refuses.
-  const KNOWN = ['hollow-payload', 'never-archived-span', 'dead-citation', 'ghost-plan-manifest',
-    'unreleased-reservation', 'countervalue-drift', 'unregistered-file', 'empty-artifact',
-    'duplicate-number', 'orphan-file', 'tampered-file', 'test-litter', 'unrecoverable']
-  const unknown = out.filter((c) => !KNOWN.includes(c))
-  if (unknown.length > 0) {
-    console.error(`unknown repair class(es): ${unknown.join(', ')}\n  known: ${Object.keys(CLASS_ALIASES).join(', ')}\n  (nothing will be applied — fix the name or pass --apply all)`)
+  const resolved = resolveRepairClasses(raw)
+  if (resolved.unknown.length > 0) {
+    console.error(`unknown repair class(es): ${resolved.unknown.join(', ')}\n  known: ${Object.keys(REPAIR_CLASS_ALIASES).join(', ')}\n  (nothing will be applied — fix the name or pass --apply all)`)
     process.exit(2)
   }
-  return out
+  return resolved.classes
 }
 
 // ──────────────────────────────────────────────────────────── durable logs
