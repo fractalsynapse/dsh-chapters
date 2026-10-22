@@ -28,7 +28,7 @@ import type { ChapterRecord } from './archive.ts'
 import { estimateTokens, renderChapter, renderIndex } from './render.ts'
 import { isInjectedProse } from './injections.ts'
 import { lineageOf } from './types.ts'
-import { slugify } from './archive.ts'
+import { slugify, toStoredPath } from './archive.ts'
 import { isFinalized } from './registry.ts'
 import type { PlanChapter, SessionState } from './registry.ts'
 
@@ -48,6 +48,8 @@ export interface TocBullet {
 }
 
 export interface EngineConfig {
+  /** Workspace cwd, so a resolved-absolute store root still yields workspace-relative records (#69). */
+  workspaceCwd?: string | undefined
   /** Workspace-relative archive root; must be reachable by the `read` tool. */
   artifactStoreRoot: string
   chapterTokenTarget: number
@@ -313,7 +315,11 @@ export function deriveIdentity(
 
 /** Workspace-relative chapter path for a reserved number. */
 export const chapterPathFor = (config: EngineConfig, rootSession: string, number: number, title: string): string =>
-  `${config.artifactStoreRoot.replace(/\/+$/, '')}/${rootSession}/chapters/${String(number).padStart(3, '0')}-${slugify(title)}.md`
+  // #69: normalized at the mint. The realm resolves an ABSOLUTE store root to reach the filesystem, but
+  // the RECORD must carry the workspace-relative form, or chapter 1 written by compaction never matches
+  // the same file listed from disk and the auditor reports its own archive as lost knowledge.
+  toStoredPath(config.workspaceCwd,
+    `${config.artifactStoreRoot.replace(/\/+$/, '')}/${rootSession}/chapters/${String(number).padStart(3, '0')}-${slugify(title)}.md`)
 
 /**
  * Map the prepared summarize input back to the log seqs it was built from

@@ -683,7 +683,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // text we are about to hand the host cites numbers that are durable at this point.
     let tocText = ''
     await store.mutate(session.id, (fresh) => {
-      const { plan, state: next } = planSummarize(session, fresh, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry, rulesCarry)
+      // #69: the realm resolves an ABSOLUTE store root; hand planSummarize the session cwd so the record it
+      // mints is workspace-relative like every door's.
+      const wcwd = (session as { header?: { cwd?: string } }).header?.cwd
+      const { plan, state: next } = planSummarize(session, fresh, input, { ...this.chaptersConfig, workspaceCwd: wcwd }, reserve, cid, composition, plot, planCarry, rulesCarry)
       const stored = rememberPlan(next, cid, {
         number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
         ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),

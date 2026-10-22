@@ -370,7 +370,7 @@ export function buildChaptersTools(
           toolResultOverrides: args.toolResultOverrides ?? [],
           ...(line !== undefined ? { projectLine: line } : {}),
           ...(rs.section !== undefined ? { rulesSection: rs.section } : {}),
-        }, config)
+        }, { ...config, workspaceCwd: cwd })
         if (result.ok && cwd !== '') config.scheduler?.schedule(cwd, 'archive:continue')
         // conditional spreads: absent optionals must not surface as `undefined`
         // (not a JsonValue); the output schema validates the successful body.
@@ -546,7 +546,7 @@ export function buildChaptersTools(
           : ['no stored turn signatures — legacy size-based segmentation']
         const handoffNote = `Archived through the Chapters ${door.noun}. The chapters listed above carry every prior word verbatim — reload any with the read tool on its path. ${door.noDirective}`
           + (notes.length > 0 ? `\n(Segmentation notes: ${notes.join('; ')})` : '')
-        const result = await runContinue(ports, { ...callerArgs, handoffNote, chapters }, config)
+        const result = await runContinue(ports, { ...callerArgs, handoffNote, chapters }, { ...config, workspaceCwd: cwd0 })
         if (result.ok && cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:fork')
         const budgetText = result.budget !== undefined ? `; TOC ~${result.budget.usedTokens} tokens, allowance ${result.budget.allowanceTokens}` : ''
         // #61: the archive happened; the caveats were in `result.warnings` and were NEVER printed here.

@@ -92,6 +92,33 @@ export function slugify(title: string): string {
   return slug.length > 0 ? slug.slice(0, 48) : 'chapter'
 }
 
+/**
+ * The ONE canonical form of a stored path (#69): **workspace-relative**. `ChapterRecord.path` had two
+ * producers — the doors mint from a relative `artifactStoreRoot`, the compaction realm from a resolved
+ * ABSOLUTE one — so one file could be a cited record by one path and an "unregistered file" by the
+ * other, and `/chapters-repair` then reported its own archive as lost knowledge (measured: 6 records,
+ * chapter 1 of the two longest sessions, each `msgs > 300`, all absolute).
+ *
+ * Relative is the right winner: the store root lives inside the workspace, `read` reaches it, and a
+ * path that survives moving a checkout between machines is the same argument `projectKey` already makes
+ * for the remote over the path. An absolute path OUTSIDE the workspace is passed through unchanged — the
+ * rig legitimately pins an absolute store root per port (#61 item 8), and pretending otherwise would
+ * produce a `../../..` path that resolves nowhere.
+ */
+export function toStoredPath(cwd: string | undefined, p: string): string {
+  if (cwd === undefined || cwd === '' || !p.startsWith('/')) return p
+  const rel = p.startsWith(cwd + '/') ? p.slice(cwd.length + 1) : null
+  return rel ?? p
+}
+
+/** Compare two stored paths in either dialect. Every path COMPARISON goes through this, never `===`. */
+export function sameStoredPath(a: string, b: string, cwd?: string): boolean {
+  if (a === b) return true
+  const root = cwd ?? ''
+  const abs = (p: string): string => (p.startsWith('/') ? p : root === '' ? p : `${root}/${p}`)
+  return abs(a) === abs(b)
+}
+
 export const chapterFileName = (n: number, title: string): string =>
   `${String(n).padStart(3, '0')}-${slugify(title)}.md`
 
@@ -113,6 +140,8 @@ export interface WriteInput {
   allocator: NumberAllocator
   /** Store root, relative to the session workspace so the `read` tool can reach it. */
   storeRoot: string
+  /** Workspace cwd; when given, stored paths are normalized to workspace-relative (#69). */
+  cwd?: string | undefined
   /** Directory key — the root of the ancestry tree, not the per-fork id. One dir per tree. */
   rootSessionId: string
   chapters: readonly RenderedChapter[]
@@ -122,6 +151,7 @@ export interface WriteInput {
 
 export async function writeArchive(input: WriteInput): Promise<WriteResult> {
   const { fs, allocator, storeRoot, rootSessionId, chapters } = input
+  const cwd = input.cwd
   if (chapters.length === 0) throw new Error('writeArchive called with no chapters')
 
   const treeDir = join(storeRoot, rootSessionId)
@@ -239,7 +269,7 @@ export async function writeArchive(input: WriteInput): Promise<WriteResult> {
 
     records.push({
       number,
-      path: chapterPath,
+      path: toStoredPath(cwd, chapterPath),
       title: chapter.range.title,
       summary: chapter.range.summary,
       startSeq: chapter.range.startSeq,
