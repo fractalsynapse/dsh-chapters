@@ -243,14 +243,23 @@ export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork wi
  * seq 47). A `user/message` carrying the text is the only authority, and pointedly NOT an
  * assistant echo: a model repeating a phrase must not be read as the human's send having landed.
  */
-export function humanMessageCarries(logText: string, needle: string): boolean {
-  if (logText === '' || needle === '') return false
-  // #84: the WHOLE instruction, not a window. An 80-character prefix made two prompts that open
-  // alike ("…with ranges, then answer." vs "…then summarize it.") indistinguishable, so a genuine
-  // second send was judged already-delivered and never happened — the leg then asserted against
-  // the first send's world and exited 0, while replay, where the flush landed differently, asked
-  // the turn that was never recorded. A swallowed send is worse than a duplicate: it is silent.
+/**
+ * How many times does this instruction appear as a human turn? (#88)
+ *
+ * Counting, not existing. `deliveredFor` below needs "did THIS press land", and existence answers a
+ * different question — "has something like this ever been sent" — which silently swallowed the
+ * second of two identical instructions. A replay of the knowledge journey stalled for sixteen
+ * minutes on exactly that: the spec runs `/chapters-status` twice, the guard saw the first record,
+ * and the second send never happened.
+ *
+ * #84 still holds: the WHOLE instruction, not a window. An 80-character prefix made two prompts that
+ * open alike ("…then answer." vs "…then summarize it.") indistinguishable. A swallowed send is worse
+ * than a duplicate: a duplicate is visible in the log, this is silent.
+ */
+export function countHumanMessagesCarrying(logText: string, needle: string): number {
+  if (logText === '' || needle === '') return 0
   const want = needle.trimEnd()
+  let n = 0
   for (const line of logText.split('\n')) {
     if (!line.includes('"user/message"')) continue
     try {
@@ -258,50 +267,70 @@ export function humanMessageCarries(logText: string, needle: string): boolean {
       const c = ev?.data?.message?.content
       const text = typeof c === 'string' ? c
         : Array.isArray(c) ? (c as Array<{ text?: string }>).map((b) => b?.text ?? '').join(' ') : ''
-      if (text.includes(want)) return true
+      if (text.includes(want)) n += 1
     } catch { /* a partial write is not a delivery */ }
   }
-  return false
+  return n
 }
 
-/** Did a slash command already reach the host? Its record is a `command/run`, not a chat bubble. */
-export function commandDispatched(logText: string, name: string, argsNeedle: string): boolean {
-  if (logText === '') return false
+/** How many times has this slash command reached the host? Its record is a `command/run`, not a
+ *  chat bubble — and a journey may legitimately run the same command twice (#88). Full args, not a
+ *  prefix, so two different invocations of one command are never conflated. */
+export function countCommandsDispatched(logText: string, name: string, args: string): number {
+  if (logText === '') return 0
+  const want = args.trim()
+  let n = 0
   for (const line of logText.split('\n')) {
     if (!line.includes('"command/run"')) continue
     try {
       const ev = JSON.parse(line) as { data?: { name?: string, args?: string } }
       if (ev?.data?.name !== name) continue
-      if (argsNeedle === '' || (ev?.data?.args ?? '').includes(argsNeedle)) return true
+      if (want === '' || (ev?.data?.args ?? '').trim() === want) n += 1
     } catch { /* ignore a partial line */ }
   }
-  return false
+  return n
+}
+
+/** Did a human turn carrying this exact instruction reach the log? One predicate per decision: the
+ *  boolean is the count, never a parallel implementation of the same question. */
+export function humanMessageCarries(logText: string, needle: string): boolean {
+  return countHumanMessagesCarrying(logText, needle) > 0
+}
+
+/** Did this command reach the host? Same rule: derived from the count. */
+export function commandDispatched(logText: string, name: string, args: string): boolean {
+  return countCommandsDispatched(logText, name, args) > 0
+}
+
+/** Total deliveries of this instruction in this session, right now. */
+export function countDeliveries(sid: string | null, line: string): number {
+  if (sid === null || sid === '') return 0
+  const text = sessionLogTextById(sid)
+  if (text === '') return 0
+  const trimmed = line.trim()
+  if (trimmed.startsWith('/')) {
+    const name = (trimmed.slice(1).split(/\s+/)[0] ?? '')
+    return countCommandsDispatched(text, name, trimmed.slice(1 + name.length))
+  }
+  return countHumanMessagesCarrying(text, trimmed)
 }
 
 /**
  * The predicate `typeComposer` needs at EVERY call site, built from the session it is typing into.
  *
- * #81 wired this only for the first turn of `newSessionWithTurn` and left the follow-ups and
- * slash commands unguarded — which is exactly how the re-anchored `heavy` tape recorded a
- * duplicated instruction: record-time the race sent twice and only one answer got recorded, so
- * replay (same code, different race timing) asked a question the tape has no entry for and the
- * post-compaction answer gate went red. A guard that covers one of seven call sites is not a
- * guard; it is a coin flip that looks deterministic on the machine that wrote it.
+ * #81 wired this only for the first turn of `newSessionWithTurn` and left the follow-ups and slash
+ * commands unguarded — which is how the re-anchored `heavy` tape recorded a duplicated instruction:
+ * record-time the race sent twice, only one answer got recorded, and replay asked a question the tape
+ * has no entry for. A guard covering one of N call sites is a coin flip.
+ *
+ * #88 is the other half of the same lesson: the guard must ask **"has THIS press landed?"** So the
+ * closure snapshots how many copies existed when it was created and compares counts thereafter. A
+ * second identical instruction is a real instruction; existence-based delivery swallowed it, and a
+ * knowledge-loop replay stalled sixteen minutes waiting for a command that was never sent.
  */
 export function deliveredFor(sid: string | null, line: string): () => boolean {
-  return () => {
-    if (sid === null || sid === '') return false
-    const text = sessionLogTextById(sid)
-    if (text === '') return false
-    const trimmed = line.trim()
-    if (trimmed.startsWith('/')) {
-      const parts = trimmed.slice(1).split(/\s+/)
-      const name = parts[0] ?? ''
-      const args = trimmed.slice(1 + name.length)
-      return commandDispatched(text, name, args.trim().slice(0, 24))
-    }
-    return humanMessageCarries(text, trimmed)
-  }
+  const baseline = countDeliveries(sid, line)
+  return () => countDeliveries(sid, line) > baseline
 }
 
 export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>): Promise<void> {

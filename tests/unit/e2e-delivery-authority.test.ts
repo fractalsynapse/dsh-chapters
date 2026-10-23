@@ -12,7 +12,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { humanMessageCarries, commandDispatched } from '../../tests/e2e/session.ts'
+import { humanMessageCarries, commandDispatched, countHumanMessagesCarrying, countCommandsDispatched } from '../../tests/e2e/session.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 
@@ -121,4 +121,47 @@ test('delivery is waited for, not assumed from a flush race (#84)', () => {
   assert.match(fn, /waitForTimeout\(\s*GRACE|deliveredGraceMs/,
     'after a press, give the durable log a grace window before concluding it did not land')
   assert.match(fn, /for \(let round = 0; round < 48/, 'the round bound survives (the r38 busy-state tolerance)')
+})
+
+/**
+ * #88 — a guard that swallows a legitimate repeat is not a guard.
+ *
+ * Measured: a knowledge-loop replay stalled SIXTEEN MINUTES because the spec runs `/chapters-status`
+ * twice and the delivery predicate answered "already delivered" from the first record, so the second
+ * send never happened. Existence answers "has something like this ever been sent"; the question at a
+ * press is "has THIS press landed". Counting is the difference.
+ */
+const cmd = (name: string, args: string, id: string): string =>
+  line({ type: 'command/run', seq: 1, data: { commandId: id, name, args } })
+
+test('two identical commands are two deliveries, not one (#88)', () => {
+  const log = [cmd('chapters-status', '', 'c-1'), cmd('chapters-status', '', 'c-2')].join('\n')
+  assert.equal(countCommandsDispatched(log, 'chapters-status', ''), 2,
+    'the second run is a real run; the count is what makes a repeat deliverable')
+  assert.equal(commandDispatched(log, 'chapters-status', ''), true, 'the boolean is derived from the count')
+  assert.equal(countCommandsDispatched(log, 'chapters-save', ''), 0, 'a different name is not this delivery')
+})
+
+test('commands are matched on full args, not a 24-character prefix (#88)', () => {
+  const log = [cmd('chapters-rule', 'add security never log tokens', 'c-1')].join('\n')
+  assert.equal(countCommandsDispatched(log, 'chapters-rule', 'add security never log tokens'), 1)
+  assert.equal(countCommandsDispatched(log, 'chapters-rule', 'add security never log tokens and headers'), 0,
+    'an args prefix that matches a DIFFERENT invocation is the #84 bug in command clothing')
+})
+
+test('a repeated human instruction counts twice (#88)', () => {
+  const log = [
+    line({ type: 'user/message', seq: 1, data: { message: { content: [{ type: 'text', text: 'Now answer again.' }] } } }),
+    line({ type: 'user/message', seq: 5, data: { message: { content: [{ type: 'text', text: 'Now answer again.' }] } } }),
+  ].join('\n')
+  assert.equal(countHumanMessagesCarrying(log, 'Now answer again.'), 2)
+})
+
+test('the guard snapshots a baseline and compares counts (#88)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'session.ts'), 'utf8')
+  const fn = /export function deliveredFor[\s\S]*?\n}\n/.exec(src)?.[0] ?? ''
+  assert.match(fn, /const baseline = countDeliveries\(sid, line\)/,
+    'the closure must capture what existed BEFORE this press')
+  assert.match(fn, /countDeliveries\(sid, line\) > baseline/,
+    'and answer only for THIS press having landed — not for the instruction ever having been sent')
 })
