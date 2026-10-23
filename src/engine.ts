@@ -772,9 +772,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   async #arrive(agent: Agent): Promise<void> {
     const session = agent.session as unknown as ArrivalSessionShim & { header?: { cwd?: string } }
     const cwd = session.header?.cwd
-    if (cwd === undefined || cwd === '') return
+    if (cwd === undefined || cwd === '') {
+      // #78: two bare returns made arrival artifacting vanish COMPLETELY, silently — the very
+      // silence that lets a leg fail while nobody can say whether the code path ran. And the
+      // reason is printed as the SHAPE it found, because `session.header?.cwd` is precisely the
+      // assumption a host format bump retires (the v3→v4 log lesson).
+      diagnosticNote(this.ctx.logger, 'realm:engine:arrive',
+        `arrival stubbing skipped: no session cwd (session keys=${Object.keys(session ?? {}).slice(0, 10).join(',')})`)
+      return
+    }
     const meter = (this.ctx as unknown as { tokenMeter?: { estimateMessage: (m: unknown) => number } }).tokenMeter
-    if (meter === undefined) return
+    if (meter === undefined) {
+      diagnosticNote(this.ctx.logger, 'realm:engine:arrive', 'arrival stubbing skipped: no tokenMeter on the realm context')
+      return
+    }
     const r = await applyArrivalStubs(session, {
       cwd,
       storeRoot: this.chaptersConfig.artifactStoreRoot,

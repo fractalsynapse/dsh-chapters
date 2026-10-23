@@ -398,3 +398,45 @@ test('the override ANNOUNCES its entry, so a browser leg can prove the host call
     fs.rmSync(sinkPath, { force: true })
   }
 })
+
+/**
+ * #78, part two: the host DOES enter `compactIfNeeded` (measured on 0.2.0-rc.2: three entries,
+ * `trigger="pressure"`, in a real browser leg) — so the missing arrival stubs are a failure
+ * INSIDE the hook, and `#arrive` had two bare `return`s on its way in: no session cwd, no token
+ * meter. Each of those makes arrival artifacting vanish completely while the product says nothing
+ * at all. The same silence would also be the reason a fix got "verified" by a leg that never ran
+ * the code path. So a skip is now an observation with its reason, and the shape of what the realm
+ * session really offers, because `session.header?.cwd` is exactly the kind of assumption that a
+ * host format bump retires.
+ */
+test('arrival stubbing says WHY it skipped instead of skipping quietly (#78)', async () => {
+  const sinkPath = path.join(os.tmpdir(), `arrive-sink-${String(process.pid)}-${Math.random().toString(36).slice(2)}.log`)
+  const prevSink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness()
+  try {
+    const events = [human(0, 'read the whole book in one call please'), asst(1, 'done reading it')]
+    // a session shim with NO header.cwd — the shape the realm may be handed on 0.2.x
+    const noCwd = h.sessionOf('s-nocwd', events, { requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }) })
+    delete (noCwd as unknown as { header?: unknown }).header
+    await h.engine.compactIfNeeded({ session: noCwd } as never, 'pressure' as never, new AbortController().signal as never)
+    const sink = fs.readFileSync(sinkPath, 'utf8')
+    assert.match(sink, /arrival stubbing skipped: no session cwd/,
+      `a skipped arrival must name its reason, got: ${sink.slice(0, 300)}`)
+    assert.match(sink, /session keys=/, 'and show the shape it was actually handed, so the next host drift is read, not re-derived')
+
+    // with a cwd present the skip note must NOT appear — this is a claim about wiring, not a log spam
+    fs.rmSync(sinkPath, { force: true })
+    const withCwd = h.sessionOf('s-cwd', events, { requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }) })
+    ;(withCwd as unknown as { header: { cwd: string } }).header = { cwd: h.cwd }
+    await h.engine.compactIfNeeded({ session: withCwd } as never, 'pressure' as never, new AbortController().signal as never)
+    const sink2 = fs.existsSync(sinkPath) ? fs.readFileSync(sinkPath, 'utf8') : ''
+    assert.doesNotMatch(sink2, /arrival stubbing skipped: no session cwd/,
+      `a resolved cwd must not report the skip: ${sink2.slice(0, 200)}`)
+  } finally {
+    h.dispose()
+    if (prevSink === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
+    fs.rmSync(sinkPath, { force: true })
+  }
+})
