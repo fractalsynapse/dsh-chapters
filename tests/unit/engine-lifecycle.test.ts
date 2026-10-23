@@ -362,3 +362,39 @@ test('finalize failures warn, land in the diagnostics sink, and retry next touch
     fs.rmSync(path.dirname(sink), { recursive: true, force: true })
   }
 })
+
+// ---------------------------------------------------------------- invocation evidence (#78)
+
+test('the override ANNOUNCES its entry, so a browser leg can prove the host calls it (#78)', async () => {
+  // Every other row in this file CALLS `compactIfNeeded` directly — which is exactly how a
+  // suite can stay green while the product never relieves anything: the test is the caller.
+  // On 0.2.0-rc.2 the field evidence is a 35,428-token surface against a 16,000 trigger with
+  // ZERO `compaction/*` events (issue #78), and nothing in the product could tell us whether
+  // the host ever entered this method. Now it says so, and a leg run answers that from the log
+  // instead of from inference.
+  const sinkPath = path.join(os.tmpdir(), `entry-sink-${String(process.pid)}-${Math.random().toString(36).slice(2)}.log`)
+  const prevSink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness()
+  try {
+    const events = [human(0, 'do the thing with some real content here'), asst(1, 'done: verified by npm test')]
+    const session = h.sessionOf('s-entry', events, {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    // the SINK is the artifact the field question needs — a logger the harness does not have,
+    // or a headless `dsh web` that swallows it (r19), must not be the reason an observation is lost
+    await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal as never)
+    const sink = fs.readFileSync(sinkPath, 'utf8')
+    const entry = sink.split('\n').filter((l) => /compactIfNeeded entered/.test(l))
+    assert.equal(entry.length, 1, `the override must record exactly one entry line in the sink, got ${String(entry.length)}: ${sink.slice(0, 240)}`)
+    assert.match(entry[0]!, /realm:engine:compact/, 'named by plane and site, so a log line is attributable')
+    assert.match(entry[0]!, /trigger="pressure"/, 'and it carries the trigger the host passed')
+    assert.doesNotMatch(entry[0]!, /fail|refus|degrad|error/i,
+      'an observation is not a warning — it must not read as a failure to the composer or /chapters-status')
+  } finally {
+    h.dispose()
+    if (prevSink === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
+    fs.rmSync(sinkPath, { force: true })
+  }
+})

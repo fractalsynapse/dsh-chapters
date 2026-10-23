@@ -17,7 +17,7 @@ import type { SessionEventLike } from './types.ts'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
-import { diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
+import { diagnosticNote, diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
 import { makeChildArchiveListener } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
@@ -787,6 +787,14 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   override async compactIfNeeded(
     agent: Agent, trigger: CompactionTrigger, signal: AbortSignal,
   ): Promise<CompactionResult | null> {
+    // #78: the entry line that proves the HOST called this. Every row in the lifecycle suite
+    // CALLS `compactIfNeeded` directly — the test has always been the caller, which is exactly
+    // how a suite stays green while the product relieves nothing. Field evidence on 0.2.0-rc.2:
+    // 35,428 tokens against a 16,000 trigger, ZERO `compaction/*` events, and no line anywhere
+    // saying whether relief ran. One info line per entry, carrying the trigger the host passed,
+    // makes "is context relief wired at all?" answerable from a session log instead of inferred.
+    diagnosticNote(this.ctx.logger, 'realm:engine:compact',
+      `compactIfNeeded entered (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')})`)
     this.#observeRoute(agent)
     await this.#arrive(agent)
     // Finalization runs whether super resolves OR throws: the pressure retry
