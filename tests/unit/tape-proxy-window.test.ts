@@ -131,3 +131,22 @@ test('the refusal message satisfies the HOST classifier, read from its own bundl
   assert.ok(hostRegex.test(OVERFLOW_REFUSAL.message),
     `the host would NOT read our refusal as an overflow: ${OVERFLOW_REFUSAL.message}`)
 })
+
+/**
+ * The estimator is only useful if it agrees with the host's meter at the sizes the host actually
+ * reported. These are the field numbers from one `heavy` leg (proxy journal `reqBytes=` beside the
+ * engine's `surface=… tok`), not round numbers invented for convenience.
+ */
+test('the estimator agrees with the host meter at the measured sizes', async () => {
+  const { estimateRequestTokens, BYTES_PER_TOKEN } = await import('../../tests/e2e/model-proxy-window.ts')
+  // 78,140 bytes ≈ 27,306–28,928 host tokens: UNDER a 32,000 window, and must stay under.
+  const under = { model: 'm', messages: [{ role: 'user', content: 'x'.repeat(78_140 - 60) }] }
+  const estUnder = estimateRequestTokens(under)
+  assert.ok(estUnder < 32_000, `a request the host measured at ~28K tokens must not be refused: ${String(estUnder)}`)
+  assert.ok(estUnder > 24_000, `the estimate must not drift so early it refuses ordinary turns: ${String(estUnder)}`)
+  // 120,129 bytes ≈ 35,428 host tokens: OVER the window, and must be refused.
+  const over = { model: 'm', messages: [{ role: 'user', content: 'x'.repeat(120_129 - 60) }] }
+  const estOver = estimateRequestTokens(over)
+  assert.ok(estOver > 32_000, `the host overflowed at 35,428 tokens; our estimate said ${String(estOver)}`)
+  assert.equal(BYTES_PER_TOKEN, 3, 'the divisor is the conservative round value, and the measured 2.8 lives beside it')
+})

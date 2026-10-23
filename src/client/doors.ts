@@ -190,7 +190,8 @@ function openByService(
   /** #77: adopt (and re-project) only when the client's own roster is missing this session.
    *  `onAfter` reports the roster at the instant after adoption, before any later refresh can
    *  discard the mutation — the difference between an ordering bug and a publication gap. */
-  adopt?: { needed: boolean, onRefused: (reason: string) => void, onSubscribeRefused?: (reason: string) => void, onAfter: (seen: boolean | null) => void },
+  adopt?: { needed: boolean, onRefused: (reason: string) => void, onSubscribeRefused?: (reason: string) => void, onAfter: (seen: boolean | null) => void, onStep?: (step: string) => void },
+  nav?: { openSession?: (id: string) => unknown },
 ): Promise<boolean> {
   return (async () => {
     const svc = sessions as unknown as {
@@ -198,7 +199,22 @@ function openByService(
       create?: (opts: { sessionId?: string }) => unknown
       using?: (id: string, opts: { source: string }, fn: () => Promise<void>) => unknown
     } | undefined
-    if (typeof svc?.open !== 'function') return false
+    // #77, the actual root cause: `sessions.open` DOES NOT EXIST on this host. The sessions
+    // service offers create/fork/using/retain/binding/refresh; the host's own fork button calls
+    // `ctx.uiWorkspace.openSession(childId)` (`dsh-client-ui-chat/lib/client.js`). The line here
+    // used to be `if (typeof svc?.open !== 'function') return false`, so every service attempt
+    // since the door was written returned false on line one and the note blamed the client's
+    // roster for a verb that was never there.
+    if (svc === undefined) return false
+    const navigate = typeof nav?.openSession === 'function'
+      ? (id: string): unknown => nav.openSession!(id)
+      : typeof svc?.open === 'function'
+        ? (id: string): unknown => svc.open!(id)
+        : null
+    if (navigate === null) {
+      adopt?.onStep?.('no-verb')
+      return false
+    }
     try { await svc.refresh?.() } catch { /* refresh best-effort */ }
     // #57: re-project the client's session catalog. The host does this ITSELF after every
     // create and fork — `dsh-api-session-controller/lib/client.js`, `create()` and `fork()`
@@ -216,8 +232,13 @@ function openByService(
     // host-plane long before this call — this only lets the client see what the host already
     // knows. A refusal is reported to the caller, never swallowed.
     if (adopt?.needed === true && typeof svc.create === 'function') {
+      // the block narrates itself: entry first, then whichever way it left. The live note once
+      // said "try" from the runner and showed nothing downstream — with this line, an absent
+      // `enter-create` IS the answer instead of a mystery.
+      adopt.onStep?.('enter-create')
       try {
         await svc.create({ sessionId })
+        adopt.onStep?.('settle-create')
         try { svc.projectList?.() } catch { /* re-project again, now that a mutation exists */ }
         // the momentary read is the whole point: a later `refreshList()` reassigns the manager's
         // mutations from the server result, so an adoption that DID land is invisible by the time
@@ -225,6 +246,7 @@ function openByService(
         const after = rosterIds(sessions)
         adopt.onAfter?.(after === null ? null : after.has(sessionId))
       } catch (error) {
+        adopt.onStep?.('refuse-create')
         adopt.onRefused(refusalReason(error))
       }
     }
@@ -234,12 +256,15 @@ function openByService(
     // reported exactly like adoption's. No URL route exists as an alternative — checked every
     // dsh-client-* bundle: the only `/session/` strings are resource addresses for files.
     if (adopt?.needed === true && typeof svc.using === 'function' && rosterIds(sessions)?.has(sessionId) === false) {
+      adopt.onStep?.('enter-using')
       try {
         await svc.using(sessionId, { source: 'dsh-chapters-door' }, async () => undefined)
+        adopt.onStep?.('settle-using')
         try { svc.projectList?.() } catch { /* best-effort, like the others */ }
         const seen = rosterIds(sessions)
         adopt.onAfter?.(seen === null ? null : seen.has(sessionId))
       } catch (error) {
+        adopt.onStep?.('refuse-using')
         adopt.onSubscribeRefused?.(refusalReason(error))
       }
     }
@@ -248,7 +273,7 @@ function openByService(
     // open briefly across that window.
     const started = Date.now()
     for (;;) {
-      try { svc.open(sessionId); return true } catch {
+      try { navigate(sessionId); return true } catch {
         if (Date.now() - started > 4_000) return false
         await new Promise((r) => setTimeout(r, 250))
       }
@@ -311,7 +336,7 @@ export function makeDoorRunner(
    * A client with no `refresh` verb gets exactly ONE attempt — re-asking `open` against a roster
    * we cannot re-pull would be theater.
    */
-  opts?: { attempts?: number, attemptPauseMs?: number },
+  opts?: { attempts?: number, attemptPauseMs?: number, navigator?: { openSession?: (id: string) => unknown } },
 ): (sessionId: string) => Promise<DoorResult> {
   return async function run(sessionId: string): Promise<DoorResult> {
     try {
@@ -337,6 +362,7 @@ export function makeDoorRunner(
       // only mean the reader disagreed with itself over time — and a note that says one number
       // cannot show that.
       const rosterTrace: string[] = []
+      const steps: string[] = []
       let adoptSaw: boolean | null | undefined
       for (let i = 0; i < maxAttempts; i++) {
         tried += 1
@@ -350,14 +376,17 @@ export function makeDoorRunner(
         // `+c` / `+u` = the candidate verbs are present on the injected service AT THAT MOMENT.
         // Without this, a note that says the roster was missing while no adoption outcome appears
         // is uninterpretable: either the code never ran, or the service has no create to call.
-        const svcShape = sessions as unknown as { create?: unknown, using?: unknown } | undefined
-        rosterTrace.push(`${ids === null ? 'unknown' : ids.size === 0 ? 'empty' : ids.has(child) ? 'has' : 'missing'}${typeof svcShape?.create === 'function' ? '+c' : '-c'}${typeof svcShape?.using === 'function' ? '+u' : '-u'}`)
+        const svcShape = sessions as unknown as { create?: unknown, using?: unknown, open?: unknown } | undefined
+        // +c create, +u using, +o sessions.open, +w workspace navigator — the exact predicates
+        // the door branches on, so a note can be read instead of re-derived from source
+        rosterTrace.push(`${ids === null ? 'unknown' : ids.size === 0 ? 'empty' : ids.has(child) ? 'has' : 'missing'}${typeof svcShape?.create === 'function' ? '+c' : '-c'}${typeof svcShape?.using === 'function' ? '+u' : '-u'}${typeof svcShape?.open === 'function' ? '+o' : '-o'}${typeof opts?.navigator?.openSession === 'function' ? '+w' : '-w'}`)
         if (await openByService(sessions, child, {
           needed,
           onRefused: (reason) => { adoptRefusal = reason },
           onSubscribeRefused: (reason) => { subscribeRefusal = reason },
           onAfter: (seen) => { adoptSaw = seen },
-        }) && await switchedOnce()) return { ok: true, message: '' }
+          onStep: (step) => { if (!steps.includes(step)) steps.push(step) },
+        }, opts?.navigator) && await switchedOnce()) return { ok: true, message: '' }
         if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300).unref?.() })
       }
       // the service path did not take — the sidebar row is the same affordance a human uses
@@ -371,7 +400,7 @@ export function makeDoorRunner(
       // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar [roster per attempt: ${rosterTrace.join(' → ')}] (build: ${DOOR_BUILD})${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${subscribeRefusal === '' ? '' : ` (subscribe refused: ${subscribeRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
+        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar [roster per attempt: ${rosterTrace.join(' → ')}] [tried: ${steps.length === 0 ? 'none' : steps.includes('no-verb') ? 'no open or openSession verb on any injected service' : steps.join(', ')}] (build: ${DOOR_BUILD})${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${subscribeRefusal === '' ? '' : ` (subscribe refused: ${subscribeRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }

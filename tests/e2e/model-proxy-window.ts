@@ -15,16 +15,27 @@ export const OVERFLOW_REFUSAL = {
   code: 'context_length_exceeded',
 } as const
 
-/** Same estimator the rig uses elsewhere (serialized bytes / 4); deliberately crude and honest. */
+/**
+ * Bytes → tokens, CALIBRATED against the host's own meter rather than a guess.
+ *
+ * Measured on 0.2.0-rc.2 in one leg: a request of **78,140** serialized bytes was reported by
+ * `tokenMeter.measure()` as 27,306 / 27,952 / 28,928 tokens — about **2.8 bytes per token**. My
+ * first version used the conventional 4 and counted only message content, which under-counted a
+ * real request by ~40%: `heavy` ran a 120,129-byte prompt that the host measured at 35,428 tokens
+ * (over its 32,000 window) and the proxy let through as "27K", so enforcement never fired and the
+ * leg looked unchanged. Two bugs in one line: the divisor, and ignoring the header (system prompt,
+ * tool schemas, templates) that the host counts.
+ *
+ * So: whole serialized body, divided by 3. Slightly conservative on purpose — an enforcement that
+ * fires a little early still exercises the pressure regime, while one that fires late exercises
+ * nothing. The number lives here with its measurement, not in a config someone can drift.
+ */
+export const BYTES_PER_TOKEN = 3
+export const BYTES_PER_TOKEN_MEASURED = 2.8
+
 export function estimateRequestTokens(body: unknown): number {
   try {
-    const b = body as { messages?: unknown }
-    const msgs = Array.isArray(b?.messages) ? b.messages : []
-    const chars = msgs.reduce((n: number, m) => {
-      const c = (m as { content?: unknown })?.content
-      return n + (typeof c === 'string' ? c.length : JSON.stringify(c ?? '').length)
-    }, 0)
-    return Math.ceil(chars / 4)
+    return Math.ceil(JSON.stringify(body ?? '').length / BYTES_PER_TOKEN)
   } catch {
     return 0
   }

@@ -464,7 +464,10 @@ test('the note records what the roster reader saw at EACH attempt, not just at t
   const r = await makeDoorRunner(remote, sessions, door, async () => false, { attemptPauseMs: 1, attempts: 3 })('parent-1')
   // this fake HAS create and LACKS using, so the markers must read +c-u — the row describes its
   // own fixture, which is the point of printing the shape at all.
-  assert.match(r.message, /\[roster per attempt: empty\+c-u → has\+c-u → has\+c-u\]/,
+  // four capability flags now ride each entry (create/using/open/navigator); this fake has only
+  // create, so `+c-u-o-w` is exactly what it should read — the claim being tested is the
+  // per-attempt trace, which is unchanged in meaning.
+  assert.match(r.message, /\[roster per attempt: empty\+c-u\+o-w → has\+c-u\+o-w → has\+c-u\+o-w\]/,
     `the trace must show the reader's answer at each decision point: ${r.message}`)
 })
 
@@ -498,4 +501,68 @@ test('a refusal with no message is still VISIBLE — an empty reason is not a si
   assert.match(r.message, /adoption refused: \(\S[^)]*\)|adoption refused: [^\s(][^)]*/,
     `a refusal whose message is empty must say so with something, got: ${r.message}`)
   assert.doesNotMatch(r.message, /adoption refused: \)/, 'and never render an empty reason')
+})
+
+test('the note reports what the CANDIDATE BLOCKS did, from inside them (#77)', async () => {
+  // The runner can only report the decision it made; the live contradiction was a decision that
+  // said "try" while nothing downstream ever appeared. So the blocks now narrate themselves:
+  // entry, settlement and rejection are all visible, and an absent entry line is itself the answer.
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-narrate-1') } } }) } } as unknown as ClientRemote
+  const sessions = {
+    refresh: () => Promise.resolve(),
+    projectList: () => undefined,
+    create: () => Promise.resolve('ch-narrate-1'),
+    open: () => undefined,
+    list: { getSnapshot: () => ({ ids: ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attempts: 1, attemptPauseMs: 1 })('parent-1')
+  assert.match(r.message, /tried: enter-create/, `the adoption block must announce entry: ${r.message}`)
+  assert.match(r.message, /settle-create/, 'and its outcome — settled or refused, never silence')
+
+  const silent = { open: () => undefined, list: { getSnapshot: () => ({ ids: ['session-a'] }) } } as unknown as ClientSessions
+  const r2 = await makeDoorRunner(remote, silent, door, async () => false, { attempts: 1, attemptPauseMs: 1 })('parent-1')
+  assert.doesNotMatch(r2.message, /enter-create/, 'a service without those verbs must not claim to have tried: ' + r2.message)
+  assert.match(r2.message, /tried: none/, 'and must say plainly that nothing was available to try')
+})
+
+/**
+ * #77, root cause at last: **`sessions.open` does not exist.** The host's own fork button calls
+ * `ctx.uiWorkspace.openSession(childId)` (`dsh-client-ui-chat/lib/client.js`), and the sessions
+ * service exposes `create/fork/using/retain/binding/refresh` — no `open`. `openByService` opens
+ * with `if (typeof svc?.open !== 'function') return false`, so EVERY service attempt since the
+ * door was written has returned false on line one, silently, while the note blamed the roster.
+ * What looked like "the client refuses to catalogue" was our door calling a verb that was never
+ * there. The workspace navigator is now the primary path, and the note says which one it used.
+ */
+test('the door navigates with the workspace openSession verb, not a sessions.open that never existed', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-nav-1') } } }) } } as unknown as ClientRemote
+  const calls: string[] = []
+  const navigator = { openSession: (id: string) => { calls.push(`openSession:${id}`) } }
+  const sessions = { open: (id: string) => { calls.push(`sessions.open:${id}`) }, list: { getSnapshot: () => ({ ids: ['session-a'] }) } } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => calls.length > 0, { navigator } as never)('parent-1')
+  assert.deepEqual(r, { ok: true, message: '' }, `the navigator should have switched: ${JSON.stringify(r)}`)
+  assert.deepEqual(calls, ['openSession:ch-nav-1'], `sessions.open must not be preferred over the verb the host itself uses: ${calls.join(' → ')}`)
+})
+
+test('a door with no navigator still reports that plainly instead of pretending it tried', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-nav-2') } } }) } } as unknown as ClientRemote
+  // a sessions service with NO `open`: this is the real 0.2.x shape, and it is what every live
+  // probe in #77's history was silently hitting
+  const sessions = { create: () => Promise.resolve('ch-nav-2'), list: { getSnapshot: () => ({ ids: ['session-a'] }) } } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attempts: 1, attemptPauseMs: 1 })('parent-1')
+  assert.match(r.message, /-o/, 'the note must say the open verb was absent at the decision point: ' + r.message)
+  assert.match(r.message, /no open or openSession verb/, 'and name the missing capability, not just a symptom')
+})
+
+test('production wires the navigator — an optional port that stops being passed is the bug class (#77)', () => {
+  const src = readFileSync(path.join(process.cwd(), 'src', 'client', 'index.ts'), 'utf8')
+  assert.match(src, /inject = \[[^\]]*'uiWorkspace'[^\]]*\]/,
+    'uiWorkspace must be in the client inject list, or the door has no way to switch')
+  assert.match(src, /navigator: uiWorkspace/, 'and it must actually be handed to the runner')
 })

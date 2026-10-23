@@ -44,7 +44,10 @@ interface Ctx {
   get(name: string): unknown
 }
 
-export const inject = ['slots', 'remote', 'remote.commands', 'sessions'] as const
+// #77: `uiWorkspace` is not optional in practice — it owns `openSession(target)`, the verb the
+// host's own fork button uses (`ctx.uiWorkspace.openSession(childId)` in dsh-client-ui-chat).
+// `sessions` has no `open` at all, so without this row the door has never had a way to switch.
+export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
 
 /** Props composed by the slot framework: owner (`messageId`) + our injected verb. */
 interface DoorActionProps {
@@ -238,6 +241,10 @@ export function apply(ctx: Ctx): void {
   const remote = (ctx.get('remote') ?? {}) as ClientRemote
   let sessions: ClientSessions | undefined
   try { sessions = ctx.get('sessions') as ClientSessions | undefined } catch { sessions = undefined }
+  // Defensive: a host that cannot provide the navigator must leave the door registering and
+  // reporting its own limitation, not failing at boot.
+  let uiWorkspace: { openSession?: (id: string) => unknown } | undefined
+  try { uiWorkspace = ctx.get('uiWorkspace') as { openSession?: (id: string) => unknown } | undefined } catch { uiWorkspace = undefined }
   // No early return on missing descriptors: the buttons register regardless
   // and the click reports the gap. A missing button is worse than a button
   // that explains itself. Components and runners are built ONCE here — slot
@@ -263,7 +270,7 @@ export function apply(ctx: Ctx): void {
         await new Promise((r) => setTimeout(r, 250))
       }
       return currentSessionId() === child
-    }),
+    }, { ...(uiWorkspace !== undefined ? { navigator: uiWorkspace } : {} ) }),
     component: makeDoorAction(door),
   }))
   slots.inject('conversation.chat.assistant-actions', () => rows.map(({ door, run, component }) => slots.register({
