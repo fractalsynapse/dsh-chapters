@@ -413,6 +413,46 @@ export function logHasEvent(file: string, type: string, text?: string): boolean 
  * THAT SESSION: identity from localStorage, turn-complete = its own log's
  * own turn/end. Returns the session id for downstream durable assertions.
  */
+/**
+ * The preset a session actually COMPOSED WITH, read from its own durable header.
+ *
+ * #56/#77, the find of the week: the profile pinned the preset under a row id the 0.2.x host no
+ * longer mounts (`agent-presets` survives only as a client UI section; the registry row is
+ * `agent-preset-registry`, whose `defaultId` is `selectedDefault ?? default`). Patch layers merge
+ * by id, so the row was inert, every boot ran `standard`, and the legs then waited 8 minutes for
+ * chapters that the realm had no engine to write — a product-shaped conclusion from an
+ * un-mounted product. The header is the cheapest possible place to see the truth, so the rig now
+ * looks, and says so in one sentence instead of an hour of polling.
+ */
+export function agentPresetFromLog(logText: string): string | null {
+  for (const line of logText.split('\n').slice(0, 4)) {
+    try {
+      const e = JSON.parse(line) as { type?: string, agentPreset?: string }
+      if (e?.type === 'session') return e.agentPreset ?? null
+    } catch { /* a partial write; keep looking at the next line */ }
+  }
+  return null
+}
+
+/** The words the tripwire says — a pure function so a unit row can read them without a browser. */
+export function presetMismatchMessage(sessionId: string, actual: string | null, expected: string): string {
+  return (
+    `e2e: session ${sessionId} composed with agentPreset=${JSON.stringify(actual)}, not "${expected}" — `
+    + 'the chapters realm (persona, ChaptersCompactionEngine, arrival-time artifacting, the turn/end signature '
+    + 'listener that first writes the registry) is NOT mounted in this boot, so every compaction-dependent '
+    + 'assertion below would be measuring an absent product. Fix: the profile pin must reach the row the pinned '
+    + 'host mounts — `- id: agent-preset-registry` with `selectedDefault: chapters` — and the realm config must '
+    + 'be pinned on `preset-chapters` (tests/e2e/rig-preset-pin.ts); see issues #56/#77.'
+  )
+}
+
+/** The precondition every chapters journey needs, asserted BEFORE its polls. */
+export function assertChaptersPreset(sessionId: string, expected = 'chapters'): void {
+  const preset = agentPresetFromLog(sessionLogTextById(sessionId))
+  if (preset === expected) return
+  throw new Error(presetMismatchMessage(sessionId, preset, expected))
+}
+
 export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs = 20_000 | false): Promise<string> {
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))
@@ -471,5 +511,11 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     }
     await expect(page.locator('button[aria-label="Fork with chapters"]').first(), 'assistant row exposes the fork action').toBeVisible({ timeout: actionGraceMs })
   }
+  // #56/#77 PRECONDITION, before any journey polls anything: did this session actually compose
+  // with the chapters preset? A durable log can take a moment to flush, so this waits for a
+  // READABLE header and then asserts the value — it never waits for the value to become true.
+  await expect.poll(() => sessionLogTextById(sid) !== '', { timeout: 60_000, intervals: [2000] },
+    `session ${sid} never produced a durable log to read its preset from`).toBe(true)
+  assertChaptersPreset(sid)
   return sid
 }

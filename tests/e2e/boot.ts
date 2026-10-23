@@ -3,6 +3,7 @@ import net from 'node:net'
 import path from 'node:path'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
+import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -259,6 +260,20 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
       // #61 item 8: THIS boot's chapters go to this port's home, never to the repo's store root.
       p = applyRigPluginPatch(p, { storeRoot: rigStoreRoot(port), ...(pins.promptModel !== undefined ? { promptModel: pins.promptModel } : {}) })
+      // #56/#77, measured: `Pins.thresholdRatio` / `toolResultArtifactTokens` / `enrichment` /
+      // `noAuxModel` were collected and applied by NOTHING, so every leg ran realm defaults while
+      // the script header claimed 0.5 / floor 1,000,000 / no-aux. Those keys live on the preset's
+      // `chapters-engine` row — so the profile must re-declare THAT row, carrying the shipped
+      // plugin tree (a partial `config` row would replace it and delete the preset's plugins).
+      // #56/#77: guarantee the REGISTRY pin in this boot's own patch. The source home
+      // `.dshdev-local` was bootstrapped on Oct 16 and still carried the retired
+      // `- id: agent-presets` row, so the corrected id in `dev/profile-cordis.patch.yml` never
+      // reached a single leg — same trap as the copied plugin tree (#54), same fix: assert the
+      // profile fact per boot instead of trusting a copy step nobody re-runs.
+      const devProfile = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'dev', 'profile-cordis.patch.yml'), 'utf8')
+      p = ensurePresetRegistryPin(p, devProfile)
+      const shippedPatch = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'cordis.patch.yml'), 'utf8')
+      p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port)))
       fs.writeFileSync(patchPath, p)
     }
   }
