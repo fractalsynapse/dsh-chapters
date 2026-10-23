@@ -10,10 +10,11 @@
 # self-lifting instead of a red job on every future PR (the same pattern `hostSupportsPresetRows`
 # uses for a host that cannot register preset rows). A re-distill updates `host`, and the
 # acceptance chain starts running again with no code edit.
-host = 0.2.0-rc.2
+host = 0.1.5-rc.1
 # host this branch pins (dev/dsh-host-lock) — mismatch above is tracked by:
 pinned = 0.2.0-rc.2
 tracking = https://github.com/treeseed-ai/dsh-chapters/issues/56
 distilledAt = 2026-10-23
-reason = re-distilled on 0.2.0-rc.2 under one rig behavior: preset pinned on the row the host mounts,
-realm pins reaching chapters-engine, window enforced in record AND replay, one send per instruction (#81)
+reason = the 2026-10-23 re-distill was recorded against a LINKED DEV BUILD of the host (`spawn('dsh')` took
+PATH, not the pin) and cannot replay on CI; the chain stays closed until the corpus is distilled under
+the pinned hermetic host (#89). Prior causes still apply: preset row id retired, flattened tool/result shape.

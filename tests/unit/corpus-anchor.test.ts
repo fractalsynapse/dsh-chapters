@@ -37,13 +37,19 @@ const tree = (opts: { corpus?: string, pinned?: string }): string => {
  * version could not: it asserts WHY it is open (pinned equals distilled) and mutates the record
  * to prove a future pin move closes the gate again without anyone touching a test.
  */
-test('the corpus is anchored to the pinned host, and the gate re-closes on drift', () => {
+test('the gate is CLOSED again on purpose: the last corpus was distilled on a host that is not the pin (#89)', () => {
   const root = path.resolve(process.cwd())
   const a = corpusAnchor(root)
   assert.equal(a.pinned, '0.2.0-rc.2', 'the lock is the source of the pin (no second literal)')
-  assert.equal(a.anchored, true, 'the nine legs were re-distilled on 0.2.0-rc.2 (#56) — replay must now RUN, not refuse by name')
-  assert.equal(a.distilled, a.pinned, 'open means the RECORD matches the PIN, not that a flag says so')
-  assert.match(a.reason, /0\.2\.0-rc\.2|re-distilled/i, 'and the reason field still explains itself to a reader')
+  // I opened this gate on 2026-10-23 and closed it again the same day, for a reason worth keeping:
+  // the rig booted `dsh` from PATH, which on the recording machine was a LINKED DEV BUILD reporting
+  // the same version string as the pin. Local strict replay was green on that build and impossible on
+  // CI's published tarball. A lifted gate that admits a corpus no one else can replay is a
+  // decorative gate, so it goes back to closed until the corpus is distilled under the pinned host —
+  // at which point the mutation branch below is what proves the reopen is real.
+  assert.equal(a.anchored, false, 'replay must REFUSE by name until the corpus matches the pinned host')
+  assert.match(a.reason, /0\.1\.5-rc\.1/, 'the refusal states which version it was distilled against')
+  assert.match(a.reason, /DEV BUILD|dev build|pinned/i, 'and why — a reader must not have to read the issue to learn it')
 
   // mutation: the drift that matters is the RECORD falling behind the PIN. `pinned` in the file
   // is documentary — `corpusAnchor` resolves the truth from the lock — so the honest mutation is
@@ -51,14 +57,22 @@ test('the corpus is anchored to the pinned host, and the gate re-closes on drift
   // `dev/dsh-host-lock` and forgets to re-distill.
   const file = path.join(root, 'tests', 'fixtures', 'model-tape', 'CORPUS_HOST')
   const before = fs.readFileSync(file, 'utf8')
+  const baseline = corpusAnchor(root).anchored
   try {
+    // (1) write the PIN into the record: the gate must OPEN with no code change — this is the
+    // mechanism the whole re-anchor ends on, and asserting it here means it is proven whether or not
+    // the committed record currently claims it.
+    fs.writeFileSync(file, before.replace(/^host = .*$/m, `host = ${a.pinned}`))
+    assert.equal(corpusAnchor(root).anchored, true, 'a record that names the pin opens the chain by data alone')
+    // (2) write a stale version: it must close again, naming both versions.
     fs.writeFileSync(file, before.replace(/^host = .*$/m, 'host = 0.1.5-rc.1'))
     const stale = corpusAnchor(root)
     assert.equal(stale.anchored, false, 'a corpus left behind by the pin must re-close the chain with no code edit')
     assert.match(stale.reason, /0\.1\.5-rc\.1/, 'and say which version it was distilled against')
   } finally {
     fs.writeFileSync(file, before)
-    assert.equal(corpusAnchor(root).anchored, true, 'restored, and the gate is open again — the mutation left nothing behind')
+    assert.equal(corpusAnchor(root).anchored, baseline,
+      'restored to the committed state exactly — the mutation leaves nothing behind either way')
   }
 })
 
