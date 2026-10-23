@@ -1,11 +1,28 @@
 import { bootE2eServer, type Pins } from './boot.ts'
+import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
 
 /**
  * One server per CONFIG LOAD (proven lifecycle: project setupFiles die with
  * worker restarts — measured 2026-09-19). The two suites run as two
  * invocations with env pins: E2E_PORT / E2E_THRESHOLD / E2E_FLOOR.
  */
-export default async function setup(): Promise<() => Promise<void>> {
+export default async function setup(fullConfig?: {
+  projects?: { env?: Record<string, string> }[]
+}): Promise<() => Promise<void>> {
+  // #56: `playwright.config.ts` per-project `env` is now the ONE authority for the regime — but
+  // globalSetup runs BEFORE Playwright applies that env to workers, so the boot used to read
+  // defaults (port 41731, threshold 0.75) while the spec's worker saw the pins: record and replay
+  // booted DIFFERENT realms, and replay failed as tape MISSes that looked like prompt drift.
+  // Adopt the selected project's env here, without overwriting anything a developer set on the
+  // command line — an explicit E2E_THRESHOLD still wins, which is how a leg gets re-tuned.
+  // `config.projects` is the UNFILTERED list and its entries do not carry `env`; the selection
+  // lives in `filteredProjects` (measured: 11 projects vs the one `--project` asked for).
+  // #56: the boot's pins come from the rig table, selected by the invocation's `--project`.
+  // `config.projects` is unfiltered and its entries carry no `env`, so reading the CONFIG here
+  // silently gave defaults (port 41731, threshold 0.75) while workers saw the pins — record and
+  // replay ran different realms and replay failed as tape MISSes that looked like prompt drift.
+  const selected = projectFromArgv((fullConfig as { argv?: string[] } | undefined)?.argv)
+  applyRigEnv(selected)
   const port = Number(process.env.E2E_PORT ?? '41731')
   const pins: Pins = {
     thresholdRatio: process.env.E2E_THRESHOLD ?? '0.75',

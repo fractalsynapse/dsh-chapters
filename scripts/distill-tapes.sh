@@ -37,10 +37,13 @@ if [[ -z "${E2E_UPSTREAM:-}" ]]; then
   fi
 fi
 
-# project:port:threshold:extra — mirrors `npm run test:e2e`'s pins exactly
+# project:port — DISPLAY ONLY (the boot port comes from the project env in playwright.config.ts)
 declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739)
-declare -A THRESH=([suite]=0.75 [heavy]=0.5 [arrival]=0.9 [enrich]=0.9 [fanout]=0.75 [rules]=0.9 [fork]=0.75 [plans]=0.99 [prompt]=0.99)
-declare -A EXTRA=([heavy]="E2E_FLOOR=1000000" [arrival]="E2E_FLOOR=500" [enrich]="E2E_ENRICH=1" [plans]="E2E_NO_AUX_MODEL=1" [prompt]="E2E_NO_AUX_MODEL=1 E2E_PROMPT=1")
+# #56: THRESHOLD/EXTRA tables DELETED. The regime lives in `playwright.config.ts` as
+# per-project `env`, because three copies (this file, `npm run test:e2e`, boot defaults) had
+# silently diverged: replay booted suite/rules/fork with no threshold while distill had recorded
+# them at 0.75/0.9/0.75 — a different realm than the tape, so the surface diverged and replay
+# MISSed. PORTS below is display-only; a row asserts it still agrees with the config's env.
 trap 'stop_stub' EXIT
 ORDER=(suite heavy arrival enrich fanout rules fork plans prompt)
 
@@ -73,13 +76,20 @@ for proj in "${want[@]}"; do
   if [[ -z "${PORTS[$proj]:-}" ]]; then
     echo "distill: unknown project '$proj' (known: ${ORDER[*]})" >&2; failed+=("$proj:unknown"); continue
   fi
-  leg_extra="${EXTRA[$proj]:-}"
+  leg_extra=""
   # plans/prompt own their upstream: the scripted stub, or nothing (see STUB_PROJECTS above).
   if [[ " ${STUB_PROJECTS} " == *" ${proj} "* ]]; then
     if ! start_stub "${proj}"; then failed+=("${proj}:stub-down"); continue; fi
     leg_extra="${leg_extra} E2E_UPSTREAM=http://127.0.0.1:${STUB_PORT}"
   fi
-  echo "=== distill ${proj} — port ${PORTS[${proj}]}, threshold ${THRESH[${proj}]} ${leg_extra} ==="
+  # the header prints the EFFECTIVE regime, read from the one table the boot uses, so a tape's
+  # provenance is auditable from the runner log alone (the row in distill-upstream-pins insists).
+  regime=$(node --experimental-strip-types --input-type=module -e "
+    const m = await import('./tests/e2e/rig-pins.ts');
+    const p = m.RIG_PINS['$proj'];
+    process.stdout.write(p ? 'port=' + p.port + ' threshold=' + p.threshold + (p.floor ? ' floor=' + p.floor : '') + (p.enrich ? ' enrich=1' : '') + (p.noAuxModel ? ' noAux=1' : '') + (p.promptModel ? ' prompt=1' : '') : 'UNPINNED')
+  " 2>/dev/null)
+  echo "=== distill ${proj} — port ${PORTS[${proj}]} regime:${regime:-UNREADABLE} ${leg_extra} ==="
   [[ "${KEEP_TAPES:-}" == "1" ]] || rm -rf "tests/fixtures/model-tape/$proj"
   # shellcheck disable=SC2086
   # FULL output to a per-leg file, never through `tail`: #54 measured a leg that produced no
@@ -88,7 +98,8 @@ for proj in "${want[@]}"; do
   mkdir -p var/distill
   leg_log="var/distill/${proj}-$(date +%H%M%S).log"
   started=$(date +%s)
-  env E2E_MODEL=record E2E_PORT="${PORTS[$proj]}" E2E_THRESHOLD="${THRESH[$proj]}" E2E_TAPE="$proj" ${leg_extra:-} \
+  # ${leg_extra} is the stub upstream only — the pins are the config's (#56).
+  env E2E_MODEL=record ${leg_extra:-} \
     timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "$leg_log" 2>&1 &
   leg_pid=$!
   # heartbeat: tape entries + last upstream journal line, every 60s. A stall becomes
