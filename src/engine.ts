@@ -802,6 +802,41 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * on `/compact`) because those two disagreeing is exactly the kind of drift a field report needs
    * to be able to tell apart. (#78)
    */
+  /** See the call site: a decline while OVER the trigger is a statement, not a shrug. Never throws. */
+  async #reportDecline(agent: Agent, signal: AbortSignal): Promise<void> {
+    try {
+      const route = this.lastRoute
+      const meter = (this.ctx as unknown as {
+        tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number }, estimateMessage?: (m: unknown) => number }
+      }).tokenMeter
+      if (route === null || meter === undefined) return
+      const surface = meter.measure?.(agent.session)?.totalTokens
+      const llm = (this.ctx as unknown as {
+        llm?: { resolveModelInfo?: (p: string, m: string, s: AbortSignal) => Promise<unknown> }
+      }).llm
+      if (typeof surface !== 'number' || typeof llm?.resolveModelInfo !== 'function') return
+      const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
+        { context?: { contextWindow?: number } } | undefined
+      const window = info?.context?.contextWindow
+      const ratio = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
+      if (typeof window !== 'number' || typeof ratio !== 'number') return
+      const triggerTokens = Math.floor(window * ratio)
+      if (surface <= triggerTokens) return
+      const session = agent.session as unknown as ArrivalSessionShim & { surface: { nodes: number[] } }
+      let oversized = 0
+      let biggest = 0
+      for (const seq of session.surface.nodes) {
+        const ev = session.eventAt(seq)
+        if (ev?.type !== 'tool/result') continue
+        const est = meter.estimateMessage?.((ev as { data?: { message?: unknown } }).data?.message) ?? 0
+        if (est > biggest) biggest = est
+        if (est > triggerTokens) oversized += 1
+      }
+      diagnosticWarn(this.ctx.logger, 'realm:engine:decline',
+        `relief declined while the surface is over the trigger (surface=${String(surface)} trigger=${String(triggerTokens)} window=${String(window)} ratio=${String(ratio)}): no safe range to compact, and ${String(oversized)} inline tool/result node(s) individually exceed the trigger (largest ${String(biggest)} tok). Context relief needs the arrival floor below that node size — toolResultArtifactTokens is the operator switch, and the archive keeps every byte either way.`)
+    } catch { /* a report must never become the reason compaction failed */ }
+  }
+
   #noteDecision(where: string, trigger: unknown, result: CompactionResult | null, agent: Agent): void {
     // The INPUTS, not just the verdict: `decided: none` is one word covering two opposite bugs —
     // no routed target (the base returns null on line one) and under-threshold (a real decision).
@@ -842,6 +877,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       result = await super.compactIfNeeded(agent, trigger, signal)
     } catch (error) {
       await this.#finalizeGuarded(agent)
+      // A throw while the surface is OVER the trigger is the same field failure as a null —
+      // arguably worse, because the user sees the endpoint's 400 rather than our explanation.
+      // Report first, then rethrow untouched; the report itself can never mask the error.
+      await this.#reportDecline(agent, signal)
       // no result exists on this path — the base engine threw — so the line says `none` and the
       // reason is the rethrown error, not a value invented for the log
       this.#noteDecision('compactIfNeeded', trigger, null, agent)
@@ -852,6 +891,13 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // produced no `compaction/*` event at all, and nothing could say whether the base engine
     // declined (a meter/threshold disagreement) or acted and our finalization lost the evidence.
     // The decision now sits beside the entry, in the same artifact.
+    // #78: the quiet failure was the worst part. Six compactions, then a raw `400 … exceeds the
+    // context window` from the endpoint, and nothing the product said about WHY relief stopped.
+    // This reports the numbers it actually had — surface, trigger, window, ratio, and how many
+    // inline tool/results are individually larger than the trigger — and changes no behavior:
+    // the arrival floor is the operator's switch (AGENTS: a behavior switch, not a knob), and the
+    // engine does not get to reinterpret it silently.
+    if (result === null) await this.#reportDecline(agent, signal)
     this.#noteDecision('compactIfNeeded', trigger, result, agent)
     return result
   }

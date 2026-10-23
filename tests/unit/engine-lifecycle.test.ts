@@ -42,6 +42,10 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
   const domainLike = { table, close: async () => {} }
   const logs: Array<['info' | 'warn', string]> = []
   let resolveModelInfoThrows = false
+  // #78: the surface the meter reports must be settable, because the state under test is
+  // relief-declined-while-over-trigger; with a fixed 12 that state was unreachable by
+  // construction, which is one reason the field failure stayed invisible.
+  let surfaceTokens = 12
   let streamText = 'PLOT: mid-refactor, next run tests.'
   // THE REAL cordis root context: the Service base chain touches container
   // internals (provide/mixin/tracker) that a hand-rolled fake cannot satisfy —
@@ -72,7 +76,10 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
   process.stderr.write = ((o: typeof wes) => (c: Parameters<typeof wes>[0], ...r: Parameters<typeof wes>) => { feed(c); return o(c, ...r) })(wes)
   ctx.provide('storageDomain', { open: async () => domainLike, get: () => domainLike })
   ctx.provide('tokenMeter', {
-    measure: () => ({ totalTokens: 12 }),
+    // #78: the surface size has to be settable, because the case under test is precisely
+    // "relief declined while the surface was OVER the trigger" — with a fixed 12 the code can
+    // never be observed in that state, which is how the field failure stayed invisible.
+    measure: () => ({ totalTokens: surfaceTokens }),
     estimateMessage: (m: unknown) => Math.ceil(JSON.stringify(m).length / 4),
   })
   ctx.provide('llm', {
@@ -117,7 +124,7 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
     }
   }
   const settle = () => new Promise((r) => setTimeout(r, 120))
-  return { engine, cwd, store, logs, setStreamText: (t: string) => { streamText = t }, fire: (session: unknown, event: unknown) => { void ctx.emit('session/event', session, event) }, sessionOf, settle, table, setThrow: (v: boolean) => { resolveModelInfoThrows = v }, dispose: () => { process.stdout.write = ws; process.stderr.write = wes; try { (ctx.fiber as { dispose?: () => unknown } | undefined)?.dispose?.() } catch { /* root teardown is best-effort in tests */ } fs.rmSync(cwd, { recursive: true, force: true }) } }
+  return { engine, cwd, store, logs, setStreamText: (t: string) => { streamText = t }, fire: (session: unknown, event: unknown) => { void ctx.emit('session/event', session, event) }, sessionOf, settle, table, setThrow: (v: boolean) => { resolveModelInfoThrows = v }, setSurface: (n: number) => { surfaceTokens = n }, dispose: () => { process.stdout.write = ws; process.stderr.write = wes; try { (ctx.fiber as { dispose?: () => unknown } | undefined)?.dispose?.() } catch { /* root teardown is best-effort in tests */ } fs.rmSync(cwd, { recursive: true, force: true }) } }
 }
 
 // ---------------------------------------------------------------- construction
@@ -474,4 +481,62 @@ test('the override reports what the base engine DECIDED, not just that it ran (#
     else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
     fs.rmSync(sinkPath, { force: true })
   }
+})
+
+/**
+ * #78: relief that declines while the surface is OVER the trigger must be a delivered statement.
+ *
+ * The field shape was brutal in its quietness: six compactions, then a hard `400 … exceeds the
+ * context window` from the endpoint, and nothing the product itself said about why relief stopped.
+ * The rule this pins is about *visibility*, not about overriding anyone's arrival floor — the floor
+ * is the operator's behavior switch (AGENTS) and the engine does not get to quietly reinterpret it.
+ */
+test('a declined relief while over the trigger is reported with its numbers (#78)', async () => {
+  const sinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decline-sink-'))
+  const sinkPath = path.join(sinkDir, 'diagnostics.log')
+  const prevSink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness({ thresholdRatio: 0.5 }, {})
+  try {
+    const events = [human(0, 'read the big thing'), asst(1, 'reading it now, one result coming')]
+    const session = h.sessionOf('s-decline', events, {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    h.setSurface(30_000)   // window 32,000 x ratio 0.5 => trigger 16,000
+    // this fake session makes the BASE engine throw rather than return null — which is the other
+    // half of the same field failure, and the row's claim is about the report either way. The
+    // rethrow itself is pinned by the pre-existing rows above (they assert the original error
+    // survives finalization), so swallowing it here steals nothing from them.
+    await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal as never)
+      .catch(() => undefined)
+    // read the SINK, not the console: this harness has no ctx.logger, and r19 proved a headless
+    // `dsh web` swallows logger output. An artifact nobody can read is not a delivery.
+    const sink = fs.existsSync(sinkPath) ? fs.readFileSync(sinkPath, 'utf8') : ''
+    const warn = sink.split('\n').filter((l) => /relief declined/.test(l) && /surface=30000/.test(l))
+    assert.ok(warn.length >= 1,
+      `an over-trigger decline must be reported with its numbers, got: ${sink.slice(0, 320)}`)
+    assert.match(warn[0]!, /trigger=16000/, 'naming the trigger it was measured against')
+    assert.match(warn[0]!, /window=32000/, 'and the window that produced it')
+    assert.match(warn[0]!, /tool\/result node|no safe range/, 'and the shape of the cause, not just the fact')
+    assert.match(warn[0]!, /toolResultArtifactTokens/, 'pointing at the operator switch that fixes it')
+  } finally {
+    h.dispose()
+    if (prevSink === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
+    fs.rmSync(sinkDir, { recursive: true, force: true })
+  }
+})
+
+test('an under-trigger decline stays quiet — this is not a per-step notice (#78)', async () => {
+  const h = harness({ thresholdRatio: 0.9 }, {})
+  try {
+    const events = [human(0, 'hello'), asst(1, 'done')]
+    const session = h.sessionOf('s-quiet', events, {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    h.setSurface(12)
+    await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal as never)
+    assert.equal(h.logs.filter(([, l]) => /relief declined/.test(l)).length, 0,
+      'nothing is wrong when the surface is under the trigger; a warning here is noise that hides the real one')
+  } finally { h.dispose() }
 })
