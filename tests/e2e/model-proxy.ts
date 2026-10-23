@@ -50,6 +50,14 @@ const VOLATILE: Array<[RegExp, string]> = [
   // move whenever a body-render detail shifts); the chapter path already
   // identifies the line, so pinning the exact count only makes tapes brittle.
   [/\(\d+ est tokens\)/g, '(<N> est tokens)'],
+  // SESSIONID-BLIND (#85, measured): the compaction notice cites chapter paths under
+  // `<store-root>/<rootSession>/…`, and `rootSession` is a per-boot uuid — so a replay that
+  // compacted at the SAME step with the SAME bytes missed, because the path named a different
+  // session. Same class as HOSTPORT-BLIND above: a run-scheduling fact of the port-keyed-home
+  // design, never product content. Without it, `heavy` diverged at msg1 with commonPrefix=1 while
+  // the tape held the matching entry all along (0003/0006: notice at index 1, normLen 5).
+  [/\bs(?:ession|ubagent|ession-)?-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<SESSIONID>'],
+  [/\bch-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<SESSIONID>'],
   // ⟦omitted:host-injected …, N chars⟧ markers embed the injected document's
   // size — which shifts with any workspace-doc edit (and real target projects
   // edit their docs constantly). The marker's presence + label are the fact;
@@ -287,14 +295,21 @@ export function describeMiss(tape: TapeEntry[], incoming: unknown[]): string {
   // `file` is filled by the tape loader; a caller without it (a test, a partially built tape)
   // still gets a usable index rather than a mysterious `?`
   let best = { entry: '?', common: -1, idx: -1 }
-  tape.forEach((_unused, i) => { void i })
+  const scored: Array<{ entry: string, common: number }> = []
   for (let ti = 0; ti < tape.length; ti += 1) {
     const e = tape[ti]
     const stored = (e.prefix ?? []).map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
     let n = 0
     while (n < stored.length && n < inc.length && stored[n] === inc[n]) n += 1
-    if (n > best.common) best = { entry: e.file ?? `entry#${String(ti)}`, common: n, idx: ti }
+    const name = e.file ?? `entry#${String(ti)}`
+    scored.push({ entry: name, common: n })
+    if (n > best.common) best = { entry: name, common: n, idx: ti }
   }
+  // Ties were a lie: with msg0 matching every entry and msg1 matching none, the first entry won by
+  // accident and reported the QUESTION-bearing entry as "closest" — pointing a reader at the wrong
+  // turn. Report every entry that ties at the maximum, so "the notice matches no recorded notice"
+  // is visible as such.
+  const tied = scored.filter((x) => x.common === best.common).map((x) => x.entry)
   const at = best.common
   const wantIdx = at < inc.length ? String(at) : 'end'
   const got = at < inc.length ? inc[at].slice(0, 110) : ''
@@ -304,7 +319,7 @@ export function describeMiss(tape: TapeEntry[], incoming: unknown[]): string {
     const s = (e.prefix ?? [])[at]
     return substituteAll(typeof s === 'string' ? s : JSON.stringify(s) ?? '').slice(0, 110)
   })()
-  return `closest=${best.entry} commonPrefix=${String(best.common)} divergeAt=msg${wantIdx}`
+  return `closest=${best.entry}${tied.length > 1 ? ` tied=[${tied.join(',')}]` : ''} commonPrefix=${String(best.common)} divergeAt=msg${wantIdx}`
     + ` got=${JSON.stringify(got)} expected=${JSON.stringify(exp)}`
 }
 
@@ -514,6 +529,11 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           return
         }
         if (opts.mode === 'replay') {
+          // The journal must show replay's requests too. When enforcement was hoisted above this
+          // branch, `START` stayed down in the record/live path and replay went unobservable —
+          // which is how a divergence hunt ended up reasoning from silence. One line per request,
+          // same fields, mode named.
+          journal(`REQUEST mode=replay path=${(req.url ?? '/').split('?')[0]} msgs=${String(inc.length)} reqBytes=${String(raw.length)}`)
           const tape = loadTape(opts.tapeDir)
           const hit = findReplay(tape, inc)
           if (hit !== null) {

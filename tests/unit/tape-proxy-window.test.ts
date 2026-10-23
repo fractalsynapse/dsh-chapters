@@ -212,3 +212,27 @@ test('describeMiss names the closest entry and the message where the bytes stop 
   assert.match(line, /got=.*ANSWER ONE/, 'shows what replay asked: ' + line)
   assert.match(line, /expected=.*answer one/, 'and what the tape holds: ' + line)
 })
+
+test('a replay request is journaled, not silently served (#85)', async () => {
+  // Every mode must be auditable from one file. Without this line a divergence between record and
+  // replay is invisible, and "the tape regime differs" can only be argued, never measured.
+  const { describeMiss } = await import('../../tests/e2e/model-proxy.ts')
+  assert.equal(typeof describeMiss, 'function', 'the describer is exported for its row and for the journal')
+  const src = (await import('node:fs')).readFileSync(
+    (await import('node:path')).resolve(import.meta.dirname, '..', '..', 'tests', 'e2e', 'model-proxy.ts'), 'utf8')
+  const replayBranch = src.slice(src.indexOf("if (opts.mode === 'replay') {"), src.indexOf("if (opts.mode === 'replay') {") + 900)
+  assert.match(replayBranch, /REQUEST mode=replay/, 'the replay branch must journal the request itself')
+})
+
+test('a per-boot session id in a cited path cannot break tape matching (#85)', async () => {
+  const { substituteAll } = await import('../../tests/e2e/model-proxy.ts')
+  const a = '{"role":"user","content":"Chapter archive: 3 chapters under .dsh-chapters/session-6f0c1a2b-33aa-4c0d-9b11-111111111111/"}'
+  const b = '{"role":"user","content":"Chapter archive: 3 chapters under .dsh-chapters/session-99999999-0000-4000-8000-aaaaaaaaaaaa/"}'
+  assert.equal(substituteAll(a), substituteAll(b),
+    'two boots differ only by session uuid — the normalized bytes must be identical')
+  assert.match(substituteAll(a), /<SESSIONID>/, 'and the mask is explicit, not an accident of truncation')
+  const child = 'child ch-1a2b3c4d-5e6f-4a5b-8c9d-0e1f2a3b4c5d opened'
+  assert.match(substituteAll(child), /<SESSIONID>/, 'continuation children are the same class')
+  assert.equal(substituteAll('read src/engine.ts'), 'read src/engine.ts',
+    'ordinary content is untouched — this is a mask for run identity, not a general scrub')
+})
