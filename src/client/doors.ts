@@ -84,11 +84,33 @@ export const DOOR_ACTIONS: readonly DoorAction[] = [
 
 /** Pull the child id out of either door's durable success text — both end in
  * `… is session ch-…` (src/tools.ts), so this regex is door-agnostic. */
+/**
+ * Which build of THIS file produced a door note (#77). When the live probe reported a roster
+ * trace of `missing → missing → missing` — meaning adoption should have fired three times — while
+ * showing no adoption outcome at all, the first question stopped being "why did the client refuse"
+ * and became "did the browser run the code I am reading?". A note that names its own build makes
+ * that a glance instead of an archaeology session into symlinked plugin trees.
+ */
+export const DOOR_BUILD = '2026-10-22T23:55 door-build-stamp'
+
 export const CHILD_ID = /is session (ch-[\w-]+)/
 
 /** The quoted title the door gave the child, matched by its OWN noun so a
  * refusal or an unrelated quote cannot pass for it. */
 export const doorTitle = (noun: string): RegExp => new RegExp(`${noun} \\u201C([^\\u201D]+)\\u201D is session`)
+
+/**
+ * A refusal reason that can never render as nothing. `String(err.message ?? err)` is `''` for a
+ * host error built with an empty message, and an empty reason disappears from the note — the
+ * reader then concludes "no refusal happened", which is the opposite of the truth (#77).
+ */
+function refusalReason(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error)
+  const trimmed = raw.trim()
+  const named = trimmed === '' ? (error instanceof Error && error.name.trim() !== '' ? error.name : '') : trimmed
+  const base = named === '' ? (error === null ? 'null thrown' : typeof error) : named
+  return base.replace(/\s+/g, ' ').slice(0, 90)
+}
 
 /**
  * Is the child in the client's OWN roster? This is the question that separates two very
@@ -203,7 +225,7 @@ function openByService(
         const after = rosterIds(sessions)
         adopt.onAfter?.(after === null ? null : after.has(sessionId))
       } catch (error) {
-        adopt.onRefused(String((error as Error)?.message ?? error).slice(0, 90))
+        adopt.onRefused(refusalReason(error))
       }
     }
     // #77, second candidate: if adoption left the child out of the roster, SUBSCRIBE to it.
@@ -218,7 +240,7 @@ function openByService(
         const seen = rosterIds(sessions)
         adopt.onAfter?.(seen === null ? null : seen.has(sessionId))
       } catch (error) {
-        adopt.onSubscribeRefused?.(String((error as Error)?.message ?? error).slice(0, 90))
+        adopt.onSubscribeRefused?.(refusalReason(error))
       }
     }
     // The store must know the session before open() resolves it; a child
@@ -310,13 +332,26 @@ export function makeDoorRunner(
       let tried = 0
       let adoptRefusal = ''
       let subscribeRefusal = ''
+      // #77: what the roster reader answered AT EACH DECISION, not only at the end. The live
+      // probe reported MISSING after three attempts while neither candidate fired, which can
+      // only mean the reader disagreed with itself over time — and a note that says one number
+      // cannot show that.
+      const rosterTrace: string[] = []
       let adoptSaw: boolean | null | undefined
       for (let i = 0; i < maxAttempts; i++) {
         tried += 1
         // decide adoption from the SAME reader the note reports, so the door never acts on a
         // verdict it did not tell the user about; an unreadable roster is not "missing"
         const ids = rosterIds(sessions)
-        const needed = ids !== null && ids.size > 0 && !ids.has(child)
+        // Loaded-but-empty is a DECISION (the child is not there → try the sanctioned paths);
+        // unreadable is UNKNOWN and must not invent a session (#77: the strict form here meant
+        // neither candidate ever ran in the live probe, and its silence looked like a result).
+        const needed = ids !== null && !ids.has(child)
+        // `+c` / `+u` = the candidate verbs are present on the injected service AT THAT MOMENT.
+        // Without this, a note that says the roster was missing while no adoption outcome appears
+        // is uninterpretable: either the code never ran, or the service has no create to call.
+        const svcShape = sessions as unknown as { create?: unknown, using?: unknown } | undefined
+        rosterTrace.push(`${ids === null ? 'unknown' : ids.size === 0 ? 'empty' : ids.has(child) ? 'has' : 'missing'}${typeof svcShape?.create === 'function' ? '+c' : '-c'}${typeof svcShape?.using === 'function' ? '+u' : '-u'}`)
         if (await openByService(sessions, child, {
           needed,
           onRefused: (reason) => { adoptRefusal = reason },
@@ -336,7 +371,7 @@ export function makeDoorRunner(
       // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${subscribeRefusal === '' ? '' : ` (subscribe refused: ${subscribeRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
+        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar [roster per attempt: ${rosterTrace.join(' → ')}] (build: ${DOOR_BUILD})${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${subscribeRefusal === '' ? '' : ` (subscribe refused: ${subscribeRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }

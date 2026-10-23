@@ -182,6 +182,15 @@ try {
       await page.waitForTimeout(9000)
     }
     dump.probeCmd = cmd ?? null
+    // WHICH BYTES IS THE BROWSER RUNNING? A build stamp in the source only proves the source
+    // said something; if the note lacks it, the honest question is staleness, not behavior. So:
+    // list the loaded script resources and fetch them from node, then look for a marker string
+    // that exists only in the CURRENT door code. A stale client bundle makes every downstream
+    // conclusion wrong, and this is the only check that catches it without trusting a symlink.
+    dump.servedBundles = await page.evaluate(() => performance.getEntriesByType('resource')
+      .map((r) => r.name)
+      .filter((n) => /chapters|client|plugin/i.test(n))
+      .slice(0, 12))
     // and does the door, when force-clicked, leave anything observable behind?
     const clicked = await page.evaluate(() => {
       const b = Array.from(document.querySelectorAll('button')).find((x) => (x.getAttribute('aria-label') ?? '') === 'Fork with chapters')

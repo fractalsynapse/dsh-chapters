@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
-  CHILD_ID, DOOR_ACTIONS, doorTitle, makeDoorRunner,
+  CHILD_ID, DOOR_ACTIONS, DOOR_BUILD, doorTitle, makeDoorRunner,
   type ClientRemote, type ClientSessions,
 } from '../../src/client/doors.ts'
 
@@ -409,4 +409,93 @@ test('a refused subscribe is named in the note, and a session already listed is 
   } as unknown as ClientSessions
   await makeDoorRunner(mk(okText), listed, door, async () => true)('parent-1')
   assert.ok(!listedCalls.includes('using-SHOULD-NOT-RUN'), `subscribing a listed session is redundant: ${listedCalls.join(' → ')}`)
+})
+
+test('a LOADED-BUT-EMPTY roster still triggers adoption — unknown does not', async () => {
+  // The predicate that gates adoption is a claim about knowledge, and getting it wrong silently
+  // disables every #77 candidate: `ids.size > 0` read a store that had not loaded yet as "nothing
+  // to do", so neither adopt nor subscribe ever ran in the live probe, and the negative result I
+  // nearly recorded was measuring a code path that never executed.
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const mkRemote = (child: string): ClientRemote => ({
+    commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', child) } } }) },
+  })
+
+  const calls: string[] = []
+  const emptyStore = {
+    refresh: () => Promise.resolve(),
+    projectList: () => calls.push('projectList'),
+    create: () => { calls.push('create'); return Promise.resolve('ch-empty-1') },
+    open: () => calls.push('open'),
+    list: { getSnapshot: () => ({ ids: [], byId: {}, phase: 'ready' }) },
+  } as unknown as ClientSessions
+  await makeDoorRunner(mkRemote('ch-empty-1'), emptyStore, door, async () => false, { attemptPauseMs: 1, attempts: 1 })('parent-1')
+  assert.ok(calls.includes('create'), `a ready-but-empty roster must not suppress adoption: ${calls.join(' → ')}`)
+
+  const noStore: string[] = []
+  const unreadable = {
+    refresh: () => Promise.resolve(),
+    projectList: () => noStore.push('projectList'),
+    create: () => { noStore.push('create'); return Promise.resolve('ch-unk-1') },
+    open: () => noStore.push('open'),
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(mkRemote('ch-unk-1'), unreadable, door, async () => false, { attemptPauseMs: 1, attempts: 1 })('parent-1')
+  assert.ok(!noStore.includes('create'), 'an UNREADABLE roster is unknown, and unknown must not invent a session')
+  assert.match(r.message, /UNKNOWN, not absent/, 'and the note must say it was unknown — that is the sentence that prevents the wrong conclusion')
+})
+
+test('the note records what the roster reader saw at EACH attempt, not just at the end (#77)', async () => {
+  // The live probe said `roster: MISSING, 1 sessions` at the end while neither adoption nor
+  // subscribe ever fired — which is only possible if the reader answered differently at the
+  // moment of decision. One number cannot show that; a per-attempt trace can, and it turns an
+  // argument about my own control flow into a line someone can read.
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-trace-1') } } }) } } as unknown as ClientRemote
+  let loaded = false
+  const sessions = {
+    refresh: () => { loaded = true; return Promise.resolve() },
+    projectList: () => undefined,
+    create: () => Promise.resolve('ch-trace-1'),
+    open: () => undefined,
+    list: { getSnapshot: () => (loaded ? { ids: ['session-a', 'ch-trace-1'] } : { ids: [], byId: {}, phase: 'pending' }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attemptPauseMs: 1, attempts: 3 })('parent-1')
+  // this fake HAS create and LACKS using, so the markers must read +c-u — the row describes its
+  // own fixture, which is the point of printing the shape at all.
+  assert.match(r.message, /\[roster per attempt: empty\+c-u → has\+c-u → has\+c-u\]/,
+    `the trace must show the reader's answer at each decision point: ${r.message}`)
+})
+
+test('a failed switch names the BUILD that failed, so a stale tree is not read as a refusal (#77)', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  assert.ok(DOOR_BUILD.length > 10, 'the stamp must be a real marker, not a placeholder')
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-build-1') } } }) } } as unknown as ClientRemote
+  const sessions = { open: () => undefined, list: { getSnapshot: () => ({ ids: ['session-a'] }) } } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attempts: 1, attemptPauseMs: 1 })('parent-1')
+  assert.ok(r.message.includes(DOOR_BUILD), `the note must carry the build stamp: ${r.message}`)
+})
+
+test('a refusal with no message is still VISIBLE — an empty reason is not a silence (#77)', async () => {
+  // Every candidate path formats its reason through `String(err.message ?? err).slice(0,90)`, and
+  // a host error that carries an empty message produced exactly `''` — which the note then
+  // rendered as nothing at all. The live probe showed precisely that shape: adoption warranted,
+  // both verbs present, no outcome reported. An unhelpful reason is still a reason; "no text" is
+  // the one answer that must never be the output.
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-empty-err') } } }) } } as unknown as ClientRemote
+  const sessions = {
+    refresh: () => Promise.resolve(),
+    projectList: () => undefined,
+    create: () => Promise.reject(new Error('')),
+    open: () => undefined,
+    list: { getSnapshot: () => ({ ids: ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attempts: 1, attemptPauseMs: 1 })('parent-1')
+  assert.match(r.message, /adoption refused: \(\S[^)]*\)|adoption refused: [^\s(][^)]*/,
+    `a refusal whose message is empty must say so with something, got: ${r.message}`)
+  assert.doesNotMatch(r.message, /adoption refused: \)/, 'and never render an empty reason')
 })
