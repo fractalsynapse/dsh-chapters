@@ -198,3 +198,28 @@ empty region), written before the wiring was trusted. **Process lapse, recorded 
 cycle is Issue → Docs → Tests → Code, and here I wrote the implementation before this section. The
 issue (#87) and the tests did come first, and the docs landed before the commit — but the order slipped,
 and a rule that is only followed when convenient is the kind of drift this file exists to catch.
+
+## The last-resort deferral (#78 option A, decided 2026-10-23)
+
+**The rule.** A single `tool/result` that cannot coexist with the mandatory verbatim tail makes pressure
+relief *impossible*, not merely hard: `selectCompactableRange` finds no safe range, the engine declines,
+the endpoint refuses the request, and the session is left spinning (#86) or answering something other
+than what was asked (#78's original symptom). Survivability is therefore an invariant, not a tuning
+outcome: such a node is artifact-deferred **as a last resort**, with a delivered warning naming the seq,
+the node's tokens, and the ceiling it failed.
+
+**Three bounds, because the obvious implementation is the wrong one.**
+1. **After a decline, never before.** The trigger is the measured fact that relief ran, found no safe
+   range, and the surface is over the trigger. Deferring big nodes eagerly makes compaction unnecessary
+   and turns `oversized-turn.spec.ts` into a tautology — the trap AGENTS names in the rig rules — so an
+   anti-vacuity row asserts the ceiling does NOT fire when relief is possible.
+2. **Derived, not invented.** The ceiling is `windowTokens − retainBudget`, both from the base's own
+   config (`resolveCompactSpec` inputs), so no new magic constant appears. The one new key is the
+   operator-visible boolean switch `lastResortArtifact` (default on), which `preset-declaration.test.ts`
+   must see declared or the loader strips it.
+3. **The archive keeps every byte.** The deferral writes the artifact and leaves a citation, so the worst
+   case is a context-economy miss and `chapters_artifact` still answers for it — which is the only thing
+   that makes overriding a configured economy knob defensible at all.
+
+Rows: `tests/unit/engine-last-resort.test.ts` — fires only after a decline; below the ceiling, untouched;
+switch off, untouched even after a decline; and the warning carries the numbers.
