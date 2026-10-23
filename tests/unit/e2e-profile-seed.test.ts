@@ -22,44 +22,51 @@ test('the seed exists in git, not only on disk', () => {
   const body = fs.readFileSync(path.join(ROOT, rel), 'utf8')
   assert.match(body, /contextWindow: \d+/, 'it carries the provider/model facts a boot needs')
 })
-
-test('the boot refuses to fall back to the untracked settings', () => {
+test('the boot writes the tracked seeds and throws if they are missing (#89)', () => {
   const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
-  assert.match(boot, /if \(rel === 'settings\.yaml'\) return false/,
-    'the untracked copy is excluded from the home seed')
-  assert.match(boot, /fs\.copyFileSync\(SETTING_SEED/, 'and the tracked seed is what lands in the home')
-  assert.match(boot, /missing[\s\S]{0,200}\.dshdev-local\/settings\.yaml|the tracked profile seed is missing/,
-    'a boot with no seed must THROW, not quietly use the developer’s file')
+  assert.match(boot, /fs\.copyFileSync\(SETTING_SEED/, 'the tracked settings seed is what lands in the home')
+  assert.match(boot, /the tracked profile seed is missing/, 'a missing seed throws — no silent fallback to a developer file')
 })
-
 test('the profile patch the boot seeds is tracked too, and its rows are the ones that matter (#89)', () => {
   const rel = path.join('tests', 'e2e', 'fixtures', 'dev-profile-cordis.patch.yml')
   assert.equal(execFileSync('git', ['ls-files', rel], { cwd: ROOT, encoding: 'utf8' }).trim(), rel,
     'this file, not a laptop copy, defines what a boot composes')
   const body = fs.readFileSync(path.join(ROOT, rel), 'utf8')
-  // The specific rows whose absence made CI send a 2-message first request against a 6-message tape.
+  // The rows whose absence made CI send a 2-message first request against a 6-message tape.
   for (const row of ['agent-default-model', 'agent-presets', 'llm-gate', 'fetch-timeouts']) {
-    assert.ok(body.includes(`id: ${row}`), `the seed must carry the "${row}" row — this is the composition the corpus was recorded under`)
+    assert.ok(body.includes(`id: ${row}`), `the seed must carry the "${row}" row — the corpus was recorded under it`)
   }
   const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
-  assert.match(boot, /profiles', 'web', 'cordis\.patch\.yml'\)\) return false/, 'the untracked copy is excluded')
-  assert.match(boot, /fs\.copyFileSync\(PROFILE_SEED/, 'and the tracked seed is what lands in the home')
+  assert.match(boot, /fs\.copyFileSync\(PROFILE_SEED/, 'the tracked profile patch is what lands in the home')
+  assert.match(boot, /the tracked profile patch seed is missing/, 'and its absence throws rather than falling back')
+})
+test('the profile base is built by the shared script, never copied from a laptop (#89)', () => {
+  const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
+  // The exclusion filters this branch first asserted are gone: nothing from `.dshdev-local` is copied
+  // at all now, so a filter would be vacuous. The closure row below is the structural guard.
+  assert.match(boot, /bootstrap-dev-profile\.sh/, 'the profile base is built with the SAME script CI runs')
+  assert.match(boot, /'--home', path\.relative\(ROOT, base\)/, 'into a repo-local base directory')
+  assert.match(boot, /no fallback/, 'and a failed base build throws — booting a different profile is the bug class')
+  assert.ok(fs.existsSync(path.join(ROOT, 'scripts', 'bootstrap-dev-profile.sh')), 'the bootstrap script is part of the rig contract')
 })
 
-/**
- * Layer four (#89), found by ENUMERATING what a boot reads instead of waiting for the next tape diff:
- * the copy also brought `.dshdev-local/profiles/**` — 18 MB of `node_modules` installed by whoever last
- * used the dev profile. Which plugins a profile mounts changes which instruction paragraphs the host
- * composes, so the system header itself differed: 7,276 chars recorded vs 2,783 on CI, diverging at
- * char 141 mid-sentence.
- */
-test('no profile tree is copied from the developer home; it is built by the shared script (#89)', () => {
+test('the ignored dev home is copied through a filter that provably drops every composing file (#89)', () => {
+  // What enumeration actually produced, stated about the code that exists. `.dshdev-local/` is
+  // gitignored, and four layers of #89 were files copied out of it: `settings.yaml` (provider routes,
+  // 32K window), its `profiles/web/cordis.patch.yml` (the `agent-presets` / `llm-gate` /
+  // `fetch-timeouts` rows), and the whole `profiles/` tree — 18 MB of installed plugins, which
+  // decides what the system header composes (7,276 recorded chars vs 2,783 on CI, diverging at
+  // char 141). Each is excluded by name and replaced by a tracked seed or a base built with the same
+  // script CI runs. The one remaining carry is `storages/workspace.json`, whose SHAPE the host owns
+  // (a hand-written substitute made the app never set `dsh.sessions.current`) and whose sessionIds
+  // are scrubbed below it. This row is the teeth: delete any filter line and it reddens.
   const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
-  assert.match(boot, /if \(rel\.startsWith\('profiles'\)\) return false/,
-    'the untracked profile tree must be excluded from the home copy')
-  assert.match(boot, /bootstrap-dev-profile\.sh[\s\S]{0,200}--home/,
-    'the profile base is built with the SAME script CI runs')
-  assert.match(boot, /no fallback/, 'and a failure to build it must throw — silently booting a different profile is the whole bug class')
-  // and the script must exist and be executable-by-path (it is the contract, not a convenience)
-  assert.ok(fs.existsSync(path.join(ROOT, 'scripts', 'bootstrap-dev-profile.sh')), 'the bootstrap script is part of the rig contract')
+  assert.match(boot, /if \(rel === 'settings\.yaml'\) return false/, 'settings.yaml is excluded')
+  assert.match(boot, /rel === path\.join\('profiles', 'web', 'cordis\.patch\.yml'\)\) return false/, 'the profile patch is excluded')
+  assert.match(boot, /rel\.startsWith\('profiles'\)\) return false/, 'and the installed profile tree is excluded')
+  assert.match(boot, /fs\.copyFileSync\(SETTING_SEED/, 'settings comes from the tracked fixture')
+  assert.match(boot, /fs\.copyFileSync\(PROFILE_SEED/, 'the profile patch comes from the tracked fixture')
+  assert.match(boot, /bootstrap-dev-profile\.sh[\s\S]{0,400}'--home'/, 'the profile tree is BUILT by the shared script, into a repo-local base')
+  assert.match(boot, /e2e-profile-base/, 'that base is named, not improvised')
+  assert.match(boot, /dsh-host-lock/, 'and the host binary resolves from the pinned hermetic install')
 })
