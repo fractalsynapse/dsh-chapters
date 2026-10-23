@@ -749,3 +749,13 @@ feeds that read, and `boot.ts` pins it to `var/e2e-home-<port>/knowledge`. The r
 path a boot reads to build model-visible text must be per-port or per-session, because a tape is a
 claim about ONE world. `tests/unit/e2e-store-root.test.ts` keeps the pins honest, and
 `tests/unit/preset-declaration.test.ts` refuses a config key that drifts out of the preset row.
+
+### Don't push while an acceptance run is the thing you're waiting on (#89, measured against myself)
+
+`.github/workflows/ci.yml` sets `concurrency: ci-<ref>` with `cancel-in-progress: true`. Twice on
+2026-10-23 I pushed a small commit (a docs line, a corrected message) while the ~25-minute acceptance
+chain was mid-flight, and GitHub cancelled the run that held the answer — then the new run restarted
+from zero. The commit was never the problem; the wait was. Batch the push: while a long gate is
+running, either finish what you're doing locally first or park the commit, and push once. Same rule in
+the other direction: don't judge a fix by the run it cancelled — re-read which head each verdict belongs
+to before believing a green.
