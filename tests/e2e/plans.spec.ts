@@ -189,24 +189,40 @@ test('an approved plan is archived whole, a continuation carries it as a directi
 
   const cardText = await card.innerText()
   expect(cardText, 'the human reviews the plan the model sent').toContain(planTitle)
-  // The card is showing the plan, not a summary of it: a body line from the middle
-  // of the submission must be present too.
-  // Compared with markdown emphasis stripped from BOTH sides: the card renders the
-  // plan, so `**bold**` on disk is `bold` on screen — a literal substring test
-  // would fail for a reason that has nothing to do with carriage.
-  // Stripped on BOTH sides: the card renders markdown, so emphasis markers exist on
-  // disk and not on screen — and so do list bullets, which cost a live run: a real
-  // model plan ending in "- Nothing was read…" was compared against a screen showing
-  // "Nothing was read…" and the assertion failed on the marker, not the carriage.
+
+  // Stripped on BOTH sides: the card renders markdown, so emphasis markers and list bullets
+  // exist on disk and not on screen.
   const stripMd = (t: string): string => t
     .replace(/[*_`>]+/g, '')
     .replace(/(^|\n)\s*(?:[-*+]|\d+\.)\s+/g, '$1')
     .replace(/\s+/g, ' ')
     .trim()
-  const bodyLine = (submitted.split('\n').map((l) => l.trim())
-    .filter((l) => stripMd(l).length > 24 && !l.startsWith('#')).pop() ?? '')
-  expect(bodyLine.length, 'the submission has body text to check').toBeGreaterThan(24)
-  expect(stripMd(cardText), 'and the body is on screen, not just the title').toContain(stripMd(bodyLine))
+  const lines = submitted.split('\n').map((l) => l.trim())
+  // #56, against the pinned host's own text (tests/unit/host-plan-card-shape.test.ts): on 0.2.x
+  // the review region is a COMPACT card — `extractMarkdownPlainText(review.plan, { mode:
+  // "first-line" })` for the title and `{ mode: "first-paragraph" }` for the description — and
+  // the whole document lives behind "View full plan" in the sidebar. The old assertion demanded
+  // the LAST body line inside the card, which the host never puts there: carriage was fine, the
+  // expectation was about the wrong surface. So assert BOTH, each on the surface that carries it,
+  // and the full-document check is strictly stronger than what it replaces.
+  const bodyLines = lines.filter((l) => l !== '' && !l.startsWith('#') && stripMd(l).length > 24)
+  expect(bodyLines.length, 'the submission has body text to check').toBeGreaterThan(1)
+  const firstParagraph = (bodyLines[0] ?? '').replace(/\s+/g, ' ').trim()
+  expect(stripMd(cardText), 'the collapsed card carries the plan’s first paragraph (host 0.2.x renders first-paragraph, not the document)')
+    .toContain(stripMd(firstParagraph).slice(0, 60))
+
+  // …and the ENTIRE document reaches the screen once the human opens it — every body line, not a
+  // sample. A plan a reviewer cannot read in full is the failure mode this journey exists to catch.
+  const viewFull = card.getByRole('button', { name: /view full plan|open plan/i }).first()
+  await expect.poll(() => viewFull.isVisible().catch(() => false), { timeout: 20_000, intervals: [1000] },
+    'the card exposes the host’s full-plan affordance').toBe(true)
+  await viewFull.click()
+  await expect.poll(async () => {
+    const doc = stripMd(await page.locator('body').innerText())
+    return bodyLines.filter((l) => !doc.includes(stripMd(l))).length
+  }, { timeout: 30_000, intervals: [1500] }, 'every body line of the submitted plan is on screen once opened').toBe(0)
+  await page.keyboard.press('Escape').catch(() => undefined)
+  await page.waitForTimeout(700)
 
   await card.getByRole('button', { name: 'Approve' }).click()
 
