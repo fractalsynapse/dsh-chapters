@@ -348,3 +348,65 @@ test('the note reports the roster RIGHT AFTER adoption, before a later refresh c
     `the note must show adoption took effect at the moment, got: ${r.message}`)
   assert.match(r.message, /roster: MISSING/, 'and still report the final state honestly')
 })
+
+/**
+ * #77, second candidate: make the CLIENT subscribe to the session it cannot see.
+ *
+ * `ClientSessions.retain(target, {source})` / `using(target, {source}, fn)` resolve the id through
+ * the manager and open a scope for it (`sessions/service.js`: `retain` →
+ * `reference.attachOpening(this.manager.get(id).open(), signal)`), which is the host's own way of
+ * addressing a session that is not currently displayed. Adoption via `create` was measured and did
+ * not populate the roster; this is the other legitimate door, so it gets the same treatment:
+ * bounded, verified, and reported — and dropped the moment measurement says it does nothing.
+ */
+test('an uncatalogued child is retained through the client service before it is opened', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const calls: string[] = []
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-retain-1') } } }) } } as unknown as ClientRemote
+  let visible = false
+  const sessions = {
+    refresh: () => Promise.resolve(),
+    projectList: () => { calls.push('projectList') },
+    using: (id: string, opts: { source?: string }, fn: () => Promise<void>) => {
+      calls.push(`using:${id}:${opts?.source ?? '?'}`)
+      visible = true
+      return fn()
+    },
+    open: (id: string) => { calls.push(`open:${id}`) },
+    list: { getSnapshot: () => ({ ids: visible ? ['session-a', 'ch-retain-1'] : ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => visible, { attemptPauseMs: 1 })('parent-1')
+  assert.deepEqual(r, { ok: true, message: '' }, `subscribe-then-open should have worked: ${JSON.stringify(r)}`)
+  assert.deepEqual(calls, ['projectList', 'using:ch-retain-1:dsh-chapters-door', 'projectList', 'open:ch-retain-1'],
+    `the roster must be re-read after subscribing: ${calls.join(' → ')}`)
+})
+
+test('a refused subscribe is named in the note, and a session already listed is never subscribed', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const mk = (execute: () => Promise<unknown>) => ({ commands: { execute } } as unknown as ClientRemote)
+  const okText = () => Promise.resolve({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-retain-2') } } })
+
+  const refusedCalls: string[] = []
+  const refused = {
+    refresh: () => Promise.resolve(),
+    projectList: () => refusedCalls.push('projectList'),
+    using: () => Promise.reject(new Error('session/not-found')),
+    open: () => refusedCalls.push('open'),
+    list: { getSnapshot: () => ({ ids: ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r1 = await makeDoorRunner(mk(okText), refused, door, async () => false, { attemptPauseMs: 1, attempts: 1 })('parent-1')
+  assert.match(r1.message, /subscribe refused: session\/not-found/, `the refusal must reach the human: ${r1.message}`)
+
+  const listedCalls: string[] = []
+  const listed = {
+    refresh: () => Promise.resolve(),
+    projectList: () => listedCalls.push('projectList'),
+    using: () => { listedCalls.push('using-SHOULD-NOT-RUN'); return Promise.resolve() },
+    open: () => listedCalls.push('open'),
+    list: { getSnapshot: () => ({ ids: ['ch-retain-2'] }) },
+  } as unknown as ClientSessions
+  await makeDoorRunner(mk(okText), listed, door, async () => true)('parent-1')
+  assert.ok(!listedCalls.includes('using-SHOULD-NOT-RUN'), `subscribing a listed session is redundant: ${listedCalls.join(' → ')}`)
+})

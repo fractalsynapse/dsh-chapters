@@ -168,10 +168,14 @@ function openByService(
   /** #77: adopt (and re-project) only when the client's own roster is missing this session.
    *  `onAfter` reports the roster at the instant after adoption, before any later refresh can
    *  discard the mutation — the difference between an ordering bug and a publication gap. */
-  adopt?: { needed: boolean, onRefused: (reason: string) => void, onAfter: (seen: boolean | null) => void },
+  adopt?: { needed: boolean, onRefused: (reason: string) => void, onSubscribeRefused?: (reason: string) => void, onAfter: (seen: boolean | null) => void },
 ): Promise<boolean> {
   return (async () => {
-    const svc = sessions as unknown as { open?: (id: string) => unknown; refresh?: () => unknown; projectList?: () => unknown; create?: (opts: { sessionId?: string }) => unknown } | undefined
+    const svc = sessions as unknown as {
+      open?: (id: string) => unknown; refresh?: () => unknown; projectList?: () => unknown
+      create?: (opts: { sessionId?: string }) => unknown
+      using?: (id: string, opts: { source: string }, fn: () => Promise<void>) => unknown
+    } | undefined
     if (typeof svc?.open !== 'function') return false
     try { await svc.refresh?.() } catch { /* refresh best-effort */ }
     // #57: re-project the client's session catalog. The host does this ITSELF after every
@@ -200,6 +204,21 @@ function openByService(
         adopt.onAfter?.(after === null ? null : after.has(sessionId))
       } catch (error) {
         adopt.onRefused(String((error as Error)?.message ?? error).slice(0, 90))
+      }
+    }
+    // #77, second candidate: if adoption left the child out of the roster, SUBSCRIBE to it.
+    // `using(target, {source}, fn)` is the host's own way to address a session that is not
+    // currently displayed (`sessions/service.js`: retain → `manager.get(id).open()`). A refusal is
+    // reported exactly like adoption's. No URL route exists as an alternative — checked every
+    // dsh-client-* bundle: the only `/session/` strings are resource addresses for files.
+    if (adopt?.needed === true && typeof svc.using === 'function' && rosterIds(sessions)?.has(sessionId) === false) {
+      try {
+        await svc.using(sessionId, { source: 'dsh-chapters-door' }, async () => undefined)
+        try { svc.projectList?.() } catch { /* best-effort, like the others */ }
+        const seen = rosterIds(sessions)
+        adopt.onAfter?.(seen === null ? null : seen.has(sessionId))
+      } catch (error) {
+        adopt.onSubscribeRefused?.(String((error as Error)?.message ?? error).slice(0, 90))
       }
     }
     // The store must know the session before open() resolves it; a child
@@ -290,6 +309,7 @@ export function makeDoorRunner(
       const maxAttempts = canRepull ? (opts?.attempts ?? 3) : 1
       let tried = 0
       let adoptRefusal = ''
+      let subscribeRefusal = ''
       let adoptSaw: boolean | null | undefined
       for (let i = 0; i < maxAttempts; i++) {
         tried += 1
@@ -297,7 +317,12 @@ export function makeDoorRunner(
         // verdict it did not tell the user about; an unreadable roster is not "missing"
         const ids = rosterIds(sessions)
         const needed = ids !== null && ids.size > 0 && !ids.has(child)
-        if (await openByService(sessions, child, { needed, onRefused: (reason) => { adoptRefusal = reason }, onAfter: (seen) => { adoptSaw = seen } }) && await switchedOnce()) return { ok: true, message: '' }
+        if (await openByService(sessions, child, {
+          needed,
+          onRefused: (reason) => { adoptRefusal = reason },
+          onSubscribeRefused: (reason) => { subscribeRefusal = reason },
+          onAfter: (seen) => { adoptSaw = seen },
+        }) && await switchedOnce()) return { ok: true, message: '' }
         if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300).unref?.() })
       }
       // the service path did not take — the sidebar row is the same affordance a human uses
@@ -311,7 +336,7 @@ export function makeDoorRunner(
       // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
+        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${subscribeRefusal === '' ? '' : ` (subscribe refused: ${subscribeRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }
