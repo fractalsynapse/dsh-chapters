@@ -240,8 +240,8 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   suite" (a union), and mind the script header's c8 gotcha: include/exclude
   filters apply BEFORE remapping, so `--include=src/**` would silently
   zero every row.
-  **Ledger, re-measured 2026-10-23 on host 0.2.0-rc.2 (`bcb16d3`, strict replay
-  rc 0 / zero misses): 78.19% stmts / 58.55% branch / 71.22% funcs.** Per module:
+  **Ledger, re-measured 2026-10-23 on the PINNED hermetic host (`97c7c79`, strict replay
+  rc 0 / zero misses, all nine segments): 78.26% stmts / 59.01% branch / 71.38% funcs.** Per module:
   engine.ts 87.93/55.06, index.ts 85.78/52.43, rules.ts 88.83/58.87,
   store.ts 91.64/79.59, continue-core.ts 94.05/66.66, arrival.ts 94.87/60.60,
   sync.ts 83.95/59.89, tools.ts 64.06/49.66.
