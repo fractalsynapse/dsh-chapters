@@ -115,3 +115,47 @@ durable log length **never decreased** (shadowing, not deletion — r12 proved t
 (c) a compacted session can still answer a question whose answer lives only in a chapter it chooses to
 `read`; (d) the summary call cost is **zero** tokens, since our `summarize()` is deterministic —
 proved with the r12 stub (no `usage` field), must re-prove with the real TOC.
+
+## Measured on 0.2.0-rc.2 (2026-10-23, #78) — what the seam actually does now
+
+Every line below came from an artifact in this repo's own run: the diagnostics sink
+(`realm:engine:compact`), the tape proxy journal (`reqBytes=`, `OVERFLOW refused`), or a decoded
+`session.v4.jsonl.zstd`. None of it is inferred from the 0.1.x notes above, which is the point —
+those notes are what made the failure legible as "the hook is never called", and that was wrong.
+
+1. **The host does call our override.** Pre-step, with `trigger="pressure"`:
+   `compactIfNeeded entered (trigger="pressure", session=session-…)` — three entries in one probe
+   session, seven compactions in one `heavy` session. The claim "never invoked" was an inference
+   from absent `compaction/*` events, and the instrument replaced it with a fact in one run.
+2. **The base decision path** (`dsh-compaction-basic/lib/index.js`) is: `routedTarget(session)` →
+   `undefined` ⇒ return `null` immediately; else `tokenMeter.measure(session)`, then
+   `llm.resolveModelInfo(provider, model)` for `contextWindow`, then
+   `resolveCompactSpec(policy, window, reservedCompletionTokens(agent, defaultMaxTokens))`, then
+   `measurement.totalTokens < spec.thresholdTokens` ⇒ `null`; else `selectCompactableRange(...)`,
+   which can itself return `null` — that is the documented "no safe range" case, and it is the case
+   `heavy` reaches.
+3. **Two failure shapes for the same field symptom.** A decline can be a `null` return or a THROW
+   (`selectCompactableRange` threw on a harness session whose surface it could not read). The
+   engine now reports on both paths, because "the endpoint said 400" was the only user-visible
+   trace of a state the product knew about.
+4. **A single oversized `tool/result` is not relievable by pressure.** Measured: one 120,650-byte
+   result (~30K tokens) in a 32,000 window at ratio 0.5 — six compactions of *older* content, then
+   the hard `400 … exceeds the context window`. The knob that prevents it is the **arrival floor**
+   (`toolResultArtifactTokens`), and `heavy` deliberately sets it to 1,000,000 so pressure — not
+   arrival — is what gets exercised. The engine does NOT override that floor: AGENTS calls it "a
+   behavior switch, not a knob", and an engine quietly reinterpreting an operator's switch is the
+   same species of dishonesty as a pin that is collected and never applied. What it does now is name
+   the switch, the offending node size, and the count of nodes above the trigger, in the sink.
+5. **Bytes ↔ tokens, calibrated.** 78,140 serialized request bytes measured 27,306 / 27,952 /
+   28,928 tokens by the host meter — **≈2.8 B/token**, not the conventional 4. The rig's window
+   enforcement uses whole-body `/3` (deliberately conservative: early refusal still exercises the
+   regime; late refusal exercises nothing) and the rows assert the estimator against the two field
+   values that matter, including the 120,129-byte / 35,428-token request that `4/` let through.
+6. **The regime must be identical in record and replay.** Enforcement applies in both modes now:
+   a distill whose request was refused, relieved, and re-asked recorded a sequence *shaped by* that
+   refusal, so a replay without it diverges and looks like prompt drift.
+7. **Realm config lives on the preset row, not the host row.** `thresholdRatio`,
+   `toolResultArtifactTokens`, `artifactStoreRoot`, `auto`, `elicitedPlot` are read from the
+   `chapters-engine` row inside `preset-chapters` (`cordis.patch.yml`); the host plugin row's
+   `compactionThresholdRatio` / `installChaptersPreset` are inert since 0.1.18. This is why an
+   apparently-configured rig ran every leg on realm defaults while its own header claimed 0.5.
