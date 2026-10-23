@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import {openApp, localModelUp, currentSessionId, sessionLogTextById, logEvents, typeComposer, findSessionIdWhoseLogContains, sessIdsWithPrefix, ROOT, E2E_STORE_ROOT} from './session.ts'
+import {openApp, localModelUp, currentSessionId, sessionLogTextById, logEvents, typeComposer, findSessionIdWhoseLogContains, sessIdsWithPrefix, ROOT, E2E_STORE_ROOT, deliveredFor} from './session.ts'
 
 /**
  * A SESSION PLAN, carried: plan mode in the browser, a real `exit_plan_mode`
@@ -166,7 +166,10 @@ test('an approved plan is archived whole, a continuation carries it as a directi
   // grep — and the follow-up request TIMED OUT before it ever reached the plan).
   // The journey wants one turn to a submission, so it must forbid exploration as
   // loudly as it asks for the plan.
-  await typeComposer(page, '/plan Which file defines the chapter renderer? Answer from what you already know — do not read, list, search, or open any file, and do not run any tool except the plan tool. Present your plan with the exit_plan_mode tool now; if you need a fact, state it as an assumption.'
+  // One copy of the text: the predicate and the instruction cannot drift apart, which is the
+  // failure mode my first wiring pass created by duplicating literals at 12 call sites.
+  const PLAN_ASK = '/plan Which file defines the chapter renderer? Answer from what you already know — do not read, list, search, or open any file, and do not run any tool except the plan tool. Present your plan with the exit_plan_mode tool now; if you need a fact, state it as an assumption.'
+  await typeComposer(page, PLAN_ASK, deliveredFor(sid, PLAN_ASK))
 
   // The review renders as a REGION named by the question, with the plan text
   // inside it and an "Approve" button (measured from the failure snapshot of the

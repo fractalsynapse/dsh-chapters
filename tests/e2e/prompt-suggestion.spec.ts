@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { openApp, localModelUp, currentSessionId, sessionLogTextById, typeComposer, ROOT } from './session.ts'
+import {openApp, localModelUp, currentSessionId, sessionLogTextById, typeComposer, ROOT, deliveredFor} from './session.ts'
 import { SUGGESTION, SUGGEST_TRIGGER } from './stub-model.ts'
 
 /**

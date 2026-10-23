@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, forkDoor, ROOT, E2E_REGISTRY } from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, forkDoor, ROOT, E2E_REGISTRY, deliveredFor} from './session.ts'
 
 /**
  * THE BIG EDGE CASE: one turn that outgrows the compaction threshold by

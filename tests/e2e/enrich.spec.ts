@@ -10,7 +10,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import {openApp, newSessionWithTurn, typeComposer, forkDoor, ROOT, E2E_STORE_ROOT, reportPendingInDurableLog} from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, forkDoor, ROOT, E2E_STORE_ROOT, reportPendingInDurableLog, deliveredFor} from './session.ts'
 
 // #70 moved the rig's store into the port's own home; reading the workspace tree here made a
 // successful archive look like a missing one (#56).

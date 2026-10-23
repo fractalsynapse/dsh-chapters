@@ -42,6 +42,7 @@
     "test": "node --test tests/unit/*.test.ts tests/integration/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:client": "tsc -p tsconfig.client.strict.json",
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "build": "tsc -p tsconfig.json && tsdown -c tsdown.client.config.ts --config-loader tsx",
     "build:client": "tsdown -c tsdown.client.config.ts",
     "test:unit": "node --test tests/unit/*.test.ts",

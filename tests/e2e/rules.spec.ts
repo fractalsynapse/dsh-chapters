@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, E2E_SESS_DIR, sessionLogFileFor, openSessionByRow, durableLogExists } from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, E2E_SESS_DIR, sessionLogFileFor, openSessionByRow, durableLogExists, deliveredFor} from './session.ts'
 
 const RULE_TEXT = 'Never log raw tokens or bearer headers anywhere in command output'
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, sessionLogTextById, logEvents, typeComposer } from './session.ts'
+import {openApp, newSessionWithTurn, localModelUp, sessionLogTextById, logEvents, typeComposer, deliveredFor} from './session.ts'
 
 /**
  * CACHE TRAJECTORY PROBE — opt-in, live-only (`npm run test:e2e:cache`).

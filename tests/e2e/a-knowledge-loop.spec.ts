@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import {openApp, newSessionWithTurn, typeComposer, localModelUp, currentSessionId, sessionLogTextById, durableLogExists, forkDoor, ROOT, E2E_REGISTRY, E2E_SESS_DIR, E2E_STORE_ROOT} from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, localModelUp, currentSessionId, sessionLogTextById, durableLogExists, forkDoor, ROOT, E2E_REGISTRY, E2E_SESS_DIR, E2E_STORE_ROOT, deliveredFor} from './session.ts'
 
 /**
  * ORDERING (2026-09-24): filename 'a-' makes Playwright run this journey FIRST —
