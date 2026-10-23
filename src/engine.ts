@@ -32,7 +32,7 @@ import {
 } from './engine-core.ts'
 import { composeChapters } from './compose.ts'
 import { carryActivePlan, detectPlans } from './plans.ts'
-import { stripReminderSpans } from './injections.ts'
+import { isInjectedProse, stripReminderSpans } from './injections.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
 import { extractPlot } from './engine-core.ts'
@@ -56,6 +56,8 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   artifactStoreRoot?: string
   /** #85: pool-mirror root for rules/knowledge reads that produce model-visible text. */
   knowledgeMirrorDir?: string
+  /** #87: verbatim carry of the newest human turn, capped; the cap is stated, never silent. */
+  openRequestCarryMaxChars?: number
   chapterTokenTarget?: number
   toolResultDeferFloorTokens?: number
   mergeThreshold?: number
@@ -199,6 +201,47 @@ export function makeFirstTurnPullListener(deps: { pull: (cwd: string) => Promise
   }
 }
 
+/**
+ * #87 — carry the instruction that relief is about to shadow.
+ *
+ * Measured in the field: a `heavy` session whose thirteen compactions shadowed ten of the eleven
+ * copies of the human's follow-up question. What survives in the surface is the summary — a plot, not
+ * a request — so the model is never shown the thing it is being asked to do. Nothing errors; the user
+ * sees an agent that stopped answering.
+ *
+ * The fix stays inside our own seams and honors invariant 1 (nothing recorded is rewritten): WE author
+ * the summary text, so the newest human instruction travels INTO it, verbatim. Truncation is never
+ * silent — the cap is stated in the block. Injected scaffolding (workspace reminders, the host's own
+ * checkpoint preamble, our notices) is skipped: those are represented elsewhere, and carrying them
+ * would re-inject machine state as if it were a request.
+ */
+type SummaryPart = { type: 'text', text: string }
+
+export function carryOpenRequest(
+  parts: readonly SummaryPart[],
+  messages: readonly unknown[],
+  capChars: number,
+): SummaryPart[] {
+  // ONE predicate for "is this injected machine prose" — `src/injections.ts`, the same screen the
+  // archive body and the title chooser use. A second list here is the #59 bug re-made: it would lag
+  // the first, and a drift row exists precisely to catch that (it caught this, minutes after I wrote it).
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i] as { role?: string, content?: unknown }
+    if (m?.role !== 'user') continue
+    const c = m.content
+    const text = typeof c === 'string' ? c
+      : Array.isArray(c) ? (c as Array<{ type?: string, text?: string }>).filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('\n') : ''
+    const t = text.trim()
+    if (t === '' || isInjectedProse(t)) continue
+    const clipped = t.length > capChars
+    const body = clipped
+      ? `${t.slice(0, capChars)}\n[carried in part: ${String(t.length)} characters total, ${String(capChars)} included — the whole turn stays in the durable log]`
+      : t
+    return [...parts, { type: 'text', text: `OPEN REQUEST (verbatim; this relief shadows the turn that asked it):\n"""\n${body}\n"""` }]
+  }
+  return [...parts]
+}
+
 export class ChaptersCompactionEngine extends BasicCompactionEngine {
   // Base inject is ['llm','tokenMeter','sessions']; subclassing INHERITS statics,
   // so re-declare with what the chapter flow adds (r12's crash, FINDINGS).
@@ -231,6 +274,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     auto: z.boolean(),
     artifactStoreRoot: z.string(),
     knowledgeMirrorDir: z.string().default('.dsh-knowledge'),
+    openRequestCarryMaxChars: z.number().step(1).min(200).default(4000),
     chapterTokenTarget: z.number().step(1).min(1),
     toolResultDeferFloorTokens: z.number().step(1).min(0),
     // The composition knobs ride the same row so the engine path and the fork
@@ -315,7 +359,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, knowledgeMirrorDir, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
@@ -341,6 +385,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.chaptersConfig = {
       artifactStoreRoot: artifactStoreRoot ?? '.dsh-chapters',
       knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
+      openRequestCarryMaxChars: openRequestCarryMaxChars ?? 4000,
       chapterTokenTarget: chapterTokenTarget ?? 8000,
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
@@ -605,7 +650,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       // digest; NO chapter path is cited, so nothing can dangle. A distinct
       // provider tag keeps the finalizer's scan from claiming this record.
       return {
-        summary: [{ type: 'text', text: `Compacted ${input.messages.length} messages (deterministic digest; no chapter: ${cwd === null ? 'no workspace cwd' : cid === null ? 'no open transaction' : 'empty region'}).` }],
+        summary: carryOpenRequest([{ type: 'text', text: `Compacted ${input.messages.length} messages (deterministic digest; no chapter: ${cwd === null ? 'no workspace cwd' : cid === null ? 'no open transaction' : 'empty region'}).` }], input.messages, this.chaptersConfig.openRequestCarryMaxChars),
         provider: `${CHAPTERS_PROVIDER}-degraded`,
         model: DETERMINISTIC_MODEL,
       }
@@ -701,7 +746,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       tocText = plan.tocText
       return stored
     })
-    return { summary: [{ type: 'text', text: tocText }], provider: CHAPTERS_PROVIDER, model: DETERMINISTIC_MODEL }
+    return { summary: carryOpenRequest([{ type: 'text', text: tocText }], input.messages, this.chaptersConfig.openRequestCarryMaxChars), provider: CHAPTERS_PROVIDER, model: DETERMINISTIC_MODEL }
   }
 
   // ------------------------------------------------------------ entry points (finalize after commit)

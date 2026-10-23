@@ -159,3 +159,42 @@ those notes are what made the failure legible as "the hook is never called", and
    `chapters-engine` row inside `preset-chapters` (`cordis.patch.yml`); the host plugin row's
    `compactionThresholdRatio` / `installChaptersPreset` are inert since 0.1.18. This is why an
    apparently-configured rig ran every leg on realm defaults while its own header claimed 0.5.
+
+## Relief must not shadow the question (#87, measured 2026-10-23)
+
+The seam's real failure mode is not a crash — it is a **surface with no request in it**. Field
+evidence from one `heavy` session (299 events, decoded `session.v4.jsonl.zstd`):
+
+```
+13 compaction summaries, 108 distinct shadowed seqs
+STILL-HERE instruction seqs:      [109,116,138,154,172,188,216,236,254,268,291]
+shadowed away by relief:          [109,116,138,154,172,188,216,236,254,268]   ← 10 of 11
+final assistant text: ""
+```
+
+Why: `retainRatio` reserves a *token fraction* as a verbatim tail. When an oversized `tool/result`
+sits in that tail it eats the whole budget, and range selection shadows the newest `user/message`
+anyway. Our summary is deterministic and plot-shaped, so it carries no request. The user sees an agent
+that stopped responding, with nothing in the sink — a `#61a` violation twice over (undetected, and
+therefore undelivered).
+
+**The rule we ship.** We author the summary text, so the newest human turn travels *into* it — verbatim
+(`carryOpenRequest`, `src/engine.ts`). Nothing recorded is rewritten: this honors invariant 1, appends
+to our own output, and the input array is never mutated. Details that are the point:
+
+- **Injected scaffolding is skipped.** `<system-reminder>`, the host's checkpoint preamble,
+  `Time sampled …`, artifact stubs: re-injecting machine state as if it were a request would be a
+  different lie, so the predicate that decides "is this a human turn" lives in ONE place — the same
+  one-predicate rule that bit us with #59's title chooser.
+- **A cap is stated, never silent.** `openRequestCarryMaxChars` (realm config, default 4000) bounds the
+  block, and when it bites the text says `carried in part: N characters total, M included — the whole
+  turn stays in the durable log`. Never truncate to fit is a plugin rule, and it applies to our own
+  summaries.
+- **Nothing is claimed when there is nothing to carry.** No human turn in the region ⇒ no OPEN REQUEST
+  block, no empty promise of one.
+
+Rows: `tests/unit/engine-open-request.test.ts` (verbatim carry; injections excluded; stated truncation;
+empty region), written before the wiring was trusted. **Process lapse, recorded honestly:** the mandated
+cycle is Issue → Docs → Tests → Code, and here I wrote the implementation before this section. The
+issue (#87) and the tests did come first, and the docs landed before the commit — but the order slipped,
+and a rule that is only followed when convenient is the kind of drift this file exists to catch.

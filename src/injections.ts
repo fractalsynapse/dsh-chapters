@@ -119,8 +119,14 @@ export function sourceLabel(data: Record<string, unknown>): string {
  *
  * Anchored at the START on purpose: a human quoting "time sampled while preparing" mid-sentence is
  * conversation and stays verbatim — the same line the body screen draws.
+ *
+ * `this is an automatically generated checkpoint` joined 2026-10-23 (#87): it is the host's own
+ * in-place relief preamble — machine state that replaces earlier turns, never something a human asked.
+ * It had to join THIS list rather than get a second one, because #87's fix asks the same question
+ * ("is this a human turn?") at the compaction seam, and a parallel list is exactly the #59 drift this
+ * comment already records.
  */
-const INJECTED_PROSE = /^\s*(<system-reminder>|<codegraph_context|system reminder\b|current runtime context\.|time sampled while preparing|browser time zone for this request|\[workspace instructions?\b|this session is running under|the following workspace instructions|agent [A-Za-z0-9_-]{8,} sent a message|background subagent [A-Za-z0-9_-]{8,} finished)/i
+const INJECTED_PROSE = /^\s*(<system-reminder>|<codegraph_context|system reminder\b|current runtime context\.|time sampled while preparing|browser time zone for this request|\[workspace instructions?\b|this session is running under|the following workspace instructions|agent [A-Za-z0-9_-]{8,} sent a message|background subagent [A-Za-z0-9_-]{8,} finished|this is an automatically generated checkpoint)/i
 
 export function isInjectedProse(text: string): boolean {
   return INJECTED_PROSE.test(text)
