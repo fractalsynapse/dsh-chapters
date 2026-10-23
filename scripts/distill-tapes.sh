@@ -88,7 +88,7 @@ for proj in "${want[@]}"; do
   mkdir -p var/distill
   leg_log="var/distill/${proj}-$(date +%H%M%S).log"
   started=$(date +%s)
-  env E2E_MODEL=record E2E_PORT="${PORTS[$proj]}" E2E_THRESHOLD="${THRESH[$proj]}" E2E_TAPE="$proj" ${leg_extra} \
+  env E2E_MODEL=record E2E_PORT="${PORTS[$proj]}" E2E_THRESHOLD="${THRESH[$proj]}" E2E_TAPE="$proj" ${leg_extra:-} \
     timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "$leg_log" 2>&1 &
   leg_pid=$!
   # heartbeat: tape entries + last upstream journal line, every 60s. A stall becomes
