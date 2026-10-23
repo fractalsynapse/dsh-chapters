@@ -562,3 +562,34 @@ and does not let a plugin do, with anchors:
   from our installed `@deepseek-ai/dsh-session@0.1.5-rc.2` (grep-verified on `lib/types`),
   which is why #71 ships the PULL transport; the push swap is the backlog item, and it needs
   the compile-time `@deepseek-ai/*` closure moved to 0.2.x alongside the runtime pin.
+
+## Client Sessions Service: which verbs exist (measured 0.2.0-rc.2, #77)
+
+The client service injected as `sessions` (`dsh-api-session-controller/lib/types/client/sessions/
+service.js`) is a **session store and lifecycle**, not a navigator. Its verbs are
+`create / fork / using / retain / retainInfo / release / refresh / projectList / binding /
+handleSessionAdded / handleSessionRemoved / handleSessionActivity / …`. There is **no
+`sessions.open`** — a guard written as `if (typeof sessions.open !== 'function') return false`
+fails silently on every call, which is exactly how the chapters door spent three evenings looking
+like a client that refused to catalogue a plugin-created child.
+
+The navigation verb lives on the workspace service (`dsh-client-ui-workspace/lib/client.js`):
+
+```js
+openSession(target) { this.replaceMain(target, this.lifetime.signal, "reveal"); }
+```
+
+and the host's own fork affordance uses it — `dsh-client-ui-chat/lib/client.js`, right after its
+fork RPC resolves: `.then((childId) => { ctx.uiWorkspace.openSession(childId); })`. So a plugin
+that must move the visible session injects **`uiWorkspace`** and calls `openSession(sessionId)`;
+`sessions.*` cannot do it. `sessions.using/retain` materialize a scope for a session the client
+addresses; they do not change what is displayed.
+
+Two corollaries, both bought once:
+- A client capability you assume is a client capability you must assert at the decision point —
+  `src/client/doors.ts` now prints which verbs were actually present when it decided
+  (`+c/+u/+o/+w`), because a note that blames the user's client for the plugin's own missing port
+  sends the next reader down the wrong path.
+- An injected port that is optional and stops being wired fails as a symptom, not as an error:
+  `tests/unit/client-doors.test.ts` has a row that fails if `src/client/index.ts` drops
+  `uiWorkspace` from `inject` or stops passing it.
