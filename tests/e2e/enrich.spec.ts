@@ -76,8 +76,14 @@ pending: 0
   // the DOM either. Gating on an unverified rendering claim means the leg fails for someone
   // else's missing feature with no attribution, so: record what the surface did, name the issue,
   // and keep the durable gate (above) as the strict claim it always was. #80 owns the fix.
-  await page.locator('[class*="flowItem"], [class*="message"]').last()
-    .scrollIntoViewIfNeeded().catch(() => undefined)
+  // Bounded, deliberately: `last()` on a virtualized list whose nodes detach as the window
+  // churns never settles, and with no timeout Playwright waited until the TEST ceiling — which
+  // is the 17-minute silence this leg showed twice (no model request, no log write, nothing).
+  // My own line, hung my own leg; the fix is a deadline, not a deletion of the observation.
+  await Promise.race([
+    page.locator('[class*="flowItem"], [class*="message"]').last().scrollIntoViewIfNeeded({ timeout: 5_000 }),
+    new Promise((r) => setTimeout(r, 6_000).unref?.()),
+  ]).catch(() => undefined)
   const reportVisible = ((await page.textContent('body').catch(() => '')) ?? '').includes('pending')
   fs.writeFileSync(path.join(ROOT, 'var', 'e2e-enrich-notes.json'), JSON.stringify({
     at: new Date().toISOString(),

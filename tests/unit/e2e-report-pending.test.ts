@@ -69,3 +69,15 @@ test('the helper reads the tree it is handed, not the one it happened to compute
       'a missing tree is false, not a crash')
   } finally { fs.rmSync(root, { recursive: true, force: true }) }
 })
+
+test('the surface probe is bounded, so a churning list cannot hang the leg (#56)', () => {
+  // Measured: the leg went silent for 17 minutes — no model request, no log write — because
+  // `scrollIntoViewIfNeeded()` on `locator(...).last()` of a virtualized list never settled and
+  // had no timeout. The guard is on the shape, because the symptom only shows up as a wasted
+  // evening: any scrollIntoViewIfNeeded in this spec must carry a deadline.
+  const src = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'tests', 'e2e', 'enrich.spec.ts'), 'utf8')
+  const calls = src.split('\n').filter((l) => l.includes('scrollIntoViewIfNeeded'))
+  assert.ok(calls.length >= 1, 'the observation must still be attempted')
+  assert.ok(calls.every((l) => /timeout:\s*\d/.test(l) || /Promise\.race/.test(l)),
+    `every scroll must be bounded: ${JSON.stringify(calls.map((l) => l.trim()))}`)
+})
