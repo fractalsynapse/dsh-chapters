@@ -272,6 +272,42 @@ function loadTape(tapeDir: string): TapeEntry[] {
  * pins that. A legit re-run whose volatile content normalized identically
  * still matches.
  */
+/**
+ * Say WHAT DIVERGED, not only that something missed (#56).
+ *
+ * A bare MISS line told me `messages=5` and the last message's text — which could not answer the
+ * only question that matters when replay breaks: *which recorded turn* does this continue, and at
+ * which message do the bytes stop agreeing? The answer is what separates "the host asked a shorter
+ * conversation because an injection went missing" from "the tape is from a different journey
+ * entirely". Exported so a row can pin it, because an instrument that only runs inside a failing
+ * leg is an instrument nobody trusts.
+ */
+export function describeMiss(tape: TapeEntry[], incoming: unknown[]): string {
+  const inc = incoming.map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+  // `file` is filled by the tape loader; a caller without it (a test, a partially built tape)
+  // still gets a usable index rather than a mysterious `?`
+  let best = { entry: '?', common: -1, idx: -1 }
+  tape.forEach((_unused, i) => { void i })
+  for (let ti = 0; ti < tape.length; ti += 1) {
+    const e = tape[ti]
+    const stored = (e.prefix ?? []).map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+    let n = 0
+    while (n < stored.length && n < inc.length && stored[n] === inc[n]) n += 1
+    if (n > best.common) best = { entry: e.file ?? `entry#${String(ti)}`, common: n, idx: ti }
+  }
+  const at = best.common
+  const wantIdx = at < inc.length ? String(at) : 'end'
+  const got = at < inc.length ? inc[at].slice(0, 110) : ''
+  const exp = (() => {
+    const e = best.idx >= 0 ? tape[best.idx] : tape.find((t) => t.file === best.entry)
+    if (e === undefined || at >= (e.prefix ?? []).length) return ''
+    const s = (e.prefix ?? [])[at]
+    return substituteAll(typeof s === 'string' ? s : JSON.stringify(s) ?? '').slice(0, 110)
+  })()
+  return `closest=${best.entry} commonPrefix=${String(best.common)} divergeAt=msg${wantIdx}`
+    + ` got=${JSON.stringify(got)} expected=${JSON.stringify(exp)}`
+}
+
 function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
   const inc = incoming.map(normalizeSingle).filter((x) => x !== '')
   let best: TapeEntry | null = null
@@ -496,7 +532,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           // `heavy` looked like the failure of whichever project died last. Name
           // the tape AND how many entries it loaded — "entries=0" is a different
           // bug (missing/untracked tape) than a prefix mismatch.
-          fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${tape.length} messages=${inc.length} last=${JSON.stringify(inc[inc.length - 1] ?? '').slice(0, 200)}\n`)
+          fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${String(tape.length)} messages=${String(inc.length)} ${describeMiss(tape, inc)}\n`)
           // A miss is fatal (503) — UNLESS liveFallback is on, where it falls
           // through to the record path: the real model answers the drifted
           // request AND it lands on the tape, so the next clean replay

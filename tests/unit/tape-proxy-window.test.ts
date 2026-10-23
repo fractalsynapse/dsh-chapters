@@ -190,3 +190,25 @@ test('REPLAY refuses the same over-window request and consumes no tape entry (#7
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+/**
+ * A MISS must name the divergence (#56). Tonight's replay failures were only "messages=5" plus a
+ * last-message preview, which could not distinguish a missing harness injection from a tape that
+ * belongs to a different journey — and the difference decides whether to fix the rig or re-record.
+ */
+test('describeMiss names the closest entry and the message where the bytes stop agreeing', async () => {
+  const { describeMiss } = await import('../../tests/e2e/model-proxy.ts')
+  const mk = (s: string): string => JSON.stringify({ role: 'user', content: s })
+  const tape = [
+    { key: 'a', prefix: [mk('sys'), mk('question'), mk('answer one'), mk('next')], status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: '2026-10-23T00:00:00.000Z' },
+  ] as unknown as Parameters<typeof describeMiss>[0]
+  const incoming = [mk('sys'), mk('question'), mk('ANSWER ONE — different'), mk('extra')]
+  const line = describeMiss(tape, incoming)
+  // the claim is that it NAMES the turn — a file name when the loader supplied one, an entry
+  // index when it did not. A bare `?` would be the anonymous answer this row exists to forbid.
+  assert.match(line, /closest=(?!\?)[^\s]+/, 'names which recorded turn it continues: ' + line)
+  assert.match(line, /commonPrefix=2/, 'two messages agreed byte-for-byte: ' + line)
+  assert.match(line, /divergeAt=msg2/, 'and the third is where they stop: ' + line)
+  assert.match(line, /got=.*ANSWER ONE/, 'shows what replay asked: ' + line)
+  assert.match(line, /expected=.*answer one/, 'and what the tape holds: ' + line)
+})

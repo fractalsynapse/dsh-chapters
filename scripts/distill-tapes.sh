@@ -120,6 +120,12 @@ for proj in "${want[@]}"; do
   fi
   n=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
   echo "--- $proj: exit=$rc tapeEntries=$n"
+  # Provenance is GENERATED, not hand-authored: the `rm -rf` above destroys whatever was in the
+  # project directory, and hand-written PROVENANCE.md files (plans, prompt — the records saying
+  # those legs come from the scripted stub, not a live model) were deleted by exactly that on the
+  # re-anchor (#56). One line per leg, with the verdict only the runner knows.
+  node --experimental-strip-types scripts/write-provenance.mjs --project "$proj" --verdict "exit=$rc tapeEntries=$n" \
+    >/dev/null 2>&1 || echo "    distill: provenance regeneration FAILED for $proj" >&2
   [[ "$rc" -ne 0 ]] && failed+=("$proj")
 done
 echo
