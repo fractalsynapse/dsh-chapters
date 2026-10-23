@@ -37,19 +37,29 @@ const tree = (opts: { corpus?: string, pinned?: string }): string => {
  * version could not: it asserts WHY it is open (pinned equals distilled) and mutates the record
  * to prove a future pin move closes the gate again without anyone touching a test.
  */
-test('the gate is CLOSED again on purpose: the last corpus was distilled on a host that is not the pin (#89)', () => {
+/**
+ * The gate's whole life in one day, recorded where a reader will hit it: opened on the re-anchor
+ * (`bcb16d3`), closed an hour later when the corpus turned out to be distilled against a LINKED DEV
+ * BUILD of the host rather than the pin (#89), and opened again once the nine legs had been re-run
+ * under the pinned hermetic install — booted by absolute path and self-recorded as
+ * `hostPinned: true` in `var/e2e-boot-<port>.json`.
+ *
+ * Why the row tracks the state instead of pinning "closed" forever: the gate exists to refuse a
+ * corpus that cannot replay, and that is a fact about the record, not a preference. The mutation
+ * block below proves BOTH directions by data alone, so neither state can be asserted by wish.
+ */
+test('the corpus is anchored to the pinned host it was recorded on, and the gate moves by data only', () => {
   const root = path.resolve(process.cwd())
   const a = corpusAnchor(root)
   assert.equal(a.pinned, '0.2.0-rc.2', 'the lock is the source of the pin (no second literal)')
-  // I opened this gate on 2026-10-23 and closed it again the same day, for a reason worth keeping:
-  // the rig booted `dsh` from PATH, which on the recording machine was a LINKED DEV BUILD reporting
-  // the same version string as the pin. Local strict replay was green on that build and impossible on
-  // CI's published tarball. A lifted gate that admits a corpus no one else can replay is a
-  // decorative gate, so it goes back to closed until the corpus is distilled under the pinned host —
-  // at which point the mutation branch below is what proves the reopen is real.
-  assert.equal(a.anchored, false, 'replay must REFUSE by name until the corpus matches the pinned host')
-  assert.match(a.reason, /0\.1\.5-rc\.1/, 'the refusal states which version it was distilled against')
-  assert.match(a.reason, /DEV BUILD|dev build|pinned/i, 'and why — a reader must not have to read the issue to learn it')
+  assert.equal(a.anchored, true, 'open: the corpus and the pin are the same host, booted by absolute path')
+  // `corpusAnchor` computes the reason when the record MATCHES (only a mismatch gets the two-version
+  // statement), so "what makes this open" lives in the record's own `reason` key — assert it there,
+  // where a human reading the file will find it, rather than inventing a field the resolver does not have.
+  assert.equal(a.distilled, a.pinned, 'open means the record equals the pin')
+  const recordText = fs.readFileSync(path.join(path.resolve(process.cwd()), 'tests', 'fixtures', 'model-tape', 'CORPUS_HOST'), 'utf8')
+  assert.match(recordText, /PINNED hermetic host|hostPinned/i,
+    'the record itself says why this corpus may replay where the last one could not (#89)')
 
   // mutation: the drift that matters is the RECORD falling behind the PIN. `pinned` in the file
   // is documentary — `corpusAnchor` resolves the truth from the lock — so the honest mutation is
