@@ -35,6 +35,7 @@ import { carryActivePlan, detectPlans } from './plans.ts'
 import { isInjectedProse, stripReminderSpans } from './injections.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
+import { lastResortCeilingTokens } from './last-resort.ts'
 import { extractPlot } from './engine-core.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
@@ -58,6 +59,8 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   knowledgeMirrorDir?: string
   /** #87: verbatim carry of the newest human turn, capped; the cap is stated, never silent. */
   openRequestCarryMaxChars?: number
+  /** #78 A: defer a node relief cannot coexist with, after a measured decline. */
+  lastResortArtifact?: boolean
   chapterTokenTarget?: number
   toolResultDeferFloorTokens?: number
   mergeThreshold?: number
@@ -275,6 +278,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     artifactStoreRoot: z.string(),
     knowledgeMirrorDir: z.string().default('.dsh-knowledge'),
     openRequestCarryMaxChars: z.number().step(1).min(200).default(4000),
+    /** #78 A: the last-resort deferral switch. Operator-visible, default on. */
+    lastResortArtifact: z.boolean().default(true),
     chapterTokenTarget: z.number().step(1).min(1),
     toolResultDeferFloorTokens: z.number().step(1).min(0),
     // The composition knobs ride the same row so the engine path and the fork
@@ -359,7 +364,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, lastResortArtifact, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
@@ -386,6 +391,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       artifactStoreRoot: artifactStoreRoot ?? '.dsh-chapters',
       knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
       openRequestCarryMaxChars: openRequestCarryMaxChars ?? 4000,
+      lastResortArtifact: lastResortArtifact ?? true,
       chapterTokenTarget: chapterTokenTarget ?? 8000,
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
@@ -851,6 +857,58 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * on `/compact`) because those two disagreeing is exactly the kind of drift a field report needs
    * to be able to tell apart. (#78)
    */
+  /**
+   * The last-resort deferral (#78 option A). Returns how many nodes it stubbed, and 0 — never a
+   * guess — unless every input to the ceiling is real: `resolveStoreRoot`-style derivation lives in
+   * `lastResortCeilingTokens`, so this method only supplies measured values. Runs only from the
+   * declined branch; the operator's `toolResultArtifactTokens` still governs every ordinary case.
+   */
+  async #lastResortRelief(agent: Agent, signal: AbortSignal): Promise<number> {
+    try {
+      if (this.chaptersConfig.lastResortArtifact !== true) return 0
+      const route = this.lastRoute
+      const meter = (this.ctx as unknown as {
+        tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number }, estimateMessage?: (m: unknown) => number }
+      }).tokenMeter
+      const llm = (this.ctx as unknown as {
+        llm?: { resolveModelInfo?: (p: string, m: string, s: AbortSignal) => Promise<unknown> }
+      }).llm
+      if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') return 0
+      const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
+        { context?: { contextWindow?: number } } | undefined
+      const base = this as unknown as { config?: { retainRatio?: number, retainTokens?: number, maxTokens?: number } }
+      const retainTokens = base.config?.retainTokens
+      const ceiling = lastResortCeilingTokens({
+        windowTokens: Number(info?.context?.contextWindow ?? NaN),
+        retainRatio: Number(base.config?.retainRatio ?? NaN),
+        // optional, not `| undefined`: `exactOptionalPropertyTypes` is on, and a property that can
+        // hold undefined is a different promise from one that may be absent.
+        ...(retainTokens !== undefined ? { retainTokens } : {}),
+        reservedCompletionTokens: Number(base.config?.maxTokens ?? NaN),
+      })
+      if (ceiling === null) return 0
+      const session = agent.session as unknown as ArrivalSessionShim & {
+        surface: { nodes: number[] }, header?: { cwd?: string }
+      }
+      const cwd = session.header?.cwd ?? ''
+      if (cwd === '') return 0 // no workspace identity, no deferral — same rule as `#arrive`
+      const before = [...session.surface.nodes].length
+      const r = await applyArrivalStubs(session, {
+        cwd,
+        storeRoot: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+        floorTokens: ceiling,
+        estimate: (m: unknown) => meter.estimateMessage?.(m) ?? 0,
+      })
+      if (r.stubbed > 0) {
+        diagnosticWarn(this.ctx.logger, 'realm:engine:last-resort',
+          `relief declined, so ${String(r.stubbed)} tool/result node(s) larger than the coexistence ceiling (${String(ceiling)} tok) were artifact-deferred regardless of toolResultArtifactTokens — survivability over economy (#78 A); the archive keeps every byte and chapters_artifact answers for them (surface nodes ${String(before)} → ${String(session.surface.nodes.length)})`)
+      }
+      return r.stubbed
+    } catch { /* a last resort must never become the reason relief failed */
+      return 0
+    }
+  }
+
   /** See the call site: a decline while OVER the trigger is a statement, not a shrug. Never throws. */
   async #reportDecline(agent: Agent, signal: AbortSignal): Promise<void> {
     try {
@@ -946,7 +1004,26 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // inline tool/results are individually larger than the trigger — and changes no behavior:
     // the arrival floor is the operator's switch (AGENTS: a behavior switch, not a knob), and the
     // engine does not get to reinterpret it silently.
-    if (result === null) await this.#reportDecline(agent, signal)
+    if (result === null) {
+      // #78 option A: relief declined, so a node that cannot coexist with the mandatory tail is no
+      // longer an economy question — the session is stuck. Defer THAT node as a last resort and give
+      // relief one more chance. Ordering is the whole design: this sits inside the declined branch,
+      // never in `#arrive`, so `heavy` still proves pressure compaction first. An eager version would
+      // arrival-stub the surface and make the leg's claim untestable (AGENTS' named trap), which is
+      // what the anti-vacuity rows below guard against.
+      const deferred = await this.#lastResortRelief(agent, signal)
+      if (deferred > 0) {
+        try {
+          const retry = await super.compactIfNeeded(agent, trigger, signal)
+          if (retry !== null) {
+            await this.#finalizeGuarded(agent)
+            this.#noteDecision('compactIfNeeded', trigger, retry, agent)
+            return retry
+          }
+        } catch { /* still stuck: fall through to the decline report, then rethrow nothing */ }
+      }
+      await this.#reportDecline(agent, signal)
+    }
     this.#noteDecision('compactIfNeeded', trigger, result, agent)
     return result
   }

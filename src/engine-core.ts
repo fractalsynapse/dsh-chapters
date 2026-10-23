@@ -62,6 +62,8 @@ export interface EngineConfig {
   /** #87: how much of the newest human turn the summary carries verbatim when relief
    *  shadows the turn that asked it. A cap, never a silent cut — the block says how much was left. */
   openRequestCarryMaxChars: number
+  /** #78 A: the survivability switch. See `docs/host-compaction-seam.md` § the last-resort deferral. */
+  lastResortArtifact: boolean
   chapterTokenTarget: number
   toolResultDeferFloorTokens: number
   /** Composer tunables (record §4.2/§12) — same register, same defaults as the host plugin's. */
@@ -98,6 +100,7 @@ export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   artifactStoreRoot: '.dsh-chapters',
   knowledgeMirrorDir: '.dsh-knowledge',
   openRequestCarryMaxChars: 4000,
+  lastResortArtifact: true,
   chapterTokenTarget: 8000,
   toolResultDeferFloorTokens: 200,
   mergeThreshold: 0.3,

@@ -206,6 +206,8 @@ export const Config = Schema.object({
   knowledgeMirrorDir: Schema.string().default('.dsh-knowledge'),
   // #87: the newest human turn carried verbatim into a relief summary, capped.
   openRequestCarryMaxChars: Schema.number().step(1).min(200).default(4000),
+  // #78 A: survivability switch, default on (docs/host-compaction-seam.md).
+  lastResortArtifact: Schema.boolean().default(true),
   chapterTokenTarget: Schema.number().default(8000),
   toolResultDeferFloorTokens: Schema.number().default(200),
   // Share of the window REMAINING after the header bound — never of the

@@ -221,5 +221,5 @@ the node's tokens, and the ceiling it failed.
    case is a context-economy miss and `chapters_artifact` still answers for it — which is the only thing
    that makes overriding a configured economy knob defensible at all.
 
-Rows: `tests/unit/engine-last-resort.test.ts` — fires only after a decline; below the ceiling, untouched;
+Rows: `tests/unit/last-resort.test.ts` (the ceiling math, `null` on incomplete inputs, and the anti-vacuity ordering row) plus the engine lifecycle suite; below the ceiling, untouched;
 switch off, untouched even after a decline; and the warning carries the numbers.
