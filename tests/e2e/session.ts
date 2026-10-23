@@ -273,6 +273,32 @@ export function commandDispatched(logText: string, name: string, argsNeedle: str
   return false
 }
 
+/**
+ * The predicate `typeComposer` needs at EVERY call site, built from the session it is typing into.
+ *
+ * #81 wired this only for the first turn of `newSessionWithTurn` and left the follow-ups and
+ * slash commands unguarded — which is exactly how the re-anchored `heavy` tape recorded a
+ * duplicated instruction: record-time the race sent twice and only one answer got recorded, so
+ * replay (same code, different race timing) asked a question the tape has no entry for and the
+ * post-compaction answer gate went red. A guard that covers one of seven call sites is not a
+ * guard; it is a coin flip that looks deterministic on the machine that wrote it.
+ */
+export function deliveredFor(sid: string | null, line: string): () => boolean {
+  return () => {
+    if (sid === null || sid === '') return false
+    const text = sessionLogTextById(sid)
+    if (text === '') return false
+    const trimmed = line.trim()
+    if (trimmed.startsWith('/')) {
+      const parts = trimmed.slice(1).split(/\s+/)
+      const name = parts[0] ?? ''
+      const args = trimmed.slice(1 + name.length)
+      return commandDispatched(text, name, args.trim().slice(0, 24))
+    }
+    return humanMessageCarries(text, trimmed)
+  }
+}
+
 export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>): Promise<void> {
   await focusComposer(page)
   await page.keyboard.insertText(line)

@@ -43,7 +43,7 @@ test('an archived chapter enriches through the ladder with the body provably unt
   const before = fs.readFileSync(f, 'utf8')
   const bodyBefore = before.slice(before.indexOf('\n---\n') + 5)
 
-  await typeComposer(page, '/chapters-enrich run ')
+  await typeComposer(page, '/chapters-enrich run ', deliveredFor(sid, '/chapters-enrich run '))
   await expect.poll(() => {
     const now = chapterFile(sid)
     const text = now === '' ? '' : fs.readFileSync(now, 'utf8')
@@ -57,7 +57,7 @@ test('an archived chapter enriches through the ladder with the body provably unt
   // ladder reached the durable plane through the real command + proxy path.
   expect(after).toMatch(/generated:|unvetted/, 'sanctioned write markers present')
 
-  await typeComposer(page, '/chapters-enrich report ')
+  await typeComposer(page, '/chapters-enrich report ', deliveredFor(sid, '/chapters-enrich report '))
   // TWO claims, both gated, because the old single DOM poll conflated them and the report is
   // provably running: the child's durable log holds `…· last: enrichment batch: 1/1 chapter(s)
 pending: 0

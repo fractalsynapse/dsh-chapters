@@ -166,7 +166,7 @@ test('an approved plan is archived whole, a continuation carries it as a directi
   // grep — and the follow-up request TIMED OUT before it ever reached the plan).
   // The journey wants one turn to a submission, so it must forbid exploration as
   // loudly as it asks for the plan.
-  await typeComposer(page, '/plan Which file defines the chapter renderer? Answer from what you already know — do not read, list, search, or open any file, and do not run any tool except the plan tool. Present your plan with the exit_plan_mode tool now; if you need a fact, state it as an assumption.')
+  await typeComposer(page, '/plan Which file defines the chapter renderer? Answer from what you already know — do not read, list, search, or open any file, and do not run any tool except the plan tool. Present your plan with the exit_plan_mode tool now; if you need a fact, state it as an assumption.'
 
   // The review renders as a REGION named by the question, with the plan text
   // inside it and an "Approve" button (measured from the failure snapshot of the
@@ -275,7 +275,7 @@ test('an approved plan is archived whole, a continuation carries it as a directi
   // to create the child, which is also why no new tape entry appears here.
   const contTitle = 'Carried on from the live journey'
   const beforeContinuation = sessIdsWithPrefix('ch-').length
-  await typeComposer(page, `/chapters-continue ${contTitle}`)
+  await typeComposer(page, `/chapters-continue ${contTitle}`, deliveredFor(sid, `/chapters-continue ${contTitle}`))
   // The child appears in the store; the UI does not switch, so this waits on the durable
   // log rather than on a view — the same discipline every other assertion here follows.
   let continuedId = ''

@@ -14,6 +14,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { humanMessageCarries, commandDispatched } from '../../tests/e2e/session.ts'
 
+const ROOT = path.resolve(import.meta.dirname, '..', '..')
+
 const line = (o: unknown): string => JSON.stringify(o)
 const LOG = [
   line({ type: 'session', version: 4, id: 'session-a' }),
@@ -46,4 +48,47 @@ test('typeComposer asks that authority before pressing again (#81)', () => {
   // the claim is placement, not spelling: the check must be the FIRST thing each round does
   assert.match(fn, /if \(await alreadyDelivered\(\)\) return\n\s*if \(await emptied\(\)\) return/,
     'the delivery check must precede the editor check in every round, not only run at the end')
+})
+
+/**
+ * The drift guard. #81 was fixed for ONE call site and left the rest, which is how the re-anchored
+ * `heavy` tape came to record a duplicated instruction and then fail strict replay: record-time the
+ * race sent twice, only one answer was on tape, and replay — same code, different timing — asked a
+ * question the corpus has no entry for. A guard that covers one of N sites is a coin flip.
+ */
+test('every typeComposer call in the journeys passes a delivery predicate (#81)', () => {
+  const dir = path.join(ROOT, 'tests', 'e2e')
+  const offenders: string[] = []
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.spec.ts'))) {
+    const src = fs.readFileSync(path.join(dir, f), 'utf8')
+    let i = 0
+    for (;;) {
+      const j = src.indexOf('typeComposer(', i)
+      if (j < 0) break
+      // walk with quotes respected: the naive paren counter ends inside a string that contains
+      // a bracket, which is how this scan first "found" a broken call that was fine
+      let k = j + 'typeComposer('.length
+      let depth = 1
+      let quote: string | null = null
+      while (k < src.length && depth > 0) {
+        const ch = src[k]
+        if (quote !== null) {
+          if (ch === '\\') k += 2
+          else if (ch === quote) quote = null
+        } else if (ch === '"' || ch === "'" || ch === '`') quote = ch
+        else if (ch === '(') depth += 1
+        else if (ch === ')') depth -= 1
+        k += 1
+      }
+      const call = src.slice(j, k)
+      const line = src.slice(0, j).split('\n').length
+      const isHelperSelf = f === 'session.ts'
+      if (!isHelperSelf && !call.includes('deliveredFor') && !call.includes('delivered')) {
+        offenders.push(`${f}:${line}`)
+      }
+      i = k
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `these typeComposer calls decide success from the editor instead of the durable log: ${offenders.join(', ')}`)
 })

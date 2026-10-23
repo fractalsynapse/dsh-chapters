@@ -73,7 +73,7 @@ test('the ghost appears idle, hides on typing, accepts on ArrowRight, and reache
   const sid = await newSession(page)
 
   // One real turn so there is an idle boundary with a completed assistant reply.
-  await typeComposer(page, 'Reply in one sentence: which file renders the chapter archive?')
+  await typeComposer(page, 'Reply in one sentence: which file renders the chapter archive?', deliveredFor(sid, 'Reply in one sentence: which file renders the chapter archive?'))
 
   // The suggestion arrives via the composer pull — wait for the chip, generously:
   // on record, the auxiliary call runs live against the scripted upstream.
@@ -99,7 +99,7 @@ test('the ghost appears idle, hides on typing, accepts on ArrowRight, and reache
   await expect(ghost(page), 'a dismissed offer does not come back this boundary').toBeHidden({ timeout: 3_000 })
 
   // A real turn opens boundary 2 — and the next boundary RE-ARMS the offer.
-  await typeComposer(page, 'One more sentence, no tools.')
+  await typeComposer(page, 'One more sentence, no tools.', deliveredFor(sid, 'One more sentence, no tools.'))
   await expect(ghost(page), 'the next boundary re-offers').toBeVisible({ timeout: 300_000 })
 
   // The acceptance gesture: ArrowRight moves the suggestion into the draft — the

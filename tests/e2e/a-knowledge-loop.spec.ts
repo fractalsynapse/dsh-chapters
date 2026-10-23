@@ -66,12 +66,12 @@ test('the knowledge loop end to end over a real git remote, from the browser', a
     // the remote holds them). 'synced' at this point means the transport is
     // healthy, not that bytes moved (the empty-mirror push is an honest
     // no-op — the 2026-09-25 hosted-CI product fix).
-    await typeComposer(page, `/chapters-link ${repoUrl} tok-e2e`)
+    await typeComposer(page, `/chapters-link ${repoUrl} tok-e2e`, deliveredFor(sid, `/chapters-link ${repoUrl} tok-e2e`))
     await expect.poll(() => projectRecords().some((r) => r.remote === repoUrl), { timeout: 30_000, intervals: [1000] }).toBe(true)
     const { remoteFiles } = httpMod
 
     // ---- 2. status command: synced, with the numbers behind it
-    await typeComposer(page, '/chapters-status ')
+    await typeComposer(page, '/chapters-status ', deliveredFor(sid, '/chapters-status '))
     await expect.poll(() => {
       try { return JSON.parse(fs.readFileSync(statusPath, 'utf8')).mode } catch { return null }
     }, { timeout: 30_000, intervals: [1000] }).toBe('synced')
