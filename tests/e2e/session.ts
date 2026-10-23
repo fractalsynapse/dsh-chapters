@@ -236,7 +236,44 @@ export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork wi
  * stage now checks itself and the Enter retry is a fallback that must also
  * show the text leaving the composer. Failures carry full diagnostics.
  */
-export async function typeComposer(page: Page, line: string): Promise<void> {
+/**
+ * Is a HUMAN turn already in the durable log? #81: `typeComposer` used the editor's own emptiness
+ * as proof of delivery, and the host clears the draft on its own schedule — a late flush made it
+ * press again and one session got the same instruction twice (`STILL-HERE` at seq 40 and again at
+ * seq 47). A `user/message` carrying the text is the only authority, and pointedly NOT an
+ * assistant echo: a model repeating a phrase must not be read as the human's send having landed.
+ */
+export function humanMessageCarries(logText: string, needle: string): boolean {
+  if (logText === '' || needle === '') return false
+  const want = needle.slice(0, 80)
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"user/message"')) continue
+    try {
+      const ev = JSON.parse(line) as { data?: { message?: { content?: unknown } } }
+      const c = ev?.data?.message?.content
+      const text = typeof c === 'string' ? c
+        : Array.isArray(c) ? (c as Array<{ text?: string }>).map((b) => b?.text ?? '').join(' ') : ''
+      if (text.includes(want)) return true
+    } catch { /* a partial write is not a delivery */ }
+  }
+  return false
+}
+
+/** Did a slash command already reach the host? Its record is a `command/run`, not a chat bubble. */
+export function commandDispatched(logText: string, name: string, argsNeedle: string): boolean {
+  if (logText === '') return false
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"command/run"')) continue
+    try {
+      const ev = JSON.parse(line) as { data?: { name?: string, args?: string } }
+      if (ev?.data?.name !== name) continue
+      if (argsNeedle === '' || (ev?.data?.args ?? '').includes(argsNeedle)) return true
+    } catch { /* ignore a partial line */ }
+  }
+  return false
+}
+
+export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>): Promise<void> {
   await focusComposer(page)
   await page.keyboard.insertText(line)
   const composerSel = 'div[aria-label*="/ commands, @ files or sessions"]'
@@ -253,7 +290,15 @@ export async function typeComposer(page: Page, line: string): Promise<void> {
   // hold the composer for tens of seconds (measured under coverage
   // instrumentation) — so the budget is minutes, and pressing Enter while
   // busy is a harmless no-op that the editor queues nothing for.
+  const alreadyDelivered = async (): Promise<boolean> => {
+    if (delivered === undefined) return false
+    try { return await delivered() } catch { return false }
+  }
   for (let round = 0; round < 48; round += 1) {
+    // #81: the durable delivery predicate is checked FIRST, before any further press. The
+    // editor's own state is a hint about the future, not a record of the past — that inversion
+    // is what sent one instruction twice.
+    if (await alreadyDelivered()) return
     if (await emptied()) return
     const sendEnabled = await send.count() > 0 && await send.first().isEnabled().catch(() => false)
     if (sendEnabled) await send.first().click({ force: true }).catch(() => undefined)
@@ -529,7 +574,13 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     await page.waitForTimeout(2500)
   }
   const preSeq = sid !== null ? Math.max(0, ...logEvents(sessionLogTextById(sid)).map((e) => e.seq)) : 0
-  await typeComposer(page, question)
+  // #81: pass the authority down. If the durable log already carries this instruction as a
+  // human turn, the send landed — pressing again is what duplicated it last night.
+  await typeComposer(page, question, () => {
+    if (sid === null) return false
+    const t = sessionLogTextById(sid)
+    return t !== '' && humanMessageCarries(t, question)
+  })
   await expect(page.getByText(question.slice(0, 30), { exact: false }).first(), 'user message rendered (submit worked)').toBeVisible({ timeout: 30_000 })
   // drafts can persist under a FRESH id on first submit — re-read after the
   // send and adopt a rotation (measured: pre-send localStorage is the draft)
