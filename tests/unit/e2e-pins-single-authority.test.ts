@@ -94,3 +94,20 @@ test('the runners carry no second copy of the pins', () => {
       `${script}: inline pins are the drift this closes`)
   }
 })
+
+/**
+ * The ratchet (#83): the browser plane can't be gated on a cleanup that has never happened on its
+ * own, so it is gated on not getting WORSE. This exists because a `ReferenceError: rotated is not
+ * defined` in `tests/e2e/session.ts` — a real bug that cost a nine-leg re-record — was invisible to
+ * every gate: `tsconfig.json` excludes the directory, Playwright transpiles without checking.
+ */
+test('the e2e typecheck ratchet exists, is wired, and only ratchets down', () => {
+  const base = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'typecheck-baseline.json'), 'utf8')) as { errors: number }
+  assert.equal(typeof base.errors, 'number', 'the baseline is a number, not a TODO')
+  assert.ok(base.errors >= 0)
+  const script = fs.readFileSync(path.join(ROOT, 'scripts', 'e2e-typecheck-ratchet.sh'), 'utf8')
+  assert.match(script, /if \[ "\$OUT" -le "\$BASE" \]; then/, 'growth fails; equal passes')
+  assert.match(script, /a ratchet only counts if someone tightens it/, 'and shrink is prompted, not silently accepted')
+  const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
+  assert.match(ci, /e2e-typecheck-ratchet\.sh/, 'the ratchet runs in CI, next to the other typechecks')
+})

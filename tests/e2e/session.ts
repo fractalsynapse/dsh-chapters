@@ -707,6 +707,7 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
   // inside the poll) in session `c553d23b…`, while the spec watched `105939e9…`, a session that
   // contains no human turn at all. So adoption must come from the durable log, with the view only as
   // a hint. On warm homes the two agree and nothing changes.
+  const rotated = await currentSessionId(page)
   const adopted = adoptSessionForTurn({
     candidates: [sid, rotated, await currentSessionId(page)],
     needle: question,

@@ -1,0 +1,4 @@
+{
+  "_comment": "Ratchet, not exemption (#83). Hosted CI fails when tests/e2e grows MORE type errors than this number; shrinking is allowed and should be followed by lowering the number in the same PR. 77 was measured 2026-10-23 on the re-anchor branch: 39 wrong-arity, 10 argument-type, 9 overload, 6 possibly-undefined, 4 phantom-property, plus a few one-offs. This exists because `rotated is not defined` — a real, corpus-destroying bug in tests/e2e/session.ts — was invisible to every existing gate: tsc excludes the directory and Playwright does not type-check.",
+  "errors": 77
+}

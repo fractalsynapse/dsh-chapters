@@ -39,6 +39,12 @@ jobs:
           echo "$GITHUB_WORKSPACE/dev/dsh-host-lock/node_modules/.bin" >> "$GITHUB_PATH"
       - run: npm run typecheck
       - run: npm run typecheck:client
+      # #83 ratchet: `tests/e2e` has never been type-checked — tsconfig.json excludes the
+      # directory and Playwright transpiles without checking — which is how a
+      # `ReferenceError: rotated is not defined` in a spec helper cost a nine-leg re-record.
+      # Full cleanup stays the open issue; not getting worse is gateable today.
+      - name: e2e typecheck ratchet
+        run: bash scripts/e2e-typecheck-ratchet.sh
       - run: npm run build
       # The gate IS the contract: c8 --check-coverage fails the job below
       # 85% on statements, branches, functions (and lines). Current ledger:
