@@ -14,6 +14,19 @@ switch it could not make (#77). All four are fixed with rows; the corpus is bein
 write, and **no e2e claim is current until replay is green** — `CORPUS_HOST` was flipped in the same
 change, so a red replay means that flip must be reverted, not the tape widened.
 
+0. **The acceptance chain is one rig bug from green — and it was #77's lesson, in my own tooling.**
+   A pristine home commits a draft under a **fresh session id** while `dsh.sessions.current` keeps
+   naming the draft, so `newSessionWithTurn` watched a log that received nothing (journey turn
+   completed at seq 42, 28 s after its question, in *another* directory). Warm homes hide it; CI is
+   always cold, which is why "green here, red there" survived the matcher fix (#89's path fold), the
+   host-binary fix (`resolveHostBinary`), the tracked profile seeds, and my own false
+   header-composition claim (withdrawn on #89). Fixed by `adoptSessionForTurn` — the durable log
+   decides, candidates are only where to look, `null` rather than an invented id — with 4 rows,
+   mutation-checked. **The pending step is mechanical but long**: re-distill the nine legs under it
+   (`var/run-decisive.sh`, heavy behind the #86 watchdog), strict-replay locally, then one push and
+   watch hosted acceptance. Only then: corpus commit + `CORPUS_HOST` re-lift, `coverage:e2e`,
+   merge #89, rewrite #73's verification from those numbers.
+
 1. **#83 — the e2e specs have never been type-checked.** `npm run typecheck:e2e` (new, deliberately not
    in CI) reports **120 errors**: 39 wrong-arity calls, 12 cannot-find-name, 10 argument-type, 26
    un-narrowed `unknown`, 22 missing-lib, 3 phantom properties. Two bugs this week (a missing import,
@@ -22,7 +35,7 @@ change, so a red replay means that flip must be reverted, not the tape widened.
    options object (`{ turnMs, actionGrace }`) so a positional `false` is un-writable; triage the rest;
    then wire the gate beside `typecheck` and `typecheck:client`. Do not exclude a file to shrink the
    number — a dev-only tool moves out of `tests/e2e` instead.
-2. **#82 — a running distill and the deterministic suite share `tests/fixtures/model-tape`.** Tonight
+2. **#82 — a running distill and the deterministic suite share `tests/fixtures/model-tape`.** (Third live instance 2026-10-23: `tape-provenance.test.ts` correctly went red mid-re-record because the runner had cleared a project directory — that row is now the canary, don't soften it.) Tonight
    the tape-coherence rows went red for exactly the projects being re-recorded, and a leg that dies
    halfway can leave a partial project directory in the corpus. Recommended shape: record into
    `tests/fixtures/.tape-staging/<proj>`, promote with `rename` on `rc == 0`. That makes "the corpus
