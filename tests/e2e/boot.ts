@@ -197,6 +197,13 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // STRESS REGIME pin (user directive 2026-09-19): 32K window / 15K response.
   // E2E_MODEL=record|replay inserts the tape proxy (same directive's second
   // half: the GPU model distills tapes; acceptance replays them in seconds).
+  // THE STRESS REGIME, in one place (#78). The profile gets this window, the response budget
+  // below gets its 15K completion, and the tape proxy ENFORCES it: a hosted upstream would
+  // otherwise swallow a 33K prompt and never produce the `context-overflow` trigger the whole
+  // pressure journey exists to exercise — the leg would then be measuring a boot where nothing
+  // is wrong, which is precisely the "green tests, dead product" failure this repo keeps being
+  // told about. Override with E2E_WINDOW_TOKENS=0 to run against the endpoint's real window.
+  const PINNED_CONTEXT_WINDOW = Number(process.env.E2E_WINDOW_TOKENS ?? '32000')
   const modelMode = process.env.E2E_MODEL ?? 'live'
   // REPLAY asserts against recorded prompt prefixes, which carry the host's prompt
   // composition. If the corpus was distilled against a different host than we pin, the
@@ -228,6 +235,10 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // otherwise invisible and land the session in someone else's transcript)
       tapeDir: path.join(ROOT, 'tests', 'fixtures', 'model-tape', process.env.E2E_TAPE ?? 'default'),
       journalPath: path.join(ROOT, 'var', 'e2e-tape-misses.log'),
+      // #78: RECORD enforces the pinned window so a hosted endpoint cannot silently skip the
+      // pressure regime; REPLAY must not, or a refusal the model never made would be injected
+      // into a recorded conversation (and the tape is the record of what the regime did).
+      windowTokens: modelMode === 'record' ? PINNED_CONTEXT_WINDOW : 0,
       // E2E_TAPE_FALLBACK=1: tape hits stay, misses go live and are
       // recorded — a self-healing pass instead of a full re-record
       ...(process.env.E2E_TAPE_FALLBACK === '1' ? { liveFallback: true } : {}),
@@ -256,7 +267,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
         p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: 0\n` + p
       }
-      p = p.replace(/contextWindow: \d+/g, 'contextWindow: 32000').replace(/maxTokens: \d+/g, 'maxTokens: 15000')
+      p = p.replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`).replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
       // #61 item 8: THIS boot's chapters go to this port's home, never to the repo's store root.
       p = applyRigPluginPatch(p, { storeRoot: rigStoreRoot(port), ...(pins.promptModel !== undefined ? { promptModel: pins.promptModel } : {}) })
@@ -302,7 +313,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   if (fs.existsSync(liveSettings)) {
     const s = fs.readFileSync(liveSettings, 'utf8')
     let y = s
-      .replace(/contextWindow: \d+/g, 'contextWindow: 32000')
+      .replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`)
       .replace(/maxTokens: \d+/g, 'maxTokens: 15000')
     if (proxy !== null) y = y.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
     fs.writeFileSync(liveSettings, y)

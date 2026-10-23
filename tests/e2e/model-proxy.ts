@@ -29,6 +29,7 @@ import path from 'node:path'
 import http from 'node:http'
 import https from 'node:https'
 import { createHash } from 'node:crypto'
+import { estimateRequestTokens, windowRefusal } from './model-proxy-window.ts'
 
 export interface ProxyHandle { url: string; close: () => Promise<void> }
 
@@ -203,6 +204,15 @@ export interface TapeEntry { key: string; prefix: unknown[]; status: number; con
 export interface ProxyOpts {
   mode: 'record' | 'replay'
   tapeDir: string
+  /**
+   * #78: the context window the rig ENFORCES. A hosted upstream accepts a 33K prompt happily, so
+   * a context-pressure journey distilled against it never produces the `context-overflow` trigger
+   * the pinned 32K regime exists to exercise — it measures a boot where nothing is wrong. The
+   * local stress server refuses; this makes the refusal a property of the rig, identical on
+   * rented hardware. 0/unset means no enforcement: replay and deliberately-unwindowed runs are
+   * untouched.
+   */
+  windowTokens?: number
   /** journal override; default is next to the tapes */
   journalPath?: string
   upstream?: string // e.g. http://localhost:8080 — required in record mode
@@ -514,6 +524,17 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let sawBytes = 0
         let firstByteMs = -1
         journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
+        // Enforced BEFORE the upstream is asked — the point is that the rig, not the endpoint,
+        // decides when the window is over. Never recorded: a refusal is not an answer, and a
+        // fixture of a 400 would replay as though a model had produced it.
+        const win = opts.windowTokens ?? Number(process.env.E2E_WINDOW_TOKENS ?? 0)
+        const refusal = windowRefusal(body, win)
+        if (refusal !== null) {
+          journal(`OVERFLOW refused est=${String(estimateRequestTokens(body))} tokens window=${String(win)} — rig-enforced (E2E_WINDOW_TOKENS); nothing recorded`)
+          inFlight -= 1
+          try { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify(refusal)) } catch { /* client gone */ }
+          return
+        }
         // watchdogs live in pumpUpstream now, PER ATTEMPT — arming them here too would
         // double-answer the client and keep the process alive after the run (#54).
         // Buffered pump with bounded throttle-retry (#54). The only behavioral difference
@@ -540,10 +561,18 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // listening on the hard-coded 41799 and EVERY later boot died on EADDRINUSE.
   // Derive from the e2e boot port (E2E_PROXY_PORT, set by boot.ts from the same
   // env that keys the home) so projects and re-runs never collide.
-  const proxyPort = Number(process.env.E2E_PROXY_PORT ?? '41799')
-  await new Promise<void>((resolve) => server.listen(proxyPort, '127.0.0.1', resolve))
+  // #78: when nothing asks for a specific port, take an EPHEMERAL one. The fixed default
+  // (41799) was already the subject of the 2026-09-22 note above, but the derivation only
+  // covers boots: two unit-test files in the same `node --test` pass both defaulted to it, so
+  // one bound it and the other hung on EADDRINUSE with an error that read like a leaked
+  // process. `boot.ts` still sets E2E_PROXY_PORT (port+1000) because the profile patch must
+  // name the proxy URL before the proxy exists — that requirement is preserved exactly.
+  const wantPort = process.env.E2E_PROXY_PORT !== undefined ? Number(process.env.E2E_PROXY_PORT) : 0
+  await new Promise<void>((resolve) => server.listen(wantPort, '127.0.0.1', resolve))
+  const bound = server.address() as { port: number } | null
+  if (bound === null) throw new Error('tape proxy: listen reported no address — the URL cannot be built')
   return {
-    url: `http://127.0.0.1:${Number(process.env.E2E_PROXY_PORT ?? '41799')}/v1`,
+    url: `http://127.0.0.1:${String(bound.port)}/v1`,
     close: async () => { await new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve())) },
   }
 }
