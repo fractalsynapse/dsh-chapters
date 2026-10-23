@@ -38,5 +38,12 @@ test('the boot records which binary it used (#89)', () => {
   assert.match(boot, /hostBinary: host\.binary, hostPinned: host\.pinned/,
     'the per-boot record carries the identity a later reader needs')
   assert.match(boot, /e2e-boot-\$\{String\(port\)\}\.json/,
-    'per port — a shared record shows whichever boot wrote last, the same mistake as a shared miss journal')
+    'per-port copy, so provenance cannot be whichever boot wrote last')
+  // and the SHARED file stays, because it is the handoff protocol to openApp()/discovery —
+  // renaming it is how every leg in one run connected to another project's port (measured the
+  // same day: ERR_CONNECTION_REFUSED on 41731 from a fanout boot). Two consumers, one file.
+  assert.match(boot, /writeFileSync\(path\.join\(ROOT, 'var', 'e2e-boot\.json'\), bootRecord\)/,
+    'the URL handoff protocol must keep existing — the specs read it by that name')
+  const session = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'tests', 'e2e', 'session.ts'), 'utf8')
+  assert.match(session, /'e2e-boot\.json'/, 'the consumer named above is real, so the protocol is load-bearing')
 })

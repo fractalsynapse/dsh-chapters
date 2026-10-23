@@ -412,13 +412,20 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     child.kill('SIGKILL')
     throw new Error(`e2e boot failed within 60s (port ${port})\n${log.slice(-1500)}`)
   }
-  fs.writeFileSync(path.join(ROOT, 'var', `e2e-boot-${String(port)}.json`), JSON.stringify({
+  const bootRecord = JSON.stringify({
     url: m[0], port,
     // Provenance a reader needs when a tape will not replay: which host binary booted, and whether it
     // was the pin. One file PER PORT — a shared file records whichever boot wrote last, the same
     // mistake as a shared miss journal.
     hostBinary: host.binary, hostPinned: host.pinned,
-  }))
+  })
+  // BOTH files, on purpose. `var/e2e-boot.json` is the handoff protocol — `openApp()` and
+  // discovery.spec read it to learn the URL (I renamed it in this commit's history and every leg
+  // then connected to whichever URL the last boot left behind: `ERR_CONNECTION_REFUSED` on a port
+  // belonging to another project, which is #59's "two sources for one fact" in rig clothing). The
+  // per-port copy is the provenance record, where "which boot wrote last" cannot lie.
+  fs.writeFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), bootRecord)
+  fs.writeFileSync(path.join(ROOT, 'var', `e2e-boot-${String(port)}.json`), bootRecord)
   return {
     url: m[0],
     port,
