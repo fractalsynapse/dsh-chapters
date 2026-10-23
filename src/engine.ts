@@ -795,6 +795,18 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     if (r.detail !== undefined) this.ctx.logger?.warn?.(`dsh-chapters: arrival stubbing degraded (${r.detail})`)
   }
 
+  /**
+   * One line per compaction decision — the second half of "is relief actually running?".
+   * `realm:engine:*` so the site is attributable, note-level so a routine decision never reads as
+   * a failure, and it names which entry point (`compactIfNeeded` on pressure/auto vs `compactNow`
+   * on `/compact`) because those two disagreeing is exactly the kind of drift a field report needs
+   * to be able to tell apart. (#78)
+   */
+  #noteDecision(where: string, trigger: unknown, result: CompactionResult | null, agent: Agent): void {
+    diagnosticNote(this.ctx.logger, `realm:engine:${where}`,
+      `${where} decided: ${result === null ? 'none' : `compaction ${String((result as unknown as { compactionId?: string })?.compactionId ?? '?')}`} (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')})`)
+  }
+
   override async compactIfNeeded(
     agent: Agent, trigger: CompactionTrigger, signal: AbortSignal,
   ): Promise<CompactionResult | null> {
@@ -818,9 +830,17 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       result = await super.compactIfNeeded(agent, trigger, signal)
     } catch (error) {
       await this.#finalizeGuarded(agent)
+      // no result exists on this path — the base engine threw — so the line says `none` and the
+      // reason is the rethrown error, not a value invented for the log
+      this.#noteDecision('compactIfNeeded', trigger, null, agent)
       throw error
     }
     if (result !== null) await this.#finalizeGuarded(agent)
+    // #78: entry alone is half the question. Three `trigger="pressure"` entries on 0.2.0-rc.2
+    // produced no `compaction/*` event at all, and nothing could say whether the base engine
+    // declined (a meter/threshold disagreement) or acted and our finalization lost the evidence.
+    // The decision now sits beside the entry, in the same artifact.
+    this.#noteDecision('compactIfNeeded', trigger, result, agent)
     return result
   }
 
@@ -834,9 +854,14 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       result = await super.compactNow(agent, signal, sourceCommandId)
     } catch (error) {
       await this.#finalizeGuarded(agent)
+      this.#noteDecision('compactNow', 'manual', null, agent)
       throw error
     }
     if (result !== null) await this.#finalizeGuarded(agent)
+    // #78: the same decision line on the manual path. Reporting only the pressure route would
+    // leave `/compact` — the door a human actually pulls — as silent as the bug this instrument
+    // exists to catch.
+    this.#noteDecision('compactNow', 'manual', result, agent)
     return result
   }
 

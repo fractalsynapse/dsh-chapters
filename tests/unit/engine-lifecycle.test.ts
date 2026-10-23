@@ -440,3 +440,32 @@ test('arrival stubbing says WHY it skipped instead of skipping quietly (#78)', a
     fs.rmSync(sinkPath, { force: true })
   }
 })
+
+test('the override reports what the base engine DECIDED, not just that it ran (#78)', async () => {
+  // Entry alone is half the question. On 0.2.0-rc.2 the host entered three times with
+  // trigger="pressure" and NOT ONE `compaction/*` event followed — so either the base engine
+  // declined every time (a threshold/meter disagreement worth knowing about) or it acted and our
+  // own finalization swallowed the evidence. This line is what tells those apart from an artifact,
+  // and heavy's leg is the one that needs the answer.
+  const sinkPath = path.join(os.tmpdir(), `decision-sink-${String(process.pid)}-${Math.random().toString(36).slice(2)}.log`)
+  const prevSink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness()
+  try {
+    const events = [human(0, 'do the thing with some real content here'), asst(1, 'done: verified by npm test')]
+    const session = h.sessionOf('s-decision', events, {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    const r = await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal as never)
+    assert.equal(r, null, 'this fixture is below threshold, so the expectation itself must be honest')
+    const sink = fs.readFileSync(sinkPath, 'utf8')
+    assert.match(sink, /compactIfNeeded decided: none/,
+      `the decision must be recorded beside the entry, got: ${sink.slice(0, 300)}`)
+    assert.match(sink, /trigger="pressure"/, 'with the trigger that asked for it')
+  } finally {
+    h.dispose()
+    if (prevSink === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
+    fs.rmSync(sinkPath, { force: true })
+  }
+})
