@@ -684,3 +684,37 @@ Three traps, all paid for:
 
 Prune after: `var/host-versions/`, the throwaway homes and `var/coverage` are all regenerable in minutes and
 together cost ~2 GB — this repository's contract is the *measurements written down*, not their scratch.
+
+### The rig's regime has ONE table (`tests/e2e/rig-pins.ts`) — added 2026-10-23 (#56)
+
+Three copies had silently diverged: `scripts/distill-tapes.sh`'s `THRESH`/`EXTRA` tables, the inline
+env in `npm run test:e2e`, and `boot.ts`'s defaults — under a comment claiming distill "mirrors
+`npm run test:e2e`'s pins exactly". Measured result: replay booted `suite`/`rules`/`fork` with **no
+threshold** while their tapes had been recorded at 0.75/0.9/0.75. The realm differed, replay's requests
+carried `[dsh:artifact …]` stubs the tapes contain none of, and the chain failed as tape MISSes that
+look exactly like prompt drift.
+
+`RIG_PINS` is now the single source, with two consumers: `playwright.config.ts` derives each project's
+`env` through `rigEnv(proj)` (so workers see it), and `globalSetup` resolves the selected project from
+`fullConfig.argv` and calls `applyRigEnv()` **before booting**. The second half is not optional —
+Playwright applies project `env` to workers, and the object handed to `globalSetup` exposes an
+UNFILTERED `projects` list whose entries carry no `env` (measured: 11 projects for a
+`--project=heavy` run). "Just put it in the config" looked fixed and was not: the boot kept using
+defaults. An explicit command-line value still wins, so re-tuning one leg never needs an edit; an
+unknown project derives nothing instead of inventing defaults.
+
+Rows: `tests/unit/e2e-pins-single-authority.test.ts` (table contents, `rigEnv` derivation, argv parsing
+in both `--project=x` and `--project x` forms, apply-not-clobber, unknown-project, both consumers
+reading the table, a literal `env: { 'E2E_TAPE' … }` block failing, and the runners carrying no copy).
+`npm run test:e2e`'s per-leg header now prints the EFFECTIVE regime read from the table, so a tape's
+provenance is auditable from the runner log alone.
+
+### Provenance is generated (`scripts/write-provenance.mjs`), never hand-authored (#56)
+
+`PROVENANCE.md` lives inside each project directory — and the runner `rm -rf`s that directory before
+recording. The re-anchor commit therefore deleted `plans/PROVENANCE.md` and `prompt/PROVENANCE.md`,
+which are precisely the records stating those legs were distilled from the SCRIPTED stub rather than
+a live model. A claim about what a tape means must not be destroyed by the act of re-making the tape:
+the file is generated from the pin table plus the recorded verdict, and
+`tests/unit/tape-provenance.test.ts` fails if any project lacks it or if the runner stops
+regenerating it.
