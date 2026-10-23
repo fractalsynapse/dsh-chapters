@@ -92,3 +92,33 @@ test('every typeComposer call in the journeys passes a delivery predicate (#81)'
   assert.deepEqual(offenders, [],
     `these typeComposer calls decide success from the editor instead of the durable log: ${offenders.join(', ')}`)
 })
+
+/**
+ * #84: the guard must not be able to swallow a SECOND, different instruction.
+ *
+ * Tonight's replay MISS is exactly this shape — a request the `suite` tape never recorded, because
+ * the follow-up was judged "already delivered". Matching an 80-character window makes two prompts
+ * that open alike indistinguishable, and a swallowed send is worse than a duplicated one: the leg
+ * asserts against whatever the first send produced and still exits 0.
+ */
+const P1 = 'Read the file var/e2e-bigfile.md COMPLETELY using the read tool with ranges, then answer.'
+const P2 = 'Read the file var/e2e-bigfile.md COMPLETELY using the read tool with ranges, then summarize it.'
+
+test('two instructions sharing a long prefix are NOT the same delivery (#84)', () => {
+  assert.equal(P1.slice(0, 80), P2.slice(0, 80),
+    'the fixture must really collide under the old 80-char window — if this fails, the premise is gone')
+  const log = line({ type: 'user/message', seq: 4, data: { message: { content: [{ type: 'text', text: P1 }] } } })
+  assert.equal(humanMessageCarries(log, P2), false,
+    'P1 in the log is not proof P2 was delivered; this is the swallow that broke replay')
+  assert.equal(humanMessageCarries(log, P1), true, 'and the real match still works')
+})
+
+test('delivery is waited for, not assumed from a flush race (#84)', () => {
+  // record and replay differ in when the durable write lands; a predicate that reads the log once
+  // can answer "not delivered" in one mode and "delivered" in the other for the SAME send.
+  const src = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'session.ts'), 'utf8')
+  const fn = /export async function typeComposer[\s\S]*?\n}\n/.exec(src)?.[0] ?? ''
+  assert.match(fn, /waitForTimeout\(\s*GRACE|deliveredGraceMs/,
+    'after a press, give the durable log a grace window before concluding it did not land')
+  assert.match(fn, /for \(let round = 0; round < 48/, 'the round bound survives (the r38 busy-state tolerance)')
+})

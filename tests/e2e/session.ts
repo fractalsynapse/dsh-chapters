@@ -245,7 +245,12 @@ export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork wi
  */
 export function humanMessageCarries(logText: string, needle: string): boolean {
   if (logText === '' || needle === '') return false
-  const want = needle.slice(0, 80)
+  // #84: the WHOLE instruction, not a window. An 80-character prefix made two prompts that open
+  // alike ("…with ranges, then answer." vs "…then summarize it.") indistinguishable, so a genuine
+  // second send was judged already-delivered and never happened — the leg then asserted against
+  // the first send's world and exited 0, while replay, where the flush landed differently, asked
+  // the turn that was never recorded. A swallowed send is worse than a duplicate: it is silent.
+  const want = needle.trimEnd()
   for (const line of logText.split('\n')) {
     if (!line.includes('"user/message"')) continue
     try {
@@ -320,12 +325,28 @@ export async function typeComposer(page: Page, line: string, delivered?: () => b
     if (delivered === undefined) return false
     try { return await delivered() } catch { return false }
   }
+  // #84: a press is not a delivery until the durable log has had its chance to say so. record and
+  // replay differ in WHEN the write lands, so a single read of the log answers differently for the
+  // same action — the nondeterminism that made the suite tape record five requests where the
+  // journey makes six. Wait it out, then decide.
+  const deliveredGraceMs = async (ms: number): Promise<boolean> => {
+    if (delivered === undefined) return false
+    const deadline = Date.now() + ms
+    for (;;) {
+      if (await alreadyDelivered()) return true
+      if (Date.now() >= deadline) return false
+      await page.waitForTimeout(500)
+    }
+  }
   for (let round = 0; round < 48; round += 1) {
     // #81: the durable delivery predicate is checked FIRST, before any further press. The
     // editor's own state is a hint about the future, not a record of the past — that inversion
     // is what sent one instruction twice.
     if (await alreadyDelivered()) return
     if (await emptied()) return
+    // after the FIRST press only: give the durable write a window before pressing again, so a slow
+    // flush cannot manufacture a duplicate (#81) and a fast one cannot hide a swallowed send (#84)
+    if (round === 0 && await deliveredGraceMs(4_000)) return
     const sendEnabled = await send.count() > 0 && await send.first().isEnabled().catch(() => false)
     if (sendEnabled) await send.first().click({ force: true }).catch(() => undefined)
     else await page.keyboard.press('Enter')
