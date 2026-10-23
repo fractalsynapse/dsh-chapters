@@ -434,7 +434,17 @@ Run on a scratch clone of a real project (not this repo), at the pinned host and
    `recordedAgainst` names the same code generation. If any leg was recorded before a rig-behavior
    change (send timing, window enforcement), re-record it: a mixed corpus passes for the wrong
    reason (#56, #81, #82).
-8. **Instrumentation must be shown to be capable of failing.** For every gate this week added, name
+8. **A boot may read only tracked state.** List every file the e2e home is seeded from and prove each is
+   in `git ls-files` — a gitignored path in that chain makes the corpus a recording of one laptop.
+   *Why: #89, three layers deep. First the matcher folded no workspace root (CI's `/home/runner/…` vs
+   the recorded `/home/adrian/…`); then `spawn('dsh')` took PATH and got a **linked dev build** whose
+   version string matched the pin; and even with the pinned tarball booted by absolute path, CI sent a
+   2-message first request against a 6-message tape — because `boot.ts` copied
+   `.dshdev-local/settings.yaml` (gitignored) with the provider route and `contextWindow: 32000`. Each
+   layer looked like the end of the story; the tape diff (`E2E_TAPE_DIFF` / `E2E_MISS_DUMP`) is what
+   said otherwise every time. Reproduce across machines before believing a green local chain.*
+
+9. **Instrumentation must be shown to be capable of failing.** For every gate this week added, name
    the mutation that reddens it — the hygiene guard, the roster predicate, the report helper, the
    window rows and the bounded-scroll row all have one. *Why: three bugs this week lived in code
    written to observe the fourth — `\bpending\b` missing an escaped newline, `ids.size > 0`
