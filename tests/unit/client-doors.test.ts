@@ -260,3 +260,68 @@ test('a service without refresh still gets exactly one honest attempt', async ()
   assert.equal(opens, 1, 'no refresh verb means retrying `open` alone would only re-ask a stale roster')
   assert.match(r.message, /roster: unreadable|did not switch/, 'and the note still says what is known: ' + r.message)
 })
+
+/**
+ * #77 — adopt-and-catalogue, the only client path that writes its own roster.
+ *
+ * `manager.create()` in `dsh-api-session-controller/lib/types/client/sessions/manager.js` is
+ * documented "on success merge into summaries immediately (no wait for the next refresh)" and it
+ * sends `sessionId` when the caller owns one. The server side is idempotent by contract:
+ * `create(request)` takes `request.sessionId ?? brand(...)` and calls
+ * `ensureSession(sessionId, cwd, request.sessionId !== undefined, preset)` — i.e. it ADOPTS an
+ * already-persisted session rather than authoring a second one. Nothing about the child's content
+ * is touched here: the seed notice was committed by the host plane long before this call. So the
+ * door can make the client see what the host already knows, and if adoption is refused (a cwd
+ * conflict, a closed session), that refusal must be delivered, not swallowed.
+ */
+test('a child missing from the client roster is adopted through create({sessionId}) before open', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const calls: string[] = []
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-adopt-1') } } }) } } as unknown as ClientRemote
+  let opened = false
+  const sessions = {
+    refresh: () => Promise.resolve(),
+    projectList: () => { calls.push('projectList') },
+    create: (opts: { sessionId?: string }) => { calls.push(`create:${opts?.sessionId ?? 'none'}`); return Promise.resolve('ch-adopt-1') },
+    open: (id: string) => { calls.push(`open:${id}`); opened = true },
+    list: { getSnapshot: () => ({ ids: opened ? ['session-a', 'ch-adopt-1'] : ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => opened, { attemptPauseMs: 1 })('parent-1')
+  assert.deepEqual(r, { ok: true, message: '' }, `adoption then open should have switched: ${JSON.stringify(r)}`)
+  assert.deepEqual(calls, ['projectList', 'create:ch-adopt-1', 'projectList', 'open:ch-adopt-1'],
+    `the roster must be re-projected after adopting, and only then opened: ${calls.join(' → ')}`)
+})
+
+test('a child the client ALREADY lists is never re-created', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const calls: string[] = []
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-adopt-2') } } }) } } as unknown as ClientRemote
+  const sessions = {
+    refresh: () => Promise.resolve(),
+    projectList: () => { calls.push('projectList') },
+    create: () => { calls.push('create-SHOULD-NOT-RUN'); return Promise.resolve('ch-adopt-2') },
+    open: () => { calls.push('open') },
+    list: { getSnapshot: () => ({ ids: ['ch-adopt-2'] }) },
+  } as unknown as ClientSessions
+  await makeDoorRunner(remote, sessions, door, async () => true)('parent-1')
+  assert.ok(!calls.includes('create-SHOULD-NOT-RUN'), `inventing a session the client already has: ${calls.join(' → ')}`)
+})
+
+test('a refused adoption is delivered in the note, not swallowed', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-adopt-3') } } }) } } as unknown as ClientRemote
+  const sessions = {
+    refresh: () => Promise.resolve(),
+    create: () => Promise.reject(new Error('session cwd conflict')),
+    open: () => undefined,
+    list: { getSnapshot: () => ({ ids: ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attemptPauseMs: 1, attempts: 1 })('parent-1')
+  assert.equal(r.ok, true, 'the continuation is still durable — a failed affordance is not a failed archive')
+  assert.match(r.message, /adoption refused: session cwd conflict/,
+    `the refusal reason must reach the human: ${r.message}`)
+  assert.match(r.message, /roster: MISSING/, 'alongside the roster verdict that made adoption necessary')
+})

@@ -99,31 +99,38 @@ export const doorTitle = (noun: string): RegExp => new RegExp(`${noun} \\u201C([
  * Measured host 0.2.0-rc.2: the sessions service exposes `projectList`, `refresh`, `retain`,
  * `handleSessionAdded` — the roster is a projection the client fills from control frames.
  */
+/**
+ * The client's own session ids, or `null` when the store cannot be read. ONE reader for both
+ * the note and the adoption decision, so the door never acts on a verdict it did not report.
+ */
+function rosterIds(sessions: ClientSessions | undefined): Set<string> | null {
+  const store = (sessions as unknown as { list?: { getSnapshot?: () => unknown } })?.list
+  if (typeof store?.getSnapshot !== 'function') return null
+  const snap = store.getSnapshot()
+  const ids = new Set<string>()
+  if (Array.isArray((snap as { ids?: unknown[] } | undefined)?.ids)) {
+    for (const id of (snap as { ids: unknown[] }).ids) ids.add(String(id))
+  } else if ((snap as { byId?: object } | undefined)?.byId !== undefined) {
+    for (const k of Object.keys((snap as { byId: object }).byId)) ids.add(k)
+  } else return null
+  return ids
+}
+
 function rosterNote(sessions: ClientSessions | undefined, child: string): string {
   try {
-    // gated on `projectList` existing — wrong test, since the note reads the STORE, not that
-    // mutator. Any service exposing a list store can answer; any other answers UNKNOWN.
-    // Measure the SHAPE, not the hope (the repo's own lesson: `listEvents` "worked" and had
-    // no `data`). The first version of this note printed "0 sessions" for a conversation that
-    // visibly had one, because it guessed at Array|Map and reported the guess as a fact.
-    // The host's client store shape is `list.getSnapshot() → { ids, byId, phase }`. And
-    // `projectList()` turned out to be a MUTATOR that returns undefined (measured), so the
-    // first version of this note printed "0 sessions" about a conversation that visibly had
-    // one — the repo's own `listEvents` lesson ("measure the shape, not the presence"),
-    // repeated by me in the same week. Read the store; if it isn't reachable, presence is
-    // UNKNOWN, and the note says so rather than inventing an absence.
-    const store = (sessions as unknown as { list?: { getSnapshot?: () => unknown } })?.list
-    const snap = typeof store?.getSnapshot === 'function' ? store.getSnapshot() : undefined
-    const ids = new Set<string>()
-    if (Array.isArray((snap as { ids?: unknown[] } | undefined)?.ids)) {
-      for (const id of (snap as { ids: unknown[] }).ids) ids.add(String(id))
-    } else if ((snap as { byId?: object } | undefined)?.byId !== undefined) {
-      for (const k of Object.keys((snap as { byId: object }).byId)) ids.add(k)
-    }
-    if (ids.size === 0) {
+    // The host's client store shape is `list.getSnapshot() → { ids, byId, phase }`.
+    // `projectList()` turned out to be a MUTATOR that returns undefined (measured), so the first
+    // version of this note printed "0 sessions" about a conversation that visibly had one — the
+    // repo's own `listEvents` lesson ("measure the SHAPE, not the presence"), repeated by me in
+    // the same week. Read the store; when it isn't reachable, presence is UNKNOWN and the note
+    // says that rather than inventing an absence.
+    const ids = rosterIds(sessions)
+    if (ids === null) {
+      const store = (sessions as unknown as { list?: { getSnapshot?: () => unknown } })?.list
       const shape = typeof store?.getSnapshot !== 'function' ? 'no list store on the service' : 'snapshot unreadable'
       return ` (roster: ${shape} — presence of ${child.slice(0, 11)}… is UNKNOWN, not absent)`
     }
+    if (ids.size === 0) return ` (roster: empty — presence of ${child.slice(0, 11)}… is UNKNOWN, not absent)`
     const n = ids.size
     return ids.has(child)
       ? ` (roster: contains ${child.slice(0, 11)}…, ${String(n)} sessions — open() is the failure)`
@@ -155,9 +162,14 @@ function verbsNote(sessions: ClientSessions | undefined): string {
   } catch { return ' (sessions service: unreadable)' }
 }
 
-function openByService(sessions: ClientSessions | undefined, sessionId: string): Promise<boolean> {
+function openByService(
+  sessions: ClientSessions | undefined,
+  sessionId: string,
+  /** #77: adopt (and re-project) only when the client's own roster is missing this session. */
+  adopt?: { needed: boolean, onRefused: (reason: string) => void },
+): Promise<boolean> {
   return (async () => {
-    const svc = sessions as unknown as { open?: (id: string) => unknown; refresh?: () => unknown; projectList?: () => unknown } | undefined
+    const svc = sessions as unknown as { open?: (id: string) => unknown; refresh?: () => unknown; projectList?: () => unknown; create?: (opts: { sessionId?: string }) => unknown } | undefined
     if (typeof svc?.open !== 'function') return false
     try { await svc.refresh?.() } catch { /* refresh best-effort */ }
     // #57: re-project the client's session catalog. The host does this ITSELF after every
@@ -168,6 +180,21 @@ function openByService(sessions: ClientSessions | undefined, sessionId: string):
     // on 0.2.0-rc.2: without this the door created the child, `open` resolved, and the app
     // stayed on the parent (the door's own note now says `roster: …` so this is never a guess).
     try { svc.projectList?.() } catch { /* best-effort, like refresh */ }
+    // #77: adopt-and-catalogue. `manager.create()` is documented "on success merge into
+    // summaries immediately (no wait for the next refresh)" and forwards a caller-owned
+    // `sessionId`, while the server ADOPTS a persisted id instead of authoring a second session
+    // (`create(request)` → `ensureSession(sessionId, cwd, request.sessionId !== undefined, …)`).
+    // Nothing about the child's content is authored here — the seed notice was committed
+    // host-plane long before this call — this only lets the client see what the host already
+    // knows. A refusal is reported to the caller, never swallowed.
+    if (adopt?.needed === true && typeof svc.create === 'function') {
+      try {
+        await svc.create({ sessionId })
+        try { svc.projectList?.() } catch { /* re-project again, now that a mutation exists */ }
+      } catch (error) {
+        adopt.onRefused(String((error as Error)?.message ?? error).slice(0, 90))
+      }
+    }
     // The store must know the session before open() resolves it; a child
     // created seconds ago is only server-known until refresh lands. Retry
     // open briefly across that window.
@@ -255,9 +282,14 @@ export function makeDoorRunner(
       const canRepull = typeof (sessions as unknown as { refresh?: unknown } | undefined)?.refresh === 'function'
       const maxAttempts = canRepull ? (opts?.attempts ?? 3) : 1
       let tried = 0
+      let adoptRefusal = ''
       for (let i = 0; i < maxAttempts; i++) {
         tried += 1
-        if (await openByService(sessions, child) && await switchedOnce()) return { ok: true, message: '' }
+        // decide adoption from the SAME reader the note reports, so the door never acts on a
+        // verdict it did not tell the user about; an unreadable roster is not "missing"
+        const ids = rosterIds(sessions)
+        const needed = ids !== null && ids.size > 0 && !ids.has(child)
+        if (await openByService(sessions, child, { needed, onRefused: (reason) => { adoptRefusal = reason } }) && await switchedOnce()) return { ok: true, message: '' }
         if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300).unref?.() })
       }
       // the service path did not take — the sidebar row is the same affordance a human uses
@@ -271,7 +303,7 @@ export function makeDoorRunner(
       // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${rosterNote(sessions, child)}${verbsNote(sessions)}` }
+        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }
