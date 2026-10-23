@@ -179,9 +179,16 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // recorded. The seed is TRACKED now (`tests/e2e/fixtures/dev-settings.yaml`); the untracked copy
   // is excluded so a local edit can never leak into a tape again.
   const SETTING_SEED = path.join(ROOT, 'tests', 'e2e', 'fixtures', 'dev-settings.yaml')
+  // …and the SAME applies one file deeper. The local profile's `cordis.patch.yml` carries rows the
+  // tracked dev seed does NOT (`agent-default-model`, `agent-presets`, `llm-gate`,
+  // `fetch-timeouts`) — enough to change what the host composes and therefore what a request looks
+  // like: 6 messages here, 2 on CI, after settings.yaml was already made tracked. Both seeds now come
+  // from git; the untracked profile copy is excluded. (#89)
+  const PROFILE_SEED = path.join(ROOT, 'tests', 'e2e', 'fixtures', 'dev-profile-cordis.patch.yml')
   fs.cpSync(path.join(ROOT, '.dshdev-local'), E2E_HOME, { recursive: true, filter: (src) => {
     const rel = path.relative(path.join(ROOT, '.dshdev-local'), src)
     if (rel === 'settings.yaml') return false // the tracked seed is written below, always
+    if (rel === path.join('profiles', 'web', 'cordis.patch.yml')) return false // ditto (#89)
     return rel === ''
       || rel === 'storages' || rel === 'storages/workspace.json'
       || (!rel.startsWith('sessions') && !rel.startsWith('storages' + path.sep) && !rel.startsWith('dsh-chapters') && !rel.startsWith('.dsh-chapters'))
@@ -192,6 +199,10 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       + 'A boot may not fall back to an untracked .dshdev-local/settings.yaml — that is what made every '
       + 'tape on this branch replayable only on the machine that recorded it (#89).')
     fs.copyFileSync(SETTING_SEED, path.join(E2E_HOME, 'settings.yaml'))
+    const profSeed = fs.existsSync(PROFILE_SEED)
+    if (!profSeed) throw new Error(`e2e boot: the tracked profile patch seed is missing (${path.relative(ROOT, PROFILE_SEED)}); `
+      + 'the untracked .dshdev-local copy is excluded, so a boot would silently differ from CI (#89)')
+    fs.copyFileSync(PROFILE_SEED, path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml'))
   }
 
   // DETERMINISTIC PRISTINE WORKSPACE (measured 2026-09-24, the last local-vs-CI

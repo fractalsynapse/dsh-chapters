@@ -31,3 +31,17 @@ test('the boot refuses to fall back to the untracked settings', () => {
   assert.match(boot, /missing[\s\S]{0,200}\.dshdev-local\/settings\.yaml|the tracked profile seed is missing/,
     'a boot with no seed must THROW, not quietly use the developer’s file')
 })
+
+test('the profile patch the boot seeds is tracked too, and its rows are the ones that matter (#89)', () => {
+  const rel = path.join('tests', 'e2e', 'fixtures', 'dev-profile-cordis.patch.yml')
+  assert.equal(execFileSync('git', ['ls-files', rel], { cwd: ROOT, encoding: 'utf8' }).trim(), rel,
+    'this file, not a laptop copy, defines what a boot composes')
+  const body = fs.readFileSync(path.join(ROOT, rel), 'utf8')
+  // The specific rows whose absence made CI send a 2-message first request against a 6-message tape.
+  for (const row of ['agent-default-model', 'agent-presets', 'llm-gate', 'fetch-timeouts']) {
+    assert.ok(body.includes(`id: ${row}`), `the seed must carry the "${row}" row — this is the composition the corpus was recorded under`)
+  }
+  const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
+  assert.match(boot, /profiles', 'web', 'cordis\.patch\.yml'\)\) return false/, 'the untracked copy is excluded')
+  assert.match(boot, /fs\.copyFileSync\(PROFILE_SEED/, 'and the tracked seed is what lands in the home')
+})
