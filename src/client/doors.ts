@@ -165,8 +165,10 @@ function verbsNote(sessions: ClientSessions | undefined): string {
 function openByService(
   sessions: ClientSessions | undefined,
   sessionId: string,
-  /** #77: adopt (and re-project) only when the client's own roster is missing this session. */
-  adopt?: { needed: boolean, onRefused: (reason: string) => void },
+  /** #77: adopt (and re-project) only when the client's own roster is missing this session.
+   *  `onAfter` reports the roster at the instant after adoption, before any later refresh can
+   *  discard the mutation — the difference between an ordering bug and a publication gap. */
+  adopt?: { needed: boolean, onRefused: (reason: string) => void, onAfter: (seen: boolean | null) => void },
 ): Promise<boolean> {
   return (async () => {
     const svc = sessions as unknown as { open?: (id: string) => unknown; refresh?: () => unknown; projectList?: () => unknown; create?: (opts: { sessionId?: string }) => unknown } | undefined
@@ -191,6 +193,11 @@ function openByService(
       try {
         await svc.create({ sessionId })
         try { svc.projectList?.() } catch { /* re-project again, now that a mutation exists */ }
+        // the momentary read is the whole point: a later `refreshList()` reassigns the manager's
+        // mutations from the server result, so an adoption that DID land is invisible by the time
+        // the last attempt fails. Report what was true at the instant it mattered.
+        const after = rosterIds(sessions)
+        adopt.onAfter?.(after === null ? null : after.has(sessionId))
       } catch (error) {
         adopt.onRefused(String((error as Error)?.message ?? error).slice(0, 90))
       }
@@ -283,13 +290,14 @@ export function makeDoorRunner(
       const maxAttempts = canRepull ? (opts?.attempts ?? 3) : 1
       let tried = 0
       let adoptRefusal = ''
+      let adoptSaw: boolean | null | undefined
       for (let i = 0; i < maxAttempts; i++) {
         tried += 1
         // decide adoption from the SAME reader the note reports, so the door never acts on a
         // verdict it did not tell the user about; an unreadable roster is not "missing"
         const ids = rosterIds(sessions)
         const needed = ids !== null && ids.size > 0 && !ids.has(child)
-        if (await openByService(sessions, child, { needed, onRefused: (reason) => { adoptRefusal = reason } }) && await switchedOnce()) return { ok: true, message: '' }
+        if (await openByService(sessions, child, { needed, onRefused: (reason) => { adoptRefusal = reason }, onAfter: (seen) => { adoptSaw = seen } }) && await switchedOnce()) return { ok: true, message: '' }
         if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300).unref?.() })
       }
       // the service path did not take — the sidebar row is the same affordance a human uses
@@ -303,7 +311,7 @@ export function makeDoorRunner(
       // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
+        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${adoptRefusal === '' ? '' : ` (adoption refused: ${adoptRefusal})`}${adoptSaw === undefined ? '' : ` (right after adopt: ${adoptSaw ? 'contains' : 'missing'} ${child.slice(0, 15)})`}${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }

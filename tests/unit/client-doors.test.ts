@@ -325,3 +325,26 @@ test('a refused adoption is delivered in the note, not swallowed', async () => {
     `the refusal reason must reach the human: ${r.message}`)
   assert.match(r.message, /roster: MISSING/, 'alongside the roster verdict that made adoption necessary')
 })
+
+test('the note reports the roster RIGHT AFTER adoption, before a later refresh can wipe it', async () => {
+  // `refreshList()` reassigns the manager's mutations from the server result (manager.js:
+  // `const mutations = []; this.listMutations = mutations`), so a placeholder written by an
+  // adopted `create()` is GONE by the time the last attempt fails. Reading the roster only at
+  // the end therefore reports "MISSING" even if adoption worked momentarily — and that
+  // distinction is exactly what decides whether #77 is an ordering bug or a publication gap.
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-momentary-1') } } }) } } as unknown as ClientRemote
+  let adopted = false
+  const sessions = {
+    refresh: () => { adopted = false; return Promise.resolve() },   // a refresh discards the placeholder
+    projectList: () => undefined,
+    create: () => { adopted = true; return Promise.resolve('ch-momentary-1') },
+    open: () => undefined,
+    list: { getSnapshot: () => ({ ids: adopted ? ['session-a', 'ch-momentary-1'] : ['session-a'] }) },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attemptPauseMs: 1, attempts: 2 })('parent-1')
+  assert.match(r.message, /right after adopt: contains ch-momentary-1/,
+    `the note must show adoption took effect at the moment, got: ${r.message}`)
+  assert.match(r.message, /roster: MISSING/, 'and still report the final state honestly')
+})
