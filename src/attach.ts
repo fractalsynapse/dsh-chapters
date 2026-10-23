@@ -119,7 +119,13 @@ export async function attachCreatedChild(ports: AttachPorts): Promise<AttachOutc
       // (measured: the door's roster note said `MISSING, 1 sessions` while `listSessions`
       // listed it) — so a single boolean would have called that a success.
       const sc = ports.sessionController as { list?: () => Promise<Array<{ sessionId?: string, header?: { id?: string } }>> } | undefined
-      if (typeof sc?.list !== 'function') return { attached: true, listed: true, gatewayListed: undefined, warnings: [] }
+      if (typeof sc?.list !== 'function') {
+        // Silence here is what cost a round of the 0.2.x hunt: "no warning" got read as "the
+        // gateway lists it". An unverified surface is a STATE and must be delivered as one.
+        const reason = `child ${ports.childId} is listed in the durable session corpus, but its presence in the gateway (browser) session list could not be verified — no "sessionController" service to ask`
+        ports.diagnostic('attach:gatewayList', reason, `resolved=${shape(ports.sessionController)}`)
+        return { attached: true, listed: true, gatewayListed: undefined, warnings: [reason] }
+      }
       let gids: string[] = []
       try {
         gids = (await sc.list() ?? []).map((r) => r?.sessionId ?? r?.header?.id ?? '')

@@ -226,6 +226,17 @@ export function makeDoorRunner(
    * pinned by a row so production can never quietly drop it.
    */
   verifySwitched?: (childSessionId: string) => Promise<boolean>,
+  /**
+   * #77: how many times to re-pull the client's list, re-project and re-open. The session
+   * manager documents `refreshList()` as "single-flight within one Host generation"
+   * (`dsh-api-session-controller/lib/types/client/sessions/manager.js`), so a pull issued while
+   * another is in flight can resolve from the STALE result — precisely the moment a session
+   * created microseconds ago is missing. Retrying is both the fix candidate and the measurement:
+   * which attempt lands tells us whether this is ordering (ours) or silence (host-side).
+   * A client with no `refresh` verb gets exactly ONE attempt — re-asking `open` against a roster
+   * we cannot re-pull would be theater.
+   */
+  opts?: { attempts?: number, attemptPauseMs?: number },
 ): (sessionId: string) => Promise<DoorResult> {
   return async function run(sessionId: string): Promise<DoorResult> {
     try {
@@ -237,19 +248,21 @@ export function makeDoorRunner(
       if (result?.kind !== 'success') return { ok: false, message: (text || `the ${door.noun} was refused — see the command result`).slice(0, 90) }
       const child = CHILD_ID.exec(text)?.[1]
       if (child === undefined) return { ok: true, message: `${door.noun} created — appearing in the sidebar` }
-      const switched = async (): Promise<boolean> => {
+      const switchedOnce = async (): Promise<boolean> => {
         if (verifySwitched === undefined) return true
-        // the client settles asynchronously; three short looks, then the honest answer
-        for (let i = 0; i < 3; i++) {
-          try { if (await verifySwitched(child)) return true } catch { return false }
-          await new Promise((r) => { setTimeout(r, 250).unref?.() })
-        }
-        return false
+        try { return await verifySwitched(child) } catch { return false }
       }
-      if (await openByService(sessions, child) && await switched()) return { ok: true, message: '' }
+      const canRepull = typeof (sessions as unknown as { refresh?: unknown } | undefined)?.refresh === 'function'
+      const maxAttempts = canRepull ? (opts?.attempts ?? 3) : 1
+      let tried = 0
+      for (let i = 0; i < maxAttempts; i++) {
+        tried += 1
+        if (await openByService(sessions, child) && await switchedOnce()) return { ok: true, message: '' }
+        if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300).unref?.() })
+      }
       // the service path did not take — the sidebar row is the same affordance a human uses
       const title = doorTitle(door.noun).exec(text)?.[1]
-      if (title !== undefined && await openBranchRow(title) && await switched()) return { ok: true, message: '' }
+      if (title !== undefined && await openBranchRow(title) && await switchedOnce()) return { ok: true, message: '' }
       // #54: a child that is created but not shown is a DIFFERENT fact from one the user
       // has to open by hand, and the message must not blur them.
       // #56/#57: the note must be ACTIONABLE. "the app did not switch" is true and useless;
@@ -258,7 +271,7 @@ export function makeDoorRunner(
       // omission server-side?). A detected failure that isn't delivered is the same bug.
       return verifySwitched === undefined
         ? { ok: true, message: `${door.noun} created — open it in the sidebar` }
-        : { ok: true, message: `${door.noun} created — the app did not switch; open it from the sidebar${rosterNote(sessions, child)}${verbsNote(sessions)}` }
+        : { ok: true, message: `${door.noun} created — the app did not switch after ${String(tried)} attempt${tried === 1 ? '' : 's'}; open it from the sidebar${rosterNote(sessions, child)}${verbsNote(sessions)}` }
     } catch (error) {
       return { ok: false, message: String((error as Error)?.message ?? error).slice(0, 90) }
     }

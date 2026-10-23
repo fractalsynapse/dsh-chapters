@@ -207,3 +207,56 @@ test('the failure note reports roster presence from the store, and UNKNOWN when 
   assert.match(r3.message, /UNKNOWN, not absent/, 'absence of evidence is never reported as evidence of absence')
   assert.doesNotMatch(r3.message, /0 sessions/, 'the old misread that made a live conversation look empty')
 })
+
+/**
+ * #77 — one `open()` is not enough, and which attempt works IS the diagnosis.
+ *
+ * The client's session manager pulls the list with `refreshList()`, documented as
+ * "single-flight within one Host generation" (`dsh-api-session-controller/lib/types/client/
+ * sessions/manager.js`) — so a refresh issued while another pull is in flight can resolve from
+ * the STALE in-flight result, which is exactly when a session created microseconds ago is
+ * missing. The door therefore re-pulls, re-projects and re-opens a bounded number of times, and
+ * reports which attempt took. If attempt 2 or 3 succeeds, the problem is ordering and ours to
+ * fix; if every attempt fails with `roster: MISSING`, the client is never being told at all and
+ * the fix is host-side announcement.
+ */
+test('a switch that lands on the second attempt is reported as success, not as a note', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  let opens = 0
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-retry-1') } } }) } } as unknown as ClientRemote
+  const pulls: number[] = []
+  const sessions = {
+    refresh: () => { pulls.push(pulls.length); return Promise.resolve() },
+    projectList: () => undefined,
+    open: () => { opens += 1 },
+  } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => opens >= 2, { attemptPauseMs: 1 })('parent-1')
+  assert.deepEqual(r, { ok: true, message: '' }, `the second attempt opened it: ${JSON.stringify(r)}`)
+  assert.equal(opens, 2, 'and it stopped retrying once the switch verified')
+  assert.equal(pulls.length, 2, 'each attempt re-pulls the list — that is the point of the retry')
+})
+
+test('an attempt-exhausted switch says how many tries and what the roster said', async () => {
+  const door = byId('chapters-continue')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Continued work', 'ch-retry-2') } } }) } } as unknown as ClientRemote
+  let opens = 0
+  const sessions = { refresh: () => Promise.resolve(), projectList: () => undefined, open: () => { opens += 1 }, list: { getSnapshot: () => ({ ids: ['session-a'] }) } } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attemptPauseMs: 1, attempts: 3 })('parent-1')
+  assert.equal(r.ok, true, 'the continuation is still durable and real')
+  assert.equal(opens, 3, 'every attempt tried to open')
+  assert.match(r.message, /after 3 attempts/, `the note must count the tries, got: ${r.message}`)
+  assert.match(r.message, /roster: MISSING/, 'and repeat the roster verdict, so one reading gives both halves of the diagnosis')
+})
+
+test('a service without refresh still gets exactly one honest attempt', async () => {
+  const door = byId('chapters-fork')
+  assert.ok(door !== undefined)
+  const remote = { commands: { execute: async () => ({ ok: true, value: { result: { kind: 'success', text: reply(door.noun, 'Branch work', 'ch-retry-3') } } }) } } as unknown as ClientRemote
+  let opens = 0
+  const sessions = { open: () => { opens += 1 } } as unknown as ClientSessions
+  const r = await makeDoorRunner(remote, sessions, door, async () => false, { attemptPauseMs: 1 })('parent-1')
+  assert.equal(opens, 1, 'no refresh verb means retrying `open` alone would only re-ask a stale roster')
+  assert.match(r.message, /roster: unreadable|did not switch/, 'and the note still says what is known: ' + r.message)
+})
