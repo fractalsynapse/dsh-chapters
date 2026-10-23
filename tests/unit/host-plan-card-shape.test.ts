@@ -27,6 +27,15 @@ const ROOT = path.resolve(import.meta.dirname, '..', '..')
  *  3. the repo's own `node_modules` — WRONG VERSION for host facts (0.1.5-rc.2 compile-time
  *     closure, docs/backlog.md #71), so it is consulted last and named in the failure text.
  */
+/** The host version the repo pins for testing (`dev/dsh-host-lock/package.json`). */
+function pinnedHostVersion(): string | null {
+  try {
+    const p = JSON.parse(fs.readFileSync(path.join(ROOT, 'dev', 'dsh-host-lock', 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>, devDependencies?: Record<string, string> }
+    return p.dependencies?.['@deepseek-ai/dsh'] ?? p.devDependencies?.['@deepseek-ai/dsh'] ?? null
+  } catch { return null }
+}
+
 function hostTree(): string {
   const candidates: string[] = []
   try {
@@ -38,7 +47,25 @@ function hostTree(): string {
   } catch { /* no dsh on PATH — fall through to the installed trees */ }
   candidates.push(path.join(ROOT, 'dev', 'dsh-host-lock', 'node_modules', '@deepseek-ai'))
   candidates.push(path.join(ROOT, 'node_modules', '@deepseek-ai'))
-  for (const c of candidates) if (fs.existsSync(path.join(c, 'dsh-client-ui-plan', 'lib', 'client.js'))) return c
+  for (const c of candidates) {
+    if (!fs.existsSync(path.join(c, 'dsh-client-ui-plan', 'lib', 'client.js'))) continue
+    // #89: the comment above says the repo's own tree is the WRONG VERSION for host facts, and then
+    // happily returned it. On a runner with no pinned-host install that fallback is what ran, and the
+    // row failed against 0.1.5-rc.2 while claiming to read the host the rig boots. Read the pin, and
+    // refuse a mismatch — a red that names its cause beats a red that looks like a product defect.
+    const want = pinnedHostVersion()
+    const got = (() => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(c, 'dsh-client-ui-plan', 'package.json'), 'utf8')) as { version?: string }
+      } catch { return null }
+    })()?.version
+    if (want !== null && got !== null && got !== want) {
+      throw new Error(`host-plan-card-shape resolved a STALE host tree (${got}) where the rig pins ${want}.`
+        + ' The deterministic CI job must install it — see the "install the pinned DSH host" step in'
+        + ` .github/workflows/ci.yml. Tried: ${candidates.join(' , ')}`)
+    }
+    return c
+  }
   throw new Error(`no pinned-host tree with dsh-client-ui-plan found; tried: ${candidates.join(' , ')}`)
 }
 const HOST = hostTree()

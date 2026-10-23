@@ -27,6 +27,16 @@ jobs:
       # All dependencies (incl. every @deepseek-ai/* devDep) resolve from the
       # PUBLIC registry — no install secret and no private-registry config.
       - run: npm ci
+      # The pinned host too, and BEFORE the gate: several deterministic rows read host FACTS out of
+      # the installed bundle (the overflow classifier in `@deepseek-ai/dsh-llm`, the plan-card shape in
+      # `dsh-session`) and refuse to read the repo's stale 0.1.5-rc.2 compile-time closure, because a
+      # drift gate against the wrong version is a rumor. The acceptance job already installs this; the
+      # deterministic job did not, so the rows passed on any laptop with a global `dsh` and went red on
+      # a runner that has none — measured 2026-10-23 on PR #89 (2 failures, not coverage).
+      - name: install the pinned DSH host for the host-fact rows
+        run: |
+          npm ci --prefix "$GITHUB_WORKSPACE/dev/dsh-host-lock" --no-save --no-audit --no-fund || (cd dev/dsh-host-lock && npm ci --no-audit --no-fund)
+          echo "$GITHUB_WORKSPACE/dev/dsh-host-lock/node_modules/.bin" >> "$GITHUB_PATH"
       - run: npm run typecheck
       - run: npm run typecheck:client
       - run: npm run build

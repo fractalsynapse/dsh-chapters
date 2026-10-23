@@ -116,11 +116,17 @@ test('the refusal message satisfies the HOST classifier, read from its own bundl
     (() => { try { const b = execSync('readlink -f "$(command -v dsh)"', { encoding: 'utf8' }).trim(); const i = b.indexOf('/@deepseek-ai/'); return i > 0 ? b.slice(0, i) + '/@deepseek-ai' : '' } catch { return '' } })(),
   ].filter(Boolean)
   let source = ''
-  for (const t of trees) {
+  // #89: same trap as host-plan-card-shape — a CI job without the pinned-host install falls back to
+  // the repo's 0.1.5-rc.2 compile-time closure, which is a DIFFERENT classifier than the one the
+  // pinned host runs, so the row was asserting against the wrong world. Trees are checked in
+  // pin-first order and the version that got read is stated in the failure.
+  const trees2 = [...trees, path.join(ROOT, 'node_modules', '@deepseek-ai')].filter(Boolean)
+  for (const t of trees2) {
     const f = path.join(t, 'dsh-llm', 'lib', 'types', 'error.js')
     if (fs.existsSync(f)) { source = fs.readFileSync(f, 'utf8'); break }
   }
-  assert.ok(source.length > 0, 'the pinned host bundle with the overflow classifier must be readable')
+  assert.ok(source.length > 0, 'the pinned host bundle with the overflow classifier must be readable —'
+    + ' the deterministic CI job installs it (see .github/workflows/ci.yml, "install the pinned DSH host")')
   // `String.raw` and its backtick are separated by a newline + indent in the shipped file,
   // so the pattern must not assume they touch.
   const m = /const EXCEEDS_MODEL_CONTEXT = new RegExp\(\s*String\.raw\s*`([^`]+)`[\s\S]{0,400}?String\.raw\s*`([^`]+)`[\s\S]{0,400}?String\.raw\s*`([^`]+)`/.exec(source)
