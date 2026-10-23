@@ -171,6 +171,21 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
 
   const E2E_HOME = e2eHome(port)
   fs.rmSync(E2E_HOME, { recursive: true, force: true })
+  // Build (once per repo) the profile base the way CI does, then copy THAT into the home. A `file:`
+  // dependency means the plugin is symlinked, so a rebuilt `dist/` is picked up without reinstalling.
+  {
+    const base = path.join(ROOT, 'var', 'e2e-profile-base')
+    const marker = path.join(base, 'profiles', 'web', 'node_modules', '@treeseed')
+    if (!fs.existsSync(marker)) {
+      const r = spawnSync('bash', [path.join(ROOT, 'scripts', 'bootstrap-dev-profile.sh'), '--home', path.relative(ROOT, base)],
+        { cwd: ROOT, encoding: 'utf8' })
+      if (r.status !== 0) {
+        throw new Error(`e2e boot: could not build the profile base with scripts/bootstrap-dev-profile.sh (exit ${String(r.status)}): `
+          + `${(r.stderr ?? '').slice(0, 300)} — a boot whose profile is copied from a developer's machine is the #89 failure, so there is no fallback`)
+      }
+    }
+    fs.cpSync(path.join(base, 'profiles'), path.join(E2E_HOME, 'profiles'), { recursive: true })
+  }
   // #89, the LAST machine-bound input — and the one that masqueraded as a host difference:
   // `.dshdev-local/` is gitignored, so its `settings.yaml` (provider routes, model windows,
   // reasoning effort — whatever this developer's box happens to have) was copied into every boot.
@@ -189,6 +204,14 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const rel = path.relative(path.join(ROOT, '.dshdev-local'), src)
     if (rel === 'settings.yaml') return false // the tracked seed is written below, always
     if (rel === path.join('profiles', 'web', 'cordis.patch.yml')) return false // ditto (#89)
+    // LAYER FOUR (#89, and the one the enumeration predicted rather than stumbled into): the whole
+    // `profiles/` tree — 18 MB of node_modules installed by whoever last ran the dev profile — was
+    // copied into every throwaway home. Which plugins a profile has mounted decides which
+    // instruction paragraphs the host composes, and the CI tape diff proved that is what differed:
+    // 2,783 header chars there against 7,276 recorded here, diverging at char 141, mid-sentence,
+    // because the recorded boot had paragraphs (tool guidance rows) the runner's profile never had.
+    // Profiles now come from a base built by the SAME script CI runs, below.
+    if (rel.startsWith('profiles')) return false
     return rel === ''
       || rel === 'storages' || rel === 'storages/workspace.json'
       || (!rel.startsWith('sessions') && !rel.startsWith('storages' + path.sep) && !rel.startsWith('dsh-chapters') && !rel.startsWith('.dsh-chapters'))

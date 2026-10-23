@@ -45,3 +45,21 @@ test('the profile patch the boot seeds is tracked too, and its rows are the ones
   assert.match(boot, /profiles', 'web', 'cordis\.patch\.yml'\)\) return false/, 'the untracked copy is excluded')
   assert.match(boot, /fs\.copyFileSync\(PROFILE_SEED/, 'and the tracked seed is what lands in the home')
 })
+
+/**
+ * Layer four (#89), found by ENUMERATING what a boot reads instead of waiting for the next tape diff:
+ * the copy also brought `.dshdev-local/profiles/**` — 18 MB of `node_modules` installed by whoever last
+ * used the dev profile. Which plugins a profile mounts changes which instruction paragraphs the host
+ * composes, so the system header itself differed: 7,276 chars recorded vs 2,783 on CI, diverging at
+ * char 141 mid-sentence.
+ */
+test('no profile tree is copied from the developer home; it is built by the shared script (#89)', () => {
+  const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
+  assert.match(boot, /if \(rel\.startsWith\('profiles'\)\) return false/,
+    'the untracked profile tree must be excluded from the home copy')
+  assert.match(boot, /bootstrap-dev-profile\.sh[\s\S]{0,200}--home/,
+    'the profile base is built with the SAME script CI runs')
+  assert.match(boot, /no fallback/, 'and a failure to build it must throw — silently booting a different profile is the whole bug class')
+  // and the script must exist and be executable-by-path (it is the contract, not a convenience)
+  assert.ok(fs.existsSync(path.join(ROOT, 'scripts', 'bootstrap-dev-profile.sh')), 'the bootstrap script is part of the rig contract')
+})
