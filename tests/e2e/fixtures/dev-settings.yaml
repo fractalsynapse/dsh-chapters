@@ -1,0 +1,49 @@
+# dsh-chapters DEV profile settings — the real target environment.
+# The Local Qwen model — STRESS REGIME per user directive 2026-09-19: a 32K
+# and rejected as too small for real work — the 27-tool header alone is
+# ~13-15K). This mirrors the live ~/.dsh Local-provider block exactly: same
+# model, same window, same timeouts. The engine's pressure threshold math is
+# proven here at the real regime, not a projected one.
+llm-pi-ai:
+  providers:
+    local:
+      displayName: Local
+      api: openai-completions
+      baseURL: http://localhost:8080/v1
+      models:
+        - id: qwen3.8-flash-next
+          name: qwen3.8-flash-next (dev, 32K stress — the proving regime)
+          contextWindow: 32000
+          maxTokens: 15000
+          reasoningEfforts:
+            off:
+            low: low
+            medium: medium
+            high: high
+            xhigh: xhigh
+      apiKeyEnv: LOCAL_API_KEY
+      streamIdleTimeoutMs: 3600000
+      timeoutMs: 3600000
+      reasoning: medium
+      retryPolicy:
+        mode: normal
+        maxRetries: 0
+      compat:
+        supportsDeveloperRole: false
+
+agent-default-model:
+  provider: local
+  model: qwen3.8-flash-next
+  reasoningEffort: medium
+
+agent-presets:
+  default: chapters
+
+# The dev/e2e home ships PAST onboarding. On a pristine home the welcome
+# overlay intercepts the sidebar's new-session click, so browser specs die
+# before a session exists (measured 2026-09-23 on a CI-sim boot: the warm dev
+# home had accumulated this ack through first launches; a fresh CI home built
+# from this template must start acknowledged). The version tracks the host's
+# own notice counter — bump it when the host ships a newer welcome notice.
+ui-onboarding:
+  welcomeNoticeVersion: 2026-08-13.1
