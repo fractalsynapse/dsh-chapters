@@ -453,6 +453,39 @@ export function assertChaptersPreset(sessionId: string, expected = 'chapters'): 
   throw new Error(presetMismatchMessage(sessionId, preset, expected))
 }
 
+/**
+ * Did a `/chapters-* report` command actually run and say something durable?
+ *
+ * #56 (`enrich`): the DOM poll for the word `pending` failed while the child's own log held
+ * `…pending: 0 chapter(s)` — the command ran, the surface just wasn't showing it, because the
+ * 0.2.x conversation list virtualizes. An assertion cannot tell "the feature is broken" from
+ * "the text is offscreen" unless it also reads the durable record, so it now does: predicate over
+ * decoded log text, wrapper that walks whatever sessions this boot created.
+ */
+export function commandResultSaysPending(logText: string): boolean {
+  if (logText === '') return false
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"command/done"')) continue
+    // Both report shapes carry the word: `pending: 0 chapter(s)` and `…; 0 pending`. No `\b`
+    // on the left: in a JSON-encoded log line a newline is the two characters `\n`, so
+    // `\npending` has a word character before it and a word-boundary pattern silently misses
+    // the exact case this predicate exists to catch (measured with a direct call). The
+    // `command/done` guard above is what keeps this from matching human text.
+    if (line.includes('pending')) return true
+  }
+  return false
+}
+
+export function reportPendingInDurableLog(dir: string = E2E_SESS_DIR): boolean {
+  let entries: string[] = []
+  try { entries = fs.readdirSync(dir) } catch { return false }
+  for (const name of entries) {
+    const text = sessionLogTextById(name)
+    if (text !== '' && commandResultSaysPending(text)) return true
+  }
+  return false
+}
+
 export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs = 20_000 | false): Promise<string> {
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))

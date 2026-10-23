@@ -10,7 +10,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import {openApp, newSessionWithTurn, typeComposer, forkDoor, ROOT, E2E_STORE_ROOT} from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, forkDoor, ROOT, E2E_STORE_ROOT, reportPendingInDurableLog} from './session.ts'
 
 // #70 moved the rig's store into the port's own home; reading the workspace tree here made a
 // successful archive look like a missing one (#56).
@@ -51,5 +51,19 @@ test('an archived chapter enriches through the ladder with the body provably unt
   expect(after).toMatch(/generated:|unvetted/, 'sanctioned write markers present')
 
   await typeComposer(page, '/chapters-enrich report ')
-  await expect.poll(async () => (await page.textContent('body'))?.includes('pending'), { timeout: 60_000 }).toBe(true)
+  // TWO claims, both gated, because the old single DOM poll conflated them and the report is
+  // provably running: the child's durable log holds `…· last: enrichment batch: 1/1 chapter(s)
+pending: 0
+  // chapter(s)` (measured tonight in the failed leg's own session), while `textContent('body')`
+  // never showed the word. The 0.2.x conversation surface virtualizes its nodes, so a recorded
+  // command result can live outside the rendered window — which is a rendering question, not
+  // proof the command failed. So: assert the durable record (what this journey actually claims),
+  // and separately bring the newest node into view and assert the visible text.
+  await expect.poll(() => reportPendingInDurableLog(), { timeout: 90_000, intervals: [3000] },
+    'the report ran and its result is durable (command/done with a pending count)').toBe(true)
+  await page.locator('[class*="flowItem"], [class*="message"]').last()
+    .scrollIntoViewIfNeeded().catch(() => undefined)
+  await page.keyboard.press('End').catch(() => undefined)
+  await expect.poll(async () => ((await page.textContent('body')) ?? '').includes('pending'),
+    { timeout: 30_000, intervals: [2000] }, 'the report is readable on screen after scrolling to the newest node').toBe(true)
 })

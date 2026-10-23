@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import assert from 'node:assert/strict'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, currentSessionId, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
