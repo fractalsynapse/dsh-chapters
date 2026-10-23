@@ -11,6 +11,65 @@ history of a decision, not before every task.** The rules that lived inside it a
 ---
 
 ## Start Here
+## 2026-10-22/23 — the host 0.2.0-rc.2 acceptance sweep (#56)
+
+**What actually happened, in order.** The pinned host moved to 0.2.x; the tape corpus stayed at
+0.1.5-rc.1, so `CORPUS_HOST` closed the acceptance chain and no e2e claim was current (#56/#57). While
+re-anchoring it, seven distinct failures turned out to be **one root cause plus six real defects**: the
+preset pin had been written to a row id the host retired (`agent-presets` → `agent-preset-registry`), so
+every browser boot since the move ran the STANDARD realm — no `compaction/*`, no arrival artifacting, no
+`chapters_rules`. The legs were measuring an absence. Fixing the pin is what made the other six visible.
+
+**Defects found by measurement, each with red-first rows, on `feature/56-reanchor-tape-corpus`:**
+- **#77** — the continuation door called `sessions.open`, a verb that does not exist; the real seam is
+  `uiWorkspace.openSession` (`docs/contract.md` § Client Sessions Service). Three evenings of "the client
+  refuses to catalogue plugin-created children" were a door that never switched anything, while the tool
+  reported success. The door now verifies the switch from live state and degrades to
+  `switched:false, note:…` rather than claiming it.
+- **The flattened 0.2.x `tool/result` shape** silently disabled arrival artifacting chain-wide (the
+  probe decoded `data.message` at the top level, where 0.2.x puts `data.message.message`). Arrival
+  artifacted nothing because the predicate was never true — `src/arrival.ts` now takes both dialects,
+  with a row that rebuilds the assertion against the host's real event shape.
+- **#79** — the composer ghost ran `command/run` on **every render** (measured 4–26 per session, into
+  the transcript this plugin archives) because a `useEffect` listed `[props]` under a comment claiming
+  "once per mount"; and it kept pulling suggestions from a disabled feature.
+- **#78** — relief that declines while the surface is over the trigger said nothing. It now prints
+  `surface=/trigger=/window=/ratio=` plus the offending node count; observed live:
+  `relief declined … (surface=33442 trigger=16000 window=32000 ratio=0.5)`. The engine deliberately does
+  **not** override the operator's arrival floor (AGENTS calls that switch a behavior switch, and a rig
+  that reinterprets config is the same dishonesty as a pin that is collected and never applied).
+- **#81/#84** — `typeComposer` decided "did my send work?" from the editor's own emptiness, which the
+  host clears asynchronously: one session received the same instruction twice (seq 40 and 47). Then the
+  guard, matching an 80-character prefix, **swallowed** a genuinely different second instruction. Delivery
+  is now decided from the durable log, by the full instruction, after a bounded grace — and a drift row
+  fails if any composer call decides from the editor again.
+- **#85** — replay booted a **different realm than record** because the rig's regime lived in three
+  places (distill tables, the chain script's inline env, boot defaults) and Playwright project `env`
+  reaches only workers, so `globalSetup` used defaults. One table now (`tests/e2e/rig-pins.ts`), read by
+  both the config and the boot.
+- **#87** — the deepest one, and the last to become visible: **relief shadows the newest human
+  instruction.** Measured from one session's durable log: 13 compaction summaries, 108 distinct shadowed
+  seqs, `STILL-HERE` sent eleven times, **ten of them shadowed away**, final assistant text empty.
+  `retainRatio` reserves a token fraction as a verbatim tail, so an oversized node in the tail consumes
+  it and the question disappears with no error anywhere. The fix is inside our seam and honors
+  invariant 1: `carryOpenRequest` appends the newest human turn **verbatim** into the summary we author
+  (`openRequestCarryMaxChars`, default 4000; truncation is stated, never silent; injected scaffolding is
+  excluded by the one canonical predicate, `isInjectedProse`).
+
+**The instruments earned their keep, and four bugs lived in the instruments.** `pending` never
+matched a JSON-escaped newline; `ids.size > 0` disabled every #77 candidate; a report helper resolved
+logs against the import-time home so its own gate could never pass; an unbounded
+`scrollIntoViewIfNeeded` hung a leg for 17 minutes; my own MISS dump was swallowed by its own `catch`
+for a whole run; and a second injected-prose list was caught by the #59 drift row within minutes.
+`docs/verify.md` now carries a release gate shaped by these failures ("an unexercised assertion is a
+rumor of an assertion"), and `npm run typecheck:e2e` exposes **77 errors in a browser plane that has
+never been type-checked** (#83) — after I subtracted the ones my own new code caused.
+
+**Still open as this lands:** #86 (a session with the arrival floor off can livelock on one oversized
+result — 89 requests in 20 minutes, three outcomes for the same leg minutes apart), #80 (plugin command
+results are durable but render nothing operator-visible), #82 (a distill and the deterministic suite share
+the corpus directory), #81 criteria 3-4, and the #78 A/B product decision, which is the maintainer's.
+
 
 **Phase 0 passed.** Across nine probe boots on an isolated instance, a plugin created a session seeded with
 exactly one synthetic `user/message`, and that session was **listed** by `sessionQuery.listSessions`,
