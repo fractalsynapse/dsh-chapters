@@ -462,6 +462,12 @@ test('the override reports what the base engine DECIDED, not just that it ran (#
     assert.match(sink, /compactIfNeeded decided: none/,
       `the decision must be recorded beside the entry, got: ${sink.slice(0, 300)}`)
     assert.match(sink, /trigger="pressure"/, 'with the trigger that asked for it')
+    // `decided: none` alone conflates "the base engine saw no routed model" with "the surface was
+    // under threshold" — the two have opposite fixes, and heavy's leg is in exactly that spot.
+    // So the note carries the inputs the decision actually depended on.
+    assert.match(sink, /route=[^,)]+/, 'the note must show the route the meter was keyed on')
+    assert.match(sink, /surface=\d+ tok/, 'and the surface size it measured, in tokens')
+    assert.match(sink, /ratio=0\.9/, 'and the threshold ratio in force (the realm config, not an assumption)')
   } finally {
     h.dispose()
     if (prevSink === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS

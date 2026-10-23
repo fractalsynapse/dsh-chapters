@@ -803,8 +803,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * to be able to tell apart. (#78)
    */
   #noteDecision(where: string, trigger: unknown, result: CompactionResult | null, agent: Agent): void {
+    // The INPUTS, not just the verdict: `decided: none` is one word covering two opposite bugs —
+    // no routed target (the base returns null on line one) and under-threshold (a real decision).
+    // Heavy's leg sat exactly there, so the note now carries route, surface tokens and ratio.
+    // All of it wrapped: a diagnostic that can throw is a diagnostic that will eat the step.
+    let route = 'unknown'
+    let surface = '? tok'
+    try {
+      route = this.lastRoute === null ? 'none' : `${this.lastRoute.provider}/${this.lastRoute.model}`
+      const meter = (this.ctx as unknown as { tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number } } }).tokenMeter
+      const measured = meter?.measure?.((agent as { session?: unknown }).session)
+      if (typeof measured?.totalTokens === 'number') surface = `${String(measured.totalTokens)} tok`
+    } catch { /* never let instrumentation break compaction */ }
     diagnosticNote(this.ctx.logger, `realm:engine:${where}`,
-      `${where} decided: ${result === null ? 'none' : `compaction ${String((result as unknown as { compactionId?: string })?.compactionId ?? '?')}`} (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')})`)
+      `${where} decided: ${result === null ? 'none' : `compaction ${String((result as unknown as { compactionId?: string })?.compactionId ?? '?')}`} (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')}, route=${route}, surface=${surface}, ratio=${String((this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio ?? '?')})`)
   }
 
   override async compactIfNeeded(
