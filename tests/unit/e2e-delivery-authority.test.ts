@@ -12,7 +12,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { humanMessageCarries, commandDispatched, countHumanMessagesCarrying, countCommandsDispatched } from '../../tests/e2e/session.ts'
+import { humanMessageCarries, commandDispatched, countHumanMessagesCarrying, countCommandsDispatched, adoptSessionForTurn } from '../../tests/e2e/session.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 
@@ -164,4 +164,47 @@ test('the guard snapshots a baseline and compares counts (#88)', () => {
     'the closure must capture what existed BEFORE this press')
   assert.match(fn, /countDeliveries\(sid, line\) > baseline/,
     'and answer only for THIS press having landed — not for the instruction ever having been sent')
+})
+
+/**
+ * #77's lesson, applied to the rig: on a pristine home a draft commits under a fresh id while
+ * `dsh.sessions.current` still names the draft. Measured on the cold home — the instruction at seq 10
+ * and `turn/end` at seq 42, 28 s apart, in `c553d23b…`, while the spec watched `105939e9…` and timed
+ * out for twelve minutes. The durable log decides which session a send lives in; the view is a hint.
+ */
+test('session adoption follows the durable log, not the view (#77-class, rig side)', () => {
+  const turn = line({ type: 'user/message', seq: 10, data: { message: { content: [{ type: 'text', text: 'Which file defines the chapter composer merge rule? answer in one sentence.' }] } } })
+  const logs: Record<string, string> = {
+    'session-105939': line({ type: 'session', version: 4, id: 'session-105939' }),
+    'session-c553d2': [line({ type: 'session', version: 4, id: 'session-c553d2' }), turn].join('\n'),
+  }
+  const readLog = (id: string): string => logs[id] ?? ''
+  assert.equal(adoptSessionForTurn({ candidates: ['session-105939', 'session-c553d2'], needle: 'Which file defines the chapter composer merge rule?', readLog }),
+    'session-c553d2', 'the session that HOLDS the turn wins, even though the view named the other first')
+  assert.equal(adoptSessionForTurn({ candidates: ['session-c553d2', 'session-105939'], needle: 'Which file defines the chapter composer merge rule?', readLog }),
+    'session-c553d2', 'and order-independently: a correct first candidate is kept')
+})
+
+test('adoption refuses to guess when no candidate holds the turn', () => {
+  const empty: Record<string, string> = { 'session-a': line({ type: 'session', version: 4, id: 'session-a' }) }
+  assert.equal(adoptSessionForTurn({
+    candidates: ['session-a', null],
+    needle: 'a message nobody received',
+    readLog: (id: string) => { if (id === 'session-boom') throw new Error('unreadable'); return empty[id] ?? '' },
+  }), null, 'null means the caller keeps its target and the poll fails HONESTLY — inventing an id is how a rig hides a real stall')
+  assert.equal(adoptSessionForTurn({ candidates: [null, ''], needle: 'anything', readLog: () => 'x' }), null,
+    'and a null/empty candidate is skipped, not read as a log')
+})
+
+test('a throwing log read is absence, not a crash', () => {
+  assert.equal(adoptSessionForTurn({ candidates: ['session-boom'], needle: 'n', readLog: () => { throw new Error('zstd failed') } }), null,
+    'one unreadable directory must not take the journey down with it')
+})
+
+test('newSessionWithTurn actually uses the adoption (#77-class)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'session.ts'), 'utf8')
+  assert.match(src, /adoptSessionForTurn\(\{[\s\S]{0,200}readLog: sessionLogTextById/,
+    'the helper must be wired where the send happens, not just exported')
+  assert.match(src, /if \(adopted !== null\) sid = adopted/,
+    'and it may only OVERRIDE the view, never clear a good id with null')
 })

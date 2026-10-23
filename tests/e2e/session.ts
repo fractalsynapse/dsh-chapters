@@ -333,6 +333,34 @@ export function deliveredFor(sid: string | null, line: string): () => boolean {
   return () => countDeliveries(sid, line) > baseline
 }
 
+/**
+ * Which session does a send actually live in? (#77's lesson, turned on the rig.)
+ *
+ * A pristine home commits a draft under a FRESH id while `dsh.sessions.current` keeps reporting the
+ * draft, so a spec that trusts the view watches a log nothing was ever written to. Measured on the
+ * cold home: the instruction landed at seq 10 and `turn/end` at seq 42 — 28 seconds, well inside the
+ * 12-minute poll — in `session-c553d23b…`, while the spec was watching `session-105939e9…`, a log
+ * with no human turn at all. The durable log decides; candidates are only where to look.
+ *
+ * Exported and injected (`readLog`) so a row can prove it without a browser or a host: `null` when
+ * nothing carries the turn (the caller keeps its current target and the poll fails honestly), and the
+ * FIRST candidate that actually holds the message when one does.
+ */
+export function adoptSessionForTurn(opts: {
+  candidates: Array<string | null>
+  needle: string
+  readLog: (id: string) => string
+}): string | null {
+  const want = opts.needle.trimEnd().slice(0, 40)
+  for (const c of opts.candidates) {
+    if (c === null || c === '') continue
+    let text = ''
+    try { text = opts.readLog(c) } catch { text = '' }
+    if (text !== '' && humanMessageCarries(text, want)) return c
+  }
+  return null
+}
+
 export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>): Promise<void> {
   await focusComposer(page)
   await page.keyboard.insertText(line)
@@ -673,8 +701,18 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
   await expect(page.getByText(question.slice(0, 30), { exact: false }).first(), 'user message rendered (submit worked)').toBeVisible({ timeout: 30_000 })
   // drafts can persist under a FRESH id on first submit — re-read after the
   // send and adopt a rotation (measured: pre-send localStorage is the draft)
-  const rotated = await currentSessionId(page)
-  if (rotated !== null && rotated !== sid) sid = rotated
+  // #77's lesson, applied to the rig itself: the VIEW is not the truth. On a PRISTINE home the
+  // draft commits under a fresh id and `dsh.sessions.current` keeps reporting the draft — measured
+  // on the cold home: the needle landed at seq 10 and `turn/end` at seq 42 (28 s later, comfortably
+  // inside the poll) in session `c553d23b…`, while the spec watched `105939e9…`, a session that
+  // contains no human turn at all. So adoption must come from the durable log, with the view only as
+  // a hint. On warm homes the two agree and nothing changes.
+  const adopted = adoptSessionForTurn({
+    candidates: [sid, rotated, await currentSessionId(page)],
+    needle: question,
+    readLog: sessionLogTextById,
+  })
+  if (adopted !== null) sid = adopted
   const needle = question.slice(0, 40)
   await expect.poll(() => {
     const text = sid !== null ? sessionLogTextById(sid) : ''
