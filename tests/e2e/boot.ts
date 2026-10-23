@@ -76,6 +76,21 @@ export const rigStoreRoot = (port: number): string => path.join(e2eHome(port), '
  *  own repo is not a claim about the world the tape recorded. */
 export const rigMirrorRoot = (port: number): string => path.join(e2eHome(port), 'knowledge')
 
+/**
+ * Which `dsh` does a boot get? The pinned hermetic install when it is present, PATH only as a
+ * fallback — and the fallback is reported, never assumed (#89). Exported and dependency-injected so
+ * a row can prove the ORDER with no host installed at all: a rig that silently boots a linked dev
+ * build distills a corpus that cannot replay anywhere else.
+ */
+export function resolveHostBinary(
+  rootDir: string,
+  exists: (p: string) => boolean = (p) => fs.existsSync(p),
+): { binary: string, pinned: boolean } {
+  const pinned = path.join(rootDir, 'dev', 'dsh-host-lock', 'node_modules', '.bin', 'dsh')
+  if (exists(pinned)) return { binary: pinned, pinned: true }
+  return { binary: 'dsh', pinned: false }
+}
+
 export function applyRigPluginPatch(existing: string, opts: { storeRoot: string; promptModel?: string | undefined }): string {
   const row = `- id: '@treeseed/dsh-chapters'
   config:
@@ -341,7 +356,15 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // the deterministic report. Aggregate with scripts/e2e-coverage.mjs.
   const covDir = path.join(ROOT, 'var', 'e2e-cov', String(port))
   if (process.env.E2E_COVERAGE === '1') { fs.rmSync(covDir, { recursive: true, force: true }); fs.mkdirSync(covDir, { recursive: true }) }
-  const child: ChildProcessWithoutNullStreams = spawn('dsh', ['web', '--port', String(port), '--no-open'], {
+  // #89, the biggest rig lie this branch found: `spawn('dsh')` used whatever was on PATH. On this
+  // laptop that is a LINKED DEV BUILD of the harness (`repository: git+https://…`, no `gitHead`) —
+  // version string 0.2.0-rc.2, but not the published tarball CI installs from `dev/dsh-host-lock`.
+  // So the corpus was distilled against a host that exists nowhere else, and every CI replay
+  // mismatch got blamed on tapes, the matcher, or the product. The rig boots THE PIN and says which
+  // binary it used. A version string is not identity.
+  const host = resolveHostBinary(ROOT)
+  console.log(`[e2e] host binary: ${host.binary} (pinned=${host.pinned})`)
+  const child: ChildProcessWithoutNullStreams = spawn(host.binary, ['web', '--port', String(port), '--no-open'], {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -389,7 +412,13 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     child.kill('SIGKILL')
     throw new Error(`e2e boot failed within 60s (port ${port})\n${log.slice(-1500)}`)
   }
-  fs.writeFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), JSON.stringify({ url: m[0], port }))
+  fs.writeFileSync(path.join(ROOT, 'var', `e2e-boot-${String(port)}.json`), JSON.stringify({
+    url: m[0], port,
+    // Provenance a reader needs when a tape will not replay: which host binary booted, and whether it
+    // was the pin. One file PER PORT — a shared file records whichever boot wrote last, the same
+    // mistake as a shared miss journal.
+    hostBinary: host.binary, hostPinned: host.pinned,
+  }))
   return {
     url: m[0],
     port,
