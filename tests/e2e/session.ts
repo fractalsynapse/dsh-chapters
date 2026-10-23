@@ -486,6 +486,23 @@ export function reportPendingInDurableLog(dir: string = E2E_SESS_DIR): boolean {
   return false
 }
 
+/**
+ * How many host commands the composer ghost ran in this session (#79).
+ *
+ * The number is the point: with the feature OFF, the honest count is zero, and it was 4–26 per
+ * session because an effect depended on `props`. A durable count is the only assertion that
+ * survives a UI that looks correct while it polls.
+ */
+export function countGhostCommandRuns(logText: string): number {
+  if (logText === '') return 0
+  let n = 0
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"command/run"')) continue
+    if (/"name":\s*"chapters-prompt"/.test(line)) n += 1
+  }
+  return n
+}
+
 export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs = 20_000 | false): Promise<string> {
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))

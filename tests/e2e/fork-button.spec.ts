@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, currentSessionId, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, currentSessionId, countGhostCommandRuns, sessionLogTextById, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
 
 /**
  * The assistant-row door actions, on a session this spec CREATES through the
@@ -98,4 +98,16 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
     }
     return false
   }, { timeout: 20_000, intervals: [1000] }).toBe(true)
+  // #79: a disabled feature must be silent in the DURABLE log, not merely invisible on screen.
+  // Measured before the fix: 4–26 `chapters-prompt` command runs per session on boots without
+  // `promptModel`, because a "fetch once per mount" effect listed `[props]` — and React makes a
+  // new props object every render, so each keystroke polled a host command into the transcript
+  // this plugin archives. Zero is the claim; the chip being absent proves nothing about it.
+  // The honest bound is ONE probe per mount, not zero: the client has to ask whether the
+  // feature exists (`/chapters-prompt model`), and that answer is what lets it stop asking
+  // anything else. What must never happen is a probe per render — measured 4–26 per session
+  // before the fix, in boots where the feature was off the whole time.
+  expect(countGhostCommandRuns(sessionLogTextById(sid)),
+    'the composer ghost polls at most once per mount on a boot where the feature is OFF')
+    .toBeLessThanOrEqual(1)
 })
