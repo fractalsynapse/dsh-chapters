@@ -718,3 +718,20 @@ a live model. A claim about what a tape means must not be destroyed by the act o
 the file is generated from the pin table plus the recorded verdict, and
 `tests/unit/tape-provenance.test.ts` fails if any project lacks it or if the runner stops
 regenerating it.
+
+### The pool mirror must be per-boot too, or notices are not reproducible (#85)
+
+`artifactStoreRoot` has been pinned per port since #61, and I believed that made a boot's state
+test-local. It did not: the compaction/continuation notice composes its `## CORE RULES` block from
+`path.join(cwd, DEFAULT_CLONE_DIR)` (`src/engine.ts`) — a **fixed path in whatever project the rig is
+running in**. In this repo that directory holds real development state, so a leg's notice content
+depended on rules that had nothing to do with the leg: measured 2026-10-23, `heavy`'s recorded notice
+carried `[dev2/001] (security) Never log raw tokens…` while the replayed notice carried none, the two
+texts agreeing to character 346 and diverging there. Same build, same pins, same tapes — a different
+repo.
+
+The realm config key `knowledgeMirrorDir` (default `.dsh-knowledge`, unchanged for real installs) now
+feeds that read, and `boot.ts` pins it to `var/e2e-home-<port>/knowledge`. The rule generalizes: any
+path a boot reads to build model-visible text must be per-port or per-session, because a tape is a
+claim about ONE world. `tests/unit/e2e-store-root.test.ts` keeps the pins honest, and
+`tests/unit/preset-declaration.test.ts` refuses a config key that drifts out of the preset row.

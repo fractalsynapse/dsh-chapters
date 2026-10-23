@@ -52,3 +52,42 @@ test('every spec that touches the store imports the shared constant', () => {
     }
   }
 })
+
+/**
+ * #85 — the pool mirror is per-boot too.
+ *
+ * `heavy`'s recorded compaction notice carried a `## CORE RULES` block naming `[dev2/001]`; the
+ * replayed notice carried none. Both texts were byte-identical for 346 characters and diverged
+ * there, because the rules read that builds model-visible text came from a fixed path inside this
+ * repository (`cwd/.dsh-knowledge` / the store default) — development state of the project the rig
+ * runs in, not test state. A tape is a claim about ONE world; a boot that reads the developer's
+ * repo is a second world nobody recorded.
+ */
+test('boot.ts derives a mirror root per port and hands it to the realm pin writer', () => {
+  const boot = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'boot.ts'), 'utf8')
+  assert.match(boot, /export const rigMirrorRoot = \(port: number\): string => path\.join\(e2eHome\(port\), 'knowledge'\)/,
+    "the mirror root is derived from the SAME per-boot home as the chapters store")
+  assert.match(boot, /realmPinsOf\(pins, rigStoreRoot\(port\), rigMirrorRoot\(port\)\)/,
+    'and it is passed on every boot — not left to the engine default')
+  const pins = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'rig-preset-pin.ts'), 'utf8')
+  assert.match(pins, /knowledgeMirrorDir: '\$\{pins\.knowledgeMirrorDir\}'/,
+    'the realm row writer emits the key it is given')
+})
+
+test('the notice builder reads the configured mirror, never a workspace constant', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'engine.ts'), 'utf8')
+  const line = src.split('\n').find((l) => l.includes('mirrorDir:'))
+  assert.ok(line !== undefined, 'the rules block must still compose from a mirrorDir')
+  assert.match(line, /resolveStoreRoot\(cwd, this\.chaptersConfig\.knowledgeMirrorDir/,
+    `the mirror root must come from config: ${line?.trim()}`)
+  assert.doesNotMatch(line, /path\.join\(cwd, DEFAULT_CLONE_DIR\)/,
+    'a bare workspace constant here is the contamination this row exists to keep out')
+})
+
+test('the plugin Config declares the key with the historical default', () => {
+  // Default unchanged for real installs: only an e2e boot moves it. A key the engine reads but no
+  // schema declares is stripped by the loader — the 2026-09-18 lesson this repo already records.
+  const idx = fs.readFileSync(path.join(ROOT, 'src', 'index.ts'), 'utf8')
+  assert.match(idx, /knowledgeMirrorDir: Schema\.string\(\)\.default\('\.dsh-knowledge'\)/,
+    'declared on the plugin row with the pre-existing default')
+})

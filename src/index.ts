@@ -202,6 +202,8 @@ export const Config = Schema.object({
   // the row registered from code it belongs to THIS config, so a profile patch retunes it.
   compactionThresholdRatio: Schema.number().default(0.9),
   artifactStoreRoot: Schema.string().default('.dsh-chapters'),
+  // #85: pool-mirror root for rules/knowledge reads that produce model-visible text.
+  knowledgeMirrorDir: Schema.string().default('.dsh-knowledge'),
   chapterTokenTarget: Schema.number().default(8000),
   toolResultDeferFloorTokens: Schema.number().default(200),
   // Share of the window REMAINING after the header bound — never of the

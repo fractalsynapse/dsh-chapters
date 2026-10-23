@@ -290,7 +290,7 @@ function loadTape(tapeDir: string): TapeEntry[] {
  * entirely". Exported so a row can pin it, because an instrument that only runs inside a failing
  * leg is an instrument nobody trusts.
  */
-export function describeMiss(tape: TapeEntry[], incoming: unknown[]): string {
+export function describeMiss(tape: TapeEntry[], incoming: unknown[], label = '?'): string {
   const inc = incoming.map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
   // `file` is filled by the tape loader; a caller without it (a test, a partially built tape)
   // still gets a usable index rather than a mysterious `?`
@@ -319,6 +319,25 @@ export function describeMiss(tape: TapeEntry[], incoming: unknown[]): string {
     const s = (e.prefix ?? [])[at]
     return substituteAll(typeof s === 'string' ? s : JSON.stringify(s) ?? '').slice(0, 110)
   })()
+  if (process.env.E2E_MISS_DUMP !== undefined && best.idx >= 0) {
+    // Opt-in, and it changes nothing about matching: the 400-char previews can show THAT two long
+    // notices differ without showing WHERE, and "where" is the whole diagnosis (#85). Both full
+    // normalized arrays go to the file named by the env var, once per divergence.
+    try {
+      const bestEntry = tape[best.idx]
+      const stored = (bestEntry.prefix ?? []).map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+      fs.appendFileSync(process.env.E2E_MISS_DUMP,
+        `=== MISS tape=${label} closest=${best.entry} commonPrefix=${String(best.common)}\n`
+        + `--- INCOMING (${String(inc.length)}) ---\n${inc.join('\n<<<msg>>>\n')}\n`
+        + `--- STORED (${String(stored.length)}) ---\n${stored.join('\n<<<msg>>>\n')}\n\n`)
+    } catch (error) {
+      // A diagnostic must never break a request — but swallowing the error outright is how this
+      // block silently produced NO dump for a whole run while the journal kept saying MISS
+      // (it referenced a variable that is not in scope here, and tsconfig.json never checks
+      // tests/e2e, so nothing compile-time caught it either). Say so on stderr instead.
+      console.error(`e2e: MISS dump failed (matching is unaffected): ${String(error)}`)
+    }
+  }
   return `closest=${best.entry}${tied.length > 1 ? ` tied=[${tied.join(',')}]` : ''} commonPrefix=${String(best.common)} divergeAt=msg${wantIdx}`
     + ` got=${JSON.stringify(got)} expected=${JSON.stringify(exp)}`
 }
@@ -552,7 +571,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           // `heavy` looked like the failure of whichever project died last. Name
           // the tape AND how many entries it loaded — "entries=0" is a different
           // bug (missing/untracked tape) than a prefix mismatch.
-          fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${String(tape.length)} messages=${String(inc.length)} ${describeMiss(tape, inc)}\n`)
+          fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${String(tape.length)} messages=${String(inc.length)} ${describeMiss(tape, inc, tapeName)}\n`)
           // A miss is fatal (503) — UNLESS liveFallback is on, where it falls
           // through to the record path: the real model answers the drifted
           // request AND it lands on the tape, so the next clean replay

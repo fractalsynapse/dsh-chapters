@@ -72,6 +72,10 @@ export const e2eHome = (port: number): string => path.join(ROOT, 'var', `e2e-hom
  */
 export const rigStoreRoot = (port: number): string => path.join(e2eHome(port), 'chapters')
 
+/** #85: the pool mirror is per-boot as well — a notice built from rules in the developer's
+ *  own repo is not a claim about the world the tape recorded. */
+export const rigMirrorRoot = (port: number): string => path.join(e2eHome(port), 'knowledge')
+
 export function applyRigPluginPatch(existing: string, opts: { storeRoot: string; promptModel?: string | undefined }): string {
   const row = `- id: '@treeseed/dsh-chapters'
   config:
@@ -284,7 +288,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       const devProfile = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'dev', 'profile-cordis.patch.yml'), 'utf8')
       p = ensurePresetRegistryPin(p, devProfile)
       const shippedPatch = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'cordis.patch.yml'), 'utf8')
-      p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port)))
+      p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port), rigMirrorRoot(port)))
       fs.writeFileSync(patchPath, p)
     }
   }

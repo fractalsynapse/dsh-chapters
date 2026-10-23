@@ -155,3 +155,22 @@ test('a dev profile without the registry row fails loudly instead of booting un-
     /carries no `agent-preset-registry` row/,
   )
 })
+
+/**
+ * #85 functional half: the pin must actually reach the row the engine reads. A per-port store root
+ * was pinned since #61, but the POOL MIRROR stayed a workspace constant, so `heavy`'s recorded
+ * compaction notice carried a `## CORE RULES` block from this repo's own development rules and the
+ * replayed notice carried none — the two texts agreed to character 346 and diverged there. A tape is
+ * a claim about one world; reading the developer's repo is a second world nobody recorded.
+ */
+test('a booted realm row carries knowledgeMirrorDir, and reruns replace rather than duplicate it', () => {
+  const profile = SHIPPED
+  const once = applyRigPresetPin(profile, SHIPPED, realmPinsOf({ thresholdRatio: '0.5' }, '/tmp/home/chapters', '/tmp/home/knowledge'))
+  const twice = applyRigPresetPin(once, SHIPPED, realmPinsOf({ thresholdRatio: '0.5' }, '/tmp/home2/chapters', '/tmp/home2/knowledge'))
+  assert.match(once, /knowledgeMirrorDir: '\/tmp\/home\/knowledge'/, 'the first write lands on the realm row')
+  assert.match(twice, /knowledgeMirrorDir: '\/tmp\/home2\/knowledge'/, 'a rerun replaces the value')
+  const count = (twice.match(/knowledgeMirrorDir:/g) ?? []).length
+  assert.equal(count, 1, `exactly one mirror key per row, saw ${String(count)}`)
+  assert.equal(realmPinsOf({ thresholdRatio: '0.5' }, '/tmp/x/chapters').knowledgeMirrorDir, undefined,
+    'no mirror root passed means no key written — a real install keeps its default')
+})

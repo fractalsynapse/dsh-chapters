@@ -54,6 +54,8 @@ import type { RegistryStore } from './store.ts'
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
 export interface ChaptersRowConfig extends BasicCompactionConfig {
   artifactStoreRoot?: string
+  /** #85: pool-mirror root for rules/knowledge reads that produce model-visible text. */
+  knowledgeMirrorDir?: string
   chapterTokenTarget?: number
   toolResultDeferFloorTokens?: number
   mergeThreshold?: number
@@ -228,6 +230,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     })),
     auto: z.boolean(),
     artifactStoreRoot: z.string(),
+    knowledgeMirrorDir: z.string().default('.dsh-knowledge'),
     chapterTokenTarget: z.number().step(1).min(1),
     toolResultDeferFloorTokens: z.number().step(1).min(0),
     // The composition knobs ride the same row so the engine path and the fork
@@ -312,7 +315,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
@@ -337,6 +340,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     }))
     this.chaptersConfig = {
       artifactStoreRoot: artifactStoreRoot ?? '.dsh-chapters',
+      knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
       chapterTokenTarget: chapterTokenTarget ?? 8000,
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
@@ -956,7 +960,9 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const project = projectForCwd(store.projects(), cwd)
     // the SAME renderer the doors use — one builder for every rebuilt head (§7.3)
     const built = await renderRulesBlock({
-      mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+      // #85: the configured root, not the constant — an e2e boot pins this per port so a notice
+      // cannot pick up rules from whatever the developer's repo happens to contain.
+      mirrorDir: resolveStoreRoot(cwd, this.chaptersConfig.knowledgeMirrorDir ?? DEFAULT_CLONE_DIR),
       storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
       projectKey: project?.projectKey ?? '',
       harnessId: harness,

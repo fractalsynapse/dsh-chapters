@@ -28,6 +28,10 @@ export interface RealmPin {
   enrichmentEnabled?: boolean
   noAuxModel?: boolean
   artifactStoreRoot?: string
+  /** #85: per-boot pool-mirror root, so a notice's CORE RULES block cannot come from the
+   *  developer's repo. Without it, `heavy`'s recorded notice carried `[dev2/001] …` and the
+   *  replayed notice carried none — same build, same pins, different repo state. */
+  knowledgeMirrorDir?: string
 }
 
 const PRESET_ROW = '- id: preset-chapters'
@@ -66,6 +70,7 @@ export function renderPinnedPreset(shipped: string, pins: RealmPin): string {
       out.push(l)
       const extras: string[] = []
       if (pins.artifactStoreRoot !== undefined) extras.push(`${ind}artifactStoreRoot: '${pins.artifactStoreRoot}'`)
+      if (pins.knowledgeMirrorDir !== undefined) extras.push(`${ind}knowledgeMirrorDir: '${pins.knowledgeMirrorDir}'`)
       if (pins.toolResultArtifactTokens !== undefined) extras.push(`${ind}toolResultArtifactTokens: ${pins.toolResultArtifactTokens}`)
       if (pins.enrichmentEnabled !== undefined) extras.push(`${ind}enrichmentEnabled: ${String(pins.enrichmentEnabled)}`)
       // #77's predecessor lesson: the aux pin was expressed against keys that no longer exist.
@@ -131,10 +136,11 @@ export function ensurePresetRegistryPin(existing: string, devProfile: string): s
 }
 
 /** Which realm pins do the rig's collected `Pins` map to? One place, so a field cannot go inert. */
-export function realmPinsOf(pins: Pins, storeRoot: string): RealmPin {
+export function realmPinsOf(pins: Pins, storeRoot: string, mirrorRoot?: string): RealmPin {
   return {
     thresholdRatio: pins.thresholdRatio,
     artifactStoreRoot: storeRoot,
+    ...(mirrorRoot !== undefined ? { knowledgeMirrorDir: mirrorRoot } : {}),
     ...(pins.toolResultArtifactTokens !== undefined ? { toolResultArtifactTokens: pins.toolResultArtifactTokens } : {}),
     ...(pins.enrichment !== undefined ? { enrichmentEnabled: pins.enrichment } : {}),
     ...(pins.noAuxModel === true ? { noAuxModel: true } : {}),
