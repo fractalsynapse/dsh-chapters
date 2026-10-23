@@ -231,7 +231,7 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   sweep files rather than by lowering the bar.
 - `npm run coverage` — the same deterministic suite under node's native
   `--experimental-test-coverage` (a quick second opinion; no gate).
-- `npm run coverage:e2e` — replays the eight browser segments with
+- `npm run coverage:e2e` — replays the **nine** browser segments with
   `E2E_COVERAGE=1`, which makes every boot write NODE_V8_COVERAGE profiles
   under `var/e2e-cov/<port>` (flushed on the boot's clean exit), then runs
   `scripts/e2e-coverage.mjs` → **c8 with real source maps** (tsconfig
@@ -239,10 +239,24 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   per-module Stmts/Branch/Funcs. Read it as "covered by SOME boot of the
   suite" (a union), and mind the script header's c8 gotcha: include/exclude
   filters apply BEFORE remapping, so `--include=src/**` would silently
-  zero every row. First full ledger: 80% stmts / 62% branches overall;
-  tools.ts 72/49, engine.ts 81/59, index.ts 86/55 — plus the honest plane
-  split (src/treedx reads low HERE because the browser suite rides git;
-  the deterministic + live ledgers own that transport).
+  zero every row.
+  **Ledger, re-measured 2026-10-23 on host 0.2.0-rc.2 (`bcb16d3`, strict replay
+  rc 0 / zero misses): 78.19% stmts / 58.55% branch / 71.22% funcs.** Per module:
+  engine.ts 87.93/55.06, index.ts 85.78/52.43, rules.ts 88.83/58.87,
+  store.ts 91.64/79.59, continue-core.ts 94.05/66.66, arrival.ts 94.87/60.60,
+  sync.ts 83.95/59.89, tools.ts 64.06/49.66.
+  **This is a slip, stated as one:** the 2026-09-25 ledger read 80/62 overall
+  (tools 72/49, engine 81/59, index 86/55). Statements and branches both went
+  DOWN while engine's statement coverage rose — because the re-anchored legs
+  are shorter, not weaker: `heavy` replays in 4 tape entries (2 compaction
+  triples, and it now answers) where the old corpus carried 16–22, and a
+  shorter conversation walks fewer engine arms. Nothing here is gated — the
+  gated ledger is `coverage:ci` at 85/85/85/85 on the deterministic plane —
+  so the honest reading is: *e2e coverage tracks how much conversation the
+  corpus replays, and a faster-converging corpus covers less of the engine by
+  accident.* Recovering the number means adding breadth deliberately (more
+  distinct journeys, or longer ones with their own claim), never padding a
+  leg to fatten a percentage.
   Both ledgers together are the coverage claim; neither alone is honest.
 
 ### Release status (measured 2026-09-25)
