@@ -150,3 +150,43 @@ test('the estimator agrees with the host meter at the measured sizes', async () 
   assert.ok(estOver > 32_000, `the host overflowed at 35,428 tokens; our estimate said ${String(estOver)}`)
   assert.equal(BYTES_PER_TOKEN, 3, 'the divisor is the conservative round value, and the measured 2.8 lives beside it')
 })
+
+test('REPLAY refuses the same over-window request and consumes no tape entry (#78)', async () => {
+  // The regime is part of what a tape records. A distill that saw a refusal, relieved, and asked
+  // again must see the SAME refusal on replay — otherwise the request sequence diverges and the
+  // chain goes red for what looks like prompt drift but is really a rig that changed the world
+  // between record and replay.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'win-replay-'))
+  const tape = path.join(dir, 'tape')
+  fs.mkdirSync(tape, { recursive: true })
+  // one entry that WOULD match a small request; the big request must not consume it
+  const small = { model: 'qwen3-4b-instruct', messages: [{ role: 'user', content: 'hi' }] }
+  const key = (b: unknown): string => {
+    const { createHash } = require('node:crypto') as typeof import('node:crypto')
+    return createHash('sha256').update(JSON.stringify(b)).digest('hex').slice(0, 16)
+  }
+  fs.writeFileSync(path.join(tape, '0000.json'), JSON.stringify({
+    key: 'ignore', prefix: [], status: 200, contentType: 'text/event-stream',
+    bytes: Buffer.from('data: [DONE]\n\n').toString('base64'), model: 'qwen3-4b-instruct',
+    recordedAt: new Date().toISOString(),
+  }))
+  void small; void key
+  const quiet = http.createServer((_q, r) => { r.writeHead(200); r.end('{}') })
+  const addr = await new Promise<{ port: number }>((r) => quiet.listen(0, '127.0.0.1', () => r(quiet.address() as { port: number })))
+  const proxy = await startModelProxy({
+    mode: 'replay', tapeDir: tape, journalPath: path.join(dir, 'misses.log'),
+    upstream: `http://127.0.0.1:${addr.port}`, windowTokens: 1000,
+  })
+  try {
+    const before = fs.readdirSync(tape).length
+    const r = await post(proxy.url + '/v1/chat/completions', bigRequest(4000))
+    assert.equal(r.status, 400, 'replay must refuse an over-window request the way record did')
+    assert.equal(fs.readdirSync(tape).length, before, 'a refusal consumes nothing')
+    const log = fs.readFileSync(path.join(dir, 'e2e-upstream.log'), 'utf8')
+    assert.match(log, /OVERFLOW refused mode=replay/, 'and the journal says which mode enforced it')
+  } finally {
+    await proxy.close()
+    await new Promise<void>((r) => { quiet.close(() => r()) })
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

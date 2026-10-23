@@ -466,6 +466,17 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let body: Record<string, unknown> = {}
         try { body = JSON.parse(raw.toString('utf8')) as Record<string, unknown> } catch { /* non-json passthrough below */ }
         const inc = messagesOf(body)
+        // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape
+        // records — a distill that saw a refusal and retried after relief must see the same refusal
+        // on replay, or the request sequence diverges and the chain fails for a reason that looks
+        // like prompt drift. Refusals are never recorded and never consume an entry.
+        const win = opts.windowTokens ?? Number(process.env.E2E_WINDOW_TOKENS ?? 0)
+        const refusal = windowRefusal(body, win)
+        if (refusal !== null) {
+          journal(`OVERFLOW refused mode=${opts.mode} est=${String(estimateRequestTokens(body))} tokens window=${String(win)} — rig-enforced (E2E_WINDOW_TOKENS); nothing recorded, no tape entry consumed`)
+          try { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify(refusal)) } catch { /* client gone */ }
+          return
+        }
         if (opts.mode === 'replay') {
           const tape = loadTape(opts.tapeDir)
           const hit = findReplay(tape, inc)
@@ -524,17 +535,6 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let sawBytes = 0
         let firstByteMs = -1
         journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
-        // Enforced BEFORE the upstream is asked — the point is that the rig, not the endpoint,
-        // decides when the window is over. Never recorded: a refusal is not an answer, and a
-        // fixture of a 400 would replay as though a model had produced it.
-        const win = opts.windowTokens ?? Number(process.env.E2E_WINDOW_TOKENS ?? 0)
-        const refusal = windowRefusal(body, win)
-        if (refusal !== null) {
-          journal(`OVERFLOW refused est=${String(estimateRequestTokens(body))} tokens window=${String(win)} — rig-enforced (E2E_WINDOW_TOKENS); nothing recorded`)
-          inFlight -= 1
-          try { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify(refusal)) } catch { /* client gone */ }
-          return
-        }
         // watchdogs live in pumpUpstream now, PER ATTEMPT — arming them here too would
         // double-answer the client and keep the process alive after the run (#54).
         // Buffered pump with bounded throttle-retry (#54). The only behavioral difference

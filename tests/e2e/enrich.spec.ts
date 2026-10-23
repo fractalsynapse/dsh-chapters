@@ -23,7 +23,14 @@ function chapterFile(sid: string): string {
 }
 
 test('an archived chapter enriches through the ladder with the body provably untouched', async ({ page }) => {
-  test.setTimeout(900_000)
+  // #56: the ceiling is a BUDGET, not a claim. The ladder journey runs a real model turn, then a
+  // second model turn after the fork, then polls the durable write — on the hosted distill
+  // endpoint each step is minutes slower than the pinned local regime was (measured: the leg died
+  // at the old 15-minute ceiling with every assertion still in progress, `Test timeout of
+  // 900000ms exceeded` followed by a teardown race reported as "page closed", which is not a
+  // failure of the feature). Kept under the distill runner's own per-leg timeout so the runner
+  // still wins and prints a verdict.
+  test.setTimeout(1_500_000)
   await openApp(page)
   const sid = await newSessionWithTurn(page, 'What does the read tool do? One sentence, no tools.')
   // the message-level fork archives the parent's turn into chapters (the

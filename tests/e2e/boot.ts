@@ -235,10 +235,10 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // otherwise invisible and land the session in someone else's transcript)
       tapeDir: path.join(ROOT, 'tests', 'fixtures', 'model-tape', process.env.E2E_TAPE ?? 'default'),
       journalPath: path.join(ROOT, 'var', 'e2e-tape-misses.log'),
-      // #78: RECORD enforces the pinned window so a hosted endpoint cannot silently skip the
-      // pressure regime; REPLAY must not, or a refusal the model never made would be injected
-      // into a recorded conversation (and the tape is the record of what the regime did).
-      windowTokens: modelMode === 'record' ? PINNED_CONTEXT_WINDOW : 0,
+      // #78: enforced in record AND replay. The window is part of the regime the tape was
+      // distilled under — if replay served the same prompt where record refused it (or the
+      // reverse), the request sequence diverges and a red chain reads like prompt drift.
+      windowTokens: PINNED_CONTEXT_WINDOW,
       // E2E_TAPE_FALLBACK=1: tape hits stay, misses go live and are
       // recorded — a self-healing pass instead of a full re-record
       ...(process.env.E2E_TAPE_FALLBACK === '1' ? { liveFallback: true } : {}),
