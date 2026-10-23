@@ -28,11 +28,38 @@ const tree = (opts: { corpus?: string, pinned?: string }): string => {
   return root
 }
 
-test('the committed repo state is honestly reported: pinned 0.2.x, corpus distilled on 0.1.5', () => {
-  const a = corpusAnchor(path.resolve(process.cwd()))
+/**
+ * The row that watched the gate being CLOSED, now watching it lift.
+ *
+ * Flipping `host = 0.1.5-rc.1` to `0.2.0-rc.2` in `CORPUS_HOST` was designed to be the ONLY
+ * action that reopens the acceptance chain — "the lift is a data edit, not a code change" — so
+ * this row changes its expectation with the re-anchor, and keeps its teeth in a way the old
+ * version could not: it asserts WHY it is open (pinned equals distilled) and mutates the record
+ * to prove a future pin move closes the gate again without anyone touching a test.
+ */
+test('the corpus is anchored to the pinned host, and the gate re-closes on drift', () => {
+  const root = path.resolve(process.cwd())
+  const a = corpusAnchor(root)
   assert.equal(a.pinned, '0.2.0-rc.2', 'the lock is the source of the pin (no second literal)')
-  assert.equal(a.anchored, false, 'the corpus still predates the move — the gate must be CLOSED, not decorative')
-  assert.match(a.tracking ?? '', /\/issues\/56$/, 'and it names the issue that lifts it')
+  assert.equal(a.anchored, true, 'the nine legs were re-distilled on 0.2.0-rc.2 (#56) — replay must now RUN, not refuse by name')
+  assert.equal(a.distilled, a.pinned, 'open means the RECORD matches the PIN, not that a flag says so')
+  assert.match(a.reason, /0\.2\.0-rc\.2|re-distilled/i, 'and the reason field still explains itself to a reader')
+
+  // mutation: the drift that matters is the RECORD falling behind the PIN. `pinned` in the file
+  // is documentary — `corpusAnchor` resolves the truth from the lock — so the honest mutation is
+  // to the `host =` line, and that is also exactly what happens next time somebody moves
+  // `dev/dsh-host-lock` and forgets to re-distill.
+  const file = path.join(root, 'tests', 'fixtures', 'model-tape', 'CORPUS_HOST')
+  const before = fs.readFileSync(file, 'utf8')
+  try {
+    fs.writeFileSync(file, before.replace(/^host = .*$/m, 'host = 0.1.5-rc.1'))
+    const stale = corpusAnchor(root)
+    assert.equal(stale.anchored, false, 'a corpus left behind by the pin must re-close the chain with no code edit')
+    assert.match(stale.reason, /0\.1\.5-rc\.1/, 'and say which version it was distilled against')
+  } finally {
+    fs.writeFileSync(file, before)
+    assert.equal(corpusAnchor(root).anchored, true, 'restored, and the gate is open again — the mutation left nothing behind')
+  }
 })
 
 test('a matching host record lifts the gate with no code change', () => {

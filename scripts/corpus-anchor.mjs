@@ -46,9 +46,13 @@ export function corpusAnchor(root = ROOT) {
   return {
     anchored, pinned, distilled,
     tracking: rec.tracking ?? null,
+    // A stale record must name BOTH versions whatever its free-text `reason` says: the whole
+    // point of refusing by name is that the next reader learns what changed. Proven by a row —
+    // my own `reason` text once hid the distilled version completely, which is a gate that
+    // announces itself without being diagnosable.
     reason: anchored
       ? `corpus distilled against ${distilled}`
-      : rec.reason ?? `corpus distilled against ${distilled ?? '?'}, this branch pins ${pinned}`,
+      : `corpus distilled against ${distilled ?? '?'}, this branch pins ${pinned}${rec.reason ? ` — ${rec.reason}` : ''}`,
     file,
   }
 }
