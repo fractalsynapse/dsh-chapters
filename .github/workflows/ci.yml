@@ -170,6 +170,15 @@ jobs:
         run: bash scripts/ci-replay.sh
         env:
           E2E_TAPE_DIFF: ${{ github.workspace }}/var/e2e-tape-diffs
+          # #89: the throwaway homes are OUTSIDE the repository on purpose. Node resolves
+          # `@deepseek-ai/*` bundles by walking up from the profile dir, and a home under `var/`
+          # reaches this repo's node_modules (0.1.5-rc.2) and then the developer's ~/node_modules
+          # (a linked dev build wearing the pin's version string). Measured by moving nothing but
+          # the location: the same pinned host composed a 7,276-char system header under `var/` and
+          # the CI-shaped short one under /tmp, and the suite replay flipped from 4-passed to a
+          # `commonPrefix=1` miss. So the runner pins the root explicitly, and the artifact paths
+          # below follow it.
+          E2E_HOME_ROOT: /tmp/dsh-e2e
       - name: assert the production store root is untouched
         if: always()
         run: node scripts/assert-store-untouched.mjs verify
@@ -184,7 +193,7 @@ jobs:
             var/e2e-tape-diffs/
             var/e2e-server-*.log
             var/e2e-engine-errors.log
-            var/e2e-home-*/sessions/
-            var/e2e-home-*/storages/
-            var/e2e-home-*/settings.yaml
+            /tmp/dsh-e2e/e2e-home-*/sessions/
+            /tmp/dsh-e2e/e2e-home-*/storages/
+            /tmp/dsh-e2e/e2e-home-*/settings.yaml
           if-no-files-found: ignore

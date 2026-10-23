@@ -47,3 +47,34 @@ test('the boot records which binary it used (#89)', () => {
   const session = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'tests', 'e2e', 'session.ts'), 'utf8')
   assert.match(session, /'e2e-boot\.json'/, 'the consumer named above is real, so the protocol is load-bearing')
 })
+
+/**
+ * The throwaway home is HERMETIC, by position (#89, proven before written).
+ *
+ * Node resolves `@deepseek-ai/*` bundles by walking UP from the profile directory. A home under
+ * `var/` therefore reaches the repo's `node_modules` (0.1.5-rc.2) and then this user's
+ * `~/node_modules` (a linked DEV BUILD whose version string equals the pin). Measured with nothing
+ * changed but the home's location: the same pinned binary composed a 7,276-character system header
+ * under `var/` and a CI-shaped shorter one under `/tmp` — and the suite replay flipped from
+ * 4-passed to a `commonPrefix=1` MISS at msg1. That is the whole "green on my laptop, impossible on
+ * CI" class in one experiment, and the reason homes now live outside the repository by default.
+ */
+test('the e2e home root is outside the repo, so no ancestor node_modules can leak in (#89)', async () => {
+  const { e2eHome, e2eHomeRoot } = await import('../../tests/e2e/boot.ts')
+  const root = e2eHomeRoot()
+  assert.equal(root.startsWith(ROOT + path.sep), false,
+    `the home root must not sit inside the repository tree (got ${root}) — that is how a developer's install joins a boot`)
+  const home = e2eHome(41731)
+  let dir = home
+  const leaks: string[] = []
+  for (;;) {
+    const nm = path.join(dir, 'node_modules')
+    if (fs.existsSync(nm) && fs.existsSync(path.join(nm, '@deepseek-ai'))) leaks.push(nm)
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  // /tmp itself is clean on this machine; if an ancestor ever grows a @deepseek-ai tree, the
+  // hermeticity claim is false and the test says so with the path rather than silently agreeing.
+  assert.deepEqual(leaks, [], `an ancestor of ${home} carries @deepseek-ai packages: ${leaks.join(' , ')}`)
+})

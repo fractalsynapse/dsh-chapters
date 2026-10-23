@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
@@ -56,7 +57,15 @@ export function hostSupportsPresetRows(): boolean {
 /** port-keyed home: two boots running at once (even accidentally) can never
  * wipe or corrupt each other's state — a same-home collision was measured
  * destroying an in-flight capture (2026-09-19). */
-export const e2eHome = (port: number): string => path.join(ROOT, 'var', `e2e-home-${port}`)
+// E2E_HOME_ROOT: the ancestor-chain experiment (#89). Node resolves `@deepseek-ai/*` bundles by
+// walking UP from the profile directory, so a home under this repo reaches the repo's node_modules
+// and then the developer's HOME/node_modules — which on this machine is a LINKED DEV BUILD. That is
+// why the same pinned host composes a 7,276-character header here and a 2,783-character one on a
+// runner that has no such ancestor: the version string matched, the content did not.
+export const e2eHomeRoot = (): string =>
+  process.env.E2E_HOME_ROOT ?? path.join(os.tmpdir(), 'dsh-e2e')
+
+export const e2eHome = (port: number): string => path.join(e2eHomeRoot(), `e2e-home-${port}`)
 
 /**
  * The rig's OWN plugin config row, written into the profile patch per boot (#61 item 8).
