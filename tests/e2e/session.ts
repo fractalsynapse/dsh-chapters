@@ -521,11 +521,24 @@ export function commandResultSaysPending(logText: string): boolean {
   return false
 }
 
+/**
+ * Read ONE session's durable log by DIRECTORY path. Split out because the helper below used
+ * `sessionLogTextById(name)`, which resolves against the boot-port-derived home this module
+ * computed at import time — so pointed at any other tree it silently found nothing and returned
+ * false forever. A gate that can never pass is worse than a missing gate: it looks like the
+ * feature is broken.
+ */
+export function decodeSessionLogAt(sessionDir: string): string {
+  const f = sessionLogFileFor(sessionDir)
+  if (f === null) return ''
+  try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch { return '' }
+}
+
 export function reportPendingInDurableLog(dir: string = E2E_SESS_DIR): boolean {
   let entries: string[] = []
   try { entries = fs.readdirSync(dir) } catch { return false }
   for (const name of entries) {
-    const text = sessionLogTextById(name)
+    const text = decodeSessionLogAt(path.join(dir, name))
     if (text !== '' && commandResultSaysPending(text)) return true
   }
   return false
