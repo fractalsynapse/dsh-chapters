@@ -58,6 +58,16 @@ const VOLATILE: Array<[RegExp, string]> = [
   // the tape held the matching entry all along (0003/0006: notice at index 1, normLen 5).
   [/\bs(?:ession|ubagent|ession-)?-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<SESSIONID>'],
   [/\bch-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<SESSIONID>'],
+  // WORKSPACE-BLIND (#89, measured on hosted CI 2026-10-23): the recorded prefixes carry the
+  // absolute path of the machine that distilled them (`/home/adrian/Projects/dsh-chapters/…` in the
+  // system header's workspace line and in every `<path>…</path>` tool result), while GitHub Actions
+  // runs the same journey at `/home/runner/work/dsh-chapters/dsh-chapters`. Nothing masked it, so CI
+  // could not replay ANY tape recorded on a laptop: `[suite]` hung 25 minutes on
+  // `button[aria-label="Fork with chapters"]` because the first turn's request never matched an entry
+  // (no answer ⇒ no assistant row ⇒ no door). Same class as HOSTPORT/SESSIONID: a scheduling fact of
+  // the checkout, never product content. Applied to BOTH sides (stored prefixes re-normalize at load),
+  // so a laptop replay keeps working and a runner's paths fold to the same token.
+  [/(?:\/home\/runner\/work\/[\w.-]+\/[\w.-]+|\/(?:home|Users)\/[\w.-]+\/(?:Projects\/)?[\w.-]+)/g, '<WORKSPACE>'],
   // ⟦omitted:host-injected …, N chars⟧ markers embed the injected document's
   // size — which shifts with any workspace-doc edit (and real target projects
   // edit their docs constantly). The marker's presence + label are the fact;

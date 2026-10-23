@@ -236,3 +236,25 @@ test('a per-boot session id in a cited path cannot break tape matching (#85)', a
   assert.equal(substituteAll('read src/engine.ts'), 'read src/engine.ts',
     'ordinary content is untouched — this is a mask for run identity, not a general scrub')
 })
+
+/**
+ * #89 — the corpus must not be bound to the machine that recorded it.
+ *
+ * Hosted CI ran the SAME tapes and hung on the fork door for 25 minutes because the recorded prefixes
+ * named `/home/adrian/Projects/dsh-chapters/…` while the runner lives at
+ * `/home/runner/work/dsh-chapters/dsh-chapters`. Nothing in the matcher folded those paths, so the
+ * first request matched no entry: no answer, no assistant row, no affordance — a "product failure"
+ * that was a checkout path.
+ */
+test('a workspace path from another machine normalizes to the same token (#89)', async () => {
+  const { substituteAll } = await import('../../tests/e2e/model-proxy.ts')
+  const laptop = '{"role":"user","content":"<path>/home/adrian/Projects/dsh-chapters/var/e2e-book.md</path>"}'
+  const runner = '{"role":"user","content":"<path>/home/runner/work/dsh-chapters/dsh-chapters/var/e2e-book.md</path>"}'
+  const mac = '{"role":"user","content":"/Users/build/Projects/dsh-chapters/var/e2e-book.md"}'
+  const a = substituteAll(laptop), b = substituteAll(runner), c = substituteAll(mac)
+  assert.equal(a, b, `laptop and runner must fold to one shape:\n  ${a}\n  ${b}`)
+  assert.match(a, /<WORKSPACE>\/var\/e2e-book\.md/, 'the RELATIVE tail stays — it is the content')
+  assert.equal(c.includes('<WORKSPACE>'), true, 'macOS homes fold too')
+  // and the mask is not a general scrub: relative paths and ordinary prose survive
+  assert.equal(substituteAll('read src/engine.ts and /tmp/other.txt'), 'read src/engine.ts and /tmp/other.txt')
+})
