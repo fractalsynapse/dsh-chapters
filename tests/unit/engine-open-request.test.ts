@@ -51,3 +51,38 @@ test('nothing is carried when there is no human turn to carry (#87)', () => {
   assert.equal(out.length, 1, 'no OPEN REQUEST block, no empty promise of one')
   assert.equal(carryOpenRequest([P('s')], [], 4000).length, 1, 'an empty region is not a crash')
 })
+
+/**
+ * The arms of the carry itself. These are not coverage padding: each is a shape the durable log
+ * really produces, and a wrong answer here is either a lost instruction (#87) or a machine-state
+ * block presented as a request.
+ */
+test('a plain-string content turn is carried as well as a block array (#87)', () => {
+  const out = carryOpenRequest([P('summary')], [{ role: 'user', content: 'Run the migration and report the count.' }], 4000)
+    .map((p) => p.text).join('\n')
+  assert.match(out, /Run the migration and report the count\./,
+    '0.2.x carries both shapes at different sites — only handling one loses the other')
+})
+
+test('non-text blocks are ignored, not stringified into noise (#87)', () => {
+  const out = carryOpenRequest([P('summary')], [{ role: 'user', content: [
+    { type: 'image', url: 'file:///tmp/x.png' },
+    { type: 'text', text: 'Describe the attached image in one line.' },
+  ] }], 4000).map((p) => p.text).join('\n')
+  assert.match(out, /Describe the attached image in one line\./)
+  assert.doesNotMatch(out, /file:\/\/\/tmp\/x\.png/, 'the block list is not a request; the text is')
+})
+
+test('trailing whitespace on the instruction does not defeat the match (#87)', () => {
+  const out = carryOpenRequest([P('summary')], [{ role: 'user', content: [{ type: 'text', text: 'Say OK.   ' }] }], 4000)
+    .map((p) => p.text).join('\n')
+  assert.match(out, /Say OK\./, 'the composer sends with a trailing space by design (the ghost needs it)')
+})
+
+test('the newest REAL turn wins even when a later injection is present (#87)', () => {
+  const out = carryOpenRequest([P('summary')], [
+    user('the question that matters'),
+    { role: 'user', content: [{ type: 'text', text: 'Time sampled while preparing turn 3, step 9: 2026-10-23T04:00:00-04:00' }] },
+  ], 4000).map((p) => p.text).join('\n')
+  assert.match(out, /the question that matters/, 'skip forward past the injection to the human content')
+})

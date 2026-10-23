@@ -42,6 +42,9 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
   const domainLike = { table, close: async () => {} }
   const logs: Array<['info' | 'warn', string]> = []
   let resolveModelInfoThrows = false
+  // #78: the window the provider reports, settable for the same reason — "no window to state" is a
+  // state the engine can be in, and with a fixed 32,000 it was unreachable in a test.
+  let windowTokens: number | undefined = 32_000
   // #78: the surface the meter reports must be settable, because the state under test is
   // relief-declined-while-over-trigger; with a fixed 12 that state was unreachable by
   // construction, which is one reason the field failure stayed invisible.
@@ -85,7 +88,7 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
   ctx.provide('llm', {
     resolveModelInfo: async () => {
       if (resolveModelInfoThrows) throw new Error('injected: adapter unavailable')
-      return { context: { contextWindow: 32_000 } }
+      return windowTokens === undefined ? {} : { context: { contextWindow: windowTokens } }
     },
     stream: async function* (_o: unknown) {
       yield { type: 'block-start', index: 0, blockType: 'text' }
@@ -124,7 +127,7 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
     }
   }
   const settle = () => new Promise((r) => setTimeout(r, 120))
-  return { engine, cwd, store, logs, setStreamText: (t: string) => { streamText = t }, fire: (session: unknown, event: unknown) => { void ctx.emit('session/event', session, event) }, sessionOf, settle, table, setThrow: (v: boolean) => { resolveModelInfoThrows = v }, setSurface: (n: number) => { surfaceTokens = n }, dispose: () => { process.stdout.write = ws; process.stderr.write = wes; try { (ctx.fiber as { dispose?: () => unknown } | undefined)?.dispose?.() } catch { /* root teardown is best-effort in tests */ } fs.rmSync(cwd, { recursive: true, force: true }) } }
+  return { engine, cwd, store, logs, setStreamText: (t: string) => { streamText = t }, fire: (session: unknown, event: unknown) => { void ctx.emit('session/event', session, event) }, sessionOf, settle, table, setThrow: (v: boolean) => { resolveModelInfoThrows = v }, setWindow: (v: number | undefined) => { windowTokens = v }, setSurface: (n: number) => { surfaceTokens = n }, dispose: () => { process.stdout.write = ws; process.stderr.write = wes; try { (ctx.fiber as { dispose?: () => unknown } | undefined)?.dispose?.() } catch { /* root teardown is best-effort in tests */ } fs.rmSync(cwd, { recursive: true, force: true }) } }
 }
 
 // ---------------------------------------------------------------- construction
@@ -539,4 +542,60 @@ test('an under-trigger decline stays quiet — this is not a per-step notice (#7
     assert.equal(h.logs.filter(([, l]) => /relief declined/.test(l)).length, 0,
       'nothing is wrong when the surface is under the trigger; a warning here is noise that hides the real one')
   } finally { h.dispose() }
+})
+
+/**
+ * The decline report's silence conditions (#78) — pinned because a report that fires on a normal
+ * step is noise, and noise is what makes the real warnings unreadable. Each arm below is a state the
+ * engine can genuinely be in: a realm with no meter, a provider that reports no window, a route
+ * never observed. None of them may print.
+ */
+test('a provider that reports no window produces no decline claim (#78)', async () => {
+  const sinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decline-nowindow-'))
+  const sinkPath = path.join(sinkDir, 'diagnostics.log')
+  const prev = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness({ thresholdRatio: 0.5 }, {})
+  try {
+    h.setWindow(undefined)      // the adapter answered with no `context` at all
+    h.setSurface(30_000)
+    const session = h.sessionOf('s-nowindow', [human(0, 'hi'), asst(1, 'ok')], {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal as never)
+      .catch(() => undefined)
+    const sink = fs.existsSync(sinkPath) ? fs.readFileSync(sinkPath, 'utf8') : ''
+    assert.doesNotMatch(sink, /relief declined/,
+      'with no window there is no truthful trigger to name, so the engine prints nothing rather than inventing one')
+  } finally {
+    h.dispose()
+    if (prev === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prev
+    fs.rmSync(sinkDir, { recursive: true, force: true })
+  }
+})
+
+test('a realm with no token meter declines quietly (#78)', async () => {
+  const sinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'decline-nometer-'))
+  const sinkPath = path.join(sinkDir, 'diagnostics.log')
+  const prev = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness({ thresholdRatio: 0.5 }, {})
+  try {
+    // remove the meter AFTER construction: the report must tolerate a realm that has no measure
+    const ctx = (h.engine as unknown as { ctx?: Record<string, unknown> }).ctx
+    if (ctx !== undefined) ctx.tokenMeter = undefined
+    const session = h.sessionOf('s-nometer', [human(0, 'hi'), asst(1, 'ok')], {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal as never)
+      .catch(() => undefined)
+    const sink = fs.existsSync(sinkPath) ? fs.readFileSync(sinkPath, 'utf8') : ''
+    assert.doesNotMatch(sink, /relief declined/, 'no measurement, no claim — the report never guesses')
+  } finally {
+    h.dispose()
+    if (prev === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prev
+    fs.rmSync(sinkDir, { recursive: true, force: true })
+  }
 })
