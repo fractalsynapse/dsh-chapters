@@ -258,3 +258,17 @@ test('a workspace path from another machine normalizes to the same token (#89)',
   // and the mask is not a general scrub: relative paths and ordinary prose survive
   assert.equal(substituteAll('read src/engine.ts and /tmp/other.txt'), 'read src/engine.ts and /tmp/other.txt')
 })
+
+test('the specific checkout rule wins over the general workspace fold — order is load-bearing (#89)', async () => {
+  // My first version of the WORKSPACE fold ran BEFORE this rule and rewrote the same span, so the
+  // live header read `<WORKSPACE>` while the recorded one (already normalized at write time to
+  // `<DSH-CHECKOUT>`) stayed as it was: every journey on the LOCAL machine went red with
+  // commonPrefix=0. The fix is ordering; the row makes the ordering a fact rather than a memory.
+  const { substituteAll } = await import('../../tests/e2e/model-proxy.ts')
+  const header = 'The DeepSeek Harness implementation checkout is at /home/adrian/Projects/dsh-chapters. Keep working.'
+  const out = substituteAll(header)
+  assert.match(out, /<DSH-CHECKOUT>/, 'the named span keeps its dedicated token')
+  assert.doesNotMatch(out, /<DSH-CHECKOUT>[^"]*<WORKSPACE>/, 'and is not folded twice')
+  // while an ordinary workspace path elsewhere still folds
+  assert.match(substituteAll('read /home/adrian/Projects/dsh-chapters/var/e2e-book.md'), /<WORKSPACE>\/var\/e2e-book\.md/)
+})

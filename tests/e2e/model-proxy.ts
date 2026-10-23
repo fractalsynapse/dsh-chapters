@@ -67,7 +67,6 @@ const VOLATILE: Array<[RegExp, string]> = [
   // (no answer ⇒ no assistant row ⇒ no door). Same class as HOSTPORT/SESSIONID: a scheduling fact of
   // the checkout, never product content. Applied to BOTH sides (stored prefixes re-normalize at load),
   // so a laptop replay keeps working and a runner's paths fold to the same token.
-  [/(?:\/home\/runner\/work\/[\w.-]+\/[\w.-]+|\/(?:home|Users)\/[\w.-]+\/(?:Projects\/)?[\w.-]+)/g, '<WORKSPACE>'],
   // ⟦omitted:host-injected …, N chars⟧ markers embed the injected document's
   // size — which shifts with any workspace-doc edit (and real target projects
   // edit their docs constantly). The marker's presence + label are the fact;
@@ -163,6 +162,7 @@ const VOLATILE: Array<[RegExp, string]> = [
   // and the same for the defused product token (enricher inputs): runs across
   // NEWLINES too — the dump shows spaces only because normalization ate them
   [/(?:⟦injected-context⟧[ \t\n]*){2,}/g, '⟦injected-context⟧ '],
+  [/(?:\/home\/runner\/work\/[\w.-]+\/[\w.-]+|\/(?:home|Users)\/[\w.-]+\/(?:Projects\/)?[\w.-]+)/g, '<WORKSPACE>'],
 ]
 /** substitution pass over ALREADY-textual content.
  *
