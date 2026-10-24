@@ -451,3 +451,39 @@ Run on a scratch clone of a real project (not this repo), at the pinned host and
    disabling every #77 candidate, a helper resolving logs against an import-time home so a gate
    could never pass, and an unbounded `scrollIntoViewIfNeeded` that hung a leg for 17 minutes. Each
    looked like a product failure. **An unexercised assertion is a rumor of an assertion.**
+
+## Bringing a store up to spec, at any time (`/chapters-repair`, offline runner)
+
+The repair runner is **safe to run whenever**, from any machine, with no host and no model:
+
+```bash
+node scripts/chapters-repair.mjs --project <cwd>                      # audit only — writes nothing
+node scripts/chapters-repair.mjs --project <cwd> --apply all --yes --until-clean
+node scripts/chapters-repair.mjs --list                               # what the registry holds
+node scripts/chapters-repair.mjs --restore <journal-id> --session <id> --yes   # walk one run backwards
+```
+
+What it fixes, and why it can be run twice: a single pass does NOT always reach the fixed point, measured
+2026-10-24 on SAIP (1,180 moves → 130 more → 0). Rows that share a `rootSession` tree each need their own
+registration, and a registration can expose a class the next pass handles. `--until-clean` repeats until a
+pass applies 0 moves (max 6), so one command is the whole job. Each pass backs the registry up beside
+itself, writes atomically, and journals every file move under `<tree>/repairs/*.json`. Nothing is ever
+deleted: quarantine is a COPY, and the loser of a twin keeps its bytes.
+
+**A nonzero refusal count is the expected terminal state, not a failure.** Some findings refuse on purpose,
+because fixing them would silently demote knowledge or rewrite an archive:
+
+- `unregistered-file: number N is already carried by another record — a lost-update twin` (#59). Two files
+  claiming one number; choosing a winner is a human call.
+- `test-litter: the store holds a second root …` — directories another rig wrote into this store. Inspect
+  before removing; repair will not guess.
+- `empty-artifact: chapter K cites the 0-byte blob …` — the fingerprint of a real historical defect: results
+  deferred before the arrival shape was read correctly (fixed on this release). The chapter bodies are
+  intact; the blobs never captured content, and repair cannot invent it.
+- `tampered-file` — report-only by design: a record hash that disagrees with the file means the operator
+  decides which is truth.
+
+Field numbers from 2026-10-24 (both stores, 0.2.0 installed): SAIP **1,441 registrations across 3 passes**,
+terminal state 3 refused (#59 twins); this repo **1,097 moves in one pass**, terminal state 634 refused, of
+which 483 `test-litter` and 143 `empty-artifact`. Registry backups sit at
+`$DSH_HOME/storages/dsh_chapters.json.pre-repair-*.bak` for either run to be undone.
