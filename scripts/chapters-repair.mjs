@@ -28,6 +28,7 @@ import path from 'node:path'
 import os from 'node:os'
 import zlib from 'node:zlib'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
 
 const require = createRequire(import.meta.url)
 const LIB = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'lib')
@@ -51,6 +52,40 @@ const PROJECT = opt('project', undefined)
 const SESSION = opt('session', undefined)
 const APPLY = opt('apply', undefined)          // 'all' or a comma list
 const DRY = flag('dry-run') || APPLY === undefined
+
+/**
+ * `--until-clean` (maintainer ask 2026-10-24: "repair should be something we can run anytime").
+ *
+ * One pass does NOT reliably reach the fixed point, measured today on SAIP: pass 1 applied 1,180 moves and
+ * left 263 findings; pass 2 applied 130 more — rows that SHARE a `rootSession` tree each need their own
+ * registration — and pass 3 applied 0. So the honest operator command is a loop, not a hope. Re-invokes
+ * this script with the same arguments until a pass applies 0 moves, max 6, printing one line per pass and
+ * every refusal it made. A pass that applies 0 while findings remain is a TERMINAL state whose reasons are
+ * named above it; the loop stops there instead of spinning, because re-running cannot fix a decision that
+ * belongs to a human (#59 lost-update twins, rig-written litter, 0-byte artifact citations from the
+ * pre-arrival-fix era).
+ */
+if (flag('until-clean') && !DRY && !flag('restore')) {
+  const self = new URL(import.meta.url).pathname
+  const selfArgs = process.argv.slice(2).filter((a) => a !== '--until-clean')
+  let pass = 0, applied = -1
+  do {
+    pass += 1
+    const r = spawnSync(process.execPath, [self, ...selfArgs], { encoding: 'utf8' })
+    const out = String(r.stdout ?? '')
+    const m = /applied (\d+) move\(s\)/.exec(out)
+    applied = m ? Number(m[1]) : 0
+    const dry = /dry run: (\d+) finding\(s\)/.exec(out)
+    const ref = /refused: (\d+) finding\(s\)/.exec(out)
+    console.log(`[until-clean] pass ${String(pass)}: applied ${String(applied)} move(s)`
+      + (ref ? `, refused ${String(ref[1])}` : '')
+      + (dry ? `, ${String(dry[1])} finding(s) still reported` : ''))
+    for (const line of out.split('\n')) if (/^\s+refused:/.test(line)) console.log(`    ${line.trim().slice(0, 150)}`)
+    if ((r.status ?? 1) !== 0) { process.stderr.write(String(r.stderr ?? '')); process.exit(r.status ?? 1) }
+  } while (applied > 0 && pass < 6)
+  console.log(`[until-clean] fixed point after ${String(pass)} pass(es) — anything still reported is named above with the reason it will not be touched automatically.`)
+  process.exit(0)
+}
 const YES = flag('yes')
 const LIST = flag('list')
 
@@ -274,6 +309,7 @@ const tmp = `${REGISTRY}.tmp-${stamp}`
 fs.writeFileSync(tmp, `${JSON.stringify(reg, null, 2)}\n`)
 fs.renameSync(tmp, REGISTRY)
 console.log(`\napplied ${totals.applied} move(s); registry backed up to ${path.basename(`${REGISTRY}.pre-repair-${stamp}.bak`)} and rewritten atomically.`)
+console.log(`refused: ${totals.refused ?? 0} finding(s) this pass — each named above with the reason it was NOT touched; nonzero is the expected terminal state for a store with pre-#59 twins, rig litter, or 0-byte artifact citations.`)
 console.log(`journals: <store>/<root>/repairs/*.json — undo a run with  node scripts/chapters-repair.mjs --restore <journal-id> --session <id> --yes`)
 if (totals.blind > 0) console.log(`note: ${totals.blind} blind spot(s) — this runner CAN list directories, so that count should be 0 here.`)
 fs.writeFileSync(path.join(path.dirname(REGISTRY), `chapters-repair-report-${stamp}.json`), `${JSON.stringify({ stamp, totals, perSession: perSession.map((p) => ({ sessionId: p.sessionId, cwd: p.cwd, findingsBefore: p.findingsBefore, findingsAfter: p.findingsAfter, applied: p.applied, refused: p.refused, blindSpots: p.blindSpots, journalId: p.journalId })) }, null, 2)}\n`)
