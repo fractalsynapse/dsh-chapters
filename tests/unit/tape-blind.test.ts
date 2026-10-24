@@ -44,3 +44,27 @@ test('stored tape prefixes get the same reasoning fold as the incoming side (#90
   assert.equal(foldReasoning('{"role":"user","content":"no reasoning here"}'), '{"role":"user","content":"no reasoning here"}',
     'and a message without reasoning is byte-identical — the fold is not a global rewrite')
 })
+
+/**
+ * Message INDEX is part of a conversation's identity, so the two sides of a match must agree about
+ * what a message even is (#90, measured 2026-10-24: a replay missed with `divergeAt=msg4` because the
+ * stored prefix held `''` items at 3 and 4 — `loadTape` filters those away, so a 9-message stored
+ * prefix became a 7-message candidate, and every position after the first empty one silently shifted
+ * against the incoming array). Dropping on one side only is not normalization, it is desynchronization.
+ */
+test('empty-normalizing messages are treated identically on both sides of a match (#90)', async () => {
+  const { normalizeSingle } = await import('../../tests/e2e/model-proxy.ts')
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const root = path.resolve(import.meta.dirname, '..', '..')
+  const proxy = fs.readFileSync(path.join(root, 'tests', 'e2e', 'model-proxy.ts'), 'utf8')
+  // findReplay must not drop empties from the incoming side while loadTape keeps them stored (or the
+  // reverse): one policy, applied to both.
+  const replay = proxy.slice(proxy.indexOf('function findReplay'), proxy.indexOf('export function normalizeSingle'))
+  const load = proxy.slice(proxy.indexOf('function loadTape'), proxy.indexOf('function findReplay'))
+  const incomingDrops = /\.filter\(\(x\) => x !== ''\)/.test(replay)
+  const storedDrops = /\.filter\(\(x\) => x !== ''\)/.test(load)
+  assert.equal(incomingDrops, storedDrops,
+    `both sides must apply the same empties policy (incoming drops=${String(incomingDrops)}, stored drops=${String(storedDrops)})`)
+  assert.equal(typeof normalizeSingle(''), 'string', 'and an empty message is still a message, not a hole in the array')
+})
