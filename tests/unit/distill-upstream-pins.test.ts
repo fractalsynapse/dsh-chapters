@@ -44,3 +44,19 @@ test('every leg pins its upstream resolution in the log line it prints', () => {
   assert.match(script, /echo "=== distill \$\{proj\} — port[^\n]*\$\{leg_extra\}/,
     'the per-leg header must echo the effective extra env, including the upstream')
 })
+
+/**
+ * The replay proxy CAN say which entry served each request (`model-proxy.ts` appends `HIT …
+ * served=<file>` when `E2E_TAPE_HITS` is set) — but no runner ever set it, so the #90 stall was
+ * unanswerable from disk: the instrument existed and was switched off, which is #61a in the rig.
+ */
+test('the replay runner turns on the hit journal (#90)', () => {
+  // The choke point is globalSetup, not a shell script — `npm run test:e2e:replay`, the CI job and my
+  // own runner all go through it, and there is no `scripts/chain-replay.sh` (I asserted a file that
+  // does not exist, which is how a row becomes folklore).
+  const setup = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'globalSetup.ts'), 'utf8')
+  assert.match(setup, /E2E_TAPE_HITS/, 'every replay must enable the journal the proxy already supports')
+  assert.match(setup, /tape-hits[^'"\n]*\$\{?|tape-hits-/, 'one file per invocation, so projects cannot overwrite each other')
+  const proxy = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'model-proxy.ts'), 'utf8')
+  assert.match(proxy, /process\.env\.E2E_TAPE_HITS/, 'the proxy side of the pair stays wired')
+})

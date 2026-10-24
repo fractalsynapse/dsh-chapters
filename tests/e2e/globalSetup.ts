@@ -1,5 +1,6 @@
 import { bootE2eServer, type Pins } from './boot.ts'
 import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
+import path from 'node:path'
 
 /**
  * One server per CONFIG LOAD (proven lifecycle: project setupFiles die with
@@ -23,6 +24,14 @@ export default async function setup(fullConfig?: {
   // replay ran different realms and replay failed as tape MISSes that looked like prompt drift.
   const selected = projectFromArgv((fullConfig as { argv?: string[] } | undefined)?.argv)
   applyRigEnv(selected)
+  // #90: the proxy can already journal WHICH entry served each request, but nothing ever set
+  // `E2E_TAPE_HITS`, so a replay that matched an entry and still stalled was unanswerable from disk —
+  // an instrument left switched off at the factory. Set it for every invocation (record simply never
+  // writes a HIT line); per-project filenames keep one leg from overwriting another's journal.
+  if (!process.env.E2E_TAPE_HITS) {
+    const hitName = String(selected ?? 'default').replace(/[^a-zA-Z0-9_-]/g, '_')
+    process.env.E2E_TAPE_HITS = path.resolve(import.meta.dirname, '..', '..', 'var', `e2e-tape-hits-${hitName}.log`)
+  }
   const port = Number(process.env.E2E_PORT ?? '41731')
   const pins: Pins = {
     thresholdRatio: process.env.E2E_THRESHOLD ?? '0.75',
