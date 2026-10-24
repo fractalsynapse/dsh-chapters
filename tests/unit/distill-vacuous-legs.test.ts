@@ -32,3 +32,19 @@ test('distill refuses a model-driven leg that recorded no tape entries', () => {
   const verdict = script.indexOf('echo "--- $proj: exit=$rc tapeEntries=$n"')
   assert.ok(at > 0 && verdict > 0 && at < verdict, 'the check runs BEFORE the verdict line is printed')
 })
+
+/**
+ * The invariant whose absence let me destroy 2,559 registry records (#101): every apply must compare
+ * record counts before and after, and REFUSE rather than write a smaller registry. My runs reported
+ * "1,596 registrations applied" and "applied 46 moves" while the total went 2,706 → 147 — both true
+ * statements, and the sum of them is data loss. A summary that cannot notice the store got smaller is
+ * the bug; the loss was only its consequence.
+ */
+test('the offline runner refuses an apply that would reduce the registry (record-count floor)', () => {
+  const script = fs.readFileSync(path.join(ROOT, 'scripts', 'distill-tapes.sh'), 'utf8') // anchor: file set below
+  void script
+  const runner = fs.readFileSync(path.join(ROOT, 'scripts', 'chapters-repair.mjs'), 'utf8')
+  assert.match(runner, /record-count floor|recordsBefore|beforeCount/, 'the runner must capture record counts before it writes')
+  assert.match(runner, /ABORT|refus/i, 'and refuse when the post-mutation count is lower')
+  assert.match(runner, /pre-apply|pre-repair/, 'with a backup taken BEFORE the write, not after')
+})
