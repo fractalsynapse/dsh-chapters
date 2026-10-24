@@ -54,6 +54,7 @@ const harness = (opts: {
     readCallerEvents: async () => opts.events ?? conversation(6),
     getState: async (id) => states.get(id) ?? freshSession(id),
     putState: async (id, s) => { states.set(id, s) },
+    mutateState: async (id, fn) => { states.set(id, fn(states.get(id) ?? freshSession(id))) },
     fs: () => fs,
     budgetProbe: async () => opts.budget ?? { windowTokens: 131072, headerBoundTokens: 13000 },
     newId: () => `id-${++idCount}`,
