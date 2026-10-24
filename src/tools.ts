@@ -135,6 +135,9 @@ export function buildChaptersTools(
       readCallerEvents: async () => [...(caller.session.snapshotEvents?.() ?? [])] as SessionEventLike[],
       getState: (sessionId) => store.get(sessionId),
       putState: (sessionId, state) => store.put(sessionId, state),
+      // `store.mutate` resolves with the written row; the port contract is fire-and-forget void, so the
+      // value is deliberately dropped here rather than leaking a row into a tool result.
+      mutateState: async (sessionId, fn) => { await store.mutate(sessionId, fn) },
       fs: () => {
         if (cwd === '') throw new Error('caller session has no workspace cwd — nowhere reachable for the read tool')
         return makeArchiveFs(cwd)

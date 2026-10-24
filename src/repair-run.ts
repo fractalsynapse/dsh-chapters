@@ -257,7 +257,20 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
           }
           const marked = markSupersededBy(fresh, f.target.number, cover[0]!.number, 'hollow-payload')
           if (marked.problem !== undefined) { refused.push(`hollow-payload ch.${f.target.number}: ${marked.problem}`); continue }
-          await store.mutate(opts.sessionId, () => marked.state)
+          // #101: `mutate(id, () => snapshot)` is a stale `put` wearing a mutate's clothes — the fn must
+          // apply the change to the row mutate hands it, because another door may have committed between
+          // the `get` above and this write (measured once already: an enrichment put at 04:53:52.841
+          // rewound a compaction commit from 04:53:50.915). Re-derive from the fresh row; if the chapter
+          // we meant to supersede is gone or changed, refuse rather than resurrect a snapshot.
+          // captured, not re-read: `f.target.number` is proven non-undefined by the check above, and a
+          // closure cannot see that narrowing (a cast would have hidden the case where it ever changes).
+          const hollowTarget = f.target.number
+          const hollowCover = cover[0]!.number
+          await store.mutate(opts.sessionId, (live) => {
+            const re = markSupersededBy(live, hollowTarget, hollowCover, 'hollow-payload')
+            if (re.problem !== undefined) { refused.push(`hollow-payload ch.${String(hollowTarget)}: ${re.problem} (row moved during repair)`); return live }
+            return re.state
+          })
           journal.entries.push({ kind: 'registry', path: fresh.chapters.find((c) => c.number === f.target.number)?.path ?? `ch.${f.target.number}`, beforeSha: null, afterSha: cover[0]!.sha256 })
           flush()
           ports.log(`superseded hollow ch.${f.target.number} by ${cover.length} chapter(s) [${cover.map((c) => c.number).join(', ')}] that together carry seqs ${f.target.fromSeq}-${f.target.toSeq}`)

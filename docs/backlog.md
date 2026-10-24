@@ -404,3 +404,13 @@ facts in `docs/contract.md` § Composer Ghost Layer). When the workspace deps mo
    (`isSurfaceEligibleType`), read from the kernel's own exports.
 4. The pull command stays as a manual verb (`suggest` re-arms the ghost); the anti-dup client
    row keeps the wire body singular either way.
+
+- **#105 / seed-vs-protected-head (blocking for `chapters_continue` on 0.2.x).** Every child we create
+  seeds a `user/message` at `seq 0` (invariant 2), which is a `SURFACE_TYPE`, so the host's header
+  `system/message` can never claim the protected first surface head — measured: 50/53 logs have the header
+  first, the only 2 exceptions are our children, and one is refused by the UI. Ask of the host team:
+  `docs/host-protected-head-ask.md`. Mitigation candidate (b), **gated on a measurement, not a guess**:
+  spike `spikes/seed-protected-head/` — one boot, fake provider, zero model tokens; create a child seeded
+  with a non-surface synthetic event (the `plan/mode` precedent) and one seeded with the notice, run one
+  step each, then reload through the host's own reader. Ship (b) behind a config flag only if the state
+  seed is admitted AND the header lands as the first surface event. Related: #77, #58, #101, #61.

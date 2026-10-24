@@ -593,3 +593,23 @@ Two corollaries, both bought once:
 - An injected port that is optional and stops being wired fails as a symptom, not as an error:
   `tests/unit/client-doors.test.ts` has a row that fails if `src/client/index.ts` drops
   `uiWorkspace` from `inject` or stops passing it.
+
+## `ContinuePorts.mutateState` — the row write seam (#101)
+
+`ContinuePorts` exposes **both** `getState`/`putState` and `mutateState(sessionId, fn)`, and the split is
+load-bearing, not historical:
+
+- `getState` is for **reads** (ancestor walks, root resolution) and for nothing else.
+- `putState` survives only for **brand-new rows** — a child row that no other writer can hold yet
+  (`linkChild(freshSession(childId), …)` at `continue-core.ts:527`).
+- **Every write to an EXISTING row goes through `mutateState`**, because `store.put` replaces the whole
+  value: a `getState`→`putState` pair loses any commit another door made in between. The chapter allocator
+  (`reserve`, `reservePlan`) runs *after* hundreds of fs writes, and the commit runs after `agents.create`
+  plus the artifact work — both are windows. AGENTS records the incident class: an enrichment put at
+  04:53:52.841 rewound a compaction commit from 04:53:50.915, deleting its manifest, reservation,
+  `finalized` entry and chapter record while its 960 KB file survived on disk. Files present + records
+  gone is the signature, and `chapters-repair` then looks like a phantom-maker.
+
+`fn` must apply its change to the row it is handed and may not return a captured snapshot — a
+`mutate(id, () => snapshot)` is a stale `put` with better branding (fixed once already in `repair-run.ts`
+for the hollow-payload supersede).

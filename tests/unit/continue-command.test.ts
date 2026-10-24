@@ -78,6 +78,7 @@ function world(events: SessionEventLike[]) {
   const store = {
     get: async (id: string) => states.get(id) ?? freshSession(id),
     put: async (id: string, s: SessionState) => { states.set(id, s) },
+    mutate: async (id: string, fn: (s: SessionState) => SessionState) => { const n = fn(states.get(id) ?? freshSession(id)); states.set(id, n); return n },
   }
   const caller = { id: 'caller-1', options: { provider: 'local', model: 'm' }, session: { id: 'caller-1', header: { cwd: tmp }, snapshotEvents: () => events } }
   const built = buildChaptersTools(ctx as never, store as never, CONFIG as never)

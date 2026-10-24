@@ -52,11 +52,17 @@ function makeWorld(opts: { events?: SessionEventLike[]; parentChapters?: Array<{
     agents: { create: async (req: Record<string, unknown>) => { createRequests.push(req); return { dispose: async () => {} } } },
     logger: { warn: (_m: string) => {} },
   }
+  // #101: the domain store's `mutate(sessionId, fn)` is the only safe write to an EXISTING row, and this
+  // fake has to honour the same read path `get` does — parent chapters are synthesized in `getRow`, so a
+  // mutate that read the raw map would see a bare row and re-spend a number. That is not a test detail: it
+  // is precisely the signature of a stale-snapshot write (chapter 1 came back as the NEW chapter).
+  const getRow = async (id: string): Promise<SessionState> => states.get(id) ?? (opts.parentChapters && id === 'caller-1'
+    ? { ...freshSession(id), chapters: opts.parentChapters, nextChapterNumber: opts.parentChapters.length + 1 }
+    : freshSession(id))
   const store = {
-    get: async (id: string) => states.get(id) ?? (opts.parentChapters && id === 'caller-1'
-      ? { ...freshSession(id), chapters: opts.parentChapters, nextChapterNumber: opts.parentChapters.length + 1 }
-      : freshSession(id)),
-    put: async (id: string, s: SessionState) => { states.set(id, s) },
+    get: getRow,
+    put: async (id: string, st: SessionState) => { states.set(id, st) },
+    mutate: async (id: string, fn: (st: SessionState) => SessionState) => { const next = fn(await getRow(id)); states.set(id, next); return next },
   }
   const built = buildChaptersTools(ctx as never, store as never, CONFIG as never)
   return { built, caller, states, createRequests, tmp }
