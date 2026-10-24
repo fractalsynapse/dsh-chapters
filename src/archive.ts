@@ -111,6 +111,19 @@ export function toStoredPath(cwd: string | undefined, p: string): string {
   return rel ?? p
 }
 
+/**
+ * The READ direction of the stored-path dialect: turn a `ChapterRecord.path` back into something the
+ * filesystem understands. `toStoredPath` may hand back an ABSOLUTE path (the rig pins an absolute
+ * `artifactStoreRoot` per port — #61 item 8), and `path.join(cwd, absolute)` CONCATENATES instead of
+ * resolving, so a naive join sends a reader to `<cwd>/tmp/…`, which exists nowhere. Measured on the
+ * `enrich` leg 2026-10-24: the ladder reported `chapter file absent` about a file that was present,
+ * because of exactly this join.
+ */
+export function resolveStoredPath(cwd: string | undefined, stored: string): string {
+  if (stored.startsWith('/') || cwd === undefined || cwd === '') return stored
+  return `${cwd.replace(/\/+$/, '')}/${stored}`
+}
+
 /** Compare two stored paths in either dialect. Every path COMPARISON goes through this, never `===`. */
 export function sameStoredPath(a: string, b: string, cwd?: string): boolean {
   if (a === b) return true

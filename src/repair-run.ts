@@ -24,6 +24,7 @@ import { audit, coveringChapter, journalEntryInverse, markSupersededBy, raiseCou
 import { appendChapters, releaseReservation, type SessionState } from './registry.ts'
 import { parseFrontmatter } from './indexing.ts'
 import type { ChapterRecord } from './archive.ts'
+import { resolveStoredPath } from './archive.ts'
 import type { RegistryStore } from './store.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import type { SessionEventLike } from './types.ts'
@@ -289,8 +290,8 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
         const written = out.records[0]
         if (written === undefined) { refused.push(`dead-citation ${f.target.path}: the span rendered nothing (${out.skipped ?? 'no records'})`); continue }
         // The cited PATH is the promise; move the bytes onto it (a copy of the same content, same hash).
-        const fromAbs = path.join(cwd, written.path)
-        const toAbs = path.join(cwd, f.target.path)
+        const fromAbs = resolveStoredPath(cwd, written.path)
+        const toAbs = resolveStoredPath(cwd, f.target.path)
         if (fs.existsSync(fromAbs)) {
           fs.mkdirSync(path.dirname(toAbs), { recursive: true })
           fs.copyFileSync(fromAbs, toAbs)
