@@ -996,8 +996,13 @@ export function buildChaptersTools(
 
       // targets: rows of this project, proven by their OWN durable header (never a path guess)
       const ids: string[] = []
+      // #101: a session the kernel will not open is named and skipped, not fatal — and it is stated in
+      // the output, because a repair that quietly omits sessions would report a healthy store it never
+      // looked at.
+      const unreadable: string[] = []
+      const noteUnreadable = (id: string) => (m: string): void => { unreadable.push(`${id}: ${m}`) }
       for (const [id] of store.sessions()) {
-        const view = await readDurableSession(get, id)
+        const view = await readDurableSession(get, id, noteUnreadable(id))
         if (view?.header.cwd !== undefined && path.resolve(view.header.cwd) === path.resolve(cwd0)) ids.push(id)
       }
       if (ids.length === 0) return { kind: 'error' as const, text: `chapters-repair: no session row under ${cwd0} has a readable durable log — nothing to audit` }
@@ -1051,7 +1056,7 @@ export function buildChaptersTools(
       const outcomes: string[] = []
       let actionable = 0
       for (const id of ids) {
-        const view = await readDurableSession(get, id)
+        const view = await readDurableSession(get, id, noteUnreadable(id))
         if (view === undefined) continue
         const out = await runRepair(
           { store, readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null, cwd: cwd0, config, knownRoots: roots, log: (m) => outcomes.push(`+ ${m}`), warn: (m) => outcomes.push(`! ${m}`) },
@@ -1071,7 +1076,12 @@ export function buildChaptersTools(
       const tail = dryRun
         ? '\napply: /chapters-repair apply all   (supersede under a new number; copy bad files to .repair-quarantine/; journal everything)'
         : ''
-      return { kind: 'success' as const, text: [head, ...outcomes, tail].join('\n') }
+      // The refusal lines lead the report: they are the reason the count below is not the whole story.
+      const skipped = unreadable.length > 0
+        ? [`${String(new Set(unreadable.map((l) => l.split(':')[0]!)).size)} session(s) could not be read and were NOT repaired:`,
+           ...[...new Set(unreadable)].slice(0, 12).map((l) => `  ! ${l}`)]
+        : []
+      return { kind: 'success' as const, text: [head, ...skipped, ...outcomes, tail].join('\n') }
     },
   }
 

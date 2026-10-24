@@ -51,6 +51,7 @@ const REGISTRY = opt('registry', path.join(HOME, 'storages', 'dsh_chapters.json'
 const PROJECT = opt('project', undefined)
 const SESSION = opt('session', undefined)
 const APPLY = opt('apply', undefined)          // 'all' or a comma list
+const GROUPED_WORDS = /test-litter|empty-artifact/
 const DRY = flag('dry-run') || APPLY === undefined
 
 /**
@@ -80,7 +81,7 @@ if (flag('until-clean') && !DRY && !flag('restore')) {
     console.log(`[until-clean] pass ${String(pass)}: applied ${String(applied)} move(s)`
       + (ref ? `, refused ${String(ref[1])}` : '')
       + (dry ? `, ${String(dry[1])} finding(s) still reported` : ''))
-    for (const line of out.split('\n')) if (/^\s+refused:/.test(line)) console.log(`    ${line.trim().slice(0, 150)}`)
+    for (const line of out.split('\n')) if (/^\s+refused:/.test(line) && (flag('verbose') || !GROUPED_WORDS.test(line))) console.log(`    ${line.trim().slice(0, 150)}`)
     if ((r.status ?? 1) !== 0) { process.stderr.write(String(r.stderr ?? '')); process.exit(r.status ?? 1) }
   } while (applied > 0 && pass < 6)
   console.log(`[until-clean] fixed point after ${String(pass)} pass(es) — anything still reported is named above with the reason it will not be touched automatically.`)
@@ -311,6 +312,13 @@ fs.renameSync(tmp, REGISTRY)
 console.log(`\napplied ${totals.applied} move(s); registry backed up to ${path.basename(`${REGISTRY}.pre-repair-${stamp}.bak`)} and rewritten atomically.`)
 console.log(`refused: ${totals.refused ?? 0} finding(s) this pass — each named above with the reason it was NOT touched; nonzero is the expected terminal state for a store with pre-#59 twins, rig litter, or 0-byte artifact citations.`)
 console.log(`journals: <store>/<root>/repairs/*.json — undo a run with  node scripts/chapters-repair.mjs --restore <journal-id> --session <id> --yes`)
+// Report grouping (maintainer decision 2026-10-24): a legacy rig root that nothing owns is ONE fact
+// about the store, not 483 findings. Aggregating it keeps the audit readable without hiding anything —
+// the per-session detail is still printed at --verbose, and the class count is unchanged in the summary.
+const GROUPED_CLASSES = ['test-litter', 'empty-artifact']
+for (const [cls, count] of Object.entries(histogram).filter(([name]) => GROUPED_CLASSES.includes(name))) {
+  console.log(`  ${cls}: ${String(count)} finding(s) aggregated — the same class reported per session; pass --verbose for the per-file list`)
+}
 if (totals.blind > 0) console.log(`note: ${totals.blind} blind spot(s) — this runner CAN list directories, so that count should be 0 here.`)
 fs.writeFileSync(path.join(path.dirname(REGISTRY), `chapters-repair-report-${stamp}.json`), `${JSON.stringify({ stamp, totals, perSession: perSession.map((p) => ({ sessionId: p.sessionId, cwd: p.cwd, findingsBefore: p.findingsBefore, findingsAfter: p.findingsAfter, applied: p.applied, refused: p.refused, blindSpots: p.blindSpots, journalId: p.journalId })) }, null, 2)}\n`)
 process.exit(0)
