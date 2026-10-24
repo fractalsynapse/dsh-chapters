@@ -1,6 +1,6 @@
 # Tape provenance — `rules` project
 
-**Distilled 2026-10-23** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
+**Distilled 2026-10-24** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
 Last recorded verdict: exit 0, 2 tape entries.
 
 - **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41735, threshold 0.9, arrival floor (realm default).
