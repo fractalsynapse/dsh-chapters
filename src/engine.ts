@@ -873,7 +873,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       const llm = (this.ctx as unknown as {
         llm?: { resolveModelInfo?: (p: string, m: string, s: AbortSignal) => Promise<unknown> }
       }).llm
-      if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') return 0
+      if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') {
+        diagnosticNote(this.ctx.logger, 'realm:engine:last-resort',
+          `not applied: missing inputs (route=${String(route === null)}, tokenMeter=${String(meter === undefined)}, resolveModelInfo=${String(typeof llm?.resolveModelInfo !== 'function')})`)
+        return 0
+      }
       const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
         { context?: { contextWindow?: number } } | undefined
       const base = this as unknown as { config?: { retainRatio?: number, retainTokens?: number, maxTokens?: number } }
@@ -886,7 +890,15 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         ...(retainTokens !== undefined ? { retainTokens } : {}),
         reservedCompletionTokens: Number(base.config?.maxTokens ?? NaN),
       })
-      if (ceiling === null) return 0
+      if (ceiling === null) {
+        // Measured tonight: relief declined twice with `surface=39983 trigger=16000` and the last
+        // resort NEVER fired — and said nothing about why. A feature that abstains silently is
+        // indistinguishable from a feature that isn't installed, which is the exact complaint this
+        // branch has filed against everything else (#61a). So: name the missing input.
+        diagnosticNote(this.ctx.logger, 'realm:engine:last-resort',
+          `not applied: coexistence ceiling underivable (window=${String(info?.context?.contextWindow)}, retainRatio=${String(base.config?.retainRatio)}, retainTokens=${String(base.config?.retainTokens)}, maxTokens=${String(base.config?.maxTokens)}) — check the realm row's compaction keys, not this feature`)
+        return 0
+      }
       const session = agent.session as unknown as ArrivalSessionShim & {
         surface: { nodes: number[] }, header?: { cwd?: string }
       }

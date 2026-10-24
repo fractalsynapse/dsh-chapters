@@ -67,3 +67,15 @@ test('the deferral is reachable only from the declined branch (#78 A, anti-vacui
   assert.ok(switchOff > 0 && switchOff < src.indexOf('const ceiling = lastResortCeilingTokens('),
     'the operator switch is honored BEFORE anything is computed')
 })
+
+test('when the last resort abstains, it says why (#61a, measured against myself)', () => {
+  // The feature shipped, relief declined twice with a 39,983-token surface against a 16,000 trigger,
+  // and the sink had NO last-resort line at all — silent abstention, the same complaint this branch
+  // files against everyone else. Both early-exit paths must now report their missing inputs.
+  const src = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'src', 'engine.ts'), 'utf8')
+  const body = src.slice(src.indexOf('async #lastResortRelief'), src.indexOf('#reportDecline'))
+  assert.match(body, /not applied: coexistence ceiling underivable/, 'a missing ceiling names the inputs it lacked')
+  assert.match(body, /not applied: missing inputs/, 'and so does a missing meter or route')
+  assert.ok((body.match(/diagnosticNote\(this\.ctx\.logger, 'realm:engine:last-resort'/g) ?? []).length >= 2,
+    'every abstention path writes a line — one is not a mechanism')
+})
