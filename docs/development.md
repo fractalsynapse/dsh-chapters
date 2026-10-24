@@ -759,3 +759,54 @@ from zero. The commit was never the problem; the wait was. Batch the push: while
 running, either finish what you're doing locally first or park the commit, and push once. Same rule in
 the other direction: don't judge a fix by the run it cancelled — re-read which head each verdict belongs
 to before believing a green.
+
+### Throwaway homes live outside the repository — `E2E_HOME_ROOT` (#89)
+
+`e2eHomeRoot()` defaults to `os.tmpdir()/dsh-e2e`, and CI sets `E2E_HOME_ROOT=/tmp/dsh-e2e` explicitly
+so the diagnostics it uploads are the ones it booted. Not tidiness: Node resolves `@deepseek-ai/*`
+bundles by walking UP from the profile directory, so a home under `var/` reaches this repo's
+`node_modules` (0.1.5-rc.2 by lockfile) and then the developer's `~/node_modules`. On the machine that
+recorded the first re-anchored corpus, that second hop is a **linked dev build of the harness whose
+version string equals the pin** — so the boot mounted tool guidance (goals, ralph, subagents, web
+search, glob/grep, job output) the published tarball does not have.
+
+Measured by moving nothing but the home's location:
+
+| home root | system header composed by the SAME pinned binary | `suite` strict replay |
+|---|---|---|
+| `var/e2e-home-41731` | 7,276 chars | 4 passed, zero misses |
+| `/tmp/dsh-e2e/e2e-home-41731` | 2,783 chars (CI's shape) | `commonPrefix=1`, `divergeAt=msg1` |
+
+That is the whole "green on my laptop, impossible on CI" class in two rows of one table, and why
+`tests/unit/e2e-host-binary.test.ts` now asserts hermeticity structurally: the home root must be
+outside `ROOT`, and no ancestor of the home may contain `@deepseek-ai` packages — if one ever does, the
+row names the path instead of agreeing silently. Pinning the *binary* (`resolveHostBinary`) was not
+enough; the ancestor chain is part of the identity, and AGENTS' warning that these bundles' version
+strings are not identity turns out to apply one directory level up from any lockfile.
+
+Consequence, stated plainly: changing this changes what every boot composes, so the entire corpus was
+re-distilled afterward. A rule that doesn't cost a re-record is probably not a reproducibility rule.
+
+## One build per corpus (#90, measured 2026-10-24)
+
+A tape records what the **plugin** asked, not just what the model answered. So a corpus is only coherent
+if every leg in it was distilled against one `lib/`. This was violated all day by well-meaning
+incrementalism — re-recording whichever leg a fix touched — and the cost was invisible until a replay
+missed on a *post-compaction* surface: a 4-message request with `commonPrefix=0` against a tape that held
+the 6-message pre-compaction form. Record ran on a build whose last-resort deferral always abstained
+(`resolveConfig` defaults `maxTokens` to `headroomTokens` = 65,536, so the coexistence ceiling was
+underivable); replay ran on a build where it is derivable (11,880) and can fire. Both behaviors are
+correct. The corpus spanning them is not.
+
+Rules that follow, in the order they bite:
+
+1. **Change `src/` → rebuild → re-distill ALL nine legs.** A partial re-record is a mixed corpus, and a
+   mixed corpus fails at whichever step the builds disagreed — usually inside compaction, where message
+   counts are the thing being matched.
+2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it does not
+   say "this leg predates three plugin commits". When in doubt about build drift, re-record everything.
+3. **Test-only changes (`tests/e2e/**`) need no re-record** — normalization folds apply at load to both
+   sides. Product-behavior changes do. The distinction is exactly AGENTS' "re-record when PRODUCT prompt
+   bytes change", generalized: anything that changes what the plugin *sends*.
+4. If a green replay is ever obtained on a corpus whose legs have different build stamps, treat it as
+   unexplained rather than as evidence.
