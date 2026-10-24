@@ -452,6 +452,19 @@ Run on a scratch clone of a real project (not this repo), at the pinned host and
    could never pass, and an unbounded `scrollIntoViewIfNeeded` that hung a leg for 17 minutes. Each
    looked like a product failure. **An unexercised assertion is a rumor of an assertion.**
 
+## One unreadable session must not stop a repair (#101)
+
+The kernel refuses to open a session log it considers invalid — measured 2026-10-24 when
+`/chapters-repair dry-run` died with `stored session "ch-dc3be3ab…" is corrupt: …` while that log
+decoded cleanly offline (2,924 lines, zero unparseable). The command's per-session read was
+unprotected, so ONE rejected session aborted the whole audit and NOTHING was repaired, including the
+48 rows that were readable. The offline runner already tolerated this; the in-host command did not.
+
+The rule, for both planes: a session whose durable log cannot be read is reported by id, with the
+kernel's reason, and skipped. The run still finishes, the output still says which sessions were not
+repaired, and the exit is not a silent success — `chapters-repair` must never let one poison item
+cancel the rest (the same rule that governs the finalize queue and the registry row).
+
 ## Bringing a store up to spec, at any time (`/chapters-repair`, offline runner)
 
 The repair runner is **safe to run whenever**, from any machine, with no host and no model:
