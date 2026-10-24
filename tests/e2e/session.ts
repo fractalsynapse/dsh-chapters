@@ -706,7 +706,13 @@ export function countGhostCommandRuns(logText: string): number {
   return n
 }
 
-export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs = 20_000 | false): Promise<string> {
+/**
+ * #83's ratchet caught a real latent bug here: `actionGraceMs = 20_000 | false` was parsed as a
+ * BITWISE OR (evaluating to 20000), so the inferred parameter type was `number`, every `false` call
+ * site was a type error, and the `actionGraceMs !== false` branch below could never have run.
+ * A union needs a type annotation, not a pipe in the default position.
+ */
+export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs: number | false = 20_000): Promise<string> {
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))
       .find((b) => /New Session/i.test(b.textContent ?? '')) as HTMLButtonElement | undefined

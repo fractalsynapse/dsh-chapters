@@ -233,7 +233,10 @@ export function normalize(v: unknown): string {
 
 const messagesOf = (body: Record<string, unknown>): unknown[] => Array.isArray(body.messages) ? body.messages : []
 
-export interface TapeEntry { key: string; prefix: unknown[]; status: number; contentType: string; bytes: string /* base64 */; model: string; recordedAt: string }
+export interface TapeEntry { key: string; prefix: unknown[]; status: number; contentType: string; bytes: string /* base64 */; model: string; recordedAt: string;
+  /** stamped at load (line ~292) and what the HIT journal prints as `served=`; the interface had never
+   *  admitted it, so `hit.file` was a type error the unchecked plane had been living with. */
+  file?: string }
 
 export interface ProxyOpts {
   mode: 'record' | 'replay'
