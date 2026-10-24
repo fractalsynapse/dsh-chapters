@@ -54,6 +54,18 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: npm
       - run: npm ci
+      # The pinned host, BEFORE the publish blocker (#93) — the same step `ci.yml` grew on 2026-10-23
+      # after PR #89's two red rows. `host-plan-card-shape.test.ts` and the overflow-classifier rows read
+      # host FACTS out of the installed bundle and REFUSE the repo's stale 0.1.5-rc.2 closure, because a
+      # drift gate against the wrong version is a rumor. Without this step the release job runs on a
+      # checkout with no `dev/dsh-host-lock/node_modules`, so the gate fails correctly and nothing
+      # publishes — measured on the 0.2.0 tag push (1126 tests, 1 fail, coverage itself passing).
+      # The alternative, skipping those rows when the host is absent, would make a publish blocker
+      # silently vacuous, which is the failure mode #89/#92 exist to end.
+      - name: install the pinned DSH host for the host-fact rows
+        run: |
+          npm ci --prefix "$GITHUB_WORKSPACE/dev/dsh-host-lock" --no-save --no-audit --no-fund || (cd dev/dsh-host-lock && npm ci --no-audit --no-fund)
+          echo "$GITHUB_WORKSPACE/dev/dsh-host-lock/node_modules/.bin" >> "$GITHUB_PATH"
       - run: npm run typecheck
       - run: npm run build
       - name: deterministic suite + coverage gate (publish blocker)
