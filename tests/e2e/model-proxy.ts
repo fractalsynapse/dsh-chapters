@@ -203,6 +203,21 @@ export function substituteAll(str: string): string {
   return /^\{"role":"(?:user|system)","content":"(?:\s|<\/?system-reminder>|<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND)>)*"\}$/.test(t) ? '' : t
 }
 /** canonical form of a message OBJECT: one stringify + substitutions. */
+/**
+ * The reasoning fold, in ONE place so both sides of a match use the identical rule (#90).
+ * `⟦REASONING⟧` replaces the prose of any `reasoning_content` string; the field survives, so a
+ * reasoning-bearing turn is still distinguishable from one without. Applied to the INCOMING side via
+ * `normalize` and to STORED prefixes at load — which are already-serialized strings, where re-running
+ * `normalize` would double-stringify them (the S0 lesson in `loadTape`), so the fold is done textually
+ * on the same token. Without the stored side folded, adding the blind would have made every
+ * reasoning-bearing turn UNMATCHABLE rather than fixing anything.
+ */
+export const REASONING_TOKEN = '⟦REASONING⟧'
+const REASONING_RE = /"reasoning_content"\s*:\s*"(?:[^"\\]|\\.)*"/g
+export function foldReasoning(text: string): string {
+  return text.replace(REASONING_RE, `"reasoning_content":"${REASONING_TOKEN}"`)
+}
+
 export function normalize(v: unknown): string {
   // TOOL RESULTS ARE HARNESS-GENERATED, never model output: their bytes
   // depend on the workspace state at replay time (measured: a src/ edit
@@ -224,11 +239,7 @@ export function normalize(v: unknown): string {
   // load), so tapes recorded before this change keep matching. The FIELD is folded, not deleted: a
   // reasoning-bearing turn stays distinguishable from one without, and visible `content` must still
   // match exactly.
-  const o = v as { role?: unknown, reasoning_content?: unknown }
-  if (o.role === 'assistant' && typeof o.reasoning_content === 'string' && o.reasoning_content !== '') {
-    return substituteAll(JSON.stringify({ ...(v as object), reasoning_content: '⟦REASONING⟧' }))
-  }
-  return substituteAll(JSON.stringify(v))
+  return substituteAll(foldReasoning(JSON.stringify(v)))
 }
 
 const messagesOf = (body: Record<string, unknown>): unknown[] => Array.isArray(body.messages) ? body.messages : []
@@ -291,7 +302,7 @@ function loadTape(tapeDir: string): TapeEntry[] {
       // sides of the match on current rules without a re-record. (The earlier
       // attempt here re-RAN normalize(), which double-stringified stored
       // strings and broke every legacy match — the S0 root cause.)
-      e.prefix = e.prefix.map((p) => (typeof p === 'string' ? substituteAll(p) : normalize(p))).filter((x) => x !== '')
+      e.prefix = e.prefix.map((p) => (typeof p === 'string' ? substituteAll(foldReasoning(p)) : normalize(p))).filter((x) => x !== '')
       ;(e as Record<string, unknown>).file = f
       out.push(e)
     } catch { /* skip torn */ }

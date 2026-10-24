@@ -26,3 +26,21 @@ test('assistant reasoning prose cannot break a tape match', () => {
   const d = normalizeSingle({ role: 'assistant', content: 'the answer' })
   assert.notEqual(c, d, 'visible content still matters, and its absence is a different conversation')
 })
+
+/**
+ * The fold is only worth having if it lands on BOTH sides. `loadTape` deliberately runs just
+ * `substituteAll` on stored string prefixes (re-running `normalize` double-stringifies them — the S0
+ * lesson), so a fold living only in `normalize` would have folded the incoming side and left the tape's
+ * own reasoning prose untouched: every reasoning-bearing turn becomes UNMATCHABLE, and the rig gets
+ * WORSE at the thing it was just fixed for.
+ */
+test('stored tape prefixes get the same reasoning fold as the incoming side (#90)', async () => {
+  const { foldReasoning, normalizeSingle } = await import('../../tests/e2e/model-proxy.ts')
+  const stored = '{"role":"assistant","content":null,"reasoning_content":"Also check primaryMatch and merge decision around line 150"}'
+  const incoming = normalizeSingle({ role: 'assistant', content: null, reasoning_content: 'The user asks: which file defines the composer rule' })
+  assert.equal(foldReasoning(stored), incoming, 'a pre-blind tape string must fold to exactly what the live side produces')
+  assert.ok(foldReasoning(stored).includes('⟦REASONING⟧'), 'the prose is gone')
+  assert.ok(foldReasoning(stored).includes('reasoning_content'), 'the field is not deleted')
+  assert.equal(foldReasoning('{"role":"user","content":"no reasoning here"}'), '{"role":"user","content":"no reasoning here"}',
+    'and a message without reasoning is byte-identical — the fold is not a global rewrite')
+})
