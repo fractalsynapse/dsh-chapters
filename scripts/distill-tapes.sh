@@ -119,6 +119,16 @@ for proj in "${want[@]}"; do
     echo "    --- upstream journal tail ---"; tail -6 var/e2e-upstream.log 2>/dev/null | sed 's/^/    /'
   fi
   n=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+  # A model-driven leg that recorded NOTHING did not talk to a model, whatever its exit code says:
+  # a `test.skip` (unreachable upstream, missing git http-backend) yields `3 passed / 1 skipped` and
+  # `exit 0`. Measured 2026-10-23: `--- suite: exit=0 tapeEntries=0` was read as green by me, for a
+  # round, until a tape count was compared with an exit code. Refuse it here, in the one place that
+  # summarises legs, and name the VACUOUS condition so a log scanner cannot read it as a pass.
+  if [[ "$rc" -eq 0 && "$n" -eq 0 ]]; then
+    echo "--- $proj: VACUOUS — exit 0 with zero tape entries (the journey never ran; refusing)" >&2
+    rc=1
+    failed+=("$proj:vacuous")
+  fi
   echo "--- $proj: exit=$rc tapeEntries=$n"
   # Provenance is GENERATED, not hand-authored: the `rm -rf` above destroys whatever was in the
   # project directory, and hand-written PROVENANCE.md files (plans, prompt — the records saying
