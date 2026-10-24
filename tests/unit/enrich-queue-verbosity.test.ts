@@ -49,3 +49,21 @@ test('the ordinary no-work case is reported once, with the pending count', async
   await q.drainNow()
   assert.ok(notes.some((n) => /pending=0/.test(n)), `a quiet queue is still a claim, got ${JSON.stringify(notes)}`)
 })
+
+test('a skipped chapter reports the ladder reason (#61a)', async () => {
+  // The manual command said `processed 0 chapter(s); 1 pending` and the sink said nothing at all:
+  // only successes were ever logged, so the one fact that mattered — WHY the ladder refused — was
+  // dropped on the floor.
+  const notes: string[] = []
+  const q = createEnrichQueue({
+    listPending: async () => [{ key: 'session-a#1', label: 'chapter one' }],
+    enrichOne: async () => ({ ok: false, skipped: 'no enrichment model route' }),
+    resolveModel: async () => 'local/qwen-test',
+    enabled: true, trigger: 'idle', idleMs: 1, batchCap: 4,
+    log: (m: string) => { notes.push(m) },
+  } as never)
+  const done = await q.drainNow()
+  assert.equal(done, 0)
+  assert.ok(notes.some((n) => /skipped session-a#1: no enrichment model route/.test(n)),
+    `the ladder's reason must reach the sink, got ${JSON.stringify(notes)}`)
+})

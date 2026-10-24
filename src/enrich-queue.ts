@@ -86,6 +86,11 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         for (const item of pending) {
           const r = await deps.enrichOne(item.key)
           if (r.ok) done++
+          // Measured: the manual command reported `processed 0 chapter(s); 1 pending` and the sink
+          // had nothing, because only successes were ever written. A skip IS a decision with a cause
+          // (`skipped:` is the ladder's own label), and an unreported one turns a 420-second poll into
+          // an argument — the third time today a queue knew and said nothing (#61a).
+          else deps.log(`enrichment skipped ${item.key}: ${r.skipped ?? 'no reason given by the ladder'}`)
         }
         lastBatch = done
         if (done > 0) deps.log(`enrichment batch: ${done}/${pending.length} chapter(s) via ${model}`)
