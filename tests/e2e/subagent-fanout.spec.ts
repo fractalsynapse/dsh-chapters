@@ -76,13 +76,26 @@ test('a parent fans out two subagent readers whose papers exceed their own windo
   }
   expect(texts.length, 'parent produced assistant text').toBeGreaterThanOrEqual(1)
   const final = texts[texts.length - 1]!
-  expect(final, 'parent synthesis lost paper A').toContain(A_MARK)
-  expect(final, 'parent synthesis lost paper B').toContain(B_MARK)
+  // #91 decision A — the claim is SPLIT, nothing removed. Product guarantee first: both children's
+  // reports reached the parent, verbatim, in its durable log. Measured 2026-10-24: this leg went red
+  // with `parent synthesis lost paper A` while the parent's log contained BOTH `PAPER-A-MARKON-7731`
+  // and `PAPER-B-MARKON-4207` (121 KB, `agent/inbox/spliced` at seq 5 carrying both) and the final
+  // message named both papers — the model summarized in 233 characters instead of quoting the tokens.
+  // Without this line a delivery bug and a verbosity complaint are indistinguishable: #61a in the rig.
+  const deliveryLog = sessionLogTextById(sid)
+  expect(deliveryLog, 'DELIVERY: paper A never reached the parent context').toContain(A_MARK)
+  expect(deliveryLog, 'DELIVERY: paper B never reached the parent context').toContain(B_MARK)
+  // Then the prose assertions, kept verbatim as claims, but naming which half failed and what delivery
+  // proved — so a red here can never again be read as "the plugin lost content".
+  const quoteHint = `SYNTHESIS, not delivery: both markers ARE in the parent log (${String(deliveryLog.length)} bytes) and the final message (${String(final.length)} chars) did not quote them`
+  expect(final, `parent synthesis lost paper A — ${quoteHint}`).toContain(A_MARK)
+  expect(final, `parent synthesis lost paper B — ${quoteHint}`).toContain(B_MARK)
   expect(final).toContain('PAPER-A-DONE')
   expect(final).toContain('PAPER-B-DONE')
 
   // --- 1: children really ran as separate sessions (tool results in parent log)
-  const raw = sessionLogTextById(sid)
+  // ONE read of the parent's log (#89: two derivations of one fact is how a spec drifts).
+  const raw = deliveryLog
   const childResults = raw.split('\n').filter((l) => {
     try { const e = JSON.parse(l); return e?.type === 'tool/result' && JSON.stringify(e).includes('MARKON') } catch { return false }
   })
