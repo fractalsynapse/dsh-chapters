@@ -44,6 +44,8 @@
     "typecheck:client": "tsc -p tsconfig.client.strict.json",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "build": "tsc -p tsconfig.json && tsdown -c tsdown.client.config.ts --config-loader tsx",
+    "corpus:stamp": "node scripts/build-stamp.mjs stamp",
+    "corpus:check": "node scripts/build-stamp.mjs check",
     "build:client": "tsdown -c tsdown.client.config.ts",
     "test:unit": "node --test tests/unit/*.test.ts",
     "test:e2e": "PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=suite && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=heavy && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=arrival && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=enrich && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=fanout && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=rules && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=fork && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=plans && PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright npx playwright test -c tests/e2e/playwright.config.ts --project=prompt",
