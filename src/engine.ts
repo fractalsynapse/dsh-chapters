@@ -873,14 +873,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       const llm = (this.ctx as unknown as {
         llm?: { resolveModelInfo?: (p: string, m: string, s: AbortSignal) => Promise<unknown> }
       }).llm
-      if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') {
-        diagnosticNote(this.ctx.logger, 'realm:engine:last-resort',
-          `not applied: missing inputs (route=${String(route === null)}, tokenMeter=${String(meter === undefined)}, resolveModelInfo=${String(typeof llm?.resolveModelInfo !== 'function')})`)
-        return 0
-      }
+      if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') return 0
       const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
         { context?: { contextWindow?: number, maxTokens?: number } } | undefined
       const base = this as unknown as { config?: { retainRatio?: number, retainTokens?: number, maxTokens?: number } }
+      // Quiet unless there is a problem to solve. Relief declines on EVERY ordinary pre-step because
+      // the surface is below the trigger, and the first two notes this feature ever emitted were that
+      // non-event — noise that also hid the case worth naming. Every value here is measured at this
+      // point in the method: no invented field and no assumed window (my first attempt reached for a
+      // `lastWindowTokens` that does not exist, and `tsc` was the only thing that caught it).
+      const surfaceNow = Number(meter.measure?.(agent.session)?.totalTokens ?? NaN)
+      const ratioNow = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
+      const windowNow = Number(info?.context?.contextWindow ?? NaN)
+      const overTrigger = Number.isFinite(surfaceNow) && Number.isFinite(windowNow)
+        && typeof ratioNow === 'number' && surfaceNow > windowNow * ratioNow
       const retainTokens = base.config?.retainTokens
       const reserved = Number(info?.context?.maxTokens ?? base.config?.maxTokens ?? NaN)
       const ceiling = lastResortCeilingTokens({

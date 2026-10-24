@@ -75,9 +75,15 @@ test('when the last resort abstains, it says why (#61a, measured against myself)
   const src = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'src', 'engine.ts'), 'utf8')
   const body = src.slice(src.indexOf('async #lastResortRelief'), src.indexOf('#reportDecline'))
   assert.match(body, /not applied: coexistence ceiling underivable/, 'a missing ceiling names the inputs it lacked')
-  assert.match(body, /not applied: missing inputs/, 'and so does a missing meter or route')
-  assert.ok((body.match(/diagnosticNote\(this\.ctx\.logger, 'realm:engine:last-resort'/g) ?? []).length >= 2,
-    'every abstention path writes a line — one is not a mechanism')
+  // The missing-route/meter path is deliberately SILENT, and that is not the old bug returning:
+  // `#reportDecline` already emits `relief declined while the surface is over the trigger
+  // (surface=… trigger=… window=… ratio=…)` for the same event, so a second line from here would be
+  // the duplicate-noise failure wearing a different hat. What must be loud is the case nothing else
+  // reports — a ceiling that cannot be derived.
+  assert.match(body, /if \(route === null \|\| meter === undefined \|\| typeof llm\?\.resolveModelInfo !== 'function'\) return 0/,
+    'a realm without route/meter defers to the decline report rather than echoing it')
+  assert.ok((body.match(/diagnosticNote\(this\.ctx\.logger, 'realm:engine:last-resort'/g) ?? []).length >= 1,
+    'the underivable-ceiling case still speaks — silence there is the bug this row was born from')
 })
 
 test('the completion budget is the model-reported one, not the base headroom default (measured)', () => {
