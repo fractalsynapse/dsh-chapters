@@ -38,7 +38,7 @@ import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { createPromptSurface, promptChaptersOf } from './prompt.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
-import { configureDiagnostics, diagnosticStatusLine } from './diag.ts'
+import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } from './diag.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -102,6 +102,7 @@ export interface Config {
    * `DSH_CHAPTERS_ENGINE_ERRORS` overrides everything. Before this, unset meant NO TRACE ON DISK.
    */
   diagnosticsLog: string
+  diagnosticsMaxBytes: number
   /** Plans (docs/plans-carriage.md § 7): verbatim plan chars shown in a chapter,
    * the tool-call-argument artifact floor (0 = off), and whether the notice
    * carries the `## Plans on this path` block. */
@@ -222,6 +223,7 @@ export const Config = Schema.object({
   warningsDisplayCap: Schema.number().default(6),
   segmentCandidateCapTokens: Schema.number().default(4000),
   diagnosticsLog: Schema.string().default(''),
+  diagnosticsMaxBytes: Schema.number().step(1).min(0).default(8388608),
   // Plans (docs/plans-carriage.md § 7). A plan's full text is ALWAYS
   // artifact-backed, so planInlineChars is display economy and never a data
   // decision. callArgArtifactTokens defaults to 0 = OFF: turning it on changes
@@ -315,6 +317,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
   // three SAIP compaction finalization failures left no trace precisely because the sink had to be
   // turned on before it could help.
   if (config.diagnosticsLog !== '') configureDiagnostics(config.diagnosticsLog)
+  configureDiagnosticsCap(config.diagnosticsMaxBytes)
 
   // § Preset delivery lives in `src/preset.ts` — the `preset-chapters` declaration row in
   // this bundle's patch, NOT here. A row is visible (`dsh --dump-default-config`, the config

@@ -41,8 +41,34 @@ export function configureDiagnostics(path: string | undefined): void { configure
  * that never touches a door leaves no stray file, and a session that does gets its failures next to its
  * chapters. Idempotent — later projects do not relocate the log mid-process.
  */
-export function ensureDiagnosticsDefault(path: string): void {
+export function ensureDiagnosticsDefault(path: string, capBytes?: number): void {
   if (configured === undefined) configured = path
+  if (capBytes !== undefined && Number.isFinite(capBytes) && capBytes >= 0) maxBytes = capBytes
+}
+
+/**
+ * The sink cap (#95 follow-up). The diagnostics sink defaults ON and every fix this month made it
+ * chattier — a line per enrichment no-op, per abstention, per declined relief — while `diagnostic()` was
+ * an uncapped `appendFileSync`. Loudness that costs unbounded disk is a bug the operator meets later, on
+ * someone else's machine. The cap is a declared Config key (`diagnosticsMaxBytes`); this constant is only
+ * its default. `0` (or a non-finite value) means uncapped, which stays the operator's explicit choice.
+ */
+export const DEFAULT_DIAGNOSTICS_MAX_BYTES = 8_388_608
+let maxBytes = DEFAULT_DIAGNOSTICS_MAX_BYTES
+
+/**
+ * The size decision, kept pure so a row can prove it without a filesystem: append below the cap, rotate
+ * at it. A diagnostic is NEVER dropped — the file is what makes detection count as delivery (#61a).
+ */
+export function sinkAction(sizeBytes: number, capBytes: number): 'append' | 'rotate' {
+  if (!Number.isFinite(capBytes) || capBytes <= 0) return 'append'
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return 'append'
+  return sizeBytes >= capBytes ? 'rotate' : 'append'
+}
+
+/** Set the cap from plugin config; absent keeps the default. */
+export function configureDiagnosticsCap(bytes: number | undefined): void {
+  if (bytes !== undefined && Number.isFinite(bytes) && bytes >= 0) maxBytes = bytes
 }
 
 export const DIAGNOSTICS_OFF = 'off'
@@ -84,6 +110,10 @@ export function resetDiagnosticStateForTests(): void { everWritten = false }
  * `where` is the seam that saw it (`'door:fork'`, `'realm:compaction'`, `'auto-save'`) — a
  * timestamp and a message without an origin is how an incident report becomes a guess.
  */
+function statSize(p: string): number {
+  try { return fs.statSync(p).size } catch { return 0 }
+}
+
 export function diagnostic(where: string, message: string, error?: unknown): string {
   const line = `[${new Date().toISOString()}] [${where}] ${message}` +
     (error === undefined ? '' : ` :: ${describe(error)}`)
@@ -92,6 +122,13 @@ export function diagnostic(where: string, message: string, error?: unknown): str
   try {
     // appendFileSync, not async: a refused child creation is often followed by the process
     // tearing the session down, and a pending write can be lost exactly when it matters.
+    // The cap is checked BEFORE the write, and the write then always happens. Rotation renames the
+    // current file to `<sink>.1` (keeping one previous generation) — this is a LOG policy for a file the
+    // plugin owns; nothing under `chapters/` is ever moved or truncated by this path, and the
+    // append-only archive invariant stays where it lives.
+    if (sinkAction(statSize(sink), maxBytes) === 'rotate') {
+      try { fs.renameSync(sink, sink + '.1') } catch { /* rotation failure must never lose the line */ }
+    }
     fs.appendFileSync(sink, line + '\n')
     everWritten = true
   } catch { /* diagnostics never mask the real failure */ }

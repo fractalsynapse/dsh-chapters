@@ -196,12 +196,25 @@ export interface AutoSaveWiring extends SaveSessionConfig {
 export async function readDurableSession(
   get: (name: string) => unknown,
   sessionId: string,
+  onError?: (message: string) => void,
 ): Promise<AutoSaveChildView | undefined> {
   const sq = get('sessionQuery') as {
     readSession?(id: string): Promise<{ session?: AutoSaveChildHeader; events?: SessionEventLike[] }>
   } | undefined
   if (sq?.readSession === undefined) return undefined
-  const read = await sq.readSession(sessionId)
+  // #101, measured live: the kernel can REFUSE a session (`stored session "ch-…" is corrupt: …`) even
+  // though the bytes decode fine offline, because it validates against its own format rules. Left
+  // uncaught, that one refusal propagated out of a per-session loop and cancelled an audit of 49
+  // rows — one poison item stopping the rest, the same rule the finalize queue already obeys. So the
+  // read is contained here, in the one helper both planes share, and the caller is handed the reason:
+  // skipping must be reported, never silent (#61a).
+  let read: { session?: AutoSaveChildHeader; events?: SessionEventLike[] }
+  try {
+    read = await sq.readSession(sessionId)
+  } catch (error) {
+    onError?.(String((error as Error)?.message ?? error).slice(0, 200))
+    return undefined
+  }
   const events = read?.events
   if (!Array.isArray(events) || events.length === 0) return undefined
   // The header rides the same observation as the bytes being archived — origin/agentPreset/cwd are

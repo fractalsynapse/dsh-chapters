@@ -64,6 +64,8 @@ export interface EngineConfig {
   openRequestCarryMaxChars: number
   /** #78 A: the survivability switch. See `docs/host-compaction-seam.md` § the last-resort deferral. */
   lastResortArtifact: boolean
+  /** Diagnostics sink size cap in bytes; 0 = uncapped (docs/verify.md, #61a). */
+  diagnosticsMaxBytes: number
   chapterTokenTarget: number
   toolResultDeferFloorTokens: number
   /** Composer tunables (record §4.2/§12) — same register, same defaults as the host plugin's. */
@@ -101,6 +103,7 @@ export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   knowledgeMirrorDir: '.dsh-knowledge',
   openRequestCarryMaxChars: 4000,
   lastResortArtifact: true,
+  diagnosticsMaxBytes: 8388608,
   chapterTokenTarget: 8000,
   toolResultDeferFloorTokens: 200,
   mergeThreshold: 0.3,

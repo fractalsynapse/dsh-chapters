@@ -98,3 +98,20 @@ test('the completion budget is the model-reported one, not the base headroom def
   assert.doesNotMatch(body, /reservedCompletionTokens: Number\(base\.config\?\.maxTokens \?\? NaN\)/,
     'the headroom default must not be the primary value — it makes the invariant unreachable')
 })
+
+/**
+ * Where the completion budget actually lives (measured in the pinned host bundle, 2026-10-24): the
+ * model-info object is built as `{ context: { contextWindow }, ...defaultMaxTokens === void 0 ? {} : {
+ * defaultMaxTokens }, … }` — so `defaultMaxTokens` is a SIBLING of `context`, not a field inside it. My
+ * first attempt read `info.context.maxTokens`, which is always absent, fell through to the base config's
+ * `maxTokens` = 65,536 (a routing headroom, `resolveConfig` defaults it to `headroomTokens`), and made
+ * the ceiling negative — so the invariant I shipped could never fire. This row pins the order the values
+ * are read in, because the whole feature hinges on picking up the model's real budget (15,000 here).
+ */
+test("the completion budget is read from info.defaultMaxTokens, the actual host key", () => {
+  const src = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'src', 'engine.ts'), 'utf8')
+  const body = src.slice(src.indexOf('async #lastResortRelief'), src.indexOf('#reportDecline'))
+  assert.match(body, /info\?\.defaultMaxTokens \?\? info\?\.context\?\.maxTokens/,
+    'the sibling key the host actually sets must be tried FIRST')
+  assert.match(body, /\?\? base\.config\?\.maxTokens/, 'the base config stays as the last resort, not the primary')
+})
