@@ -316,8 +316,9 @@ console.log(`journals: <store>/<root>/repairs/*.json — undo a run with  node s
 // about the store, not 483 findings. Aggregating it keeps the audit readable without hiding anything —
 // the per-session detail is still printed at --verbose, and the class count is unchanged in the summary.
 const GROUPED_CLASSES = ['test-litter', 'empty-artifact']
-const grouped = Object.entries(byClass).filter(([k]) => GROUPED_CLASSES.includes(k))
-for (const [k, n] of grouped) console.log(`  ${k}: ${String(n)} finding(s) aggregated — the same ${k} reported per session; pass --verbose for the per-file list`)
+for (const [cls, count] of Object.entries(histogram).filter(([name]) => GROUPED_CLASSES.includes(name))) {
+  console.log(`  ${cls}: ${String(count)} finding(s) aggregated — the same class reported per session; pass --verbose for the per-file list`)
+}
 if (totals.blind > 0) console.log(`note: ${totals.blind} blind spot(s) — this runner CAN list directories, so that count should be 0 here.`)
 fs.writeFileSync(path.join(path.dirname(REGISTRY), `chapters-repair-report-${stamp}.json`), `${JSON.stringify({ stamp, totals, perSession: perSession.map((p) => ({ sessionId: p.sessionId, cwd: p.cwd, findingsBefore: p.findingsBefore, findingsAfter: p.findingsAfter, applied: p.applied, refused: p.refused, blindSpots: p.blindSpots, journalId: p.journalId })) }, null, 2)}\n`)
 process.exit(0)
