@@ -25,8 +25,17 @@ test('session.ts derives the store root from the SAME formula boot.ts writes the
   // "failed" for a reason that had nothing to do with drift.
   assert.match(boot, /export const rigStoreRoot = \(port: number\): string => path\.join\(e2eHome\(port\), 'chapters'\)/,
     'boot.ts must keep rigStoreRoot(port) = <port home>/chapters as the single definition')
-  assert.match(session, /export const E2E_STORE_ROOT = path\.join\(ROOT, 'var', `e2e-home-\$\{bootPort\(\)\}`, 'chapters'\)/,
-    'session.ts must derive the identical path (var/e2e-home-<port>/chapters), not a lookalike')
+  // STRENGTHENED, not relaxed (#89): this row used to assert the two files contained the SAME
+  // expression — which is exactly the arrangement that broke the day `boot.ts` moved homes under
+  // `E2E_HOME_ROOT`. Two derivations of one fact need a watchdog; one derivation needs none. The
+  // specs now import boot's function, so the row asserts the import and forbids any re-derivation.
+  assert.match(session, /import \{ e2eHome, rigMirrorRoot, rigStoreRoot \} from '\.\/boot\.ts'/,
+    'session.ts must import boot\u2019s derivation rather than reproduce it')
+  assert.match(session, /export const E2E_STORE_ROOT = rigStoreRoot\(bootPort\(\)\)/,
+    'the store root is one function call, so it cannot drift from the patch that writes it')
+  const sessionCode = session.split('\n').filter((l) => !/^\s*(\/\/|\*|#)/.test(l))
+  assert.deepEqual(sessionCode.filter((l) => /e2e-home-/.test(l)), [],
+    'a re-derived boot path in the spec layer is the #89 stall, one step from happening again')
 })
 
 test('no spec reads chapters out of the workspace tree any more', () => {

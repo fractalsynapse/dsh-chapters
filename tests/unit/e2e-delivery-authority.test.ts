@@ -232,3 +232,34 @@ test('adoption discovers the session holding the turn when the view offers nothi
   assert.equal(got, 'session-2304a071',
     'the log that HOLDS the completed turn wins even when no candidate pointed at it')
 })
+
+test('the poll re-resolves the session on every interval, not once (#77-class)', () => {
+  // The stall's shape, in one sentence: adoption ran once at send time, before the committed session
+  // existed, and the poll then stared at an empty draft log while the turn finished elsewhere
+  // (needle seq 10, turn/end seq 39). A single resolution is not "the durable log decides" — it is
+  // the view's answer, sampled early.
+  const src = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'session.ts'), 'utf8')
+  const fn = /const turnSeen = \(\): boolean => \{[\s\S]*?\n  \}\n/.exec(src)?.[0] ?? ''
+  assert.ok(fn.length > 0, 'the poll predicate must exist to be checked')
+  assert.match(fn, /adoptSessionForTurn\(\{[\s\S]{0,220}discover: listRecentSessionIds/,
+    'the predicate itself must consult the home while it waits')
+  assert.match(fn, /if \(again !== null\) sid = again/, 'and only ever move to a session that holds the turn')
+})
+
+/**
+ * The stall's actual root cause, third time this lesson has been paid for (#89): when the hermetic
+ * move changed `boot.ts`'s home location, `session.ts` kept rebuilding `ROOT/var/e2e-home-<port>`
+ * itself, so every durable-log read returned '' and a completed turn was polled for twelve minutes
+ * (`home=[]` in my own diagnostic was the sentence that ended the guessing).
+ */
+test('the spec side never re-derives boot paths — it imports them (#89)', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'session.ts'), 'utf8')
+  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|#)/.test(l))
+  const own = code.filter((l) => /e2e-home-/.test(l))
+  assert.deepEqual(own, [],
+    `boot paths must come from boot.ts; re-derived here they drift silently: ${JSON.stringify(own.map((l) => l.trim().slice(0, 80)))}`)
+  assert.match(src, /import \{ e2eHome, rigMirrorRoot, rigStoreRoot \} from '\.\/boot\.ts'/,
+    'the shared derivation must actually be imported')
+  assert.match(src, /export const E2E_HOME = e2eHome\(bootPort\(\)\)/, 'the home is boot\u2019s function')
+  assert.match(src, /export const E2E_STORE_ROOT = rigStoreRoot\(bootPort\(\)\)/, 'and so is the store root (#70\u2019s lesson, same class)')
+})

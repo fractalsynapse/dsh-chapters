@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { e2eHome, rigMirrorRoot, rigStoreRoot } from './boot.ts'
 
 /**
  * Shared e2e session plumbing: specs create THEIR OWN session through the
@@ -19,7 +20,14 @@ export const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const bootPort = (): number => {
   try { return (JSON.parse(fs.readFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), 'utf8')) as { port: number }).port } catch { return 41731 }
 }
-export const E2E_HOME = path.join(ROOT, 'var', `e2e-home-${bootPort()}`)
+// ONE derivation, from boot.ts (#89, third time this lesson has had to be learned here — the
+// 2026-09-24 hardcoded-slug incident, #70's store root, and now the hermetic-home move). The specs
+// used to rebuild the home path as `ROOT/var/e2e-home-<port>`; when boots moved to
+// `E2E_HOME_ROOT` (tmpdir), every durable-log read returned '' — and a-knowledge-loop stalled
+// twelve minutes on a turn that had completed, with my own new diagnostic reporting `home=[]`.
+// A path a boot writes and a spec re-derives are ONE fact; two derivations are a drift waiting to
+// look like a product bug.
+export const E2E_HOME = e2eHome(bootPort())
 export const E2E_REGISTRY = path.join(E2E_HOME, 'storages', 'dsh_chapters.json')
 // The app derives the per-project session dir by non-alphanumerically-slugging
 // the workspace path; it must be COMPUTED, never literal (measured 2026-09-24:
@@ -35,7 +43,10 @@ export const E2E_SESS_DIR = path.join(E2E_HOME, 'sessions', sessSlug(ROOT))
  * files that were sitting in the port store the whole time (#56: enrich waited 6 min, heavy 8).
  * One constant, derived exactly like `boot.rigStoreRoot`; a row pins that the two agree.
  */
-export const E2E_STORE_ROOT = path.join(ROOT, 'var', `e2e-home-${bootPort()}`, 'chapters')
+// Same rule as the home above: derive it from boot, don't re-implement it and hope a row keeps the
+// two honest. (#70 pinned the store root per port; the specs re-derived it and reported "the archive
+// never landed" about files sitting in the port store.)
+export const E2E_STORE_ROOT = rigStoreRoot(bootPort())
 const REGISTRY = E2E_REGISTRY
 let zstdWarned = false // one loud zstd failure per process (see logHasEvent/sessionLogTextById catches)
 
@@ -746,7 +757,21 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
   })
   if (adopted !== null) sid = adopted
   const needle = question.slice(0, 40)
-  await expect.poll(() => {
+  const turnSeen = (): boolean => {
+    // #77-class, and the measurement that ended three guesses: adoption used to run ONCE, right after
+    // the send — when the committed session often does not exist yet. The poll then watched the
+    // draft's (empty) log for twelve minutes while the turn completed in `session-5eb0bb60…`
+    // (needle at seq 10, `turn/end` at 39: a passing run that no predicate could see). The log
+    // decides for the WHOLE wait, so re-resolve on every interval, not just the first.
+    if (sid === null || sessionLogTextById(sid) === '' || !humanMessageCarries(sessionLogTextById(sid), needle)) {
+      const again = adoptSessionForTurn({
+        candidates: [sid],
+        needle: question,
+        readLog: sessionLogTextById,
+        discover: listRecentSessionIds,
+      })
+      if (again !== null) sid = again
+    }
     const text = sid !== null ? sessionLogTextById(sid) : ''
     if (text === '') return false
     const header = logHeaderId(text)
@@ -754,7 +779,23 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     const evs = logEvents(text)
     const mine = evs.find((e) => e.type === 'user/message' && e.seq > preSeq && e.raw.includes(needle))
     return mine !== undefined && evs.some((e) => e.type === 'turn/end' && e.seq > mine.seq)
-  }, { timeout: turnMs, intervals: [5000] }, 'this session\u2019s own log shows turn/end').toBe(true)
+  }
+  try {
+    await expect.poll(turnSeen, { timeout: turnMs, intervals: [5000] }, 'this session\u2019s own log shows turn/end').toBe(true)
+  } catch (error) {
+    // #61a, aimed at the rig: a poll that gives up after twelve minutes must not leave "which of
+    // these four facts was wrong?" to a stranger with a zstd binary. This exact message is what
+    // turned three guesses about the cold-home stall into one measurement.
+    const homes = listRecentSessionIds().slice(0, 4).map((id) => {
+      const text = sessionLogTextById(id)
+      if (text === '') return `${id}=unreadable`
+      const evs = logEvents(text)
+      const hit = evs.find((e) => e.type === 'user/message' && e.raw.includes(needle))
+      return `${id.slice(0, 18)}(maxSeq=${String(evs.reduce((m, e) => Math.max(m, e.seq), 0))},hasNeedle=${hit !== undefined}${hit !== undefined ? `@${String(hit.seq)}` : ''},turnEnds=${evs.filter((e) => e.type === 'turn/end').map((e) => String(e.seq)).join('|') || 'none'})`
+    })
+    console.error(`e2e: turn poll failed after ${String(turnMs)}ms — sid=${String(sid)} preSeq=${String(preSeq)} needle=${JSON.stringify(needle)} home=[${homes.join(' ')}]`)
+    throw error
+  }
   if (actionGraceMs !== false) {
     // Ensure the VIEW is on OUR session before UI assertions (measured 2026-09-24
     // on CI: the SPA navigated back to the previous spec's fork child during the
