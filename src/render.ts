@@ -86,6 +86,8 @@ const textOf = textOfBlocks
 export function validateRanges(
   chapters: ChapterRange[],
   archiveCeiling: number,
+  /** The watermark: ranges must start HERE, not wherever the submitter liked (#59). */
+  archiveFloor = 0,
 ): ChapterRange[] {
   if (chapters.length === 0) throw new Error('no chapters supplied')
   chapters.forEach((c, i) => {
@@ -107,16 +109,50 @@ export function validateRanges(
           `chapter ${i} ("${c.title}") overlaps "${prev.title}": ${c.startSeq}-${prev.endSeq} in both`,
         )
       }
+      // #59: the overlap check existed; its twin did not. An overlap duplicates text, a GAP drops
+      // it, and AGENTS.md has always said so — a submitted list with a hole was accepted silently.
+      if (c.startSeq > prev.endSeq + 1) {
+        throw new Error(
+          `chapter ${i} ("${c.title}") starts at seq ${c.startSeq}, leaving a gap at `
+          + `${prev.endSeq + 1}-${c.startSeq - 1} — those seqs would be archived by nobody`,
+        )
+      }
     }
   })
+  // The watermark floor, checked LAST: shape, ceiling, order and contiguity each report their own
+  // problem first, and this is the one that only makes sense once they are all sound (#59).
+  if (chapters[0]!.startSeq > archiveFloor) {
+    throw new Error(
+      `chapter 0 ("${chapters[0]!.title}") starts at seq ${chapters[0]!.startSeq}, above the watermark ${archiveFloor} — `
+      + `seqs ${archiveFloor}-${chapters[0]!.startSeq - 1} would be dropped without a word (a gap is loss, AGENTS.md)`,
+    )
+  }
   return chapters
 }
 
+/**
+ * Ranges whose render blew past the oversize ceiling (#59). `chapterTokenTarget` stays the SOFT target
+ * — split at the next boundary, never clip — and a modest overshoot is a warning, because a single
+ * indivisible turn can legitimately exceed it. Past `target × factor` the chapter is not a chapter:
+ * nobody can `read` it back inside the window it exists for, which is the whole point of archiving.
+ * The field held an 89,982-token chapter, an unrepaired 237,870-token orphan and eleven over 32K.
+ */
+export function oversizeRanges(
+  rendered: readonly { range: ChapterRange; stats: { estimatedTokens: number } }[],
+  chapterTokenTarget: number,
+  oversizeFactor: number,
+): string[] {
+  const ceiling = Math.floor(chapterTokenTarget * oversizeFactor)
+  return rendered
+    .filter((r) => r.stats.estimatedTokens > ceiling)
+    .map((r) => `"${r.range.title}" (seqs ${r.range.startSeq}-${r.range.endSeq}) rendered ${r.stats.estimatedTokens} est tokens, `
+      + `over the hard oversize ceiling ${ceiling} (= chapterTokenTarget ${chapterTokenTarget} × ${oversizeFactor}) `
+      + '— split at the next boundary; clipping is forbidden')
+}
+
 /** Enumerate tool results in a range so the model can decide keep/defer against real sizes. */
-export function toolResultCandidates(
-  events: SessionEventLike[],
-  range: ChapterRange,
-): ToolResultCandidate[] {
+/** Every oversized tool result in a range, ranked by size DESCENDING (dedupe keeps the last copy). */
+function collectCandidates(events: SessionEventLike[], range: ChapterRange): ToolResultCandidate[] {
   const out: ToolResultCandidate[] = []
   for (const ev of events) {
     if (ev.type !== 'tool/result' || ev.seq < range.startSeq || ev.seq > range.endSeq) continue
@@ -142,7 +178,45 @@ export function toolResultCandidates(
       excerpt: text.slice(0, 160),
     })
   }
+  // NO sort without a cap: log order is what every existing caller (and the model's own
+  // `toolResultOverrides` list) already sees, and reordering it would be an undocumented behavior
+  // change riding along with a loudness fix. Ranking belongs to the cap alone.
   return out
+}
+
+/**
+ * The capped public form (#61). `chapters_segment` once emitted 49,932 characters of its OWN output while
+ * also reporting `(Omitted 275266 bytes …)` — ≈81K est tokens into a 32K-class window, asking a small
+ * model to judge a candidate list it never received. Ranking is by size descending, so what a cap
+ * removes is the SMALL stuff: the judgment the model is actually asked for stays intact.
+ *
+ * The caller reports what was withheld — see `candidateTotals` — because a capped list that does not say
+ * it is capped is a silent truncation, and AGENTS.md forbids truncating to fit.
+ */
+export function toolResultCandidates(
+  events: SessionEventLike[],
+  range: ChapterRange,
+  capTokens?: number,
+): ToolResultCandidate[] {
+  if (capTokens === undefined) return collectCandidates(events, range)
+  const ranked = [...collectCandidates(events, range)].sort((a, b) => b.bytes - a.bytes)
+  let used = 0
+  const kept: ToolResultCandidate[] = []
+  for (const c of ranked) {
+    if (used + c.estimatedTokens > capTokens && kept.length > 0) break
+    kept.push(c)
+    used += c.estimatedTokens
+  }
+  return kept
+}
+
+/** Totals for the WHOLE candidate set, so a capped response can name what it left out. */
+export function candidateTotals(
+  events: SessionEventLike[],
+  range: ChapterRange,
+): { count: number; bytes: number } {
+  const all = collectCandidates(events, range)
+  return { count: all.length, bytes: all.reduce((m, c) => m + c.bytes, 0) }
 }
 
 /**
@@ -281,6 +355,13 @@ export function renderChapter(
           if (cid !== undefined && lastResultSeq.get(cid) !== ev.seq) break // earlier copy of a redelivery
         }
         const text = redact(toolResultText(data))
+        // #59 — an empty result defers NOTHING. `arrival.ts` has always skipped the empty string;
+        // the renderer did not, so a payload-less read wrote hundreds of references to sha256("") and
+        // the chapter claimed `artifacts: 102` while its tree held one 0-byte file. Say it is empty.
+        if (text.length === 0) {
+          body.push(`  - result (seq ${ev.seq}, empty)`)
+          break
+        }
         const tokens = estimateTokens(text)
         const wantsInline = inline.get(ev.seq) ?? tokens <= config.toolResultDeferFloorTokens
         const priorCall = [...inRange].reverse().find((c) => c.type === 'tool/call' && c.seq < ev.seq)
@@ -382,7 +463,11 @@ export function renderChapter(
     // 2026-09-23, invisible for eras behind the host logger.
     `sha256: ${sha256(`${bodyText}\n`)}`,
     `topics: [${[...new Set(topics)].map((t) => JSON.stringify(t)).join(', ')}]`,
-    `artifacts: ${artifacts.length}`,
+    // #59: the two numbers are NOT the same thing. Content-addressed reuse means 335 references
+    // can point at one blob; reporting references as `artifacts:` made both the field diagnostic and
+    // the registry bloat unreadable.
+    `artifacts: ${new Set(artifacts.map((a) => a.sha256)).size}`,
+    `artifactRefs: ${artifacts.length}`,
     // Plans ride in frontmatter ONLY when this chapter actually carries one, so a
     // session that never entered plan mode writes byte-identical files to before
     // this feature (verify.md P8). Compact `seq:status:sha8` triples: the minimal

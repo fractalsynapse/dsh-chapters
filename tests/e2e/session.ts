@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import { e2eHome, rigMirrorRoot, rigStoreRoot } from './boot.ts'
 
 /**
  * Shared e2e session plumbing: specs create THEIR OWN session through the
@@ -19,7 +20,14 @@ export const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const bootPort = (): number => {
   try { return (JSON.parse(fs.readFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), 'utf8')) as { port: number }).port } catch { return 41731 }
 }
-export const E2E_HOME = path.join(ROOT, 'var', `e2e-home-${bootPort()}`)
+// ONE derivation, from boot.ts (#89, third time this lesson has had to be learned here — the
+// 2026-09-24 hardcoded-slug incident, #70's store root, and now the hermetic-home move). The specs
+// used to rebuild the home path as `ROOT/var/e2e-home-<port>`; when boots moved to
+// `E2E_HOME_ROOT` (tmpdir), every durable-log read returned '' — and a-knowledge-loop stalled
+// twelve minutes on a turn that had completed, with my own new diagnostic reporting `home=[]`.
+// A path a boot writes and a spec re-derives are ONE fact; two derivations are a drift waiting to
+// look like a product bug.
+export const E2E_HOME = e2eHome(bootPort())
 export const E2E_REGISTRY = path.join(E2E_HOME, 'storages', 'dsh_chapters.json')
 // The app derives the per-project session dir by non-alphanumerically-slugging
 // the workspace path; it must be COMPUTED, never literal (measured 2026-09-24:
@@ -28,6 +36,17 @@ export const E2E_REGISTRY = path.join(E2E_HOME, 'storages', 'dsh_chapters.json')
 // while three specs polled an invisible log for 7 minutes each).
 const sessSlug = (p: string): string => `-${(p.endsWith('/') ? p : p + '/').replace(/[^a-zA-Z0-9]/g, '-')}-`
 export const E2E_SESS_DIR = path.join(E2E_HOME, 'sessions', sessSlug(ROOT))
+/**
+ * Where THIS boot's chapters actually land. #70 pinned `artifactStoreRoot` per port (so the
+ * rig stops writing 42 test trees into the project's own production `.dsh-chapters/`), but the
+ * specs kept reading `ROOT/.dsh-chapters` — and then reported "the archive never landed" about
+ * files that were sitting in the port store the whole time (#56: enrich waited 6 min, heavy 8).
+ * One constant, derived exactly like `boot.rigStoreRoot`; a row pins that the two agree.
+ */
+// Same rule as the home above: derive it from boot, don't re-implement it and hope a row keeps the
+// two honest. (#70 pinned the store root per port; the specs re-derived it and reported "the archive
+// never landed" about files sitting in the port store.)
+export const E2E_STORE_ROOT = rigStoreRoot(bootPort())
 const REGISTRY = E2E_REGISTRY
 let zstdWarned = false // one loud zstd failure per process (see logHasEvent/sessionLogTextById catches)
 
@@ -46,8 +65,36 @@ export async function localModelUp(): Promise<boolean> {
   // without any 8080 must still RUN the suite, and it must FAIL if a tape is
   // missing. Only live/record runs ask the server the question.
   if ((process.env.E2E_MODEL ?? 'live') === 'replay') return true
+  const base = (process.env.E2E_UPSTREAM ?? '').trim().replace(/\/+$/, '')
+  // #54: RECORD against a REMOTE endpoint. The guard asks "is the model this run talks
+  // to reachable?" — and answering it by probing port 8080 alone made every remote
+  // distill SKIP six of the eight projects silently (measured: the fork journey came
+  // back as `1 skipped`, which reads like a pass to anyone scanning a log). A spec that
+  // skips because it is looking at the wrong endpoint is a spec that is not run.
+  if (base !== '' && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(base)) {
+    const key = (process.env.E2E_UPSTREAM_KEY ?? process.env.LOCAL_API_KEY ?? '').trim()
+    try {
+      const r = await fetch(`${base}/v1/models`, {
+        ...(key !== '' ? { headers: { authorization: `Bearer ${key}` } } : {}),
+        signal: AbortSignal.timeout(8000),
+      })
+      // ANY HTTP answer means an endpoint is there; 5xx means it is not usable. A 401
+      // would already have been refused at boot when the key is missing.
+      return r.status < 500
+    } catch {
+      return false
+    }
+  }
+  // A LOCAL custom upstream (the scripted stub on its own port — #71's distill,
+  // and any `E2E_UPSTREAM=http://127.0.0.1:<port>` run) must be probed AT THAT
+  // PORT. Answering "is the model reachable?" by probing :8080 regardless is the
+  // same silent-skip bug the remote branch above was fixed for — measured 2026-10-22:
+  // the prompt journey refused to run TWICE with a healthy stub on :8081. The row in
+  // tests/unit/tape-proxy-upstream-key.test.ts that pinned the old :8080-probe changed
+  // with it, reason in its comment.
+  const localBase = base !== '' && /^https?:\/\/(localhost|127\.|\[::1\])/.test(base) ? base : 'http://localhost:8080'
   try {
-    const r = await fetch('http://localhost:8080/v1/models', { signal: AbortSignal.timeout(3000) })
+    const r = await fetch(`${localBase}/v1/models`, { signal: AbortSignal.timeout(3000) })
     return r.ok
   } catch {
     return false
@@ -62,19 +109,41 @@ export async function openApp(page: Page): Promise<void> {
 }
 
 /**
- * The app's 'Internal Testing Notice' dialog is a FOCUS TRAP: while open,
- * every click on the composer, the sidebar, and 'New session' silently
- * bounced (activeElement stayed on the dialog's H2 — the whole e2e debugging
- * saga of 2026-09-18). Dismissing it is the FIRST thing any browser flow
- * must do.
+ * Dismiss every notice dialog the host puts up, WHICHEVER one it shows.
+ *
+ * These dialogs are FOCUS TRAPS: while one is open, every click on the composer,
+ * the sidebar and 'New session' silently bounces and `activeElement` stays on the
+ * dialog (the 2026-09-18 saga was exactly this, with 'Internal Testing Notice').
+ * #54 found the second member of the family: host 0.2.x opens a **Preview Notice**,
+ * and a rig that dismisses one dialog BY NAME stops working the moment the host
+ * ships a second — the failure surfaced as 'composer did not take focus (active:
+ * Preview Notice)', hundreds of lines from the cause.
+ *
+ * Target the DIALOG, not "a div that mentions a notice": scanning ancestor divs
+ * matches the whole app wrapper, whose button list includes unrelated controls — the
+ * first cut pressed some other 'Close', reported success, and left the notice holding
+ * focus (measured: the retry died with `dialog: Preview Notice: Continue` still on
+ * screen). Press the control that ACKNOWLEDGES this dialog, repeat for stacked
+ * notices, and let an unknown label be a no-op: the focus assert downstream still
+ * fires, and the diagnostic names the dialog and its buttons.
  */
 export async function dismissTestingNotice(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const dlg = Array.from(document.querySelectorAll('div')).find((d) => (d.textContent ?? '').includes('Internal Testing Notice') && d.querySelector('button'))
-    const btn = Array.from(dlg?.querySelectorAll('button') ?? []).find((b) => /^continue$/i.test((b.textContent ?? '').trim()))
-    ;(btn as HTMLButtonElement | undefined)?.click()
-  })
-  await page.waitForTimeout(1000)
+  for (let i = 0; i < 3; i++) {
+    const dismissed = await page.evaluate(() => {
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], [aria-label*="Notice"]'))
+      for (const dlg of dialogs) {
+        const buttons = Array.from(dlg.querySelectorAll('button'))
+        if (buttons.length === 0) continue
+        const ack = buttons.find((b) => /^continue$/i.test((b.textContent ?? '').trim()))
+          ?? buttons.find((b) => /^(got it|i understand|acknowledge|dismiss|ok)$/i.test((b.textContent ?? '').trim()))
+          ?? buttons.find((b) => /^close$/i.test((b.textContent ?? '').trim()) && (b.getAttribute('aria-label') ?? '').toLowerCase().includes('notice'))
+        if (ack !== undefined) { (ack as HTMLButtonElement).click(); return true }
+      }
+      return false
+    })
+    if (!dismissed) return
+    await page.waitForTimeout(800)
+  }
 }
 
 /**
@@ -107,6 +176,70 @@ export async function focusComposer(page: Page): Promise<void> {
 }
 
 /**
+ * Does a session have a durable log on disk yet? (#54)
+ *
+ * Host 0.2.x persists a created-but-never-started child as a directory holding only
+ * `session.lock`. Specs that assert on a child's notice bytes therefore cannot just
+ * poll the file — the file is a fact about whether the session was STARTED, not about
+ * what the child was seeded with. This helper names the distinction so each journey can
+ * decide, explicitly, to open the child rather than wait for a write that will not come.
+ */
+export function durableLogExists(sessionId: string): boolean {
+  for (const dir of sessDirs()) {
+    if (!dir.includes(sessionId)) continue
+    return sessionLogFileFor(path.join(SESS_DIR, dir)) !== null
+  }
+  return false
+}
+
+/**
+ * Open a session the way the product does: click its sidebar row.
+ *
+ * Same selector the client door uses (`src/client/doors.ts` openBranchRow —
+ * role=treeitem matched by text, 'more sessions' expanded when the list is folded),
+ * so the rig is exercising the real affordance instead of inventing one. Returns false
+ * when no row matched — callers must say which child they could not open, never proceed
+ * as if it had.
+ */
+export async function openSessionByRow(page: Page, needles: readonly string[]): Promise<boolean> {
+  const clean = needles.filter((n) => n !== '').map((n) => n.toLowerCase())
+  if (clean.length === 0) return false
+  const rows = page.locator('[role="treeitem"]')
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const n = await rows.count()
+    for (let i = 0; i < n; i++) {
+      const t = ((await rows.nth(i).textContent()) ?? '').toLowerCase()
+      if (clean.some((needle) => t.includes(needle))) {
+        await rows.nth(i).click()
+        await page.waitForTimeout(1200)
+        return true
+      }
+    }
+    // the list can be folded; the door clicks the expander before giving up
+    const expanded = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>('button'))
+        .filter((b) => /more sessions|ungrouped/i.test(b.textContent ?? '') && b.getAttribute('aria-expanded') !== 'true')
+      for (const b of buttons) b.click()
+      return buttons.length
+    })
+    if (expanded === 0) break
+    await page.waitForTimeout(400)
+  }
+  return false
+}
+
+/**
+ * The fork door as a USER would click it: the NEWEST assistant row, visible.
+ *
+ * `.first()` picks the OLDEST message's row — harmless in a one-turn journey, and a
+ * 25-minute dead click in a long one (#54, the `suite` leg), because once the conversation
+ * moves on that node is no longer the actionable one and Playwright waits for
+ * actionability that never comes. One helper, both specs, so the two journeys cannot drift
+ * back into different selectors for the same affordance.
+ */
+export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork with chapters"]:visible').last()
+
+/**
  * Type via insertText (one real input event — contenteditable editors can
  * ignore synthetic keystroke streams) and submit VERIFIED: the send button
  * path worked on calm transcripts but silently failed after a heavy turn
@@ -114,7 +247,162 @@ export async function focusComposer(page: Page): Promise<void> {
  * stage now checks itself and the Enter retry is a fallback that must also
  * show the text leaving the composer. Failures carry full diagnostics.
  */
-export async function typeComposer(page: Page, line: string): Promise<void> {
+/**
+ * Is a HUMAN turn already in the durable log? #81: `typeComposer` used the editor's own emptiness
+ * as proof of delivery, and the host clears the draft on its own schedule — a late flush made it
+ * press again and one session got the same instruction twice (`STILL-HERE` at seq 40 and again at
+ * seq 47). A `user/message` carrying the text is the only authority, and pointedly NOT an
+ * assistant echo: a model repeating a phrase must not be read as the human's send having landed.
+ */
+/**
+ * How many times does this instruction appear as a human turn? (#88)
+ *
+ * Counting, not existing. `deliveredFor` below needs "did THIS press land", and existence answers a
+ * different question — "has something like this ever been sent" — which silently swallowed the
+ * second of two identical instructions. A replay of the knowledge journey stalled for sixteen
+ * minutes on exactly that: the spec runs `/chapters-status` twice, the guard saw the first record,
+ * and the second send never happened.
+ *
+ * #84 still holds: the WHOLE instruction, not a window. An 80-character prefix made two prompts that
+ * open alike ("…then answer." vs "…then summarize it.") indistinguishable. A swallowed send is worse
+ * than a duplicate: a duplicate is visible in the log, this is silent.
+ */
+/**
+ * Session ids present in the boot's home, newest directory first. This is the discovery side of
+ * "the durable log decides" (#77-class, cold home): the SPA's own id can name a directory that was
+ * never committed, and then no predicate over the log can ever see the turn that did land.
+ */
+export function listRecentSessionIds(): string[] {
+  const out: Array<{ id: string, mtime: number }> = []
+  for (const dir of sessDirs()) {
+    const base = path.basename(dir)
+    const m = /^(session|ch|sub)-/.exec(base)
+    if (m === null) continue
+    let mtime = 0
+    try { mtime = fs.statSync(dir).mtimeMs } catch { continue }
+    out.push({ id: base.slice(m[1]!.length + 1).split('--')[0] ?? base, mtime })
+  }
+  return out.sort((a, b) => b.mtime - a.mtime).map((x) => x.id)
+}
+
+export function countHumanMessagesCarrying(logText: string, needle: string): number {
+  if (logText === '' || needle === '') return 0
+  const want = needle.trimEnd()
+  let n = 0
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"user/message"')) continue
+    try {
+      const ev = JSON.parse(line) as { data?: { message?: { content?: unknown } } }
+      const c = ev?.data?.message?.content
+      const text = typeof c === 'string' ? c
+        : Array.isArray(c) ? (c as Array<{ text?: string }>).map((b) => b?.text ?? '').join(' ') : ''
+      if (text.includes(want)) n += 1
+    } catch { /* a partial write is not a delivery */ }
+  }
+  return n
+}
+
+/** How many times has this slash command reached the host? Its record is a `command/run`, not a
+ *  chat bubble — and a journey may legitimately run the same command twice (#88). Full args, not a
+ *  prefix, so two different invocations of one command are never conflated. */
+export function countCommandsDispatched(logText: string, name: string, args: string): number {
+  if (logText === '') return 0
+  const want = args.trim()
+  let n = 0
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"command/run"')) continue
+    try {
+      const ev = JSON.parse(line) as { data?: { name?: string, args?: string } }
+      if (ev?.data?.name !== name) continue
+      if (want === '' || (ev?.data?.args ?? '').trim() === want) n += 1
+    } catch { /* ignore a partial line */ }
+  }
+  return n
+}
+
+/** Did a human turn carrying this exact instruction reach the log? One predicate per decision: the
+ *  boolean is the count, never a parallel implementation of the same question. */
+export function humanMessageCarries(logText: string, needle: string): boolean {
+  return countHumanMessagesCarrying(logText, needle) > 0
+}
+
+/** Did this command reach the host? Same rule: derived from the count. */
+export function commandDispatched(logText: string, name: string, args: string): boolean {
+  return countCommandsDispatched(logText, name, args) > 0
+}
+
+/** Total deliveries of this instruction in this session, right now. */
+export function countDeliveries(sid: string | null, line: string): number {
+  if (sid === null || sid === '') return 0
+  const text = sessionLogTextById(sid)
+  if (text === '') return 0
+  const trimmed = line.trim()
+  if (trimmed.startsWith('/')) {
+    const name = (trimmed.slice(1).split(/\s+/)[0] ?? '')
+    return countCommandsDispatched(text, name, trimmed.slice(1 + name.length))
+  }
+  return countHumanMessagesCarrying(text, trimmed)
+}
+
+/**
+ * The predicate `typeComposer` needs at EVERY call site, built from the session it is typing into.
+ *
+ * #81 wired this only for the first turn of `newSessionWithTurn` and left the follow-ups and slash
+ * commands unguarded — which is how the re-anchored `heavy` tape recorded a duplicated instruction:
+ * record-time the race sent twice, only one answer got recorded, and replay asked a question the tape
+ * has no entry for. A guard covering one of N call sites is a coin flip.
+ *
+ * #88 is the other half of the same lesson: the guard must ask **"has THIS press landed?"** So the
+ * closure snapshots how many copies existed when it was created and compares counts thereafter. A
+ * second identical instruction is a real instruction; existence-based delivery swallowed it, and a
+ * knowledge-loop replay stalled sixteen minutes waiting for a command that was never sent.
+ */
+export function deliveredFor(sid: string | null, line: string): () => boolean {
+  const baseline = countDeliveries(sid, line)
+  return () => countDeliveries(sid, line) > baseline
+}
+
+/**
+ * Which session does a send actually live in? (#77's lesson, turned on the rig.)
+ *
+ * A pristine home commits a draft under a FRESH id while `dsh.sessions.current` keeps reporting the
+ * draft, so a spec that trusts the view watches a log nothing was ever written to. Measured on the
+ * cold home: the instruction landed at seq 10 and `turn/end` at seq 42 — 28 seconds, well inside the
+ * 12-minute poll — in `session-c553d23b…`, while the spec was watching `session-105939e9…`, a log
+ * with no human turn at all. The durable log decides; candidates are only where to look.
+ *
+ * Exported and injected (`readLog`) so a row can prove it without a browser or a host: `null` when
+ * nothing carries the turn (the caller keeps its current target and the poll fails honestly), and the
+ * FIRST candidate that actually holds the message when one does.
+ */
+export function adoptSessionForTurn(opts: {
+  candidates: Array<string | null>
+  needle: string
+  readLog: (id: string) => string
+  /** Newest-first session ids present in the home. The view's ids are a hint; on a cold home they
+   *  can name directories that do not exist at all (measured on the rules leg: the committed
+   *  session was `2304a071…` with the question at seq 10 and `turn/end` at 21, while the view
+   *  offered ids with no log — a finished turn was polled for twelve minutes). Discovery is what
+   *  makes "the durable log decides" literal instead of a preference. */
+  discover?: () => string[]
+}): string | null {
+  const want = opts.needle.trimEnd().slice(0, 40)
+  const pool = [...opts.candidates]
+  if (opts.discover !== undefined) {
+    try {
+      for (const id of opts.discover()) if (id !== '' && !pool.includes(id)) pool.push(id)
+    } catch { /* a listing failure must not turn a stall into a crash */ }
+  }
+  for (const c of pool) {
+    if (c === null || c === '') continue
+    let text = ''
+    try { text = opts.readLog(c) } catch { text = '' }
+    if (text !== '' && humanMessageCarries(text, want)) return c
+  }
+  return null
+}
+
+export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>): Promise<void> {
   await focusComposer(page)
   await page.keyboard.insertText(line)
   const composerSel = 'div[aria-label*="/ commands, @ files or sessions"]'
@@ -131,8 +419,32 @@ export async function typeComposer(page: Page, line: string): Promise<void> {
   // hold the composer for tens of seconds (measured under coverage
   // instrumentation) — so the budget is minutes, and pressing Enter while
   // busy is a harmless no-op that the editor queues nothing for.
+  const alreadyDelivered = async (): Promise<boolean> => {
+    if (delivered === undefined) return false
+    try { return await delivered() } catch { return false }
+  }
+  // #84: a press is not a delivery until the durable log has had its chance to say so. record and
+  // replay differ in WHEN the write lands, so a single read of the log answers differently for the
+  // same action — the nondeterminism that made the suite tape record five requests where the
+  // journey makes six. Wait it out, then decide.
+  const deliveredGraceMs = async (ms: number): Promise<boolean> => {
+    if (delivered === undefined) return false
+    const deadline = Date.now() + ms
+    for (;;) {
+      if (await alreadyDelivered()) return true
+      if (Date.now() >= deadline) return false
+      await page.waitForTimeout(500)
+    }
+  }
   for (let round = 0; round < 48; round += 1) {
+    // #81: the durable delivery predicate is checked FIRST, before any further press. The
+    // editor's own state is a hint about the future, not a record of the past — that inversion
+    // is what sent one instruction twice.
+    if (await alreadyDelivered()) return
     if (await emptied()) return
+    // after the FIRST press only: give the durable write a window before pressing again, so a slow
+    // flush cannot manufacture a duplicate (#81) and a fast one cannot hide a swallowed send (#84)
+    if (round === 0 && await deliveredGraceMs(4_000)) return
     const sendEnabled = await send.count() > 0 && await send.first().isEnabled().catch(() => false)
     if (sendEnabled) await send.first().click({ force: true }).catch(() => undefined)
     else await page.keyboard.press('Enter')
@@ -182,13 +494,36 @@ export async function currentSessionId(page: Page): Promise<string | null> {
 
 const SESS_DIR = E2E_SESS_DIR
 
+/**
+ * The durable session log inside one session dir, WHICHEVER format the host writes.
+ *
+ * #54: 0.2.x persists `session.v4.jsonl.zstd`; the rig hardcoded `session.v3…` and every
+ * log-reading assertion silently returned '' — which reads as "the archive never landed"
+ * and sends you hunting a product bug that lives in a filename. The resolver takes the
+ * HIGHEST version present and refuses to guess when there is none.
+ */
+export function sessionLogFileFor(dir: string): string | null {
+  let best: { file: string; v: number } | null = null
+  let names: string[] = []
+  try { names = fs.readdirSync(dir) } catch { return null }
+  for (const n of names) {
+    const m = /^session\.v(\d+)\.jsonl\.zstd$/.exec(n)
+    if (m === null) continue
+    const v = Number(m[1])
+    if (best === null || v > best.v) best = { file: path.join(dir, n), v }
+  }
+  return best === null ? null : best.file
+}
+
 const sessDirs = (): string[] => { try { return fs.readdirSync(SESS_DIR) } catch { return [] } }
 
 /** full decoded session log for a session id ('' until the file exists). */
 export function sessionLogTextById(id: string): string {
   for (const dir of sessDirs()) {
     if (!dir.includes(id)) continue
-    try { return execFileSync('zstd', ['-dc', path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
+    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    if (f === null) return '' // no durable log yet — an empty answer is honest here, a guess is not
+    try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
       if (!zstdWarned) { zstdWarned = true; console.error(`e2e: zstd failed reading session log ${dir}: ${String((e as Error)?.message ?? e).slice(0, 160)}`) }
       return ''
     }
@@ -222,8 +557,8 @@ export function findSessionIdWhoseLogContains(fragment: string, prefix = ''): st
 function sessionLogFile(sid: string): string | null {
   for (const dir of sessDirs()) {
     if (!dir.includes(sid)) continue
-    const f = path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')
-    return fs.existsSync(f) ? f : null
+    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    return f !== null && fs.existsSync(f) ? f : null
   }
   return null
 }
@@ -233,7 +568,9 @@ function sessionLogFile(sid: string): string | null {
 export function freshestSessionLog(): { dir: string; file: string } | null {
   let best: { dir: string; file: string; m: number } | null = null
   for (const dir of sessDirs()) {
-    const file = path.join(SESS_DIR, dir, 'session.v3.jsonl.zstd')
+    const file0 = sessionLogFileFor(path.join(SESS_DIR, dir))
+    if (file0 === null) continue
+    const file = file0
     let m: number
     try { m = fs.statSync(file).mtimeMs } catch { continue }
     if (best === null || m > best.m) best = { dir, file, m }
@@ -266,7 +603,116 @@ export function logHasEvent(file: string, type: string, text?: string): boolean 
  * THAT SESSION: identity from localStorage, turn-complete = its own log's
  * own turn/end. Returns the session id for downstream durable assertions.
  */
-export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs = 20_000 | false): Promise<string> {
+/**
+ * The preset a session actually COMPOSED WITH, read from its own durable header.
+ *
+ * #56/#77, the find of the week: the profile pinned the preset under a row id the 0.2.x host no
+ * longer mounts (`agent-presets` survives only as a client UI section; the registry row is
+ * `agent-preset-registry`, whose `defaultId` is `selectedDefault ?? default`). Patch layers merge
+ * by id, so the row was inert, every boot ran `standard`, and the legs then waited 8 minutes for
+ * chapters that the realm had no engine to write — a product-shaped conclusion from an
+ * un-mounted product. The header is the cheapest possible place to see the truth, so the rig now
+ * looks, and says so in one sentence instead of an hour of polling.
+ */
+export function agentPresetFromLog(logText: string): string | null {
+  for (const line of logText.split('\n').slice(0, 4)) {
+    try {
+      const e = JSON.parse(line) as { type?: string, agentPreset?: string }
+      if (e?.type === 'session') return e.agentPreset ?? null
+    } catch { /* a partial write; keep looking at the next line */ }
+  }
+  return null
+}
+
+/** The words the tripwire says — a pure function so a unit row can read them without a browser. */
+export function presetMismatchMessage(sessionId: string, actual: string | null, expected: string): string {
+  return (
+    `e2e: session ${sessionId} composed with agentPreset=${JSON.stringify(actual)}, not "${expected}" — `
+    + 'the chapters realm (persona, ChaptersCompactionEngine, arrival-time artifacting, the turn/end signature '
+    + 'listener that first writes the registry) is NOT mounted in this boot, so every compaction-dependent '
+    + 'assertion below would be measuring an absent product. Fix: the profile pin must reach the row the pinned '
+    + 'host mounts — `- id: agent-preset-registry` with `selectedDefault: chapters` — and the realm config must '
+    + 'be pinned on `preset-chapters` (tests/e2e/rig-preset-pin.ts); see issues #56/#77.'
+  )
+}
+
+/** The precondition every chapters journey needs, asserted BEFORE its polls. */
+export function assertChaptersPreset(sessionId: string, expected = 'chapters'): void {
+  const preset = agentPresetFromLog(sessionLogTextById(sessionId))
+  if (preset === expected) return
+  throw new Error(presetMismatchMessage(sessionId, preset, expected))
+}
+
+/**
+ * Did a `/chapters-* report` command actually run and say something durable?
+ *
+ * #56 (`enrich`): the DOM poll for the word `pending` failed while the child's own log held
+ * `…pending: 0 chapter(s)` — the command ran, the surface just wasn't showing it, because the
+ * 0.2.x conversation list virtualizes. An assertion cannot tell "the feature is broken" from
+ * "the text is offscreen" unless it also reads the durable record, so it now does: predicate over
+ * decoded log text, wrapper that walks whatever sessions this boot created.
+ */
+export function commandResultSaysPending(logText: string): boolean {
+  if (logText === '') return false
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"command/done"')) continue
+    // Both report shapes carry the word: `pending: 0 chapter(s)` and `…; 0 pending`. No `\b`
+    // on the left: in a JSON-encoded log line a newline is the two characters `\n`, so
+    // `\npending` has a word character before it and a word-boundary pattern silently misses
+    // the exact case this predicate exists to catch (measured with a direct call). The
+    // `command/done` guard above is what keeps this from matching human text.
+    if (line.includes('pending')) return true
+  }
+  return false
+}
+
+/**
+ * Read ONE session's durable log by DIRECTORY path. Split out because the helper below used
+ * `sessionLogTextById(name)`, which resolves against the boot-port-derived home this module
+ * computed at import time — so pointed at any other tree it silently found nothing and returned
+ * false forever. A gate that can never pass is worse than a missing gate: it looks like the
+ * feature is broken.
+ */
+export function decodeSessionLogAt(sessionDir: string): string {
+  const f = sessionLogFileFor(sessionDir)
+  if (f === null) return ''
+  try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch { return '' }
+}
+
+export function reportPendingInDurableLog(dir: string = E2E_SESS_DIR): boolean {
+  let entries: string[] = []
+  try { entries = fs.readdirSync(dir) } catch { return false }
+  for (const name of entries) {
+    const text = decodeSessionLogAt(path.join(dir, name))
+    if (text !== '' && commandResultSaysPending(text)) return true
+  }
+  return false
+}
+
+/**
+ * How many host commands the composer ghost ran in this session (#79).
+ *
+ * The number is the point: with the feature OFF, the honest count is zero, and it was 4–26 per
+ * session because an effect depended on `props`. A durable count is the only assertion that
+ * survives a UI that looks correct while it polls.
+ */
+export function countGhostCommandRuns(logText: string): number {
+  if (logText === '') return 0
+  let n = 0
+  for (const line of logText.split('\n')) {
+    if (!line.includes('"command/run"')) continue
+    if (/"name":\s*"chapters-prompt"/.test(line)) n += 1
+  }
+  return n
+}
+
+/**
+ * #83's ratchet caught a real latent bug here: `actionGraceMs = 20_000 | false` was parsed as a
+ * BITWISE OR (evaluating to 20000), so the inferred parameter type was `number`, every `false` call
+ * site was a type error, and the `actionGraceMs !== false` branch below could never have run.
+ * A union needs a type annotation, not a pipe in the default position.
+ */
+export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs: number | false = 20_000): Promise<string> {
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))
       .find((b) => /New Session/i.test(b.textContent ?? '')) as HTMLButtonElement | undefined
@@ -292,14 +738,46 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     await page.waitForTimeout(2500)
   }
   const preSeq = sid !== null ? Math.max(0, ...logEvents(sessionLogTextById(sid)).map((e) => e.seq)) : 0
-  await typeComposer(page, question)
+  // #81: pass the authority down. If the durable log already carries this instruction as a
+  // human turn, the send landed — pressing again is what duplicated it last night.
+  await typeComposer(page, question, () => {
+    if (sid === null) return false
+    const t = sessionLogTextById(sid)
+    return t !== '' && humanMessageCarries(t, question)
+  })
   await expect(page.getByText(question.slice(0, 30), { exact: false }).first(), 'user message rendered (submit worked)').toBeVisible({ timeout: 30_000 })
   // drafts can persist under a FRESH id on first submit — re-read after the
   // send and adopt a rotation (measured: pre-send localStorage is the draft)
+  // #77's lesson, applied to the rig itself: the VIEW is not the truth. On a PRISTINE home the
+  // draft commits under a fresh id and `dsh.sessions.current` keeps reporting the draft — measured
+  // on the cold home: the needle landed at seq 10 and `turn/end` at seq 42 (28 s later, comfortably
+  // inside the poll) in session `c553d23b…`, while the spec watched `105939e9…`, a session that
+  // contains no human turn at all. So adoption must come from the durable log, with the view only as
+  // a hint. On warm homes the two agree and nothing changes.
   const rotated = await currentSessionId(page)
-  if (rotated !== null && rotated !== sid) sid = rotated
+  const adopted = adoptSessionForTurn({
+    candidates: [sid, rotated, await currentSessionId(page)],
+    needle: question,
+    readLog: sessionLogTextById,
+    discover: listRecentSessionIds,
+  })
+  if (adopted !== null) sid = adopted
   const needle = question.slice(0, 40)
-  await expect.poll(() => {
+  const turnSeen = (): boolean => {
+    // #77-class, and the measurement that ended three guesses: adoption used to run ONCE, right after
+    // the send — when the committed session often does not exist yet. The poll then watched the
+    // draft's (empty) log for twelve minutes while the turn completed in `session-5eb0bb60…`
+    // (needle at seq 10, `turn/end` at 39: a passing run that no predicate could see). The log
+    // decides for the WHOLE wait, so re-resolve on every interval, not just the first.
+    if (sid === null || sessionLogTextById(sid) === '' || !humanMessageCarries(sessionLogTextById(sid), needle)) {
+      const again = adoptSessionForTurn({
+        candidates: [sid],
+        needle: question,
+        readLog: sessionLogTextById,
+        discover: listRecentSessionIds,
+      })
+      if (again !== null) sid = again
+    }
     const text = sid !== null ? sessionLogTextById(sid) : ''
     if (text === '') return false
     const header = logHeaderId(text)
@@ -307,7 +785,23 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     const evs = logEvents(text)
     const mine = evs.find((e) => e.type === 'user/message' && e.seq > preSeq && e.raw.includes(needle))
     return mine !== undefined && evs.some((e) => e.type === 'turn/end' && e.seq > mine.seq)
-  }, { timeout: turnMs, intervals: [5000] }, 'this session\u2019s own log shows turn/end').toBe(true)
+  }
+  try {
+    await expect.poll(turnSeen, { timeout: turnMs, intervals: [5000] }, 'this session\u2019s own log shows turn/end').toBe(true)
+  } catch (error) {
+    // #61a, aimed at the rig: a poll that gives up after twelve minutes must not leave "which of
+    // these four facts was wrong?" to a stranger with a zstd binary. This exact message is what
+    // turned three guesses about the cold-home stall into one measurement.
+    const homes = listRecentSessionIds().slice(0, 4).map((id) => {
+      const text = sessionLogTextById(id)
+      if (text === '') return `${id}=unreadable`
+      const evs = logEvents(text)
+      const hit = evs.find((e) => e.type === 'user/message' && e.raw.includes(needle))
+      return `${id.slice(0, 18)}(maxSeq=${String(evs.reduce((m, e) => Math.max(m, e.seq), 0))},hasNeedle=${hit !== undefined}${hit !== undefined ? `@${String(hit.seq)}` : ''},turnEnds=${evs.filter((e) => e.type === 'turn/end').map((e) => String(e.seq)).join('|') || 'none'})`
+    })
+    console.error(`e2e: turn poll failed after ${String(turnMs)}ms — sid=${String(sid)} preSeq=${String(preSeq)} needle=${JSON.stringify(needle)} home=[${homes.join(' ')}]`)
+    throw error
+  }
   if (actionGraceMs !== false) {
     // Ensure the VIEW is on OUR session before UI assertions (measured 2026-09-24
     // on CI: the SPA navigated back to the previous spec's fork child during the
@@ -324,5 +818,11 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     }
     await expect(page.locator('button[aria-label="Fork with chapters"]').first(), 'assistant row exposes the fork action').toBeVisible({ timeout: actionGraceMs })
   }
+  // #56/#77 PRECONDITION, before any journey polls anything: did this session actually compose
+  // with the chapters preset? A durable log can take a moment to flush, so this waits for a
+  // READABLE header and then asserts the value — it never waits for the value to become true.
+  await expect.poll(() => sessionLogTextById(sid) !== '', { timeout: 60_000, intervals: [2000] },
+    `session ${sid} never produced a durable log to read its preset from`).toBe(true)
+  assertChaptersPreset(sid)
   return sid
 }

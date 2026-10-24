@@ -34,7 +34,11 @@ import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLi
 import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
+import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
+import { createPromptSurface, promptChaptersOf } from './prompt.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
+import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
+import { configureDiagnostics, diagnosticStatusLine } from './diag.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -78,6 +82,26 @@ export interface Config {
    */
   subagentAutoSave: boolean
   chapterLimit: number
+  /** Past `chapterTokenTarget × this` a door refuses the archive (#59). ≥1; 2 by default. */
+  chapterOversizeFactor: number
+  /**
+   * #61 loudness. How many warning TEXTS a door prints before switching to `…and M more`. The field
+   * failure was delivery, not detection: 86 warnings — naming a hollow chapter and an unarchived
+   * 0-4082 hole — reached a human as `(86 warning(s))`.
+   */
+  warningsDisplayCap: number
+  /**
+   * #61: token ceiling on the oversized-result candidate list `chapters_segment` returns. Measured at
+   * 49,932 chars emitted while ALSO reporting `Omitted 275266 bytes`, ≈81K est tokens into a 32K-class
+   * window — the model was asked to judge a list it never received.
+   */
+  segmentCandidateCapTokens: number
+  /**
+   * #61: where door/child failures are appended. Empty (the default) resolves to
+   * `<store-root>/diagnostics.log`; the literal `off` disables the file sink, and
+   * `DSH_CHAPTERS_ENGINE_ERRORS` overrides everything. Before this, unset meant NO TRACE ON DISK.
+   */
+  diagnosticsLog: string
   /** Plans (docs/plans-carriage.md § 7): verbatim plan chars shown in a chapter,
    * the tool-call-argument artifact floor (0 = off), and whether the notice
    * carries the `## Plans on this path` block. */
@@ -106,6 +130,9 @@ export interface Config {
   /** 'provider/model' or '' = conversation/stored route (record §6). */
   enrichmentModel: string
   enrichmentIdleMs: number
+  /** One auxiliary completion budget: annotation+mining and the conflicts report.
+   * Must cover reasoning tokens, not just the visible JSON (record §6.1, #50). */
+  enrichmentMaxTokens: number
   enrichmentBatchCap: number
   /** P2 §6.3 vocabulary pass (shadow by default). */
   vocabApply: boolean
@@ -115,6 +142,34 @@ export interface Config {
   coreRulesBudgetTokens: number
   /** P3 §8: search bonus for effective-core rules (per-machine status). */
   rulesCoreBonus: number
+  /** #50 §7.5: deterministic `ADD RULE:` capture into the local session tier. */
+  sessionRulesEnabled: boolean
+  /** #50 §7.5: the capture marker, matched at line start of human messages. */
+  rulesMarkerPrefix: string
+  /** #50 §7.4: per-tier count caps on rules rendered into a rebuilt head. */
+  projectRulesDisplayCap: number
+  /** #50 §7.4: session-tier display cap. */
+  sessionRulesDisplayCap: number
+  /** #50 §7.4: topic-overlap selection on; off ⇒ deterministic category→id order. */
+  rulesRelevance: boolean
+  /** #50 §7.5: mine standing orders during enrichment. Default ON — background
+   * capture is the whole point; the verbatim-quote gate (not a click) is what
+   * keeps a guess from steering a session. */
+  rulesEnrichment: boolean
+  /** #50 §7.5: per-chapter cap on mined rules. */
+  rulesMinedPerChapter: number
+  /** #50 §7.5: mined rules govern on arrival (default true); false holds them for review. */
+  rulesAutoActivate: boolean
+  /** #50 §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass. */
+  rulesModel: string
+  /** #71 site §28: the model that DEFINES the next work. '' ⇒ the feature does
+   * not exist; setting one (here or `/chapters-prompt model …`) IS the enable —
+   * one knob, no second boolean that could drift against it. */
+  promptModel: string
+  /** #71: hard total budget on the assembled suggest input. */
+  promptContextChars: number
+  /** #71: cap on the recommendation itself; over-cap ⇒ retry once ⇒ refuse (never truncate). */
+  promptMaxChars: number
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -147,6 +202,12 @@ export const Config = Schema.object({
   // the row registered from code it belongs to THIS config, so a profile patch retunes it.
   compactionThresholdRatio: Schema.number().default(0.9),
   artifactStoreRoot: Schema.string().default('.dsh-chapters'),
+  // #85: pool-mirror root for rules/knowledge reads that produce model-visible text.
+  knowledgeMirrorDir: Schema.string().default('.dsh-knowledge'),
+  // #87: the newest human turn carried verbatim into a relief summary, capped.
+  openRequestCarryMaxChars: Schema.number().step(1).min(200).default(4000),
+  // #78 A: survivability switch, default on (docs/host-compaction-seam.md).
+  lastResortArtifact: Schema.boolean().default(true),
   chapterTokenTarget: Schema.number().default(8000),
   toolResultDeferFloorTokens: Schema.number().default(200),
   // Share of the window REMAINING after the header bound — never of the
@@ -157,6 +218,10 @@ export const Config = Schema.object({
   mergeThreshold: Schema.number().default(0.3),
   subagentAutoSave: Schema.boolean().default(true),
   chapterLimit: Schema.number().default(8000),
+  chapterOversizeFactor: Schema.number().default(2),
+  warningsDisplayCap: Schema.number().default(6),
+  segmentCandidateCapTokens: Schema.number().default(4000),
+  diagnosticsLog: Schema.string().default(''),
   // Plans (docs/plans-carriage.md § 7). A plan's full text is ALWAYS
   // artifact-backed, so planInlineChars is display economy and never a data
   // decision. callArgArtifactTokens defaults to 0 = OFF: turning it on changes
@@ -188,12 +253,31 @@ export const Config = Schema.object({
   enrichmentEnabled: Schema.boolean().default(true),
   enrichmentModel: Schema.string().default(''),
   enrichmentIdleMs: Schema.number().default(60000),
+  enrichmentMaxTokens: Schema.number().default(ENRICH_MAX_TOKENS_DEFAULT),
   enrichmentBatchCap: Schema.number().default(5),
   vocabApply: Schema.boolean().default(false),
   vocabCoMin: Schema.number().default(3),
   vocabOverlapMin: Schema.number().default(0.5),
   coreRulesBudgetTokens: Schema.number().default(1200),
   rulesCoreBonus: Schema.number().default(0.15),
+  // #50 §7.3–§7.5: the session tier + per-tier display caps. The three the
+  // checkpoint also needs are mirrored into the engine row (docs/configuration).
+  sessionRulesEnabled: Schema.boolean().default(true),
+  rulesMarkerPrefix: Schema.string().default('ADD RULE:'),
+  projectRulesDisplayCap: Schema.number().default(12),
+  sessionRulesDisplayCap: Schema.number().default(12),
+  rulesRelevance: Schema.boolean().default(true),
+  rulesEnrichment: Schema.boolean().default(true),
+  rulesMinedPerChapter: Schema.number().default(3),
+  rulesAutoActivate: Schema.boolean().default(true),
+  rulesModel: Schema.string().default(''),
+  // #71 prompt recommendations: the model IS the switch (empty ⇒ off); the two
+  // caps bound the auxiliary call's input slice and its answer. The completion
+  // rides the existing enrichmentMaxTokens budget — one auxiliary budget, now
+  // three consumers (annotation, mined rules, recommendations).
+  promptModel: Schema.string().default(''),
+  promptContextChars: Schema.number().default(4000),
+  promptMaxChars: Schema.number().default(240),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -224,6 +308,14 @@ const PKG_ROOT = join(HERE, '..')
 const heldDisposers: Array<() => Promise<void>> = []
 
 export async function apply(ctx: HostCtx, config: Config): Promise<void> {
+  // #61: the diagnostics sink defaults ON. An operator who set `diagnosticsLog` in the profile gets
+  // that path; `DSH_CHAPTERS_ENGINE_ERRORS` beats it; the literal `off` is the only silence. With
+  // neither set, the FIRST door that touches a project resolves `<store-root>/diagnostics.log`
+  // (ensureDiagnosticsDefault in tools/engine), which is why nothing is configured here yet — the
+  // three SAIP compaction finalization failures left no trace precisely because the sink had to be
+  // turned on before it could help.
+  if (config.diagnosticsLog !== '') configureDiagnostics(config.diagnosticsLog)
+
   // § Preset delivery lives in `src/preset.ts` — the `preset-chapters` declaration row in
   // this bundle's patch, NOT here. A row is visible (`dsh --dump-default-config`, the config
   // editor, `list_plugins`), overridable and disable-able from a profile patch, and its
@@ -270,7 +362,29 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         model: config.enrichmentModel,
         trigger: 'manual',
         idleMs: config.enrichmentIdleMs,
+        maxTokens: config.enrichmentMaxTokens,
         batchCap: config.enrichmentBatchCap,
+        mineRules: config.rulesEnrichment,
+        mineCap: config.rulesMinedPerChapter,
+        rulesAutoActivate: config.rulesAutoActivate,
+        rulesModel: config.rulesModel,
+      },
+      // §7.5 host-plane sink: `/chapters-enrich run` drains here, so a manual run
+      // mines exactly like the realm's auto pass. Local files only — nothing is
+      // armed on the scheduler, because session rules never travel (§7.5).
+      onMinedRules: async ({ cwd, sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
+        const res = captureMinedRules({
+          storeDir: join(cwd, config.artifactStoreRoot),
+          harnessId: config.harnessId,
+          sessionId,
+          records: store.rules(),
+          humanText,
+          rules,
+          maxPerChapter: max,
+          chapterNumber,
+          autoActivate,
+        })
+        return { written: res.ids.length, stated: res.stated, inferred: res.inferred, pending: res.pending }
       },
       fetch: async (prompt, route) => {
         if (route === null) throw new Error('no enrichment route resolvable (set /chapters-enrich model … or run a turn first)')
@@ -280,13 +394,48 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         for await (const chunk of llm.stream({
           provider: route.provider, model: route.model,
           messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
-          maxTokens: 900,
+          maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
         })) assembler.push(chunk as never)
         return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
       },
       conversationRoute: () => hostRoute,
       log: (m) => ctx.logger?.info?.(`dsh-chapters: ${m}`),
+      warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
+    })
+    // #71: prompt recommendations, host plane only (the web composer pulls;
+    // headless sessions have no ghost and never pay the call). The route for a
+    // bare model name rides the same last-seen route enrichment uses, with the
+    // persisted route as fallback — a fork-only flow that never compacted in
+    // place still has a provider to route through after one tool call.
+    const prompt = createPromptSurface({
+      getSetting: (k) => store.getSetting(k),
+      putSetting: (k, v) => store.putSetting(k, v),
+      deleteSetting: (k) => store.deleteSetting(k),
+      chaptersOf: async (sessionId) => promptChaptersOf(await store.get(sessionId)),
+      config: {
+        model: config.promptModel,
+        contextChars: config.promptContextChars,
+        maxChars: config.promptMaxChars,
+      },
+      conversationRoute: () => {
+        if (hostRoute !== null) return hostRoute
+        const persisted = store.getSetting('enrichment.route') ?? ''
+        const i = persisted.indexOf('/')
+        return i > 0 ? { provider: persisted.slice(0, i), model: persisted.slice(i + 1) } : null
+      },
+      fetch: async (input, route) => {
+        const llm = ctx.llm
+        if (llm?.stream === undefined) throw new Error('llm.stream absent')
+        const assembler = new BlockAssembler()
+        for await (const chunk of llm.stream({
+          provider: route.provider, model: route.model,
+          messages: [createUserMessage({ content: [{ type: 'text', text: input }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+          maxTokens: config.enrichmentMaxTokens,
+          purpose: 'compaction',
+        })) assembler.push(chunk as never)
+        return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+      },
       warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
     })
     const scheduler = createScheduler(store, domain, config, undefined, (cwd, ok) => {
@@ -301,6 +450,9 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       fallbackPreset: config.fallbackPreset,
       mergeThreshold: config.mergeThreshold,
       chapterLimit: config.chapterLimit,
+      chapterOversizeFactor: config.chapterOversizeFactor,
+      warningsDisplayCap: config.warningsDisplayCap,
+      segmentCandidateCapTokens: config.segmentCandidateCapTokens,
       planInlineChars: config.planInlineChars,
       callArgArtifactTokens: config.callArgArtifactTokens,
       plansInNotice: config.plansInNotice,
@@ -310,6 +462,13 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       harnessId: config.harnessId,
       coreRulesBudgetTokens: config.coreRulesBudgetTokens,
       rulesCoreBonus: config.rulesCoreBonus,
+      // #50 §7.4 — the doors read the HOST plane; the compaction checkpoint reads
+      // the realm row (same names, same defaults). There is no cross-plane channel
+      // to inject host config into a preset row, so a profile that overrides a cap
+      // sets it in both places; leaving one unset keeps the documented default.
+      projectRulesDisplayCap: config.projectRulesDisplayCap,
+      sessionRulesDisplayCap: config.sessionRulesDisplayCap,
+      rulesRelevance: config.rulesRelevance,
       scheduler,
       noteRoute: (r) => {
         hostRoute = r
@@ -321,9 +480,11 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       artifactStoreRoot: config.artifactStoreRoot,
       subagentAutoSave: config.subagentAutoSave,
       harnessId: config.harnessId,
+      projectKeyOverride: config.projectKeyOverride,
       scheduler,
       enrich,
-      rules: (cwd, args) => rulesCommand({
+      prompt,
+      rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,
         storeRoot: config.artifactStoreRoot,
         harnessId: config.harnessId,
@@ -332,6 +493,61 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         mirrorDir: (c) => join(c, DEFAULT_CLONE_DIR),
         syncNow: async (c) => { try { await scheduler.run(c, 'rules') } catch { /* status file records it */ } },
         now: () => new Date(),
+        // #50 §7.5: the session tier activates by ancestry, so the surface needs
+        // the tree the caller is sitting on. No sessionId ⇒ `active` reports the
+        // session tier UNRESOLVED rather than guessing an empty path.
+        // #52: the SAME walk every door renders with — registry links plus the host
+        // header's delegation edge — so `active` can never describe a view the head
+        // will not show. One walk, memoized: two answers about one ancestry is how
+        // a surface starts disagreeing with itself.
+        ...(sessionId !== undefined ? (() => {
+          const parentOf = makeHeaderParentReader((name) => { try { return ctx.get?.(name) } catch { return undefined } })
+          let once: Promise<{ ancestors: Set<string>; truncated: boolean }> | null = null
+          const walk = async () => {
+            if (once === null) {
+              once = ruleAncestorSet({
+                seeds: [sessionId],
+                registryAncestors: async (id) => await ancestorSessionIds(async (s) => await store.get(s), id),
+                ...(parentOf !== undefined ? { parentOf } : {}),
+              })
+            }
+            return await once
+          }
+          return {
+            ancestors: async () => (await walk()).ancestors,
+            ancestryTruncated: async () => (await walk()).truncated,
+          }
+        })() : {}),
+        // §7.3/§7.4: the SAME numbers the doors render with, so `active` can never
+        // describe a view the head will not show.
+        budgetTokens: config.coreRulesBudgetTokens,
+        projectCap: config.projectRulesDisplayCap,
+        sessionCap: config.sessionRulesDisplayCap,
+        // §7.5: the review surface reads the same activation posture the ladder uses
+        // (so `active` can say whether mined rules govern on arrival), and `model`
+        // sets a dedicated mining model through the shared settings table.
+        autoActivate: config.rulesAutoActivate,
+        settings: {
+          get: (k) => store.getSetting(k),
+          put: async (k, v) => { await store.putSetting(k, v) },
+        },
+        // §7.7: ONE bounded call, report-only, reusing the conversation route (and
+        // therefore the conversation's own cached prefix). An explicit exception to
+        // zero-inference in the elicitedPlot family — never a mutation.
+        ask: async (prompt) => {
+          const route = hostRoute
+          if (route === null) throw new Error('no conversation route yet — run a turn first')
+          const llm = ctx.llm
+          if (llm?.stream === undefined) throw new Error('llm.stream absent')
+          const assembler = new BlockAssembler()
+          for await (const chunk of llm.stream({
+            provider: route.provider, model: route.model,
+            messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+            maxTokens: config.enrichmentMaxTokens,
+            purpose: 'compaction',
+          })) assembler.push(chunk as never)
+          return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+        },
       } satisfies RulesIo, args),
     })
 
@@ -353,6 +569,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
         mergeThreshold: config.mergeThreshold,
         chapterLimit: config.chapterLimit,
+        chapterOversizeFactor: config.chapterOversizeFactor,
         planInlineChars: config.planInlineChars,
         callArgArtifactTokens: config.callArgArtifactTokens,
         scheduler,
@@ -591,6 +808,7 @@ async function witness(
   const out: Record<string, unknown> = { at: new Date().toISOString() }
   try {
     out.storageDomainPresent = ctx.get?.('storageDomain') !== undefined
+    out.diagnostics = diagnosticStatusLine()
     // What this host's preset mechanism IS, and what the roster says about the
     // chapters preset. These two lines are the difference between "the preset files
     // are installed" (true, and meaningless on a declaration-row host) and "the

@@ -56,6 +56,31 @@
 #   # ---- chapters & composition ----------------------------------------
 #   chapterTokenTarget: 8000       # soft per-chapter size target
 #   chapterLimit: 8000             # hard split threshold
+#   warningsDisplayCap: 6            # how many warning TEXTS a door prints before '…and M more' (#61).
+#                                  #   The field failure was delivery: 86 warnings — naming a hollow
+#                                  #   chapter and an unarchived 0-4082 hole — reached a human as
+#                                  #   '(86 warning(s))'. A count is not a message.
+#   segmentCandidateCapTokens: 4000 # ceiling on chapters_segment's oversized-result candidate list (#61):
+#                                  #   it emitted 49,932 chars while reporting 'Omitted 275266 bytes',
+#                                  #   ~81K est tokens into a 32K window. Ranked by size DESC, so the cap
+#                                  #   removes the small stuff, and the response names what was withheld.
+#   diagnosticsLog: ''             # where door/child failures are appended (#61). Empty ⇒ the FIRST door
+#                                  #   that touches a project resolves <store-root>/diagnostics.log;
+#                                  #   DSH_CHAPTERS_ENGINE_ERRORS overrides it; the literal 'off' is the
+#                                  #   only silence. Before this, unset meant NO TRACE ON DISK — the three
+#                                  #   SAIP compaction finalization failures left none.
+#   childAutoArchive: true           # the seventh archive moment (#61): a ch-* continuation child is not a
+#                                  #   subagent, so door 5 never sees it. `ch-dc3be3ab` reached 2,363
+#                                  #   events and 3 completed turns with chapters: [] — nothing failed,
+#                                  #   NO MOMENT WAS WATCHING. Set false to close this door.
+#   childAutoArchiveMinTurns: 4    # after the first archive, how many unarchived completed turns re-arm it
+#                                  #   (the first archive always fires: never-archived is the defect).
+#   chapterOversizeFactor: 2       # hard oversize multiple of chapterTokenTarget (#59): over the
+#                                  #   TARGET warns ("split at the next boundary, never clip"), over
+#                                  #   target × factor every door REFUSES with its numbers before
+#                                  #   reserving one. The field shipped an 89,982-token chapter and a
+#                                  #   237,870-token orphan against an 8K target; a chapter nobody can
+#                                  #   re-read is not an archive. 0/unset behaviour = warn only.
 #   mergeThreshold: 0.3            # τ for merging turns into one chapter at
 #                                  # archive time. Composition is archive-time
 #                                  # only: tune for future archives.
@@ -104,6 +129,16 @@
 #                                  # THIS machine (approval = per-machine
 #                                  # curation fact, record §15)
 #
+#   # ---- prompt recommendations (#71, site §28) ----------------------------
+#   promptModel: ''                # the model that DEFINES the next work.
+#                                  # '' ⇒ the feature does not exist (zero calls,
+#                                  # zero surface); setting one IS the enable.
+#                                  # Runtime: /chapters-prompt model <p/m|clear>
+#   promptContextChars: 4000       # hard budget on the assembled input slice
+#                                  # (chapter summaries + screened live tail)
+#   promptMaxChars: 240            # cap on the recommendation; over-cap ⇒ retry
+#                                  # once ⇒ refuse with numbers, never truncate
+#
 #   # ---- transport (2026-09-21 provider-seam amendment) -------------------
 #   knowledgeProvider: 'auto'      # 'auto' | 'git' | 'treedx'; 'auto' dispatches
 #                                  # on the remote scheme (treedx+ → TreeDX),
@@ -115,6 +150,18 @@
 #   treedxLeaseRetryDelayMs: 1000  # delay between lease retries
 #
 # Realm-row-only keys (in the preset's engine row, not this patch):
+#   harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   enrichmentMaxTokens (4000 — one auxiliary completion budget; sized to cover
+#   reasoning tokens, since the measured route reports reasoning inside completion usage
+#   and does not enforce max_tokens)
+#   rulesEnrichment (true — the ladder mines standing orders),
+#   rulesMinedPerChapter (3), rulesAutoActivate (true — mined inferences govern on
+#   arrival; false holds them for approve), rulesModel ('' — or a dedicated
+#   'provider/model' for mining, one extra bounded call per chapter),
+#   projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance  (#50 §7/§7.5 —
+#   the realm plane owns what an in-place checkpoint renders; the host plugin config
+#   owns what a continuation notice renders; same names, same defaults, set both to
+#   diverge from the default)
 #   thresholdRatio, retainRatio, retainTokens, maxTokens, compactionRetries,
 #   maxOverflowRetries, auto, summarizationProvider/summarizationModel (legacy
 #   override), enrichmentTrigger (afterPush|idle|both|manual),
@@ -169,7 +216,8 @@
             name: '@deepseek-ai/dsh-persona'
             config:
               prefix: You are a coding agent powered by the {{model}} model.
-              suffix: "When a task spans multiple turns, end each reply with one line beginning 'PLOT:' (max 60 words — objective, current hypothesis, immediate next step). A checkpoint carries this plot forward; if it looks stale, revise it on your next plot line."
+              suffix: "When a task spans multiple turns, end each reply with one line beginning 'PLOT:' (max 60 words — objective, current hypothesis, immediate next step). A checkpoint carries this plot forward; if it looks stale, revise it on your next plot line.\n\n## Chapters memory and rules\nThis session keeps an archive of its own history, and a rule tier on top of it.\nBefore starting a task, run `chapters_rules` with the task description: it returns the standing orders in force here — project rules your team approved, plus session rules captured from this conversation, including ones nobody spelled out (each says which). Name the rules you actually followed, or say none; a rule cited wrongly twice is one the human revokes with a single command.\nWhen you need earlier work, a past decision, or bug history, run `chapters_search` FIRST — before re-reading files or asking the human. Read a cited chapter for the exact bytes; `chapters_artifact` holds the oversized tool outputs.\nDelegated subagents are covered by the same rules and the same archive: a child inherits the orders of the session that delegated it, so query them rather than assuming a fresh start."
+
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'
             config:

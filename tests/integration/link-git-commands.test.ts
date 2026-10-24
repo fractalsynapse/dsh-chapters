@@ -167,3 +167,32 @@ test('/chapters-rule dispatches to the rules surface with cwd + raw args', async
   const r = await rule.handler({ agent: agent(), rawInput: 'list --proposed' })
   assert.match(r.text ?? '', /rules@.*list --proposed/)
 })
+
+test('#50 §7.8 /chapters-status reports the identity the rules namespace derives from', async () => {
+  const r = await status().handler({ agent: agent() })
+  const t = r.text ?? ''
+  assert.match(t, /^Identity: /m, 'the key derivation is a reported fact, not an assumption')
+  // EITHER outcome is honest; what is forbidden is silence. This fixture's
+  // workspace has a bound record but no .git of its own, so the key genuinely
+  // resolves path-derived here — the row caught that the first draft asserted the
+  // wrong branch of a working feature, not a bug in it.
+  assert.match(t, /matches the bound key|THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY/, t)
+})
+
+test('#50 §7.8 a checkout resolving a DIFFERENT key is flagged, not silently private', async () => {
+  // The divergence class: a bound record whose projectKey no longer matches what
+  // this cwd derives (a fork listed first, a pool re-link, a path-derived
+  // fallback). Silence here means a developer working all day under rules the
+  // team approved elsewhere, believing they apply.
+  const rec = [...projects.values()].find((p) => p.cwd === ws())
+  assert.ok(rec !== undefined)
+  const real = rec!.projectKey
+  rec!.projectKey = 'deadbeef-0000-0000-0000-000000000000'
+  try {
+    const t = (await status().handler({ agent: agent() })).text ?? ''
+    assert.match(t, /THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY/, t)
+    assert.match(t, /will NOT appear here/, t)
+  } finally {
+    rec!.projectKey = real
+  }
+})

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # CI acceptance: replay the committed model tapes — no local model, no GPU, no
 # LLM API key. Every model turn is served by tests/e2e/model-proxy.ts from the
-# committed corpus under tests/fixtures/model-tape/<project>/ (eight projects:
-# suite, fork, heavy, arrival, enrich, fanout, rules, plans). A tape MISS is a loud proxy
+# committed corpus under tests/fixtures/model-tape/<project>/ (nine projects:
+# suite, fork, heavy, arrival, enrich, fanout, rules, plans, prompt). A tape MISS is a loud proxy
 # 503 that fails the run; with E2E_MODEL=replay (and no E2E_TAPE_FALLBACK=1)
 # the proxy never reaches a live server — this proves the acceptance suite
 # green on a machine with no model present.
@@ -18,9 +18,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# ONE source of truth for the host version this plugin is verified against.
-# The whole acceptance ledger was measured on exactly this; bump deliberately.
-DSH_HOST_VERSION="${DSH_HOST_VERSION:-0.1.5-rc.1}"
+# ONE source of truth for the host version this plugin is verified against — and it is
+# the host LOCK, not a literal here. The comment used to claim "one source" while a second
+# copy of the version sat in this file next to dev/dsh-host-lock/package.json and
+# .github/workflows/ci.yml, which is precisely how #54 found the pin stale in three places:
+# the lock moves, the chain does not, and the mismatch check then (correctly) refuses to run.
+# Bump deliberately: change dev/dsh-host-lock/package.json, resolve, re-distill the tapes.
+DSH_HOST_VERSION="${DSH_HOST_VERSION:-$(node -p "require('./dev/dsh-host-lock/package.json').dependencies['@deepseek-ai/dsh']")}"
 
 command -v dsh >/dev/null 2>&1 || {
   echo "ci-replay: 'dsh' not on PATH. Install the hermetic host lock first:" >&2
@@ -63,9 +67,9 @@ npm run build
 # Chromium for Playwright, cached in the workspace so it survives across steps.
 PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
 
-# Strict tape replay across all EIGHT projects (seven model-distilled + the plans
-# carriage, whose tape is scripted-upstream distilled — tests/fixtures/model-tape/plans/
-# PROVENANCE.md); any miss fails the chain.
+# Strict tape replay across all NINE projects (seven model-distilled + the plans
+# carriage and the prompt ghost, whose tapes are scripted-upstream distilled —
+# tests/fixtures/model-tape/*/PROVENANCE.md); any miss fails the chain.
 #
 # A red chain has to name its project (the lesson of the 0.1.9 ship): playwright's
 # diagnosis goes to stdout, the job's other artifact is behind a token, and "Process
@@ -107,4 +111,4 @@ if [[ "$STATUS" -ne 0 ]]; then
   echo "::error::${DIAG:0:16000}"
   exit "$STATUS"
 fi
-echo "ci-replay: PASS — eight browser projects replayed green on committed tapes, no LLM present."
+echo "ci-replay: PASS — nine browser projects replayed green on committed tapes, no LLM present."

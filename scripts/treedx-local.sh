@@ -22,7 +22,23 @@ die() { echo "treedx-local: $*" >&2; exit 1; }
 preflight() {
   command -v docker >/dev/null 2>&1 || die "docker is not installed. The TreeDX dev loop needs it (see docs/development.md § TreeDX dev loop)."
   docker info >/dev/null 2>&1 || die "the docker DAEMON is not running. Start it (e.g. 'systemctl start docker' — may need sudo), then re-run: $0 up"
-  [ -f "$SRC/Dockerfile" ] || die "no TreeDX checkout at $SRC. It is gitignored (examples/ are reference clones); clone treeseed-ai/treedx there first."
+  # The checkout is a CONSUMED dependency of this loop, not an optional extra: the
+  # compose file builds TreeDX from source. Missing it used to be a dead end with a
+  # message telling a human to clone a repo whose URL was nowhere on screen (#54).
+  # Public repo, so the loop can simply take it — depth 1, nothing else about the
+  # environment is touched, and a half-populated directory is refused rather than
+  # overwritten (a partial clone would fail later, inside the image build, where the
+  # cause is invisible).
+  if [ ! -f "$SRC/Dockerfile" ]; then
+    if [ -d "$SRC" ] && [ -n "$(ls -A "$SRC" 2>/dev/null)" ]; then
+      die "$SRC exists but has no Dockerfile — it is not a TreeDX checkout (or is half-cloned). Inspect or remove it, then re-run: $0 up"
+    fi
+    if ! command -v git >/dev/null 2>&1; then die "no git to clone treeseed-ai/treedx into $SRC"; fi
+    echo "no TreeDX checkout at $SRC — cloning ${TREEDX_REPO_URL:-https://github.com/treeseed-ai/treedx.git} (depth 1; examples/ is gitignored)"
+    mkdir -p "$(dirname "$SRC")"
+    git clone --depth 1 "${TREEDX_REPO_URL:-https://github.com/treeseed-ai/treedx.git}" "$SRC"       || die "clone failed — check network/URL, or clone by hand: git clone ${TREEDX_REPO_URL:-https://github.com/treeseed-ai/treedx.git} $SRC"
+    [ -f "$SRC/Dockerfile" ] || die "cloned, but $SRC still has no Dockerfile — the repo moved? (TREEDX_REPO_URL overrides)"
+  fi
 }
 
 # token/smoke/status need only the HTTP endpoint (NOT the docker CLI): an

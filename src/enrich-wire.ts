@@ -21,8 +21,21 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
-import { buildEnrichInput, parseEnrichResult, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark } from './enrich.ts'
+import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
+import { resolveStoredPath } from './archive.ts'
+
+/** The row shape the ladder may read and re-write — structural, never the registry's own type. */
+interface ChapterRowItem {
+  number: number
+  path?: string | undefined
+  title?: string | undefined
+  summary?: string | undefined
+  topics?: string[] | undefined
+  generated?: Record<string, GeneratedMark[]> | undefined
+  sha256?: string | undefined
+}
+interface ChapterRow { chapters: ChapterRowItem[] }
 
 export interface EnrichConfig {
   enabled: boolean
@@ -31,12 +44,39 @@ export interface EnrichConfig {
   trigger: 'afterPush' | 'idle' | 'both' | 'manual'
   idleMs: number
   batchCap: number
+  /** One auxiliary completion budget (see enrich.ts: reasoning tokens are counted) */
+  maxTokens?: number | undefined
+  /**
+   * #50 §7.5: mine standing orders out of each annotated chapter. `undefined`
+   * means ON — the point of the tier is that the human does not have to think
+   * about it; what a mined rule needs is not a click but a VERBATIM QUOTE of the
+   * human's own words, enforced at activation, and a list one command away.
+   */
+  mineRules?: boolean | undefined
+  /** per-chapter cap on mined rules (§7.5: few, short, traceable) */
+  mineCap?: number | undefined
+  /**
+   * §7.5 policy (amended 2026-10-21): may a mined rule govern on arrival? Default
+   * TRUE — inferring a standing order nobody spelled out is the point of the tier.
+   * False holds every mined rule as `reviewOnly` until a human approves it here.
+   */
+  rulesAutoActivate?: boolean | undefined
+  /**
+   * §7.5: a model of its own for rule mining ('provider/model', or a bare model
+   * name on the current provider). Empty ⇒ mine inside the SAME annotation call,
+   * which costs no extra inference. Set it and mining becomes a second bounded call
+   * per chapter — the honest way to say governance deserves a better model than
+   * annotation does.
+   */
+  rulesModel?: string | undefined
 }
 
 export interface EnrichWiringDeps {
   store: {
     get(id: string): Promise<{ chapters: { number: number; path: string; title: string; summary: string; topics: string[]; sha256: string; generated?: Record<string, GeneratedMark[]> }[] }>
-    put(id: string, state: unknown): Promise<void>
+    put(id: string, state: unknown, expectedRev?: number): Promise<void>
+    /** #59: the ladder's whole-row write must run as one section over a FRESH read. */
+    mutate(id: string, fn: (state: ChapterRow) => ChapterRow | Promise<ChapterRow>): Promise<unknown>
     sessions(): IterableIterator<[string, unknown]>
     getSetting(key: string): string | undefined
     putSetting(key: string, value: string): Promise<void>
@@ -47,6 +87,13 @@ export interface EnrichWiringDeps {
   fetch(prompt: string, route: { provider: string, model: string } | null): Promise<string>
   /** route resolution when neither override nor config names one (realm: live agent; host: persisted) */
   conversationRoute(): { provider: string, model: string } | null
+  /**
+   * #50 §7.5 sink: the plane that owns disk + identity + the registry writes the
+   * mined candidates. enrich-wire stays model-plumbing only — it hands over the
+   * chapter's human bytes and the candidates and reports what happened. Absent ⇒
+   * mining is WARNED as unwired, never silently dropped.
+   */
+  onMinedRules?: ((args: { cwd: string; sessionId: string; chapterNumber: number; humanText: string; rules: readonly MinedRuleOut[]; max: number; autoActivate: boolean }) => Promise<{ written: number; stated: number; inferred: number; pending: number }>) | undefined
   scheduler?: { schedule(cwd: string, why: string): void }
   log(m: string): void
   warn(m: string): void
@@ -82,17 +129,70 @@ export function renderGeneratedBlock(gen: GeneratedProvenance): string {
     if (chain === undefined || chain.length === 0) continue
     lines.push(`  ${key}:`)
     for (const m of chain) {
-      if (m.by === 'model') lines.push(`    - by: model`, `      model: ${m.model}`, `      at: ${m.at ?? ''}`)
+      if (m.by === 'model') lines.push(
+        `    - by: model`,
+        `      model: ${m.model}`,
+        `      at: ${m.at ?? ''}`,
+        // #61: which build wrote it. Absent on records from before the field existed — rendering
+        // `pluginVersion: undefined` would be a lie about a legacy row.
+        ...(m.pluginVersion !== undefined && m.pluginVersion !== '' ? [`      pluginVersion: ${m.pluginVersion}`] : []),
+      )
       else lines.push(`    - by: deterministic`)
     }
   }
   return '\n' + lines.join('\n')
 }
 
+/**
+ * The HUMAN bytes of a chapter, and only these. The annotator input splits the
+ * body on user-role markers and slices(1) — which leaves every chunk RUNNING ON
+ * into the
+ * assistant reply that follows it, so it is not a set of user turns. For the
+ * verbatim-quote gate (§7.5) that distinction is the whole mechanism: a quote
+ * found in assistant prose is the model restating an instruction (the
+ * amplification path), never evidence a human gave one. So each chunk is cut at
+ * the next role marker before it is offered as evidence.
+ */
+export function humanBytesOf(body: string): string {
+  const out: string[] = []
+  // walk: a role label, then its text until the NEXT label
+  const re = /\*\*(User|Assistant)[^*\n]*:\*\*/g
+  let m: RegExpExecArray | null
+  const marks: { role: string; start: number; end: number }[] = []
+  while ((m = re.exec(body)) !== null) marks.push({ role: m[1]!, start: m.index, end: m.index + m[0].length })
+  for (let i = 0; i < marks.length; i += 1) {
+    if (marks[i]!.role !== 'User') continue
+    const next = i + 1 < marks.length ? marks[i + 1]!.start : body.length
+    const text = body.slice(marks[i]!.end, next)
+    if (text.trim() !== '') out.push(text.trim())
+  }
+  return out.join('\n')
+}
+
 type ChapterLike = { number: number; title: string; generated?: Record<string, { by: string; model?: string }[]> }
+/**
+ * The ONE "does this chapter still need annotating?" test, used by BOTH the queue and `pendingCount`
+ * (#61). They were two hand-written loops over `chaptersOf` that had already drifted in shape, and the
+ * missing half was the minimum-content gate: five model calls in the field were spent titling husks
+ * ("Empty conversation span with unknown events and zero-byte results") — money thrown at nothing to
+ * annotate, and worse, the AI rename replaced a `FRAGMENT_TITLE`-shaped title so `indexing.ts` could no
+ * longer stitch adjacent legacy fragments (indexing.ts:43). So an empty chapter is not a candidate, and
+ * its deterministic title survives to be stitched.
+ */
+export function isPendingChapter(
+  c: { messages?: number; generated?: { title?: { by: string; model?: string }[] } },
+  modelKey: string,
+): boolean {
+  if ((c.messages ?? 1) === 0) return false
+  const top = c.generated?.title?.[0]
+  return !(top?.by === 'model' && top.model === modelKey)
+}
+
 function chaptersOf(state: unknown): ChapterLike[] {
   const c = (state as { chapters?: unknown } | undefined)?.chapters
-  return Array.isArray(c) ? c as ChapterLike[] : []
+  // #60: the enrichment queue reads registry chapters through the ONE supersede predicate, so a
+  // repaired-away husk is never annotated again (and never re-enters the corpus through the ladder).
+  return Array.isArray(c) ? (c as ChapterLike[]).filter((row) => (row as { status?: string }).status !== 'superseded') : []
 }
 
 export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
@@ -124,10 +224,12 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
     const cwd = deps.cwd() ?? rememberedCwd
     if (cwd === undefined) return { ok: false, skipped: 'no workspace cwd yet (a sync or command arms it)' }
     try {
+      // Pre-flight read: cheap, and only used to find the file to annotate. The WRITE below never
+      // touches this snapshot (#59).
       const state = await deps.store.get(sid)
       const rec = state.chapters.find((c) => c.number === num)
       if (rec === undefined) return { ok: false, skipped: 'record gone' }
-      const file = path.join(cwd, rec.path)
+      const file = resolveStoredPath(cwd, rec.path)
       if (!fs.existsSync(file)) return { ok: false, skipped: 'chapter file absent' }
       const doc = parseChapterFile(fs.readFileSync(file, 'utf8'))
       // A plan document is a WORK DIRECTIVE: its body is the approved text, and an
@@ -170,6 +272,62 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
         // one retry with a nudge; garbage stays non-fatal (record §6.1)
         result = parseEnrichResult(await deps.fetch(input + '\nRemember: reply with ONLY the JSON object, no other text.', route))
       }
+      // §7.5 mining, and it happens BEFORE the hash-guarded frontmatter write, so a
+      // chapter whose annotation is refused still contributes its standing orders.
+      const humanText = humanBytesOf(body)
+      let mined: readonly MinedRuleOut[] = result !== null ? result.rules : []
+      // A dedicated governance model is opt-in; when set, ITS answer is what gets
+      // mined and the annotation pass's rules are ignored — two models minting
+      // rules for one chapter would just duplicate under different judgement.
+      const mineSpec = (deps.store.getSetting('rules.model') ?? deps.config.rulesModel ?? '').trim()
+      if (deps.config.mineRules !== false && mineSpec !== '' && mineSpec !== 'conversation') {
+        try {
+          const sep = mineSpec.indexOf('/')
+          const base = resolveRoute()
+          const route = sep > 0
+            ? { provider: mineSpec.slice(0, sep), model: mineSpec.slice(sep + 1) }
+            : { provider: base?.provider ?? '', model: mineSpec }
+          if (route.provider !== '') {
+            mined = parseMinedRules(await deps.fetch(buildMineInput(
+              { requests: userChunks.map(stripFence) },
+              body.slice(0, 6000),
+            ), route))
+          } else {
+            deps.warn(`rules.model "${mineSpec}" names no provider to route through — mining with the annotation result instead`)
+          }
+        } catch (error) {
+          deps.warn(`rule mining pass failed (${String((error as Error)?.message ?? error).slice(0, 120)}) — the annotation is unaffected`)
+          mined = []
+        }
+      }
+      if (mined.length > 0) {
+        if (deps.config.mineRules === false) {
+          deps.log(`rule mining skipped for ${sid}#${num}: ${mined.length} candidate(s) dropped (rulesEnrichment off)`)
+        } else if (deps.onMinedRules === undefined) {
+          deps.warn(`rule mining UNWIRED on this plane: ${mined.length} candidate(s) for ${sid}#${num} were not recorded — the sink owns disk + identity`)
+        } else {
+          try {
+            const got = await deps.onMinedRules({
+              cwd,
+              sessionId: sid,
+              chapterNumber: num,
+              // The human's own bytes, cut at the next role marker. They decide
+              // whether a mined rule is LABELLED `stated` or `inferred` — a warrant
+              // shown to the human, not permission to govern (§7.5, 2026-10-21).
+              humanText,
+              rules: mined,
+              max: deps.config.mineCap ?? 3,
+              autoActivate: deps.config.rulesAutoActivate !== false,
+            })
+            if (got.written > 0) {
+              deps.log(`rule mining ${sid}#${num}: ${got.written} recorded (${got.stated} stated by you, ${got.inferred} inferred${got.pending > 0 ? `, ${got.pending} held for review` : ', all governing now'} — /chapters-rule list --scope session)`)
+              // session rules are LOCAL: nothing is armed on the scheduler (§7.5)
+            }
+          } catch (error) {
+            deps.warn(`rule mining failed for ${sid}#${num}: ${String((error as Error)?.message ?? error).slice(0, 140)} — the annotation itself is unaffected`)
+          }
+        }
+      }
       const current: CurrentValues = { title: rec.title, summary: rec.summary, topics: rec.topics, ...(rec.generated !== undefined ? { generated: rec.generated as Partial<GeneratedProvenance> } : {}) }
       const applied = applyEnrich(current, result, key2, new Date().toISOString())
       if (!applied.changed) return { ok: false, skipped: result === null ? 'model output invalid; deterministic kept' : 'already enriched' }
@@ -180,14 +338,24 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
         topics: `[${v.topics.map((t) => JSON.stringify(t)).join(', ')}]`,
         generated: renderGeneratedBlock(v.generated as GeneratedProvenance),
       }, typeof rec.sha256 === 'string' ? rec.sha256 : undefined)
-      await deps.store.put(sid, {
-        ...state,
-        chapters: (state as { chapters: Record<string, unknown>[] }).chapters.map((c) => c.number === num
-          // re-anchor the registry's whole-file hash after the sanctioned write
-          // so the cite-time tamper check stays truthful for every descendant
-          ? { ...c, title: v.title, summary: v.summary, topics: v.topics, generated: v.generated, ...(written.changed ? { sha256: written.fileSha256 } : {}) }
-          : c),
+      // #59: this put was built from a row read BEFORE the model call, so every chapter annotated
+      // late enough rewound whatever another door had committed in the meantime — the field
+      // instance landed at 04:53:52.841 over a compaction commit from 04:53:50.915. The whole
+      // remaining step is now ONE section over a fresh read: re-find the record, write the file,
+      // re-anchor the row. Nothing derived from a pre-model snapshot survives into the write.
+      await deps.store.mutate(sid, (fresh) => {
+        const cur = fresh.chapters.find((c) => c.number === num)
+        if (cur === undefined) return fresh // record vanished under us: the file write already happened, the row is its own truth
+        return {
+          ...fresh,
+          chapters: fresh.chapters.map((c): ChapterRowItem => c.number === num
+            // re-anchor the registry's whole-file hash after the sanctioned write
+            // so the cite-time tamper check stays truthful for every descendant
+            ? { ...c, number: c.number, title: v.title, summary: v.summary, topics: v.topics, generated: v.generated, ...(written.changed ? { sha256: written.fileSha256 } : {}) }
+            : c),
+        }
       })
+      // Annotated bytes are new knowledge: arm the push, exactly as before #59 moved the write.
       deps.scheduler?.schedule(cwd, 'archive:enrichment')
       return { ok: true }
     } catch (error) {
@@ -201,8 +369,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const out: { key: string; label: string }[] = []
       for (const [sid, st] of deps.store.sessions()) {
         for (const c of chaptersOf(st)) {
-          const top = c.generated?.title?.[0]
-          if (top?.by === 'model' && top.model === modelKey2) continue
+          if (!isPendingChapter(c, modelKey2)) continue
           out.push({ key: `${sid}#${c.number}`, label: c.title.slice(0, 48) })
           if (out.length >= cap) return out
         }
@@ -233,8 +400,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const key2 = modelKey()
       for (const [, st] of deps.store.sessions()) {
         for (const c of chaptersOf(st)) {
-          const top = c.generated?.title?.[0]
-          if (!(top?.by === 'model' && top.model === key2)) n += 1
+          if (isPendingChapter(c, key2)) n += 1
         }
       }
       return n
@@ -259,7 +425,8 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const heartbeat = deps.store.getSetting(STATE_KEY)
       let last = ''
       try { last = ` · last: ${(JSON.parse(heartbeat ?? '{}') as { line?: string }).line ?? 'idle'}` } catch { /* cosmetic */ }
-      return `enrichment: ${deps.config.trigger}, model ${model}${last}`
+      const mine = deps.config.mineRules === false ? ' · rule mining OFF' : ` · rule mining ON (≤${deps.config.mineCap ?? 3}/chapter, verbatim-quote gated)`
+      return `enrichment: ${deps.config.trigger}, model ${model}${mine}${last}`
     },
     dispose() { queue.dispose() },
   }

@@ -8,11 +8,18 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
+import { runRepair, restoreRepair } from './repair-run.ts'
+import { formatWarnings } from './warnings.ts'
+import { ensureDiagnosticsDefault } from './diag.ts'
+import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
+import { readDurableSession } from './auto-save.ts'
 import * as path from 'node:path'
-import { estimateTokens, toolResultCandidates } from './render.ts'
+import { candidateTotals, estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
-import { buildRulesSection } from './rules.ts'
+import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
+import { diagnosticWarn } from './diag.ts'
+import { attachCreatedChild } from './attach.ts'
 import { DEFAULT_CLONE_DIR } from './sync.ts'
 import { lineageOf, type ChapterRange, type SessionEventLike, type ToolResultOverride } from './types.ts'
 import { composeChapters } from './compose.ts'
@@ -61,6 +68,10 @@ function callerOf(exec: ToolRunContext): CallerAgent | typeof CALLER_MISSING {
 }
 
 export interface ToolsConfig extends ContinueConfig {
+  /** #61: how many warning TEXTS a door prints before `…and M more`. */
+  warningsDisplayCap?: number
+  /** #61: token ceiling on `chapters_segment`'s candidate list (0 = uncapped). */
+  segmentCandidateCapTokens?: number
   /** Token budget for chapters_search result packing (record §8). */
   searchMaxTokens?: number
   /** The §5 sync scheduler: pull at fork, debounced push after archives. */
@@ -69,6 +80,14 @@ export interface ToolsConfig extends ContinueConfig {
    * => the rules section is never composed (off, no magic default). */
   harnessId?: string
   coreRulesBudgetTokens?: number
+  /** #50 §7.4: per-tier display caps on rules rendered into a rebuilt head.
+   * Absent (a profile predating the keys) ⇒ no cap, i.e. the pre-#50 door
+   * behavior — never a number invented here (no hardcoded tunables). */
+  projectRulesDisplayCap?: number
+  /** #50 §7.4: session-tier display cap. */
+  sessionRulesDisplayCap?: number
+  /** #50 §7.4: topic-overlap selection on; off ⇒ category→id order. */
+  rulesRelevance?: boolean
   /** P3 §8: search bonus for effective-core rules on this machine. */
   rulesCoreBonus?: number
   /** The caller's routed model on every tool use — feeds the enrichment
@@ -94,10 +113,18 @@ export function buildChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
   config: ToolsConfig,
-): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand } {
+): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand; repairCommand: HostCommand } {
+
+  // #52: the delegation edge for rule ancestry, read from whatever this plane can
+  // reach (live handles, else the durable session query). undefined ⇒ the walk
+  // follows registry edges only, and a block that truncated says so.
+  const ruleParentOf = makeHeaderParentReader((name) => { try { return ctx.get?.(name) } catch { return undefined } })
 
   const portsFor = async (caller: CallerAgent): Promise<ContinuePorts> => {
     const cwd = caller.session.header.cwd ?? ''
+    // #61: a door is touching this project's store, so THIS is where failures get written unless the
+    // operator said otherwise. First door wins; `off` in the env still means no file at all.
+    if (cwd !== '') ensureDiagnosticsDefault(path.join(cwd, config.artifactStoreRoot, 'diagnostics.log'))
     // every real tool use carries the caller's routed model — record it for
     // the enrichment resolver (the only route source the host plane can have)
     if (caller.options.provider !== undefined && caller.options.model !== undefined) {
@@ -136,6 +163,7 @@ export function buildChaptersTools(
         return { windowTokens, headerBoundTokens }
       },
       newId: () => randomUUID(),
+      diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
       createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
         const callerOptions = caller.options
         // The seed is contiguous from seq 0: the notice, then any STATE events this
@@ -155,16 +183,20 @@ export function buildChaptersTools(
             await presets.mount(agentCtx, mountPreset)
           },
         })
-        try {
-          const workspaceRegistry = ctx.get?.('workspaceRegistry') as { createCanonical?: (cwd: string) => Promise<{ attachSession?: (id: string) => Promise<void> | void } | undefined> } | undefined
-          if (cwd !== '' && workspaceRegistry?.createCanonical !== undefined) {
-            const workspace = await workspaceRegistry.createCanonical(cwd)
-            await workspace?.attachSession?.(sessionId)
-          }
-        } catch (error) {
-          // An unattached child is durable but may not list — say so, keep going.
-          ctx.logger?.warn?.(`dsh-chapters: child workspace attach failed (${String(error)})`)
-        }
+        // #54: was an optional chain through a REQUIRED step, inside a catch that only
+        // warned the profile logger. On host 0.2.x that turned a reshaped workspace API
+        // into a silent no-op — durable child, missing from the sidebar, door reporting
+        // success. attachCreatedChild verifies the user-visible fact (is it LISTED) and
+        // returns words the door passes through to the user.
+        const attach = await attachCreatedChild({
+          workspaceRegistry: ctx.get?.('workspaceRegistry'),
+          sessionQuery: ctx.get?.('sessionQuery'),
+          // the surface the browser reads — a child missing here is invisible and unopenable
+          sessionController: ctx.get?.('sessionController'),
+          diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
+          childId: sessionId,
+          cwd,
+        })
         // Title while the child is still live: sessionController.rename resolves
         // the agent, routes through the official session-title normalizer, and
         // appends the durable `session/title` event (r6: commands-execute was the
@@ -183,6 +215,7 @@ export function buildChaptersTools(
           // handle", measured r3). Dispose after the live-work, keep the session.
           await handle.dispose?.()
         }
+        return { warnings: attach.warnings }
       },
       now: () => Date.now(),
     }
@@ -241,8 +274,25 @@ export function buildChaptersTools(
           : { planHint: 'a submitted plan is a topic boundary: the chapter that carries it ENDS there, and its title becomes the chapter title' }),
         // fresh literals, not the ToolResultCandidate interface: anonymous
         // object types carry the implicit index signature JsonValue needs.
-        toolResults: toolResultCandidates(below, { title: '', summary: '', startSeq: 0, endSeq: ceiling })
-          .map((c) => ({ seq: c.seq, toolName: c.toolName, bytes: c.bytes, estimatedTokens: c.estimatedTokens, excerpt: c.excerpt })),
+        // #61: the candidate list is CAPPED and says so. The field version returned 49,932 characters
+        // while also reporting `Omitted 275266 bytes` — ~81K est tokens into a 32K-class window, asking
+        // the model to keep/drop-judge a list it had not received. Ranking is by size descending, so the
+        // cap removes the SMALL entries and the big ones a real decision turns on stay visible.
+        ...(() => {
+          const range = { title: '', summary: '', startSeq: 0, endSeq: ceiling } as const
+          const cap = config.segmentCandidateCapTokens ?? 4000
+          const kept = cap > 0
+            ? toolResultCandidates(below, range, cap)
+            : toolResultCandidates(below, range)
+          const totals = candidateTotals(below, range)
+          const withheld = Math.max(0, totals.count - kept.length)
+          const withheldBytes = Math.max(0, totals.bytes - kept.reduce((m, c) => m + c.bytes, 0))
+          return {
+            toolResults: kept.map((c) => ({ seq: c.seq, toolName: c.toolName, bytes: c.bytes, estimatedTokens: c.estimatedTokens, excerpt: c.excerpt })),
+            toolResultsReport: `showing ${kept.length} of ${totals.count} candidates by size, ${(withheldBytes / 1024).toFixed(0)} KB withheld`
+              + (cap > 0 ? ` (segmentCandidateCapTokens=${cap})` : ' (uncapped)'),
+          }
+        })(),
         existingChapters: callerState.chapters.map((c) => ({
           number: c.number, path: c.path, title: c.title, startSeq: c.startSeq, endSeq: c.endSeq,
         })),
@@ -311,7 +361,7 @@ export function buildChaptersTools(
           await config.scheduler.pullFor(cwd).catch(() => undefined) // §5.1: pull → archive → push
         }
         const line = projectLineFor(caller)
-        const rs = rulesSectionFor(caller)
+        const rs = await rulesSectionFor(caller, 'continue')
         if (rs.refusal !== undefined) return { ok: false as const, reason: rs.refusal }
         const result = await runContinue(ports, {
           callerSessionId: caller.session.id,
@@ -322,7 +372,7 @@ export function buildChaptersTools(
           toolResultOverrides: args.toolResultOverrides ?? [],
           ...(line !== undefined ? { projectLine: line } : {}),
           ...(rs.section !== undefined ? { rulesSection: rs.section } : {}),
-        }, config)
+        }, { ...config, workspaceCwd: cwd })
         if (result.ok && cwd !== '') config.scheduler?.schedule(cwd, 'archive:continue')
         // conditional spreads: absent optionals must not surface as `undefined`
         // (not a JsonValue); the output schema validates the successful body.
@@ -372,7 +422,7 @@ export function buildChaptersTools(
           await config.scheduler.pullFor(cwd).catch(() => undefined)
         }
         const line = projectLineFor(caller)
-        const rs = rulesSectionFor(caller)
+        const rs = await rulesSectionFor(caller, 'branch')
         if (rs.refusal !== undefined) return { ok: false as const, reason: rs.refusal }
         const result = await runFork(ports, {
           callerSessionId: caller.session.id,
@@ -457,7 +507,7 @@ export function buildChaptersTools(
         const parentTitle = [...events].reverse()
           .find((e) => e.type === 'session/title')?.data?.title as string | undefined
         const title = trimmed !== '' ? trimmed : `${parentTitle ?? `Chapters ${door.noun}`} \u2014 ${door.noun}`
-        const rsCmd = rulesSectionFor(agent)
+        const rsCmd = await rulesSectionFor(agent, door.intent)
         if (rsCmd.refusal !== undefined) return { kind: 'error' as const, text: `${door.name} refused: ${rsCmd.refusal}` }
         const callerArgs = {
           callerSessionId: agent.session.id,
@@ -498,15 +548,19 @@ export function buildChaptersTools(
           : ['no stored turn signatures — legacy size-based segmentation']
         const handoffNote = `Archived through the Chapters ${door.noun}. The chapters listed above carry every prior word verbatim — reload any with the read tool on its path. ${door.noDirective}`
           + (notes.length > 0 ? `\n(Segmentation notes: ${notes.join('; ')})` : '')
-        const result = await runContinue(ports, { ...callerArgs, handoffNote, chapters }, config)
+        const result = await runContinue(ports, { ...callerArgs, handoffNote, chapters }, { ...config, workspaceCwd: cwd0 })
         if (result.ok && cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:fork')
         const budgetText = result.budget !== undefined ? `; TOC ~${result.budget.usedTokens} tokens, allowance ${result.budget.allowanceTokens}` : ''
-        return { kind: 'success' as const, text: `${door.verb}: ${chapters.length} new chapter(s) archived (watermark respected: seqs ${fromSeq}..${anchor}), ${door.noun} \u201C${title}\u201D is session ${result.childSessionId ?? '(created)'}${budgetText}. Switch to it from the sidebar — its first message is the table of contents.` }
+        // #61: the archive happened; the caveats were in `result.warnings` and were NEVER printed here.
+        const dWarn = formatWarnings(result.warnings ?? [], config.warningsDisplayCap ?? 6)
+        return { kind: 'success' as const, text: `${door.verb}: ${chapters.length} new chapter(s) archived (watermark respected: seqs ${fromSeq}..${anchor}), ${door.noun} \u201C${title}\u201D is session ${result.childSessionId ?? '(created)'}${budgetText}. Switch to it from the sidebar — its first message is the table of contents.`
+          + (dWarn === '' ? '' : `\n  warnings: ${dWarn}`) }
       } catch (error) {
         const refusal = refusalResult(error)
         if (refusal !== null) {
           const budget = refusal.budget !== undefined ? ` (notice ~${refusal.budget.usedTokens} > allowance ${refusal.budget.allowanceTokens})` : ''
-          return { kind: 'error' as const, text: `${door.name} refused: ${refusal.reason ?? 'refused'}${budget}` }
+          const rWarn = formatWarnings(refusal.warnings ?? [], config.warningsDisplayCap ?? 6)
+          return { kind: 'error' as const, text: `${door.name} refused: ${refusal.reason ?? 'refused'}${budget}${rWarn === '' ? '' : `\n  warnings: ${rWarn}`}` }
         }
         return { kind: 'error' as const, text: `${door.name} failed: ${String((error as Error)?.message ?? error)}`.slice(0, 500) }
       }
@@ -565,6 +619,7 @@ export function buildChaptersTools(
             toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
             mergeThreshold: config.mergeThreshold,
             chapterLimit: config.chapterLimit,
+            chapterOversizeFactor: config.chapterOversizeFactor,
             ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),
             ...(config.callArgArtifactTokens !== undefined ? { callArgArtifactTokens: config.callArgArtifactTokens } : {}),
           },
@@ -587,8 +642,12 @@ export function buildChaptersTools(
         // Schedule sync so saved chapters travel to the pool.
         if (cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:save')
 
-        const warnings = out.warnings.length > 0 ? ` (${out.warnings.length} warning(s))` : ''
-        return { kind: 'success' as const, text: `Saved: ${out.records.length} chapter(s) archived (seqs ${out.fromSeq}..${out.anchor})${warnings}. Enrichment queued. Content is searchable via chapters_search from any session in this workspace.` }
+        // #61: this used to be ` (86 warning(s))` — a COUNT that carried none of the 86 messages, six of
+        // which named the hollow chapter and an unarchived 0-4082 hole. A count is not a message.
+        const warnText = formatWarnings(out.warnings, config.warningsDisplayCap ?? 6)
+        return { kind: 'success' as const, text: `Saved: ${out.records.length} chapter(s) archived (seqs ${out.fromSeq}..${out.anchor}).`
+          + (warnText === '' ? '' : `\n  warnings: ${warnText}`)
+          + ` Enrichment queued. Content is searchable via chapters_search from any session in this workspace.` }
       } catch (error) {
         return { kind: 'error' as const, text: `chapters-save failed: ${String((error as Error)?.message ?? error)}`.slice(0, 500) }
       }
@@ -611,15 +670,59 @@ export function buildChaptersTools(
     }
   }
 
-  /** P3 §7.3: this machine's rules block for a continuation notice. */
-  const rulesSectionFor = (agent: CallerAgent): { section?: string; refusal?: string } => {
+  /**
+   * §7.3/§7.6: the rules block for a head this door is about to build, through
+   * the ONE renderer the compaction checkpoint also uses
+   * (`session-rules.renderRulesBlock`) — a session must never see two rule sets
+   * depending on which path rebuilt its head.
+   *
+   * `intent` is the whole semantic difference between the two doors, and it was
+   * already the axis that decides plan bytes (docs/plans-carriage.md §§ 9–13): a
+   * CONTINUATION extends the same stream of work, so it inherits the session
+   * tier; a BRANCH splits a new direction, so it gets the project tier and ZERO
+   * session bytes — a branch is not an order.
+   */
+  const rulesSectionFor = async (agent: CallerAgent, intent: 'continue' | 'branch'): Promise<{ section?: string; refusal?: string }> => {
     try {
       if (config.harnessId === undefined || config.coreRulesBudgetTokens === undefined) return {}
       const cwd: string = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+      if (cwd === '') return {}
       const best = projectForCwd(store.projects(), cwd)
-      if (best === undefined) return {}
-      const built = buildRulesSection(path.join(cwd, DEFAULT_CLONE_DIR), {
-        projectKey: best.projectKey, harnessId: config.harnessId, budgetTokens: config.coreRulesBudgetTokens,
+      // §7.8: a session with NO project resolves normally renders zero rule bytes —
+      // and silence is exactly what this round exists to remove. But adding a
+      // "nothing is linked" line to EVERY unlinked workspace's head would spend real
+      // bytes on a warning most sessions do not need, so the line appears only when
+      // the session tier IS governing the head: then "0 project rules" is a fact the
+      // child must not misread as "the team approved nothing".
+      if (best === undefined) {
+        const orphan = await renderRulesBlock({
+          mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+          storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),
+          projectKey: '',
+          harnessId: config.harnessId,
+          budgetTokens: config.coreRulesBudgetTokens,
+          relevance: config.rulesRelevance ?? true,
+          includeSession: intent === 'continue',
+          store,
+          sessionId: agent.session.id,
+          ...(ruleParentOf !== undefined ? { parentOf: ruleParentOf } : {}),
+        })
+        if (orphan.kind !== 'ok' || orphan.shown.session === 0) return {}
+        return { section: `0 project rules — this checkout resolves no knowledge project (${cwd}); your session rules below are local only. Link one with /chapters-link to inherit the team's.\n\n${orphan.kind === 'ok' ? orphan.text : ''}` }
+      }
+      const built = await renderRulesBlock({
+        mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+        storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),
+        projectKey: best.projectKey,
+        harnessId: config.harnessId,
+        budgetTokens: config.coreRulesBudgetTokens,
+        ...(config.projectRulesDisplayCap !== undefined ? { projectCap: config.projectRulesDisplayCap } : {}),
+        ...(config.sessionRulesDisplayCap !== undefined ? { sessionCap: config.sessionRulesDisplayCap } : {}),
+        relevance: config.rulesRelevance ?? true,
+        includeSession: intent === 'continue',
+        store,
+        sessionId: agent.session.id,
+        ...(ruleParentOf !== undefined ? { parentOf: ruleParentOf } : {}),
       })
       if (built.kind === 'none') return {}
       if (built.kind === 'refusal') {
@@ -798,7 +901,181 @@ export function buildChaptersTools(
     },
   })
 
-  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, forkCommand, continueCommand, saveCommand }
+  // ------------------------------------------------- #50 §7.9: the assembly door
+  //
+  // The ONE rule verb a session is told to reach for. Capture and carriage are
+  // invisible to the model (§7.9); this is the exception, because a tool an
+  // instruction never names does not exist to a small model — and because the
+  // head can only show a capped, relevance-selected subset, so "what actually
+  // applies to THIS task" needs a door that answers with the text.
+
+  const chaptersRules = defineTool({
+    name: 'chapters_rules',
+    description:
+      'Assemble the rules that govern a task: the approved project tier plus this session tree\u2019s '
+      + 'captured session rules, verbatim, within budget. Run it BEFORE starting a task. The answer '
+      + 'names what it withheld, so "you are seeing all of them" is a fact rather than a guess.',
+    parameters: {
+      query: { type: 'string', required: true, description: 'What the session is about to do, in a sentence or two \u2014 it selects relevance.' },
+      scope: { type: 'string', description: "'all' (default) or 'project' to see only the shared tier a branch would inherit." },
+      maxTokens: { type: 'number', description: 'Token ceiling for this answer (defaults to coreRulesBudgetTokens).' },
+    },
+    output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
+    async execute(args: { query: string; scope?: string; maxTokens?: number }, exec: ToolRunContext) {
+      const caller = callerOf(exec)
+      if ('reason' in caller) return { ...CALLER_MISSING }
+      if (config.harnessId === undefined || config.coreRulesBudgetTokens === undefined) {
+        return { ok: false as const, error: 'rules surface not configured (harnessId/budget absent)' }
+      }
+      const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+      const best = cwd === '' ? undefined : projectForCwd(store.projects(), cwd)
+      try {
+        const built = await renderRulesBlock({
+          mirrorDir: path.join(cwd, DEFAULT_CLONE_DIR),
+          storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters'),
+          projectKey: best?.projectKey ?? '',
+          harnessId: config.harnessId,
+          budgetTokens: args.maxTokens ?? config.coreRulesBudgetTokens,
+          ...(config.projectRulesDisplayCap !== undefined ? { projectCap: config.projectRulesDisplayCap } : {}),
+          ...(config.sessionRulesDisplayCap !== undefined ? { sessionCap: config.sessionRulesDisplayCap } : {}),
+          relevance: config.rulesRelevance ?? true,
+          includeSession: args.scope !== 'project',
+          // the QUERY selects here (that is the door's whole job), not the session's
+          // own recent signatures — which is what a rebuilt head selects on
+          topicsOverride: queryTopics(args.query),
+          ...(ruleParentOf !== undefined ? { parentOf: ruleParentOf } : {}),
+          store,
+          sessionId: caller.session.id,
+        })
+        if (built.kind === 'refusal') return { ok: false as const, error: built.reason }
+        if (built.kind === 'none') {
+          // §7.8: "nothing applies" and "nothing is reachable" are different answers
+          return {
+            ok: true as const, shown: { project: 0, session: 0 }, withheld: { project: 0, session: 0 }, text: '',
+            note: best === undefined
+              ? `no knowledge project resolves for ${cwd} \u2014 nothing is approved here AND no pool is linked (/chapters-link); session rules still apply once captured`
+              : 'no active rules: approved project rules need a human approve ON THIS MACHINE (/chapters-rule list --all), and this session tree has captured none',
+          }
+        }
+        const note = [
+          built.withheld.project + built.withheld.session > 0
+            ? `withheld ${built.withheld.project} project / ${built.withheld.session} session rule(s) over the display caps \u2014 /chapters-rule active lists all, pin one to keep it in every head`
+            : 'nothing withheld: this is the complete active set',
+          ...(best === undefined ? ['no linked project for this cwd \u2014 the project tier is empty by construction (/chapters-link)'] : []),
+        ]
+        return { ok: true as const, shown: built.shown, withheld: built.withheld, text: built.text, tokens: built.tokens, note: note.join('; ') }
+      } catch (error) {
+        return { ok: false as const, error: `chapters_rules failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+      }
+    },
+  })
+
+  /**
+   * `/chapters-repair` — the operator door of the repair engine (#60). Read-only unless `apply` is
+   * named, and `apply` still cannot delete or rewrite anything: damage is SUPERSEDED under a new
+   * number, bad files are COPIED to `.repair-quarantine/`, and every run is journalled so `restore`
+   * can walk it backwards (docs/architecture.md § Repair).
+   *
+   * It repairs the sessions of THIS session's project — found by reading each registry row's durable
+   * header through `readDurableSession`, the same payload-bearing seam door 5 uses (#58). Rows whose
+   * log cannot be read are reported as unrecoverable rather than quietly skipped, because "nothing to
+   * repair" and "cannot repair" are different sentences.
+   */
+  const repairCommand: HostCommand = {
+    name: 'chapters-repair',
+    description: 'Audit the archive against the durable log; repair what the registry lost. Read-only by default; never deletes, never rewrites a chapter body.',
+    input: { hint: '[audit | dry-run | apply <all|hollow|gaps|citations|bookkeeping|files> | status | journal [id] | restore <journal-id>]' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
+      const agent = invocation.agent as CallerAgent
+      if (agent?.session === undefined) return { kind: 'error' as const, text: 'chapters-repair: no session context for this invocation' }
+      const cwd0 = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? ''
+      if (cwd0 === '') return { kind: 'error' as const, text: 'chapters-repair: this session has no workspace cwd — no store to inspect' }
+      const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((x) => x.length > 0)
+      const verb = parts[0] ?? 'audit'
+      const get = (name: string): unknown => { try { return (ctx as { get?: (n: string) => unknown }).get?.(name) } catch { return undefined } }
+
+      // targets: rows of this project, proven by their OWN durable header (never a path guess)
+      const ids: string[] = []
+      for (const [id] of store.sessions()) {
+        const view = await readDurableSession(get, id)
+        if (view?.header.cwd !== undefined && path.resolve(view.header.cwd) === path.resolve(cwd0)) ids.push(id)
+      }
+      if (ids.length === 0) return { kind: 'error' as const, text: `chapters-repair: no session row under ${cwd0} has a readable durable log — nothing to audit` }
+      // roots this registry claims, so sibling session trees are not reported as litter
+      const roots = (await Promise.all(ids.map(async (id) => (await store.get(id)).rootSession))) as string[]
+
+      if (verb === 'status' || verb === 'journal') {
+        const lines: string[] = []
+        for (const id of ids) {
+          const st = await store.get(id)
+          const dir = path.join(cwd0, config.artifactStoreRoot, st.rootSession, 'repairs')
+          if (!fs.existsSync(dir)) continue
+          for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json'))) {
+            const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as { id: string; completedAt: number | null; findingsBefore: number; findingsAfter: number; entries: unknown[] }
+            lines.push(`${j.id}  ${id.slice(0, 14)}…  ${j.completedAt === null ? 'UNFINISHED' : 'done'}  ${j.findingsBefore}→${j.findingsAfter} findings  ${j.entries.length} move(s)`)
+          }
+        }
+        if (verb === 'journal' && parts[1] !== undefined) {
+          const hit = lines.find((l) => l.startsWith(parts[1]!))
+          return hit !== undefined ? { kind: 'success' as const, text: hit } : { kind: 'error' as const, text: `no journal ${parts[1]} in this project` }
+        }
+        return { kind: 'success' as const, text: lines.length > 0 ? lines.join('\n') : 'no repair journals yet in this project' }
+      }
+
+      if (verb === 'restore') {
+        const jid = parts[1]
+        if (jid === undefined) return { kind: 'error' as const, text: 'restore needs a journal id (see `/chapters-repair status`)' }
+        const results: string[] = []
+        const outcomes2: Array<{ undone: number }> = []
+        for (const id of ids) {
+          const r = await restoreRepair({ store, readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null, cwd: cwd0, config, log: () => {}, warn: (m) => results.push(`! ${m}`) }, jid, id)
+          outcomes2.push(r)
+          if (r.undone > 0 || r.problems.length > 0) results.push(`${id.slice(0, 14)}…: ${r.undone} undone${r.problems.length > 0 ? `; ${r.problems.join('; ')}` : ''}`)
+        }
+        const anyUndone = outcomes2.some((o) => o.undone > 0)
+        return {
+          kind: anyUndone ? 'success' as const : 'error' as const,
+          text: results.length > 0 ? results.join('\n') : `journal ${jid} matched no session row here — files were NOT touched`,
+        }
+      }
+
+      const dryRun = verb !== 'apply'
+      // ONE resolver, shared with the offline script (src/repair.ts). An unknown name is a REFUSAL:
+      // the first version fell through to `[which]`, matched nothing, and reported success while doing
+      // nothing — the silent no-op is the defect class this issue exists to end (#60).
+      const resolved = resolveRepairClasses((parts[1] ?? 'all').split(','))
+      if (resolved.unknown.length > 0) {
+        return { kind: 'error' as const, text: `chapters-repair: unknown class(es) ${resolved.unknown.join(', ')}\n  known: ${Object.keys(REPAIR_CLASS_ALIASES).join(', ')} — nothing was applied` }
+      }
+      const classes = resolved.classes
+      const outcomes: string[] = []
+      let actionable = 0
+      for (const id of ids) {
+        const view = await readDurableSession(get, id)
+        if (view === undefined) continue
+        const out = await runRepair(
+          { store, readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null, cwd: cwd0, config, knownRoots: roots, log: (m) => outcomes.push(`+ ${m}`), warn: (m) => outcomes.push(`! ${m}`) },
+          { sessionId: id, classes: dryRun ? 'all' : classes, dryRun },
+        )
+        actionable += out.findingsBefore.filter((f) => f.remedy !== 'report-only').length
+        if (out.findingsBefore.length > 0 || out.applied.length > 0) {
+          const by = out.findingsBefore.reduce<Record<string, number>>((m, f) => ({ ...m, [f.class]: (m[f.class] ?? 0) + 1 }), {})
+          outcomes.push(`${id.slice(0, 14)}…: ${out.findingsBefore.length} finding(s) ${JSON.stringify(by)}${out.blindSpots.length > 0 ? ` blind to ${out.blindSpots.join(',')}` : ''}`)
+          for (const r of out.refused) outcomes.push(`  refused: ${r}`)
+          if (!dryRun) outcomes.push(`  → ${out.applied.length} move(s) journalled ${out.journalId}; ${out.findingsAfter.length} finding(s) remain`)
+        }
+      }
+      const head = dryRun
+        ? `chapters-repair ${verb === 'audit' ? 'audit' : 'dry-run'} — ${ids.length} session(s): ${actionable} actionable finding(s). NOTHING WRITTEN.`
+        : `chapters-repair applied to ${ids.length} session(s) — see the per-session counts below.`
+      const tail = dryRun
+        ? '\napply: /chapters-repair apply all   (supersede under a new number; copy bad files to .repair-quarantine/; journal everything)'
+        : ''
+      return { kind: 'success' as const, text: [head, ...outcomes, tail].join('\n') }
+    },
+  }
+
+  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand }
 }
 
 export function registerChaptersTools(
@@ -813,6 +1090,7 @@ export function registerChaptersTools(
   const disposeSearch = ctx.tools.register(built.chaptersSearch)
   const disposeArtifact = ctx.tools.register(built.chaptersArtifact)
   const disposeRulePropose = ctx.tools.register(built.chaptersRulePropose)
+  const disposeRules = ctx.tools.register(built.chaptersRules)
   let disposeCommand: (() => void) | null = null
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
   if (commands?.register !== undefined) {
@@ -821,7 +1099,7 @@ export function registerChaptersTools(
       // that overwrote `disposeCommand` would leak the first registration and unregister
       // only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }
@@ -834,5 +1112,5 @@ export function registerChaptersTools(
   // so behaviour was right — but it reads as a typo and would silently break if anyone
   // reordered the line. Semicolons, since this is the unload path a test cannot cover.
   return () => { disposeSegment(); disposeContinue(); disposeFork(); disposeSearch();
-    disposeArtifact(); disposeRulePropose(); disposeCommand?.() }
+    disposeArtifact(); disposeRulePropose(); disposeRules(); disposeCommand?.() }
 }

@@ -4,14 +4,53 @@
 # configuration. The llm-gate/fetch-timeouts rows mirror the live profile:
 # slow local prefill needs the long fetch timeouts and a single in-flight
 # generation (the llama server serializes generations anyway).
+# #54: on 0.2.x the profile's `settings.yaml` is read by NOTHING — provider routes come
+# from THIS file. Without the block below the host has no `local` provider at all, and the
+# e2e browser opens on an "Add an API key to get started" dialog instead of a composer
+# (measured on the first 0.2.0-rc.2 boot: the Preview Notice cleared, this one appeared).
+# Kept byte-identical in shape to dev/settings.yaml's `llm-pi-ai` block so the two files
+# cannot disagree about the stress regime: same 32K window, same 15K response, same env key.
+- id: llm-pi-ai
+  config:
+    providers:
+      local:
+        displayName: Local
+        api: openai-completions
+        baseURL: http://localhost:8080/v1
+        models:
+          - id: qwen3.8-flash-next
+            name: qwen3.8-flash-next (dev, 32K stress — the proving regime)
+            contextWindow: 32000
+            maxTokens: 15000
+        apiKeyEnv: LOCAL_API_KEY
+        streamIdleTimeoutMs: 3600000
+        timeoutMs: 3600000
+        reasoning: medium
+        retryPolicy:
+          mode: normal
+          maxRetries: 0
+
 - id: agent-default-model
   config:
     provider: local
     model: qwen3.8-flash-next
 
-- id: agent-presets
+# #77/#56, measured: this row was `- id: agent-presets` with `default: chapters`, and BOTH halves
+# were wrong on 0.2.x. The registry's own Config is `{ default, selectedDefault }` and defaultId =
+# `selectedDefault.get() ?? default` (dsh-agent-preset-registry/lib/index.js:470-474, 493-494), so
+# `default` alone does not select the preset for a new session; and the row the host reads is
+# `agent-preset-registry`, while `agent-presets` exists only as a client UI *section*
+# (dsh-cordis-client-runner/lib/client.js:4751) — so this pin matched NOTHING and every e2e boot
+# silently ran the `standard` preset: no chapters persona, no ChaptersCompactionEngine, no
+# arrival-time artifacting, zero `compaction/*` events across 15 session logs. That single wrong
+# id is why the `heavy`/`arrival`/`fanout`/`enrich` legs reported "the archive never happened"
+# about a product that was never mounted. Mirrors the LIVE working profile (~/.dsh/profiles/web/
+# cordis.patch.yml:108-112) exactly in shape. `tests/unit/e2e-preset-pin.test.ts` pins both halves.
+- id: agent-preset-registry
+  name: "@deepseek-ai/dsh-agent-preset-registry"
   config:
-    default: chapters
+    default: standard
+    selectedDefault: chapters
 
 - id: llm-gate
   config:

@@ -18,10 +18,10 @@
  */
 import type { ChapterRange, NoticePlan, RenderConfig, SessionEventLike, ToolResultOverride } from './types.ts'
 import { chapterTopics } from './signature.ts'
-import { estimateTokens, renderChapter, validateRanges } from './render.ts'
+import { estimateTokens, oversizeRanges, renderChapter, validateRanges } from './render.ts'
 import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
-import { appendChapters, freshSession, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
+import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
 import type { SessionState } from './registry.ts'
 import { buildTocNotice } from './notice.ts'
 import { deriveIdentity } from './engine-core.ts'
@@ -55,6 +55,18 @@ export interface ContinueConfig extends RenderConfig {
   mergeThreshold: number
   /** Estimated-token cap per composed chapter. */
   chapterLimit: number
+  /**
+   * Workspace cwd of the session archiving, when the caller knows it (#69). `writeArchive` normalizes
+   * stored paths to workspace-relative with it; absent, the paths keep the store root's own dialect and
+   * every comparison must go through `sameStoredPath`.
+   */
+  workspaceCwd?: string | undefined
+  /**
+   * Hard oversize multiple of `chapterTokenTarget` (#59): over the target warns, over
+   * `target × factor` the door refuses before reserving a number. Optional so a profile that predates
+   * the key keeps the pre-#59 behaviour of warning only — the default lives in `Config`, not here.
+   */
+  chapterOversizeFactor?: number
   /**
    * Carry the `## Plans on this path` block into the child's notice
    * (docs/plans-carriage.md § 4). Renders ZERO bytes when the path holds no
@@ -101,8 +113,17 @@ export interface ContinuePorts {
     modeEvents: SessionEventLike[]
     presetId: string
     title: string
-  }): Promise<void>
+  }): Promise<void | { warnings?: readonly string[] }>
   now(): number
+  /**
+   * The plane's diagnostics seam (#54). The core refuses a child creation with the kernel's
+   * own words — and on host 0.2.x those words ended the whole acceptance chain while the
+   * error sink stayed empty, because only the engine had ever written to it. The core cannot
+   * touch the filesystem (it is L0-pure, and its tests run everywhere), so each plane injects
+   * its own: `src/diag.ts` for both of them in practice, but injected so a caller can also
+   * surface it. OPTIONAL on purpose: absence must never break a door.
+   */
+  diagnostic?(where: string, message: string, error?: unknown): void
 }
 
 export interface ContinueResult {
@@ -185,6 +206,11 @@ export function assembleNotice(input: {
       '- Chapter detail: open its path above with the read tool.',
       "- A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — action 'toc' | 'search' | 'read'.",
       "- Anything else on this project — other sessions' work, archived plans (`kind: plan`), curated rules: chapters_search.",
+      // #50 §7.9: the one rule verb a session is told to reach for, and WHEN to
+      // reach for it. This line lives in the notice, not the persona, on purpose:
+      // notice prose costs the tape corpus nothing (measured 2026-10-11), while a
+      // persona edit forces a re-record of every affected project.
+      '- Before starting a task: chapters_rules with the task description — it returns the rules that actually apply, and says what it withheld.',
     )
   }
   // NOTE: CodeGraph integration is INVISIBLE to the model. It enriches
@@ -240,15 +266,25 @@ export async function runContinue(
     throw new Refusal({ ok: false, reason: 'no completed turn to archive — the conversation has not reached a turn/end boundary' })
   }
   const ceiling = lastTurnEnd.seq
+  // The watermark first: it is the FLOOR the submitted ranges must start at (#59). Reading state is
+  // also what step 2 needs, so this is a hoist, not an extra round-trip — and every later step
+  // re-reads through a fresh getState inside its own section.
+  const callerState0 = await ports.getState(args.callerSessionId)
+  const watermark = callerState0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
+  const fromSeq = watermark + 1
   try {
-    validateRanges(args.chapters, ceiling)
+    validateRanges(args.chapters, ceiling, fromSeq)
   } catch (error) {
     throw new Refusal({ ok: false, reason: `ranges refused: ${(error as Error).message}` })
   }
   const below = allEvents.filter((e) => e.seq <= ceiling)
-  const gaps = coverage(args.chapters, ceiling).gaps
+  // Internal gaps and a start above the watermark are now REFUSALS inside validateRanges, so the
+  // only gap left for `coverage` to report is the TAIL (ranges that stop short of the ceiling) —
+  // which is not a loss: the watermark advances to the last archived seq and the rest archives on
+  // the next door. Keeping the check for what it can still see, and saying so.
+  const gaps = coverage(args.chapters, ceiling, fromSeq).gaps
   const warnings: string[] = gaps.map(
-    (g) => `seqs ${g.from}-${g.to} fall outside the supplied ranges — NOT archived (gaps are reported, never silent)`,
+    (g) => `seqs ${g.from}-${g.to} are not archived by this call — they stay live for the next door (a tail is deferred, a hole is refused)`,
   )
 
   // ---- Seed-vocabulary preflight (issue #43). The live failure sequence was: chapters
@@ -266,7 +302,7 @@ export async function runContinue(
   }
 
   // ---- 2. Render + reserve + write (idempotent per attempt key).
-  const callerState = await ports.getState(args.callerSessionId)
+  const callerState = callerState0
   const renderConfig: RenderConfig = {
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     chapterTokenTarget: config.chapterTokenTarget,
@@ -277,6 +313,12 @@ export async function runContinue(
   warnings.push(...rendered
     .filter((r) => r.stats.overTarget)
     .map((r) => `chapter "${r.range.title}" is ${r.stats.estimatedTokens} est tokens over chapterTokenTarget — split at the next continuation, never clip`))
+  // Same hard ceiling as the save door (#59), same ordering: refuse before anything is reserved.
+  const tooBig = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  if (tooBig.length > 0) {
+    throw new Refusal({ ok: false, reason: `ranges refused as oversize: ${tooBig.join('; ')}`, warnings })
+  }
+
   const fs = ports.fs()
   const wrote = await writeArchive({
     fs,
@@ -297,6 +339,7 @@ export async function runContinue(
       },
     },
     storeRoot: config.artifactStoreRoot,
+    cwd: config.workspaceCwd,  // #69: records are stored workspace-relative
     rootSessionId: callerState.rootSession,
     chapters: rendered,
     attemptId: attemptKey(args.callerSessionId, ceiling),
@@ -324,7 +367,9 @@ async function collectEntries(
     const st = await ports.getState(id)
     // Registry order is insertion order = authoring order within a session;
     // sessions walk root-first, so reading order IS causal order.
-    priorRecords.push(...st.chapters)
+    // #60: a superseded chapter is not knowledge — the TOC a child is seeded with must not cite a
+    // husk or a file the repair quarantined. One predicate, in registry.ts, for every derived layer.
+    priorRecords.push(...st.chapters.filter(isActiveChapter))
   }
   const seenPaths = new Set<string>()
   const cited: ChapterRecord[] = []
@@ -463,8 +508,16 @@ async function finishChild(
   const childId = `ch-${ports.newId()}`
   const presetId = args.callerPreset ?? config.fallbackPreset
   try {
-    await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    // The plane may come back with warnings of its own — an attached-but-unlisted child,
+    // a workspace service that no longer exposes attachSession. Those are facts about the
+    // continuation the user is being handed, so they belong in the door's reply, not only
+    // in a log the reply already summarizes.
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
+    // Full detail to the sink, short detail to the composer. The UI string is sliced to fit
+    // a note; the reason a kernel refused the seed is the part an investigator needs whole.
+    ports.diagnostic?.(`door:${args.intent ?? 'continue'}`, `child creation refused for ${childId}`, error)
     throw new Refusal({ ok: false, reason: `child creation refused: ${(error as Error).message}`, warnings })
   }
   if (commitRecords.length > 0) {

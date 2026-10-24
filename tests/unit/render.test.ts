@@ -53,22 +53,26 @@ test('fenced() round-trips arbitrary backtick content', () => {
 
 // ------------------------------------------------------------------ ranges
 
-test('validateRanges refuses overlaps, gaps-as-descents, and past-ceiling ranges', () => {
+test('validateRanges refuses overlaps, descents, past-ceiling ranges AND gaps', () => {
   const c = (title: string, startSeq: number, endSeq: number) => ({ title, summary: 's', startSeq, endSeq })
   assert.throws(() => validateRanges([c('a', 0, 10), c('b', 5, 20)], 30), /overlaps/)
   assert.throws(() => validateRanges([c('a', 10, 5)], 30), /startSeq 10 above endSeq 5/)
   assert.throws(() => validateRanges([c('a', 0, 40)], 30), /past the archive ceiling 30/)
   assert.throws(() => validateRanges([c('b', 9, 10), c('a', 0, 5)], 30), /descends/)
   assert.doesNotThrow(() => validateRanges([c('a', 0, 5), c('b', 6, 10)], 10))
+  // AMENDED 2026-10-22 (#59): this row used to assert a gap was ACCEPTED and merely "visible via
+  // coverage arithmetic" — i.e. the caller was trusted to report a hole. The field proved what that
+  // trust costs: a 203-event completed turn exists in no chapter. AGENTS.md already said "a gap
+  // silently drops it"; the check now exists too.
+  assert.throws(() => validateRanges([c('a', 0, 4), c('b', 7, 9)], 9), /gap|dropped|hole/i)
 })
 
-test('a gap between chapters is visible via coverage arithmetic, not silently archived wrong', () => {
-  const chapters = validateRanges([
-    { title: 'a', summary: 's', startSeq: 0, endSeq: 4 },
-    { title: 'b', summary: 's', startSeq: 7, endSeq: 9 },
-  ], 9)
-  // seqs 5-6 are dropped; callers diff coverage against the ceiling and must report it.
-  assert.equal(chapters[1]!.startSeq - chapters[0]!.endSeq, 3)
+test('a submitted range starting above the watermark is refused, not skipped past (#59)', () => {
+  // The floor is the watermark: archiving 20..30 while 10..19 sits unarchived would advance
+  // max(endSeq) past it and strand those events forever.
+  assert.throws(() => validateRanges([{ title: 'a', summary: 's', startSeq: 20, endSeq: 30 }], 30, 10),
+    /watermark|above/i)
+  assert.doesNotThrow(() => validateRanges([{ title: 'a', summary: 's', startSeq: 10, endSeq: 30 }], 30, 10))
 })
 
 // ------------------------------------------------------------------ tool results

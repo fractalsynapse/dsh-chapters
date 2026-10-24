@@ -244,3 +244,15 @@ test('preflight: fraction of the REMAINDER, never of the whole window', () => {
   const hostile = preflight({ noticeTokens: 1, budget: { windowTokens: 1000, headerBoundTokens: 4000 }, ratio: 0.25 })
   assert.equal(hostile.ok, false)
 })
+
+test('#54: a workspace attach warning reaches the door result, not just the log', async () => {
+  // The chain that must hold: tools.ts returns { warnings } from attachCreatedChild,
+  // finishChild merges them, the door surfaces them to the user. Pin the merge, because
+  // the whole point of the refactor is that a half-worked fork STOPS looking like success.
+  const h = harness()
+  h.ports.createChild = async () => ({ warnings: ['child ch-1 attached, but does not appear in the session list'] })
+  const result = await runContinue(h.ports, baseArgs as never, CONFIG)
+  assert.equal(result.ok, true, 'an unlisted child is still a durable continuation — it must not be refused')
+  assert.ok((result.warnings ?? []).some((w) => /does not appear in the session list/.test(w)),
+    `the attach warning never surfaced: ${JSON.stringify(result.warnings)}`)
+})

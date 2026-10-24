@@ -9,6 +9,7 @@
  *   /chapters-link treedx+<url>/<repo> <token>  bind a TreeDX service upstream
  *   /chapters-status                            last sync result
  *   /chapters-enrich run | model … | report     P2 enrichment surface (record §6.2)
+ *   /chapters-prompt model … | off | suggest    prompt recommendations (#71, site §28)
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -24,7 +25,12 @@ import { readState } from './treedx/state.ts'
 import { selectProvider } from './provider.ts'
 import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
+import type { PromptCommandSurface } from './prompt.ts'
+import type { SessionEventLike } from './types.ts'
 import { resolveStoreRoot } from './store.ts'
+import { diagnosticStatusLine } from './diag.ts'
+import { registryHealth } from './repair.ts'
+import type { SessionState } from './registry.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
 export interface EnrichCommandSurface {
@@ -43,10 +49,16 @@ export interface HostCommandsConfig {
   /** P2 enrichment command surface (host plane; manual-drain semantics). */
   enrich?: EnrichCommandSurface
   /** P3 rule lifecycle family, bound to a workspace (S2 module underneath). */
-  rules?: (cwd: string, args: string) => Promise<{ kind: 'success' | 'error'; text: string }>
+  rules?: (cwd: string, args: string, sessionId?: string) => Promise<{ kind: 'success' | 'error'; text: string }>
   /** Door 5 (issue #47): whether subagent settlements auto-archive. Reported in
    *  /chapters-status because it runs WITHOUT a human seeing it happen. */
   subagentAutoSave?: boolean
+  /** #71: prompt recommendations surface (host plane; pull transport — the
+   *  client composer ghost executes `suggest`). Reported by /chapters-status. */
+  prompt?: PromptCommandSurface
+  /** §7.8: fed to `resolveProject` so the identity line reports the SAME key the
+   * plugin binds by, not a naive re-derivation. */
+  projectKeyOverride?: string
 }
 
 type CommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string }
@@ -121,6 +133,21 @@ export function registerHostCommands(
             `Provider: ${rec.kind ?? 'git'}`,
             `Upstream: ${rec.remote}`,
             `Bound:    ${rec.slug} · key ${rec.projectKey} · since ${rec.linkedAt}`,
+            // §7.8 IDENTITY MUST FAIL LOUDLY. Project rules carry across checkouts
+            // because the key derives from the canonicalized REMOTE — so the four
+            // ways it can diverge (no remote ⇒ path-derived, a fork listed first,
+            // a TreeDX link keyed on the pool, an unlinked clone) are reported here
+            // rather than leaving a checkout silently owning its own namespace.
+            (() => {
+              const derived = resolveProject(cwd, config.projectKeyOverride !== undefined && config.projectKeyOverride !== '' ? config.projectKeyOverride : undefined)
+              const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
+                : derived.projectKeySource === 'override' ? 'config override'
+                  : `PATH ${cwd} (not the remote — unstable across machines)`
+              return derived.projectKey === rec.projectKey
+                ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
+                : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${rec.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`
+            })(),
+            diagnosticStatusLine(),
             `Mirror:   ${fs.existsSync(mirrorAbs) ? DEFAULT_CLONE_DIR : '(not created yet)'}` +
               (treedx ? `  head ${head ?? (tstate === null ? 'not cloned' : 'empty repo')}${tstate?.offline === true ? ' · OFFLINE (push deferred)' : ''}` : `  branch ${head ?? 'main'}`) +
               (origin !== null && origin !== (treedx ? rec.remote : local ? resolveLocalUpstreamPath(rec.remote, cwd) : rec.remote) ? `  [origin drift: ${origin} — will rebuild]` : ''),
@@ -244,24 +271,77 @@ export function registerHostCommands(
       const cwd = cwdOf(invocation.agent)
       const project = projectForCwd(domain.table('projects').entries(), cwd)
       const status = readSyncStatus(cwd, config.artifactStoreRoot)
-      if (project === undefined && status === null) {
-        return { kind: 'success', text: 'No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token].' + AUTO_SAVE_LINE(config) }
-      }
+      // #61: this command used to RETURN here when nothing was linked — one sentence, and every health
+      // line below it (Enrichment, Diagnostics, Auto-save, Findings) was unreachable precisely for the
+      // users who most needed it. An unlinked project is a STATE, not an absence of health.
       const lines: string[] = []
+      if (project === undefined && status === null) {
+        lines.push('No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token] — '
+          + 'until then this project\u2019s chapters, rules and index stay on THIS machine only.')
+      }
       if (project !== undefined) {
         const pending = config.scheduler?.hasPending(cwd) === true
         lines.push(`Project: ${project.slug} \u00B7 key ${project.projectKey}`)
         lines.push(`Remote: ${project.remote}`)
         try { lines.push(`Provider: ${selectProvider(project).describe(project)}`) }
         catch { lines.push('Provider: (kind unrecognized — sync will refuse loudly, nothing silently reroutes)') }
+        // #50 §7.8 IDENTITY MUST FAIL LOUDLY. Project rules carry across checkouts
+        // because the key is UUIDv5 over the canonicalized REMOTE — so the ways it
+        // can silently diverge (no readable remote ⇒ path-derived, a fork listed
+        // before origin, a TreeDX link keyed on the pool location) are reported
+        // here instead of leaving a checkout owning a private rules namespace while
+        // its developer believes the team's rules apply.
+        {
+          const derived = resolveProject(cwd, config.projectKeyOverride !== undefined && config.projectKeyOverride !== '' ? config.projectKeyOverride : undefined)
+          const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
+            : derived.projectKeySource === 'override' ? 'config override'
+              : `PATH ${cwd} (not the remote — unstable across machines)`
+          lines.push(derived.projectKey === project.projectKey
+            ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
+            : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${project.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`)
+        }
         lines.push(pending ? 'Sync: a push is pending (debounced)' : `Sync: ${status?.mode ?? 'never run'}${pending ? '' : ''}`)
       }
       if (status !== null) {
         lines.push(`Last sync: ${status.at} \u2014 ${status.lastOk ? 'synced' : `${status.mode ?? 'local-only'}: ${status.detail}`}`)
         lines.push(`  ${(status.steps ?? []).join(' \u2192 ')}`)
       }
-      if (config.enrich !== undefined) lines.push(config.enrich.statusLine())
+      // #61: an unwired surface is STATED, not omitted. A reader who sees no enrichment line cannot tell
+      // whether enrichment is off, broken, or simply not printed here — which is how "the feature never
+      // ran" hides for three days behind a logger nobody reads.
+      lines.push(config.enrich !== undefined ? config.enrich.statusLine() : 'Enrichment: not wired on this plane (no model route registered)')
+      lines.push(config.prompt !== undefined ? config.prompt.statusLine() : 'Prompt suggestions: not wired on this plane')
+      lines.push(diagnosticStatusLine())
       lines.push(AUTO_SAVE_LINE(config))
+      // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
+      // the durable log is named as unchecked rather than counted as clean: coverage holes, orphan
+      // files and dead citations need `/chapters-repair audit`.
+      {
+        const states = [...(domain.table('sessions').entries() as Iterable<[string, SessionState]>)]
+          .map(([, st]) => st)
+          .filter((st) => (st as { rootSession?: string }).rootSession !== undefined)
+        const health = registryHealth(states)
+        const dead = states.reduce((m, st) => m + (st.chapters?.length ?? 0), 0)
+        lines.push(`Findings (registry-level, this machine): ${health.text}`)
+        lines.push(`  NOT checked here: coverage holes, orphan files, dead citations — run /chapters-repair audit${dead === 0 ? ' (no chapter records at all yet)' : ''}`)
+      }
+      // The retrievability line: a long session that has never tripped an archive moment is the field
+      // case #61 found (2,363 events, 414 tool calls, `chapters: []`) — knowledge that exists only in
+      // the log and is invisible to every search on this machine.
+      {
+        const session = (invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } })
+        const sess = session.session ?? session.agent?.session
+        const events = sess?.snapshotEvents?.() ?? []
+        const ends = events.filter((e) => (e as { type?: string }).type === 'turn/end').length
+        const mine = sess?.id !== undefined
+          ? ((domain.table('sessions').get(sess.id) as SessionState | undefined)?.chapters.length ?? 0)
+          : 0
+        if (mine === 0 && ends > 0) {
+          lines.push(`This session: ${events.length} events, ${ends} completed turn(s), 0 chapters — NOTHING it does is retrievable. /chapters-save archives it, or /chapters-continue opens a child on the archive.`)
+        } else if (mine > 0) {
+          lines.push(`This session: ${events.length} events, ${ends} completed turn(s), ${mine} chapter record(s) archived.`)
+        }
+      }
       return { kind: 'success', text: lines.join('\n') }
     },
   }
@@ -298,6 +378,54 @@ export function registerHostCommands(
     },
   }
 
+  const promptCommand = {
+    name: 'chapters-prompt',
+    description: 'Prompt recommendations (#71, site \u00A728): set the defining model, turn the composer ghost off, or answer the client\u2019s pull.',
+    input: { hint: 'model [provider/model | clear] | off | suggest' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
+      if (config.prompt === undefined) return { kind: 'error', text: 'prompt recommendations are not wired on this plane' }
+      const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((p) => p.length > 0)
+      const verb = parts[0] ?? 'help'
+      try {
+        if (verb === 'model') {
+          const arg = parts[1]
+          if (arg === undefined) {
+            const { spec, source } = config.prompt.effective()
+            return { kind: 'success', text: spec === ''
+              ? `prompt model: OFF${source === 'override' ? ' (stored override — /chapters-prompt model <provider/model> to enable)' : ' (unset — set one with /chapters-prompt model <provider/model>)'}`
+              : `prompt model: ${spec} (${source}) — ON` }
+          }
+          if (arg === 'clear') {
+            await config.prompt.setModel(null)
+            const { spec } = config.prompt.effective()
+            return { kind: 'success', text: spec === ''
+              ? 'prompt model override cleared — the config default is unset, so suggestions are OFF'
+              : `prompt model override cleared — now following the config default (${spec}, ON)` }
+          }
+          await config.prompt.setModel(arg)
+          return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables)` }
+        }
+        if (verb === 'off') {
+          await config.prompt.setModel('')
+          return { kind: 'success', text: 'prompt suggestions OFF (stored override; /chapters-prompt model clear restores the config default)' }
+        }
+        if (verb === 'suggest') {
+          const holder = invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }
+          const sess = holder.session ?? holder.agent?.session
+          if (sess?.id === undefined) return { kind: 'error', text: 'suggest needs a session scope — run it inside a session (the composer ghost calls this verb; humans rarely do)' }
+          const events = (sess.snapshotEvents?.() ?? []) as readonly SessionEventLike[]
+          const titleEvent = [...events].reverse().find((e) => e.type === 'session/title')
+          const title = titleEvent !== undefined && typeof titleEvent.data.title === 'string' ? titleEvent.data.title : undefined
+          const r = await config.prompt.suggest({ id: sess.id, title, events: [...events] })
+          return r.ok ? { kind: 'success', text: r.text } : { kind: 'error', text: r.text }
+        }
+        return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest' }
+      } catch (error) {
+        return { kind: 'error', text: `chapters-prompt failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
+      }
+    },
+  }
+
   try {
     const d1 = commands.register(linkCommand)
     if (typeof d1 === 'function') disposers.push(d1 as () => void)
@@ -305,14 +433,20 @@ export function registerHostCommands(
     if (typeof d2 === 'function') disposers.push(d2 as () => void)
     const d3 = commands.register(enrichCommand)
     if (typeof d3 === 'function') disposers.push(d3 as () => void)
+    const d3b = commands.register(promptCommand)
+    if (typeof d3b === 'function') disposers.push(d3b as () => void)
     if (config.rules !== undefined) {
       const rulesFn = config.rules
       const rulesCommandDef = {
         name: 'chapters-rule',
-        description: 'Project rules (record \u00A77): propose, review, approve per machine, revoke.',
-        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>] | approve <id> | revoke <id>' },
+        description: 'Rules (record \u00A77): project tier propose/approve/revoke per machine; session tier review, pin, conflict report.',
+        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts' },
         async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
-          const r = await rulesFn(cwdOf(invocation.agent), invocation.rawInput ?? '')
+          // the session id reaches the resolver because the SESSION tier activates
+          // by ancestry (§7.5): `active` cannot answer without knowing which tree
+          // is asking. Command output never enters the model context (§7.2).
+          const sessionId = (invocation.agent as { session?: { id?: string } } | undefined)?.session?.id
+          const r = await rulesFn(cwdOf(invocation.agent), invocation.rawInput ?? '', sessionId)
           return { kind: r.kind, text: r.text }
         },
       }

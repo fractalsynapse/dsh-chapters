@@ -25,7 +25,8 @@
  * non-archive is either a quiet, expected skip (wrong preset, no completed turn)
  * or a LOUD warn (unreadable, save failed).
  */
-import { appendFileSync } from 'node:fs'
+import { diagnosticWarn } from './diag.ts'
+import { formatWarnings } from './warnings.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import { lineageOf, type SessionEventLike } from './types.ts'
 import type { RegistryStore } from './store.ts'
@@ -60,7 +61,7 @@ export interface AutoSaveDeps {
   /** Durable fallback when the live handle is gone; undefined when unreadable. */
   durableChild?: ((sessionId: string) => Promise<AutoSaveChildView | undefined>) | undefined
   /** The archive itself — saveSession in production, injected for containment tests. */
-  save: (child: AutoSaveChildView) => Promise<{ archived: number; skipped: string | null }>
+  save: (child: AutoSaveChildView) => Promise<{ archived: number; skipped: string | null; warnings: string[] }>
   warn: (message: string) => void
   /** Observability seam: what each settlement decided. Outcome vocabulary pinned by tests. */
   onSettled?: ((sessionId: string, outcome: string) => void) | undefined
@@ -129,6 +130,12 @@ export function makeSubagentEndListener(deps: AutoSaveDeps): (info: SubagentEndI
         }
         try {
           const out = await deps.save(view)
+          // #58: 'payloadless' is an anomaly, not an expected skip — the child settled with a
+          // read that carried no bytes, so its knowledge is NOT archived. Loud, by the same
+          // containment rule as 'unreadable'. 'nothing-new'/'no-completed-turn' stay quiet.
+          if (out.skipped === 'payloadless') {
+            deps.warn(`subagent auto-save: ${id} settled with an archive that rendered nothing — NOT archived (a payload-less read, not a short conversation): ${out.warnings.join('; ')}`)
+          }
           deps.onSettled?.(id, out.skipped === null ? `saved${suffix}` : `skipped:${out.skipped}${suffix}`)
         } catch (error) {
           deps.warn(`subagent auto-save: archiving ${id} failed: ${String((error as Error)?.message ?? error)} — its knowledge was NOT archived`)
@@ -176,19 +183,172 @@ export interface AutoSaveWiring extends SaveSessionConfig {
  * for the idle/afterPush ladders exactly like a `/chapters-save` that skipped
  * the manual nudge. A test pins that nothing here calls runNow.
  */
+/**
+ * The ONE payload-bearing durable read (docs/contract.md § Durable reads, issue #58).
+ *
+ * Door 5 needs it because a continuable child is disposed before `subagent/end`; the repair door
+ * (`/chapters-repair`, #60) needs the same thing because re-deriving a chapter is worthless if the read
+ * returns metadata rows. Two copies of "read the log" is how 12 children were archived as empty shells
+ * and the seam still looked alive: `listEvents` succeeds, returns 10 correctly-typed
+ * `SessionEventRecord`s, and none of them has `data`. So this function is exported and pinned by a
+ * source-shape row that fails if a door starts reading the log by hand again.
+ */
+export async function readDurableSession(
+  get: (name: string) => unknown,
+  sessionId: string,
+): Promise<AutoSaveChildView | undefined> {
+  const sq = get('sessionQuery') as {
+    readSession?(id: string): Promise<{ session?: AutoSaveChildHeader; events?: SessionEventLike[] }>
+  } | undefined
+  if (sq?.readSession === undefined) return undefined
+  const read = await sq.readSession(sessionId)
+  const events = read?.events
+  if (!Array.isArray(events) || events.length === 0) return undefined
+  // The header rides the same observation as the bytes being archived — origin/agentPreset/cwd are
+  // never inferred from a second scan (and never from the events, which is the r28 lesson).
+  return { events, header: read.session ?? ({} as AutoSaveChildHeader) }
+}
+
+/**
+ * The seventh archive moment (#61, Amendment A): **a rooted child that has never archived.**
+ *
+ * Door 5 is keyed on `origin: 'subagent'`. A `ch-*` continuation child is NOT a subagent — its header
+ * says `origin: user` with a `parentSession` — so no moment was watching it at all. The field case was
+ * `ch-dc3be3ab`: 2,363 events, 414 tool calls, 2 completed turns, `chapters: []`, `reservations: {}`.
+ * Not a failed archive: one never attempted. Its knowledge sits in the log and is invisible to every
+ * search on the machine, which is precisely what this plugin exists to prevent.
+ *
+ * This is the PURE gate — the listener below only does I/O, so the decision is testable (and reviewable)
+ * without a host.
+ */
+export function shouldForceChildArchive(input: {
+  header: { origin?: string; agentPreset?: string; parentSession?: string }
+  /**
+   * Lineage, from ANY of its three real sources — measured 2026-10-22, because the first version of
+   * this gate asked the KERNEL HEADER and silently missed the field case: `ch-dc3be3ab` carries
+   * `parentSession: NONE, origin: undefined`. Lineage lives in (a) the registry row, which
+   * `chapters_continue` writes via `linkChild` at continue-core.ts:520, (b) the header, when the host
+   * sets one, and (c) the id itself — `ch-${newId()}` is minted by continue-core.ts:501, so the prefix
+   * is OUR OWN durable claim that this session is a continuation child. A row that never archived can
+   * still carry the link, and a session with no row at all still carries the prefix.
+   */
+  lineageParent?: string | null | undefined
+  chapterCount: number
+  lastArchivedSeq: number
+  anchor: number
+  completedTurnsAboveWatermark: number
+  minTurns: number
+  enabled: boolean
+}): { fire: boolean; reason: string } {
+  if (!input.enabled) return { fire: false, reason: 'childAutoArchive is off in config' }
+  if (input.header.agentPreset !== 'chapters') return { fire: false, reason: 'not a chapters-preset session' }
+  // door 5 owns delegation; two doors on one child would double-write the same span
+  if (input.header.origin === 'subagent') return { fire: false, reason: 'owned by subagent settlement (door 5)' }
+  // Only a ROOTED child: a session with no parent anywhere is the user's own session, whose doors are
+  // 1–3 (a human, a button, pressure) and which this plugin must not archive behind their back.
+  const parent = input.header.parentSession ?? input.lineageParent ?? ''
+  if (parent === undefined || parent === '') {
+    return { fire: false, reason: 'no lineage (header, registry row, or ch- id) — a root session, doors 1–3 own it' }
+  }
+  if (input.anchor <= 0) return { fire: false, reason: 'no completed turn yet' }
+  if (input.chapterCount === 0) {
+    return { fire: true, reason: 'never archived — the hole #61 measured (2,363 events, chapters: [])' }
+  }
+  if (input.completedTurnsAboveWatermark < input.minTurns) {
+    return { fire: false, reason: `${input.completedTurnsAboveWatermark} unarchived turn(s) < childAutoArchiveMinTurns=${input.minTurns}` }
+  }
+  return { fire: true, reason: `${input.completedTurnsAboveWatermark} completed turns past the watermark (seq ${input.lastArchivedSeq})` }
+}
+
+export interface ChildArchiveCtx {
+  logger?: { warn?: (m: string) => void; info?: (m: string) => void }
+}
+
+export interface ChildArchiveDeps {
+  ctx: ChildArchiveCtx
+  /** A getter, not a value: the realm's store opens asynchronously and once (#61). */
+  store: () => Promise<RegistryStore>
+  wiring: AutoSaveWiring
+  /** config `childAutoArchive`, default true — the operator can close this door. */
+  enabled: boolean
+  /** config `childAutoArchiveMinTurns`, default 4 — the lag that re-arms it after the first save. */
+  minTurns: number
+  onArchived?: (id: string, records: number) => void
+}
+
+/**
+ * The listener. Save-only — creates NO session and compacts NO surface, so the "no
+ * continuation-creating actions mid-step" rule is not engaged (the same reasoning that let door 5
+ * exist). Fires only on `turn/end`, reads the LIVE session's own payload-bearing events, and is
+ * watermark-idempotent: a re-run finds `nothing-new` and writes nothing.
+ */
+export function makeChildArchiveListener(deps: ChildArchiveDeps): (session: unknown, event: unknown) => void {
+  const chains = new Map<string, Promise<void>>()
+  const section = (id: string, job: () => Promise<void>): void => {
+    const prev = chains.get(id) ?? Promise.resolve()
+    const next = prev.then(job, job)
+    chains.set(id, next.then(() => undefined, () => undefined))
+  }
+  return (session, event) => {
+    try {
+      if ((event as { type?: string } | undefined)?.type !== 'turn/end') return
+      const s = session as {
+        id?: string
+        header?: { origin?: string; agentPreset?: string; parentSession?: string; cwd?: string }
+        snapshotEvents?: () => readonly SessionEventLike[]
+      } | undefined
+      const id = s?.id
+      const header = s?.header
+      const cwd = header?.cwd
+      if (id === undefined || header === undefined || cwd === undefined || typeof s?.snapshotEvents !== 'function') return
+      const events = [...(s.snapshotEvents())] as SessionEventLike[]
+      const anchor = [...events].reverse().find((e) => e.type === 'turn/end')?.seq ?? -1
+      section(id, async () => {
+        // resolved ONCE per section: calling the getter twice would reopen the domain store inside a
+        // live turn boundary.
+        const store = await deps.store()
+        const state0 = await store.get(id)
+        const lastArchived = state0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
+        const completed = events.filter((e) => e.type === 'turn/end' && e.seq > lastArchived && e.seq <= anchor).length
+        const gate = shouldForceChildArchive({
+          header,
+          lineageParent: (state0 as { parentSession?: string | null }).parentSession ?? (id.startsWith('ch-') ? 'continuation-id' : undefined),
+          chapterCount: state0.chapters.filter((c) => c.status !== 'superseded').length,
+          lastArchivedSeq: lastArchived,
+          anchor,
+          completedTurnsAboveWatermark: completed,
+          minTurns: deps.minTurns,
+          enabled: deps.enabled,
+        })
+        if (!gate.fire) return
+        const out = await saveSession({
+          events, sessionId: id, cwd, store, config: deps.wiring,
+          subagentOf: lineageOf(header as never),
+        })
+        if (out.records.length > 0) {
+          deps.ctx.logger?.info?.(`dsh-chapters: forced child archive ${id} (${out.records.length} chapter(s), seqs ${out.fromSeq}..${out.anchor}) — ${gate.reason}`)
+          // enrichment QUEUED, never run inline: this fires inside a live turn boundary.
+          deps.wiring.scheduler?.schedule(cwd, 'archive:save')
+          deps.onArchived?.(id, out.records.length)
+        } else if (out.skipped !== 'nothing-new') {
+          // loud, per #61: a door that decided to archive and then did not must say why.
+          diagnosticWarn(deps.ctx.logger as never, 'child-archive', `${id} forced archive produced nothing (${out.skipped ?? 'unknown'}); ${formatWarnings(out.warnings, 3)}`)
+        }
+      })
+    } catch (error) {
+      diagnosticWarn(deps.ctx.logger as never, 'child-archive', `listener failed: ${String((error as Error)?.message ?? error)}`)
+    }
+  }
+}
+
 export function wireSubagentAutoSave(
   ctx: AutoSaveCtx,
   store: RegistryStore,
   wiring: AutoSaveWiring,
 ): (info: SubagentEndInfoLike) => void {
   const warn = (message: string): void => {
-    ctx.logger?.warn?.(message)
-    // the engine's precedent (r19): a headless profile routes ctx.logger where
-    // nobody can see it; the sink env makes the loss readable from outside.
-    try {
-      const sink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
-      if (sink !== undefined) appendFileSync(sink, `[${new Date().toISOString()}] ${message}\n`)
-    } catch { /* diagnostics must never mask the real failure */ }
+    // #54: the shared seam (logger warn + sink), not a second copy of the same three lines.
+    diagnosticWarn(ctx.logger, 'auto-save', message)
   }
   const liveChild = (sessionId: string): AutoSaveChildView | undefined => {
     const agents = ctx.get?.('agents') as { get?(id: string): unknown } | undefined
@@ -197,17 +357,17 @@ export function wireSubagentAutoSave(
     if (session === undefined || typeof session.snapshotEvents !== 'function') return undefined
     return { events: [...session.snapshotEvents()] as SessionEventLike[], header: (session.header ?? {}) as AutoSaveChildHeader }
   }
-  const durableChild = async (sessionId: string): Promise<AutoSaveChildView | undefined> => {
-    const sq = ctx.get?.('sessionQuery') as { listEvents?(id: string): Promise<SessionEventLike[]>; listSessions?(signal?: unknown): Promise<Array<{ header?: AutoSaveChildHeader }>> } | undefined
-    if (sq?.listEvents === undefined || sq.listSessions === undefined) return undefined
-    const events = await sq.listEvents(sessionId)
-    if (!Array.isArray(events) || events.length === 0) return undefined
-    const records = await sq.listSessions()
-    const header = (records ?? []).find((r) => r?.header?.id === sessionId)?.header
-    if (header === undefined) return undefined
-    return { events, header }
-  }
-  const save = async (child: AutoSaveChildView): Promise<{ archived: number; skipped: string | null }> => {
+  /**
+   * The durable arm — and for a **continuable** child the ONLY arm, because the host disposes the
+   * handle before it emits `subagent/end` (`host-subagent-seam.test.ts` F4). It must return
+   * payload-bearing events, so it reads `sessionQuery.readSession` (cloned header +
+   * `snapshotSessionEvent` events, one call) and **not** `listEvents`, whose `SessionEventRecord`
+   * rows carry `seq`/`type`/`time`/`surface` and no `data` — the shape that archived 12 children
+   * as empty shells (#58; `docs/contract.md` § Durable reads).
+   */
+  const durableChild = (sessionId: string): Promise<AutoSaveChildView | undefined> =>
+    readDurableSession((name) => { try { return ctx.get?.(name) } catch { return undefined } }, sessionId)
+  const save = async (child: AutoSaveChildView): Promise<{ archived: number; skipped: string | null; warnings: string[] }> => {
     const cwd = child.header.cwd
     if (cwd === undefined || cwd === '') throw new Error('subagent child session has no workspace cwd — nowhere reachable to write')
     const out = await saveSession({
@@ -218,10 +378,21 @@ export function wireSubagentAutoSave(
       config: wiring,
       subagentOf: lineageOf(child.header),
     })
-    if (out.skipped === null && out.records.length > 0 && wiring.scheduler !== undefined && cwd !== '') {
-      wiring.scheduler.schedule(cwd, 'archive:autoSave')
+    // Lineage: the child stays its OWN root, and that is deliberate (#47 decision, re-checked
+    // under #58). Two candidate reasons to `linkChild` it to the parent were tested and both fail:
+    // a subagent is never an ANCESTOR of anything the parent walks, so `buildIndex` would still
+    // omit it from the parent's TOC; and `rootSession` is the STORE DIRECTORY (`archive.ts:110`,
+    // `engine-core.ts:310`), so linking would silently re-home every child chapter into the
+    // parent's tree. Cross-session reachability is search's job — `buildLocalCorpus` walks every
+    // tree under the store root — and rule ancestry already reads the kernel header's parentSession
+    // (`session-rules.ruleAncestorSet`), which the frontmatter records from the same source.
+    if (out.skipped === null && out.records.length > 0 && cwd !== '') {
+      wiring.scheduler?.schedule(cwd, 'archive:autoSave')
     }
-    return { archived: out.records.length, skipped: out.skipped }
+    // #58: `writeArchive` already says "N event(s) rendered no output"; dropping that array was
+    // why an entire door of empty archives ran for days with a clean log. Surface every warning.
+    for (const w of out.warnings) warn(`subagent auto-save: ${child.header.id ?? '?'}: ${w}`)
+    return { archived: out.records.length, skipped: out.skipped, warnings: out.warnings }
   }
   return makeSubagentEndListener({
     presetId: wiring.presetId,

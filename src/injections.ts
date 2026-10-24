@@ -57,6 +57,18 @@ export function isSessionStateNarration(data: Record<string, unknown>): boolean 
   // v4 (issue #43, measured against dsh-plan-mode/lib/index.js:395-410 on
   // 0.2.0-rc.2): the producer owns the kind — `{ kind: 'plan-mode', form: 'notice' }`.
   if (source?.kind === 'plan-mode' && source.form === 'notice') return true
+  // #61 Amendment B — a delegate's report is conversation about THIS session's work, not a project's
+  // private bytes. Measured shapes (0.2.x logs): `{ kind: 'agent-message', form: 'relay' }` carries
+  // "Agent <id> sent a message: <the result>", and `{ kind: 'subagent-settled', form: 'notice' }` is
+  // when that delegate finished. The old rule screened both, which cost 44 markers / 248,150 chars
+  // (~62K est tokens) in the first project built on this preset — delegated work vanished through BOTH
+  // doors meant to capture it, leaving chapters that recorded a delegation with no outcome.
+  // Named by producer AND form like the plan-mode arm above, so it cannot widen: the workspace
+  // instruction file (`{ kind: 'agent-instructions', form: 'instructions' }`) is still screened, and
+  // `isHumanAuthored` stays strict, because the topic-signature layer must not let a 2 KB report drag a
+  // signature toward the filenames it mentions (record r28).
+  if (source?.kind === 'agent-message' && source.form === 'relay') return true
+  if (source?.kind === 'subagent-settled' && source.form === 'notice') return true
   // v3 logs, still replayed from disk: the retired wrapper the exception was
   // written against. Both arms stay named by producer AND form — neither widens.
   return source?.kind === 'plugin' && source.plugin === 'plan-mode' && source.form === 'notice'
@@ -94,6 +106,32 @@ export function sourceLabel(data: Record<string, unknown>): string {
  * `[\s\S]*?(</system-reminder>|$)` mirrors the tape's masking of truncated
  * injections.
  */
+/**
+ * The ONE predicate for "this text is host-injected context, not something the human wrote".
+ *
+ * `source.kind` remains the primary gate (`isHumanAuthored`, `screenConversation`) — but some consumers
+ * see only flattened provider text with NO source at all, first among them `deriveIdentity` choosing a
+ * chapter TITLE. Until #59 that path carried a private regex (`HARNESS_PROSE`) that had silently fallen
+ * behind the host's injected kinds, so a `time-context` snapshot became a chapter title, slug, FILENAME
+ * and a live TOC citation (`020-time-sampled-while-preparing-turn-11-step-24-202.md`, cited by a
+ * checkpoint and never written). AGENTS.md: one predicate per semantic decision, and a source-shape row
+ * fails if a second list reappears.
+ *
+ * Anchored at the START on purpose: a human quoting "time sampled while preparing" mid-sentence is
+ * conversation and stays verbatim — the same line the body screen draws.
+ *
+ * `this is an automatically generated checkpoint` joined 2026-10-23 (#87): it is the host's own
+ * in-place relief preamble — machine state that replaces earlier turns, never something a human asked.
+ * It had to join THIS list rather than get a second one, because #87's fix asks the same question
+ * ("is this a human turn?") at the compaction seam, and a parallel list is exactly the #59 drift this
+ * comment already records.
+ */
+const INJECTED_PROSE = /^\s*(<system-reminder>|<codegraph_context|system reminder\b|current runtime context\.|time sampled while preparing|browser time zone for this request|\[workspace instructions?\b|this session is running under|the following workspace instructions|agent [A-Za-z0-9_-]{8,} sent a message|background subagent [A-Za-z0-9_-]{8,} finished|this is an automatically generated checkpoint)/i
+
+export function isInjectedProse(text: string): boolean {
+  return INJECTED_PROSE.test(text)
+}
+
 const REMINDER_SPAN = /<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g
 
 /** Strip every injected span from a message's text; deterministic, idempotent

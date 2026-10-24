@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import { buildChaptersTools } from '../../src/tools.ts'
 import { freshSession, type SessionState } from '../../src/registry.ts'
 import type { SessionEventLike } from '../../src/types.ts'
+import { withMutate } from '../fake-store.ts'
 
 const CONFIG = {
   artifactStoreRoot: '.dsh-chapters',
@@ -54,12 +55,12 @@ function makeWorld(opts: { events?: SessionEventLike[]; parentChapters?: Array<{
     agents: { create: async (req: Record<string, unknown>) => { createRequests.push(req); return { dispose: async () => {} } } },
     logger: { warn: (_m: string) => {} },
   }
-  const store = {
+  const store = withMutate({
     get: async (id: string) => states.get(id) ?? (opts.parentChapters && id === 'caller-1'
       ? { ...freshSession(id), chapters: opts.parentChapters, nextChapterNumber: opts.parentChapters.length + 1 }
       : freshSession(id)),
     put: async (id: string, s: SessionState) => { states.set(id, s) },
-  }
+  })
   const built = buildChaptersTools(ctx as never, store as never, CONFIG as never)
   return { built, caller, states, createRequests, tmp }
 }
@@ -141,7 +142,7 @@ test('save: triggers enrichment asynchronously (fire-and-forget)', async () => {
   const configWithEnrich = { ...CONFIG, enrich: { runNow: async () => { enrichCalled = true; return { processed: 1, remaining: 0 } } } }
   const built = buildChaptersTools(
     { get: () => undefined, sessionProjections: { stateOf: () => undefined }, llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) }, agents: { create: async () => ({ dispose: async () => {} }) }, logger: { warn: () => {} } } as never,
-    { get: async () => freshSession('caller-1'), put: async () => {} } as never,
+    withMutate({ get: async () => freshSession('caller-1'), put: async () => {} }) as never,
     configWithEnrich as never,
   )
   const caller = {

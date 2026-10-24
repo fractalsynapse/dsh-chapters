@@ -95,13 +95,57 @@ export const inject = [
 
 - `agents` — `ctx.agents.create`, the continuation primitive. **The load-bearing one.**
 - `storageDomain` — chain registry.
-- `sessionQuery` — `observeSession` for the calling agent's own log and preset projection.
+- `sessionQuery` — `observeSession` for the calling agent's own log and preset projection, plus the
+  durable reads for **other** sessions (see § Durable reads — the verbs are not interchangeable).
 - `tokenMeter` — pressure math and the continuation budget preflight.
 - **`systemPrompt` is excluded on purpose** (invariant 3).
 - Add `commands` at the UI/CLI trigger phase; `connection` / `sessionController` only if a create path
   turns out to need the client RPC round-trip.
 
 Declare only what you use — `dsh-compact` gets by on `inject = ["commands"]`.
+
+## Durable reads — `sessionQuery` verbs are NOT interchangeable
+
+Measured 2026-10-22 against host `0.2.0-rc.2` while root-causing #58. The rule this section exists to
+enforce: **measure a host verb's payload *shape*, not its presence.** `spikes/subagent-end/FINDINGS.md`
+finding 5 recorded `{count, types}` from `listEvents`, saw 10 plausible event types, wrote "returned the
+full durable log", and the whole of door 5 was built on that. The types were real; the payloads were not
+there at all.
+
+| verb | returns | safe as an archive input? |
+|---|---|---|
+| `listEvents(sessionId)` | `SessionEventRecord[]` = `{sessionId, seq, type, time, surface}` — **no `data`** | **No.** Types and seqs only: a metadata index. |
+| `readSession(sessionId)` | `{session: structuredClone(header), inheritedEventCount, events: snapshotSessionEvent(e)[]}` | **Yes**, and it carries the header too — one call, so no `listSessions()` scan. |
+| `readSurface(sessionId)` | cloned header + `currentSurfaceEvents` (folded surface, snapshot-detached) | Yes for surface work; it is *folded*, so it is not the whole log. |
+| `filterEvents(sessionId, filters)` | semantic event documents | No — search documents, not events. |
+
+File:line (host install, `/home/adrian/node_modules/@deepseek-ai/dsh-session-query/`):
+`lib/index.js:1141` `async listEvents(sessionId) { return eventRecords(sessionId, (await this._corpus.load(sessionId)).events) }`
+→ `:845-847` `eventRecords` → `analyzeEventLog(sessionId, events).records`, built at `:966-973` as
+`records: events.map((event) => ({ sessionId, seq: event.seq, type: event.type, time: event.time, surface: … }))`.
+Published type: `lib/types/types.d.ts:43-54` (`interface SessionEventRecord` — the doc comment says
+*"Lightweight metadata for one event"*, which is the sentence the spike skipped).
+`lib/index.js:1079-1087` `readSession` → `events: loaded.events.map(snapshotSessionEvent)`;
+`snapshotSessionEvent = adoptSessionEvent(structuredClone(event))` at
+`@deepseek-ai/dsh-session/lib/index.js:1106-1108`, i.e. a **validated, payload-bearing** clone.
+
+Read the header, never infer it: `readSession().session` is the kernel's own `SessionHeader` clone, so
+`origin` / `parentSession` / `agentPreset` / `cwd` come from the same observation as the bytes being
+archived — which is what door 5's gate needs (#58). The header is *recorded* on the child's own row
+(`subagent`/`parentSession` frontmatter), not used to re-link the tree — see docs/architecture.md
+§ The archive moments for why `linkChild` was measured and rejected.
+
+And the host's own teardown ordering, which decides **which** arm runs:
+`@deepseek-ai/dsh-subagent/lib/index.js:1240-1250` (continuable) — `flushFinalState` →
+`await activation.handle.dispose()` → `resident.delete(childId)` → `observer.settle(failure)`, and
+`settle` is what emits `subagent/end` (`:317-324`). `observeRun` (one-shot, `:296-306`) emits earlier,
+before disposal. So a continuable child's live handle is **always** gone at settlement: the durable arm
+is the only arm for it, and the fast path is the only arm for one-shot children. Both must be tested;
+one measurement of one mode is what #58 is.
+
+`SessionEventLike.data` is therefore **required** in `src/types.ts` (was optional). Optionality is the
+reason a `listEvents` record passed as `SessionEventLike[]` type-checked, and the renderer's
+`ev.data ?? {}` then made a hollow chapter legal instead of failing to compile.
 
 ## Tools
 
@@ -467,3 +511,85 @@ not stylistic:
 - Manual is MVP. The button path cannot supply model-authored titles or ranges, so segmentation must be
   a plain function callable **without an agent turn** — build that seam in Phase 1, not Phase 5, or the
   UI and automatic paths both force a rewrite.
+
+## Composer Ghost Layer — measured host facts (#71, verified 2026-10-21 against `examples/dsh` @ 0.2.1-rc.2; runtime pin 0.2.0-rc.2, compile deps still 0.1.5-rc.2)
+
+The prompt-recommendation feature renders a ghost layer in the composer. What the host does
+and does not let a plugin do, with anchors:
+
+- **The placeholder text is NOT plugin-writable.** `placeholderText` is computed inside the
+  host's `InputBar.tsx:363-372` (`packages/client/ui-conversation/src/client/skeleton/`): an
+  owner prop (passed only by the host's own `ConversationContent`) ?? offline/disabled/steer
+  states ?? `useProjection('plan')` swap ?? locale defaults. Every string is locale-owned
+  (`client/locales.ts`, enforced upstream by `verify-client-ui-i18n`); no config key, slot,
+  projection input, or service feeds a plugin value into that chain. Plan mode swaps it from
+  host code (`InputBar.tsx:67-68`) — mechanism precedent, not an extension point.
+- **The composer overlay slot is the hole.** `'conversation.input.overlay'` — "floating
+  entries rendered inside the resident composer card", `{ kind: 'list'; scope: 'session' }`
+  (`contract/slots.ts:271-272`), rendered at `InputBar.tsx:404` inside
+  `[data-composer-overlay]`. The shipped slash-menu occupies it
+  (`ui-input-trigger/src/client/index.ts:65`) — registering there is a proven path, and
+  `slots.inject(name, …)` waits for the declaration, same as our assistant-actions door rows.
+- **Standard session props give the composer machine.** Session-scope slot entries receive
+  `useConversation` / `useInput` / `inputActions` (`contract/slots.ts:329-336`); `InputActions`
+  carries `setDraft(text)` ("replace the whole draft with plain text"), `insertText`,
+  `persistDraft`, `submit` (`contract/input.ts:263-291`), and `InputState.draft` is the
+  published draft text (`contract/input.ts`, `InputState`). `useProjection` is on
+  `SessionStandardProps` (`ui-session/src/client/index.ts:166-173`) for the 0.2.x push upgrade.
+- **ArrowRight is free.** The composer keymap registers `KEY_ARROW_UP/DOWN`, `KEY_TAB`,
+  `KEY_ESCAPE`, `KEY_SPACE`, `KEY_ENTER` at `COMMAND_PRIORITY_CRITICAL`
+  (`input/editor/keymap.ts:104-140`); `grep ArrowRight` over `ui-conversation/src/client` is
+  empty on both 0.1.5 and the 0.2.1 checkout. `ComposerKeyboard` itself is
+  "InputBar-exclusive … never across a plugin boundary" (`contract/draft-editor.ts:54-58`),
+  so the plugin's accept gesture attaches a capture-phase `keydown` listener at the DOM level
+  while its ghost is visible — fail-open: if the host ever claims the key or reshapes the DOM,
+  the click-to-accept path still works and nothing else breaks.
+- **Host→client pull channel: `remote.commands.execute(sessionId, line, [])`**, the exact wire
+  the door buttons ride (`src/client/doors.ts`, Playwright-verified; result arm
+  `{value.result.kind/text}`). New **wire events are NOT available to plugins**: the forwarded
+  allowlist is app-owned ("the one home of this application's forwarded-Host-event allowlist",
+  `packages/api/remotes/src/remote-events.ts:24`).
+- **Push transport is 0.2.x-only.** `appendPluginRecord(session, 'plugin:<name>', data)`
+  (`packages/core/session/src/index.ts:492`, grammar/types at `types.ts:525-543`, reader
+  `pluginRecordOf` at `index.ts:508`): durable, append-only, "never enters the model-visible
+  surface", retained by fork/resume, skipped by unknown readers. The `verify-plugin-record-callers`
+  gate is a **source-tree policy inside the dsh repo** ("rejects any other production caller
+  *in this repository*") — it does not and cannot gate an external plugin, and the `plugin:`
+  grammar is precisely the external-plugin carrier. `PluginRecordMap` is declaration-merged
+  (`export interface PluginRecordMap {}`, `types.ts:533`); a `ProjectionDefinition` registered
+  on `ctx.sessionProjections` (the plan/goal pattern; our host plane ALREADY injects
+  `sessionProjections`) folds committed events to client-pushed values. Both APIs are absent
+  from our installed `@deepseek-ai/dsh-session@0.1.5-rc.2` (grep-verified on `lib/types`),
+  which is why #71 ships the PULL transport; the push swap is the backlog item, and it needs
+  the compile-time `@deepseek-ai/*` closure moved to 0.2.x alongside the runtime pin.
+
+## Client Sessions Service: which verbs exist (measured 0.2.0-rc.2, #77)
+
+The client service injected as `sessions` (`dsh-api-session-controller/lib/types/client/sessions/
+service.js`) is a **session store and lifecycle**, not a navigator. Its verbs are
+`create / fork / using / retain / retainInfo / release / refresh / projectList / binding /
+handleSessionAdded / handleSessionRemoved / handleSessionActivity / …`. There is **no
+`sessions.open`** — a guard written as `if (typeof sessions.open !== 'function') return false`
+fails silently on every call, which is exactly how the chapters door spent three evenings looking
+like a client that refused to catalogue a plugin-created child.
+
+The navigation verb lives on the workspace service (`dsh-client-ui-workspace/lib/client.js`):
+
+```js
+openSession(target) { this.replaceMain(target, this.lifetime.signal, "reveal"); }
+```
+
+and the host's own fork affordance uses it — `dsh-client-ui-chat/lib/client.js`, right after its
+fork RPC resolves: `.then((childId) => { ctx.uiWorkspace.openSession(childId); })`. So a plugin
+that must move the visible session injects **`uiWorkspace`** and calls `openSession(sessionId)`;
+`sessions.*` cannot do it. `sessions.using/retain` materialize a scope for a session the client
+addresses; they do not change what is displayed.
+
+Two corollaries, both bought once:
+- A client capability you assume is a client capability you must assert at the decision point —
+  `src/client/doors.ts` now prints which verbs were actually present when it decided
+  (`+c/+u/+o/+w`), because a note that blames the user's client for the plugin's own missing port
+  sends the next reader down the wrong path.
+- An injected port that is optional and stops being wired fails as a symptom, not as an error:
+  `tests/unit/client-doors.test.ts` has a row that fails if `src/client/index.ts` drops
+  `uiWorkspace` from `inject` or stops passing it.

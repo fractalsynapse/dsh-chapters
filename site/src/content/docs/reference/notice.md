@@ -14,6 +14,9 @@ Project: <slug> · <projectKey>                       ← only when a knowledge 
                                                        one-line pointer to chapters_search
 <CORE RULES>                                         ← this machine's approved rules, verbatim; over budget
                                                        the continuation refuses, never clips
+                                                       #50 adds a SESSION tier to the same block: local
+                                                       rules, rendered beside the project ones; a fork
+                                                       child gets zero session bytes (branch intent)
 
 ## Active plan
 (this continuation keeps the same stream of work: 3 plan(s) submitted on the path — …)
@@ -66,6 +69,17 @@ agent's framing of "here's what's happening now".>   ← budget-checked TOGETHER
                                                        machine. ⚠ marks a chapter missing or modified
                                                        since archived — flagged, never trusted
 
+## The preset says it out loud
+
+A notice can only teach the session it creates, so a brand-new session and a delegated subagent would
+never be told these doors exist. The instruction therefore rides the `chapters` preset's own persona
+row — the same mechanism that carries the `PLOT:` discipline, and per-composition rather than global,
+which is what makes it allowed. It says, briefly: before a task run `chapters_rules` with the task
+description and name the rules you followed (or say none); for earlier work, decisions, or bug history
+run `chapters_search` first instead of re-reading files or asking the human; `chapters_artifact` holds
+the oversized tool outputs; a delegated child is covered by the same rules and the same archive.
+Sessions on the standard preset see none of it.
+
 ## Finding things
 - Chapter detail: open its path above with the read tool.
 - A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — 'toc' | 'search' | 'read'.
@@ -96,6 +110,6 @@ own plan projection folds it to active, so a seeded child really is gated (see t
 names where they are, the budget counts every one of them, and an over-budget continuation still refuses
 rather than clipping a single line.
 
-What's deliberately absent: the parent's full events (invariant 2 — citation not copying), any summary of a body (the model authors ranges, never text — invariant 4), any shared system-prompt edit (invariant 3). What's present because the numbers said so: **~102 tokens** for this index vs **~2,476** for the transcript it replaces — and every line is a door back to the full bytes ([§9](/concepts/archive-anatomy/)). The CORE RULES block rides under the title when you've approved some — verbatim, budget-capped, refuse-don't-clip ([§13](/knowledge/rules/)).
+What's deliberately absent: the parent's full events (invariant 2 — citation not copying), any summary of a body (the model authors ranges, never text — invariant 4), any shared system-prompt edit (invariant 3). What's present because the numbers said so: **~102 tokens** for this index vs **~2,476** for the transcript it replaces — and every line is a door back to the full bytes ([§9](/concepts/archive-anatomy/)). The CORE RULES block rides under the title when you've approved some — verbatim, budget-capped, refuse-don't-clip ([§13](/knowledge/rules/)). With [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50) the same builder feeds **two** places a head is rebuilt — this notice and the in-place compaction checkpoint (whose lead sections already carry the active plan and the working plot) — because a plan survived a `/compact` and a rule did not, which was the bug. Nothing is injected per request: invariant 3 keeps the global system prompt out, and on local hardware a head-position replacement reuses no cache. Empty set ⇒ zero bytes, exactly as today.
 
 Next, the receipts: [19. Benchmarks](/evidence/benchmarks/).

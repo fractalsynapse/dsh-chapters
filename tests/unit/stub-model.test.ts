@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decide, PLAN_TRIGGER, STUB_MODEL } from '../e2e/stub-model.ts'
+import { decide, PLAN_TRIGGER, STUB_MODEL, SUGGEST_TRIGGER } from '../e2e/stub-model.ts'
 
 const msg = (role: string, content: string) => ({ role, content })
 
@@ -102,4 +102,15 @@ test('the human ask is found even when injected user messages come AFTER it', as
     { role: 'user', content: '<system-reminder> A skill is a reusable set of task-specific instructions…' },
   ] } as never) as { kind: string }
   assert.equal(d.kind, 'plan', 'the LAST user message is the skill catalog — keying on it read "no request" and hung the journey')
+})
+
+test('#71: the second reader is its own decision — keyed on the persona phrase, nothing else claims it', () => {
+  // The suggest call: one user message, the persona line, no tools.
+  assert.equal(decide({ messages: [msg('user', `You are the ${SUGGEST_TRIGGER} — write the next prompt`)] }).kind, 'suggest')
+  // A normal conversation message must NOT look like a suggestion request, and the
+  // persona phrase appearing anywhere else (system prompt, catalog) must not fire it:
+  assert.equal(decide({ messages: [msg('system', `even a ${SUGGEST_TRIGGER} reference in the system prompt`), msg('user', 'hello there')] }).kind, 'plain')
+  // The trigger ranks ABOVE the plan arm: a suggest request never carries PLAN_TRIGGER,
+  // but if both phrases ever collided, the bounded aux call is answered, not replayed as a plan.
+  assert.equal(decide({ messages: [msg('user', `${SUGGEST_TRIGGER} ${PLAN_TRIGGER}`)] }).kind, 'suggest')
 })

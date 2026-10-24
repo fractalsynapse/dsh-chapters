@@ -1,0 +1,27 @@
+# dsh-chapters DEV profile patch — Local Qwen as the default model and the
+# Chapters preset as the default preset, so every new session in the dev
+# profile gets the deterministic compaction engine without any per-session
+# configuration. The llm-gate/fetch-timeouts rows mirror the live profile:
+# slow local prefill needs the long fetch timeouts and a single in-flight
+# generation (the llama server serializes generations anyway).
+- id: agent-default-model
+  config:
+    provider: local
+    model: qwen3.8-flash-next
+
+- id: agent-presets
+  config:
+    default: chapters
+
+- id: llm-gate
+  config:
+    providers:
+      local:
+        maxConcurrent: 1
+        maxQueued: 16
+        queueTimeoutMs: 7200000
+
+- id: fetch-timeouts
+  config:
+    headersTimeoutMs: 0
+    bodyTimeoutMs: 0

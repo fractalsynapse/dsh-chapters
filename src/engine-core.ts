@@ -26,8 +26,10 @@ import type { ChapterRange, RenderedChapter, SessionEventLike } from './types.ts
 import { chapterTopics } from './signature.ts'
 import type { ChapterRecord } from './archive.ts'
 import { estimateTokens, renderChapter, renderIndex } from './render.ts'
+import { isInjectedProse } from './injections.ts'
 import { lineageOf } from './types.ts'
-import { slugify } from './archive.ts'
+import { slugify, toStoredPath } from './archive.ts'
+import { isFinalized } from './registry.ts'
 import type { PlanChapter, SessionState } from './registry.ts'
 
 /** provider tag written into `compaction/summary` — our event-scan discriminator. */
@@ -46,13 +48,30 @@ export interface TocBullet {
 }
 
 export interface EngineConfig {
+  /** Workspace cwd, so a resolved-absolute store root still yields workspace-relative records (#69). */
+  workspaceCwd?: string | undefined
   /** Workspace-relative archive root; must be reachable by the `read` tool. */
   artifactStoreRoot: string
+  /**
+   * #85: where approved rules and the knowledge pool are read from when a notice is composed.
+   * Defaults to the historical `.dsh-knowledge` for real installs; an e2e boot pins it per port,
+   * because a tape is a claim about ONE world and a fixed path inside the developer's repo is not
+   * part of that world.
+   */
+  knowledgeMirrorDir: string
+  /** #87: how much of the newest human turn the summary carries verbatim when relief
+   *  shadows the turn that asked it. A cap, never a silent cut — the block says how much was left. */
+  openRequestCarryMaxChars: number
+  /** #78 A: the survivability switch. See `docs/host-compaction-seam.md` § the last-resort deferral. */
+  lastResortArtifact: boolean
   chapterTokenTarget: number
   toolResultDeferFloorTokens: number
   /** Composer tunables (record §4.2/§12) — same register, same defaults as the host plugin's. */
   mergeThreshold: number
   chapterLimit: number
+  /** #61 Amendment A — the seventh archive moment (see auto-save.ts `shouldForceChildArchive`). */
+  childAutoArchive?: boolean | undefined
+  childAutoArchiveMinTurns?: number | undefined
   /** Arrival-time artifacting floor (architecture.md amendment 2026-09-19):
    * tool results at/above this many estimated tokens are stored as artifacts
    * and replaced by reference stubs BEFORE the next request is composed. */
@@ -79,6 +98,9 @@ export interface EngineConfig {
 
 export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   artifactStoreRoot: '.dsh-chapters',
+  knowledgeMirrorDir: '.dsh-knowledge',
+  openRequestCarryMaxChars: 4000,
+  lastResortArtifact: true,
   chapterTokenTarget: 8000,
   toolResultDeferFloorTokens: 200,
   mergeThreshold: 0.3,
@@ -266,7 +288,6 @@ export interface SummarizePlan {
   chapters?: PlanChapter[]
 }
 
-const HARNESS_PROSE = /^\s*(<system-reminder>|system reminder\b|current runtime context\.|\[workspace instructions?\b|this session is running under)/i
 
 /** Deterministic title/summary from region content. Never model-authored (invariant 4 — the model is absent). */
 export function deriveIdentity(
@@ -286,9 +307,11 @@ export function deriveIdentity(
   // user messages too — an earlier fork titled a chapter "System reminder 1"
   // from a runtime snapshot that happened to open the span. Skip them; the
   // r29 command tests pin this behavior.
+  // The same predicate that screens chapter BODIES chooses a title (#59). Two lists of what counts as
+  // injected context is how a runtime snapshot became a filename and a TOC citation.
   const firstUser = messages.find((m) => m.role === 'user'
     && !messageText(m).includes(SUMMARY_OPEN_TAG)
-    && !HARNESS_PROSE.test(messageText(m).trimStart()))
+    && !isInjectedProse(messageText(m)))
   const userCount = messages.filter((m) => m.role === 'user').length
   const assistantCount = messages.filter((m) => m.role === 'assistant').length
   const headLine = planTitle !== undefined && planTitle.trim() !== ''
@@ -307,7 +330,11 @@ export function deriveIdentity(
 
 /** Workspace-relative chapter path for a reserved number. */
 export const chapterPathFor = (config: EngineConfig, rootSession: string, number: number, title: string): string =>
-  `${config.artifactStoreRoot.replace(/\/+$/, '')}/${rootSession}/chapters/${String(number).padStart(3, '0')}-${slugify(title)}.md`
+  // #69: normalized at the mint. The realm resolves an ABSOLUTE store root to reach the filesystem, but
+  // the RECORD must carry the workspace-relative form, or chapter 1 written by compaction never matches
+  // the same file listed from disk and the auditor reports its own archive as lost knowledge.
+  toStoredPath(config.workspaceCwd,
+    `${config.artifactStoreRoot.replace(/\/+$/, '')}/${rootSession}/chapters/${String(number).padStart(3, '0')}-${slugify(title)}.md`)
 
 /**
  * Map the prepared summarize input back to the log seqs it was built from
@@ -379,10 +406,21 @@ export function planSummarize(
    * session — i.e. the committed tapes. Plans are new, so carrying them is free.
    */
   planCarry: string | null = null,
+  /**
+   * #50 §7.6 — the rules block carried across this checkpoint, already rendered
+   * by the ONE builder that renders it for the notice too (`rules.buildRulesSection`).
+   * This is the hole the round exists to close: `leadSections` was
+   * `[planSection, plotSection]`, so a plan and a plot survived a compaction and a
+   * RULE did not. Null (nothing active, or the corpus unreadable) renders ZERO
+   * bytes — which is what keeps every committed plot-carrying checkpoint intact.
+   */
+  rulesCarry: string | null = null,
 ): { plan: SummarizePlan; state: SessionState } {
   const planSection = planCarry !== null && planCarry.trim() !== ''
     ? `Active plan — carried across this checkpoint (it is STILL the work directive):\n\n${planCarry.trim()}`
     : null
+  const rulesSection = rulesCarry !== null && rulesCarry.trim() !== '' ? rulesCarry.trim() : null
+  const leadSections0 = [planSection, rulesSection].filter((x): x is string => x !== null && x !== '')
   const blocks = extractCheckpointBlocks(input.messages)
   const { bullets, carriedProse } = parseTocState(blocks)
   const identity = deriveIdentity(input.messages, blocks.length > 0)
@@ -413,7 +451,9 @@ export function planSummarize(
     }
     return {
       plan: {
-        tocText: planSection === null ? composedParts.join('\n\n') : `${planSection}\n\n${composedParts.join('\n\n')}`,
+        tocText: leadSections0.length === 0
+          ? composedParts.join('\n\n')
+          : `${leadSections0.join('\n\n')}\n\n${composedParts.join('\n\n')}`,
         numbers: reserved.numbers,
         chapter: { title: chapters[0]!.title, summary: chapters[0]!.summary, path: chapters[0]!.path },
         chapters,
@@ -439,7 +479,7 @@ export function planSummarize(
   const plotSection = plot !== null && plot.trim() !== ''
     ? `Working plot (model-authored, carried across this checkpoint):\n\nPLOT: ${plot.trim()}\n\n(If it has gone stale, revise it in your next reply.)`
     : null
-  const leadSections = [planSection, plotSection].filter((x): x is string => x !== null && x !== '')
+  const leadSections = [planSection, rulesSection, plotSection].filter((x): x is string => x !== null && x !== '')
   const tocText = leadSections.length === 0 ? parts.join('\n\n') : `${leadSections.join('\n\n')}\n\n${parts.join('\n\n')}`
 
   return {
@@ -619,6 +659,43 @@ export function engineRecord(plan: SummarizePlan, shadowedSeqs: readonly number[
 }
 
 /** Numbers the plan reserved, or null when the manifest disagrees (corruption). */
+/**
+ * Walk the provider-tagged summaries of one session and finalize each that is not yet finalized,
+ * ONE AT A TIME (#59): an item whose manifest is gone is reported and skipped, never allowed to
+ * abort the items behind it. Pure over injected effects so the poison-pill case is testable without
+ * a host.
+ */
+export async function scanAndFinalize(
+  state: SessionState,
+  summaries: readonly { compactionId: string; summarySeq: number; shadowedSeqs: number[] }[],
+  finalizeOne: (found: { compactionId: string; summarySeq: number; shadowedSeqs: number[] }) => Promise<void>,
+  onSkip?: (reason: { compactionId: string; reason: string }, error: unknown) => void,
+): Promise<{ done: string[]; skipped: Array<{ compactionId: string; reason: string }> }> {
+  const done: string[] = []
+  const skipped: Array<{ compactionId: string; reason: string }> = []
+  for (const found of summaries) {
+    if (isFinalized(state, found.compactionId)) continue
+    const hasManifest = state.plans[found.compactionId] !== undefined
+      && state.reservations[`compaction:${found.compactionId}`] !== undefined
+    if (!hasManifest) {
+      // The field case: the manifest row was erased by a stale whole-row put. Nothing can write the
+      // chapter now (the cited path/number are not durable), so say which and move on.
+      skipped.push({ compactionId: found.compactionId, reason: 'no-manifest' })
+      onSkip?.({ compactionId: found.compactionId, reason: 'no-manifest' }, new Error('no durable plan/reservation'))
+      continue
+    }
+    try {
+      await finalizeOne(found)
+      done.push(found.compactionId)
+    } catch (error) {
+      // Keep the rest of the queue alive; the item itself stays un-finalized and is retried next touch.
+      skipped.push({ compactionId: found.compactionId, reason: 'finalize-failed' })
+      onSkip?.({ compactionId: found.compactionId, reason: 'finalize-failed' }, error)
+    }
+  }
+  return { done, skipped }
+}
+
 export function assertReservationMatchesPlan(state: SessionState, compactionId: string, plan: SummarizePlan): boolean {
   const got = state.reservations[`compaction:${compactionId}`]
   return got !== undefined && got.length === plan.numbers.length && got.every((n, i) => n === plan.numbers[i])

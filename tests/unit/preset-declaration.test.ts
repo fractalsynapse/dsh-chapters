@@ -495,3 +495,23 @@ test('RUN — the remediation names the row that carries the preset', () => {
   assert.match(text, /cordis\.patch\.yml/, 'and at the file that ships it')
   assert.match(text, /0\.2\.0 support floor/, 'and says when the row legitimately cannot exist')
 })
+
+test('RUN — the preset persona tells every chapters session how to find rules and history (#52)', () => {
+  // A brand-new session and a DELEGATED subagent get no continuation notice, so the
+  // only sanctioned per-composition instruction channel is this preset's persona
+  // suffix — the same mechanism that already carries the PLOT: discipline. It is
+  // per-preset, not the process-global system prompt, so invariant 3 is not engaged.
+  const text = readFileSync(join(process.cwd(), 'cordis.patch.yml'), 'utf8')
+  const block = text.split('- id: preset-chapters')[1] ?? ''
+  const persona = block.split('- id: agent-instructions')[0] ?? ''
+  assert.match(persona, /dsh-persona/, 'the row that carries the guidance is the persona row')
+  assert.match(persona, /chapters_rules/, 'a chapters session must be TOLD the rules door exists — an unmentioned tool does not exist to a small model')
+  assert.match(persona, /chapters_search/, 'and the history door, for the same reason')
+  assert.match(persona, /subagent|delegat/i, 'the guidance names delegation, because that is the session shape with no notice')
+  // variables: hosts from 0.2.1-alpha.2 register only provider/model. An unregistered
+  // variable throws at prompt assembly and kills EVERY turn of every chapters session.
+  const vars = [...persona.matchAll(/\{\{\s*([a-zA-Z_][\w:]*)\s*\}\}/g)].map((m) => m[1]!)
+  assert.deepEqual(vars.filter((v) => v !== 'model'), [],
+    `persona variables outside { model } throw at assembly: ${vars.join(', ')}`)
+  assert.match(persona, /PLOT:/, 'the plot discipline still ships in the same suffix — do not replace it')
+})

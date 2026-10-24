@@ -38,6 +38,24 @@ Per linked project: `Project` / `Remote` / `Provider` lines, then `Sync: a push 
 /chapters-rule approve <id> | revoke <id>                  # YOUR machine's curation fact — never a shared rewrite
 ```
 
+The session tier and the audit surface, so automatic capture is never opaque
+([#50](https://github.com/treeseed-ai/dsh-chapters/issues/50)):
+
+```
+/chapters-rule list --scope project|session               # which tier a rule belongs to
+/chapters-rule active                                     # exactly what a rebuilt head will show, + withheld counts + the mining posture
+/chapters-rule approve <id>                               # the one action that turns a held mined rule on
+/chapters-rule pin <id> | unpin <id>                       # the always-rendered class (human-set only)
+/chapters-rule model [<provider/model> | clear]            # a dedicated model for mining; costs one call per chapter
+/chapters-rule conflicts                                  # report contradictory pairs — never edits a rule
+```
+
+`ADD RULE: <text>` at the start of a line in your own message is the deterministic capture path —
+zero model tokens, active for your session tree, exactly the words you wrote. It is deliberately
+**not** a command: nothing to remember, no review step before it takes effect. Everything the model
+mines instead is labelled `stated` or `inferred` in the head, so the two paths are never confused.
+See [Rules & governance](/knowledge/rules/).
+
 ## The deterministic door: `/chapters-fork [title]` and `/chapters-continue [title]`
 
 **One door, two intents — not two mechanisms.** Both commands come from the same builder
@@ -93,6 +111,48 @@ parallel sessions via `chapters_search` without disrupting the active conversati
 Idempotent: re-running saves only what has not yet been archived (respects the watermark).
 If nothing new was said since the last save, reports "nothing to save" without error.
 
+## `/chapters-repair` — re-derive the archive from the durable log
+
+The durable session log is append-only and complete (invariant 1), which is the only reason any of the
+defects in issues #58/#59 are recoverable at all. `/chapters-repair` audits the three things that can
+disagree — **the log**, **the store's files**, and **the registry's records** — and repairs what the
+current code can now produce correctly.
+
+```
+/chapters-repair status                     # last journal, findings count by class
+/chapters-repair audit [--json]             # read-only; reports every finding and its remedy
+/chapters-repair dry-run [class]            # the exact mutations a run would make, with numbers
+/chapters-repair apply hollow|gaps|citations|bookkeeping|all
+/chapters-repair journal [<id>]             # list applied journals / print one
+/chapters-repair restore <journal-id>       # undo a whole applied run, newest action first
+```
+
+What it fixes, by class:
+
+| class | what it was | remedy |
+|---|---|---|
+| `hollow-payload` | a chapter that rendered nothing (`**unknown**` / `0 B`), from a payload-less read (#58) | re-render the span from the log under a NEW number; supersede the old record |
+| `unsiged-completed-turn` | a completed turn inside no chapter, from a lost signature (#59) | archive the gap span through the normal save core |
+| `never-archived-subagent` | a settled child that tripped no archive moment | archive it from its durable log, with subagent lineage |
+| `dead-citation` | a checkpoint that cites a chapter file never written (#59) | **materialize the file at the cited path and reserved number** — the lie becomes true, no text is edited |
+| `ghost-plan-manifest` / `unreleased-reservation` | a manifest with no body; a retry key that can never land | expire/release, keeping every spent number spent |
+| `orphan-file` / `duplicate-number` / `countervalue-drift` | files no record cites; a number spent twice; a counter behind its own max | classify, supersede, raise the counter **upward only** |
+| `test-litter` | chapters written into a real store by the acceptance rig | quarantine, never delete |
+
+### The repair contract (why it never edits a chapter)
+
+Append-only has no exceptions, and a body-hash guard is the only sanctioned mutation of a chapter file.
+So repair **supersedes**: it writes a new chapter number carrying `repairs: <n>`, marks the old registry
+record `status: 'superseded'`, and **copies** the corrupt file into `<tree>/.repair-quarantine/`. Nothing
+is deleted, nothing is rewritten, and every applied run is journalled to
+`<tree>/repairs/<utc-stamp>.json` — one record per move, with hashes, so `restore` can walk it backwards.
+Derived layers (TOC, index shards, vocabulary, plan status, counters) are re-derivable and repair may
+rewrite **those**; verbatim bytes are read-only input.
+
+Refusals, deliberately: it will not merge, split or renumber existing chapters; will not touch a session
+log or a checkpoint's text; will not re-cite a file it cannot verify byte-for-byte; and will not run
+against a workspace whose registry row it cannot serialize through the #59 write discipline.
+
 ## Auto-save when a subagent settles
 
 No command. With `subagentAutoSave` on (the default), every subagent run that carries the
@@ -115,6 +175,33 @@ refuses: only **completed turns** are archived (the anchor is the child's last `
 an interrupted tail is skipped, never half-saved); a child on a different preset is left
 alone; and if a child's log can be read neither live nor from disk at settlement, the archive
 is skipped with a loud diagnostic rather than guessed at.
+
+## Auto-archive when a continuation child lags behind
+
+A `chapters_continue` child is not a subagent, so the settlement door above does not cover it. As of
+issue #61 a `turn/end` listener archives it through the same save core when its session is a
+`chapters`-preset session with lineage — read from the registry row, the header, or the `ch-` id our own
+continue door mints — and either it has never archived at all, or `childAutoArchiveMinTurns` completed
+turns have piled up past its watermark. It creates no session and compacts nothing, so nothing happens
+mid-step; a session that never trips a moment is unretrievable, and the field case was 2,363 events with
+zero chapters. Close it with `childAutoArchive: false`.
+
+## `/chapters-prompt` — the recommending model ([§28](/concepts/prompt-recommendations/))
+
+```
+/chapters-prompt                             # usage + the current state (ON with model / OFF)
+/chapters-prompt model                       # show the effective model and its source (override or config)
+/chapters-prompt model <provider/model>      # set it — setting a model is what ENABLES the feature
+/chapters-prompt model clear                 # drop the override; falls back to `promptModel` ('' ⇒ off)
+/chapters-prompt off                         # disable regardless of config (stores the empty override)
+/chapters-prompt suggest                     # machine verb: the composer ghost pulls this; ≤ one bounded call per turn boundary
+```
+
+`suggest` is the client's door: it answers `{kind:'success', text:<one prompt>}` when a
+recommendation is current or computable, and refuses with the remedy (`off`, no route, model
+failure, over-cap answer) when it is not. A refusal latches the ghost hidden for the turn
+boundary — the disabled state shows nothing, ever. `/chapters-status` prints the feature's
+state beside enrichment and rules.
 
 ## Plus the host's `/compact`
 

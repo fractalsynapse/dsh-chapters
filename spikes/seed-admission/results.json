@@ -1,0 +1,225 @@
+{
+  "startedAt": "2026-10-22T07:19:19.718Z",
+  "variants": [
+    {
+      "label": "bare-user-seed",
+      "sessionId": "ch-probe-1-2d0a3e45",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 5,
+      "durableTypes": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 5,
+      "typesAfterDispose": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 165
+    },
+    {
+      "label": "our-notice-v4",
+      "sessionId": "ch-probe-2-1649d1fc",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 5,
+      "durableTypes": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 5,
+      "typesAfterDispose": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 30
+    },
+    {
+      "label": "our-notice-plus-planmode",
+      "sessionId": "ch-probe-3-4f955288",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 6,
+      "durableTypes": [
+        "user/message",
+        "plan/mode",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 6,
+      "typesAfterDispose": [
+        "user/message",
+        "plan/mode",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 29
+    },
+    {
+      "label": "v3-wrapped-notice(expected-refusal)",
+      "sessionId": "ch-probe-4-8c8df158",
+      "ok": false,
+      "error": "SessionFormatError: format v4 message requires a producer-owned source kind",
+      "stack": "    at source (file:///home/adrian/node_modules/@deepseek-ai/dsh-session-format-v3-to-v4/lib/index.js:126:144) |     at assertV4SourceRowAdmission (file:///home/adrian/node_modules/@deepseek-ai/dsh-session-format-v3-to-v4/lib/index.js:150:71) |     at assertV4RowAdmission (file:///home/adrian/node_modules/@deepseek-ai/dsh-session-format-v3-to-v4/lib/index.js:1112:2) |     at Object.encodeEvent (file:///home/adrian/node_modules/@deepseek-ai/dsh-session-format-v3-to-v4/lib/index.js:1097:3)",
+      "sessionDir": "session.lock",
+      "ms": 3
+    },
+    {
+      "label": "our-notice-with-preset-mount",
+      "sessionId": "ch-probe-5-ba005a98",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 5,
+      "durableTypes": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 5,
+      "typesAfterDispose": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 35
+    },
+    {
+      "label": "empty-seed",
+      "sessionId": "ch-probe-6-2850d84f",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 4,
+      "durableTypes": [
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 4,
+      "typesAfterDispose": [
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 28
+    },
+    {
+      "label": "notice+agentOptions",
+      "sessionId": "ch-probe-7-09d919f7",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 5,
+      "durableTypes": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 5,
+      "typesAfterDispose": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 28
+    },
+    {
+      "label": "notice+agentOptions+mount",
+      "sessionId": "ch-probe-8-361d6afb",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 5,
+      "durableTypes": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 5,
+      "typesAfterDispose": [
+        "user/message",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 30
+    },
+    {
+      "label": "notice+agentOptions+mount+planmode",
+      "sessionId": "ch-probe-9-72924402",
+      "ok": true,
+      "handleKeys": [
+        "agent",
+        "dispose"
+      ],
+      "durableEvents": 6,
+      "durableTypes": [
+        "user/message",
+        "plan/mode",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "durableAfterDispose": 6,
+      "typesAfterDispose": [
+        "user/message",
+        "plan/mode",
+        "session/end-seed",
+        "permission/preset",
+        "sandbox/mode",
+        "approval/policy"
+      ],
+      "ms": 29
+    }
+  ],
+  "finishedAt": "2026-10-22T07:19:20.782Z"
+}

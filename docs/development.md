@@ -9,7 +9,7 @@ this machine, not assumed.
 
 | Thing | Value |
 |---|---|
-| Host serving this session | global npm install, `/usr/lib/node_modules/@deepseek-ai/dsh/lib/bin.js`, **0.1.5-rc.1**, listening on `127.0.0.1:3080` |
+| Host serving this session | the GLOBAL npm install — but the PREFIX IS NOT PART OF THE FACT. Resolve it: `readlink -f $(command -v dsh)`, then read that package's `version`. On this box today: `/home/adrian/node_modules/@deepseek-ai/dsh`, **0.2.0-rc.2**, listening on `127.0.0.1:3080`. This row used to assert `/usr/lib/...` and `0.1.5-rc.1` as if they were the machine; a drift gate that hardcoded that path then skipped forever while the package sat in the repo's own `node_modules` (#54). |
 | Profile root | `~/.dsh` (`DSH_HOME` default) — `profiles/`, `sessions/`, `storages/`, `.credentials.yaml` |
 | Sandbox effect | `~/.dsh` is **read-only** from the agent sandbox: `dsh web --help` died with `EROFS: read-only file system, open '/home/adrian/.dsh/profiles/web/cordis.yml'` |
 | Dev fork | `~/Projects/deepseek-harness` — git `fb2c4b9e69` (2026-09-10), **0.1.5-rc.2**, pnpm workspace, `node_modules` installed |
@@ -24,6 +24,14 @@ Two consequences worth stating plainly:
    snapshot. Line numbers in `docs/contract.md` come from the `examples/` copy. Treat any of the three as
    truth only for the question you asked it; resolve real behaviour against the version you are actually
    booting.
+3. **Check the binary you are measuring, not just the code you changed.** #54 lost hours to
+   `.dshdev-local/profiles/web/node_modules/@treeseed/dsh-chapters` having become a COPIED tree
+   dated six days earlier: every browser journey, probe and re-distill attempt was running a build
+   predating the feature under test, and drew confident conclusions about the HOST — including a
+   seed-admission refusal the current code does not produce (`tests/e2e/boot.ts` refuses to spawn
+   on a copied tree now, and names the re-link command). The general habit: where a built artifact
+   is loaded by path, link it or assert its version — an old binary passes every test you write
+   against it and reports them as facts.
 
 ## The Isolation Mechanism: `DSH_HOME`
 
@@ -108,6 +116,49 @@ later session may re-reference them for the *why* behind an implementation. Two 
    contradiction with the shipped code, update or supersede it in place via git history — never rewrite
    silently.
 
+### Is the corpus anchored to the host we pin? (`tests/fixtures/model-tape/CORPUS_HOST`)
+
+Tape matching is normalized request-PREFIX matching, and the prefixes carry the host's
+system-prompt composition. So moving `dev/dsh-host-lock`, editing the preset persona, or changing a
+tool description invalidates the whole corpus — and a replay failure then describes an *earlier*
+change, not the one under review. `scripts/corpus-anchor.mjs` states the provenance in one file and
+answers the question in exactly one place; two consumers use it:
+
+- `tests/e2e/boot.ts` **refuses replay by name** when `host` ≠ the pinned version, quoting the
+  recorded `reason` and the tracking issue. `E2E_MODEL=record` is deliberately exempt — re-distilling
+  is the way out, and a gate that blocked it would strand itself.
+- `.github/workflows/ci.yml`'s `host-capability` job sets `corpus-anchored`, the `e2e-replay` job
+  requires it, and the run log gets a step summary plus a `::warning::` naming the issue. Skipped,
+  visibly — the same discipline as the preset-row refusal it sits beside: never silently green,
+  never permanently red.
+
+The gate lifts with no code change: re-distill the eight projects
+(`scripts/distill-tapes.sh`), write the new `host =` line, done. Current state: pinned
+`0.2.0-rc.2`, corpus distilled `0.1.5-rc.1`, tracked by
+[issue #56](https://github.com/treeseed-ai/dsh-chapters/issues/56) (with the door-selector blocker
+[#57](https://github.com/treeseed-ai/dsh-chapters/issues/57) inside it). Rows in
+`tests/unit/corpus-anchor.test.ts` assert both directions — matching lifts, missing/garbled
+provenance refuses, and the committed repo state is reported honestly as NOT anchored.
+
+### Reading a distill while it runs (#54)
+
+`scripts/distill-tapes.sh` writes each leg's FULL playwright output to `var/distill/<proj>-<hhmmss>.log`
+(never `tail`, which buffers until the leg ends) and prints a 60-second heartbeat: tape-entry count
+plus the last line of `var/e2e-upstream.log`. That journal is the proxy's own record of every upstream
+attempt — `START / FIRSTBYTE / STALLED / DONE / DEAD`, with elapsed ms and byte counts — and the proxy
+now bounds the wait at `E2E_UPSTREAM_TIMEOUT_MS` (default 600000, 10 minutes: generous for a cold
+prefill at the stress regime, short enough that a hung connection ends the run with an answer instead
+of silently consuming the harness's own 3600000 ms profile timeout).
+
+So the question "is this turn slow, or is the connection dead?" is a lookup:
+
+| journal shape | meaning |
+|---|---|
+| `START` then `FIRSTBYTE` | answered; `DONE elapsed=… bytes=…` says how long and how much |
+| `START`, `STALLED elapsed=…ms bytes=0`, then `DEAD` | upstream never responded — a hang, not a slow model |
+| `START`, `FIRSTBYTE`, then `STALLED … bytes=N` growing | real streaming progress; leave it alone |
+| no journal line at all | the request never reached the proxy (boot/port/profile problem) |
+
 ### Three test layers (and why the third exists)
 
 | Layer | Command | Runs | Covers |
@@ -180,7 +231,7 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   sweep files rather than by lowering the bar.
 - `npm run coverage` — the same deterministic suite under node's native
   `--experimental-test-coverage` (a quick second opinion; no gate).
-- `npm run coverage:e2e` — replays the eight browser segments with
+- `npm run coverage:e2e` — replays the **nine** browser segments with
   `E2E_COVERAGE=1`, which makes every boot write NODE_V8_COVERAGE profiles
   under `var/e2e-cov/<port>` (flushed on the boot's clean exit), then runs
   `scripts/e2e-coverage.mjs` → **c8 with real source maps** (tsconfig
@@ -188,10 +239,24 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   per-module Stmts/Branch/Funcs. Read it as "covered by SOME boot of the
   suite" (a union), and mind the script header's c8 gotcha: include/exclude
   filters apply BEFORE remapping, so `--include=src/**` would silently
-  zero every row. First full ledger: 80% stmts / 62% branches overall;
-  tools.ts 72/49, engine.ts 81/59, index.ts 86/55 — plus the honest plane
-  split (src/treedx reads low HERE because the browser suite rides git;
-  the deterministic + live ledgers own that transport).
+  zero every row.
+  **Ledger, re-measured 2026-10-23 on the PINNED hermetic host (`97c7c79`, strict replay
+  rc 0 / zero misses, all nine segments): 78.26% stmts / 59.01% branch / 71.38% funcs.** Per module:
+  engine.ts 87.93/55.06, index.ts 85.78/52.43, rules.ts 88.83/58.87,
+  store.ts 91.64/79.59, continue-core.ts 94.05/66.66, arrival.ts 94.87/60.60,
+  sync.ts 83.95/59.89, tools.ts 64.06/49.66.
+  **This is a slip, stated as one:** the 2026-09-25 ledger read 80/62 overall
+  (tools 72/49, engine 81/59, index 86/55). Statements and branches both went
+  DOWN while engine's statement coverage rose — because the re-anchored legs
+  are shorter, not weaker: `heavy` replays in 4 tape entries (2 compaction
+  triples, and it now answers) where the old corpus carried 16–22, and a
+  shorter conversation walks fewer engine arms. Nothing here is gated — the
+  gated ledger is `coverage:ci` at 85/85/85/85 on the deterministic plane —
+  so the honest reading is: *e2e coverage tracks how much conversation the
+  corpus replays, and a faster-converging corpus covers less of the engine by
+  accident.* Recovering the number means adding breadth deliberately (more
+  distinct journeys, or longer ones with their own claim), never padding a
+  leg to fatten a percentage.
   Both ledgers together are the coverage claim; neither alone is honest.
 
 ### Release status (measured 2026-09-25)
@@ -211,7 +276,17 @@ environment `Production`. Prerelease versions publish under a matching
 dist-tag so 'latest' stays stable. `0.1.1` is the first OIDC + provenance
 ship; `0.1.0` itself carries no attestation.
 
-### Hosted CI (`.github/workflows/`, wired + dress-rehearsed 2026-09-23)
+### Hosted CI
+**The rig writes into its own port's store, never the project's (#61 item 8).** Each boot pins
+`artifactStoreRoot` to `var/e2e-home-<port>/chapters` through the profile patch
+(`tests/e2e/boot.ts::applyRigPluginPatch`), and CI brackets the replay job with
+`scripts/assert-store-untouched.mjs snapshot` / `verify` — a listing comparison (names, sizes, mtimes)
+that fails the job if the production `.dsh-chapters/` changed, including the pristine-runner case where
+the store did not exist and a run CREATED one. Before this, every acceptance run left its chapters in the
+repo's real store: 42 test trees and 29 of 47 live registry rows with e2e-shaped ids, which #60's auditor
+then reported as 441 `test-litter` findings. Contamination like that does not just waste disk; it teaches
+people to ignore a report that is telling them the truth about something else.
+ (`.github/workflows/`, wired + dress-rehearsed 2026-09-23)
 
 - **`ci.yml`** — two jobs. `test`: `npm ci` (all deps public on
   registry.npmjs.org — **no install secret**), typecheck, build,
@@ -220,14 +295,63 @@ ship; `0.1.0` itself carries no attestation.
   failing-test lines and c8's threshold verdicts as `::error::`, because on the
   0.1.6 tag a red gate left nothing behind but "exit code 1" while every local
   reproduction of the same SHA was green; the summary step now runs
-  `if: always()`). `e2e-replay`: installs the pinned
-  host (`npm i -g @deepseek-ai/dsh@0.1.5-rc.1` — the SAME version as the
-  gate line in `scripts/ci-replay.sh`, which fails loudly on mismatch) plus
-  chromium's apt libs, then `scripts/ci-replay.sh` — eight browser segments
-  served entirely from the committed tapes. **No LLM, no key, no GPU:** in
+  `if: always()`). `e2e-replay`: materializes the pinned host from
+  `dev/dsh-host-lock` (`npm ci`, hermetic — `npm i -g` rewrites the plugin tree and the
+  host's caret ranges float), plus chromium's apt libs, then `scripts/ci-replay.sh`, which
+  READS the version out of that lock rather than repeating it (#54 removed the second
+  literal; three copies of a pin is how it goes stale in three places) — eight browser
+  segments served entirely from the committed tapes. **No LLM, no key, no GPU:** in
   replay mode `localModelUp()` short-circuits to true (specs RUN, they do not
   skip) and a tape miss is a loud proxy 503, so a scenario that legitimately
   changed fails the job instead of silently passing.
+### Distilling tapes WITHOUT the GPU box (#54)
+
+`E2E_MODEL=record` drives the real model once per scenario to make a tape. Until #54 that
+meant the local vLLM server had to be up. It no longer does, because the tape proxy
+translates on the way out instead of asking the fixture to change:
+
+```bash
+E2E_MODEL=record E2E_TAPE=rules E2E_PORT=41735 E2E_THRESHOLD=0.9 \
+  E2E_UPSTREAM=https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode \
+  E2E_UPSTREAM_MODEL=qwen3.8-flash PLAYWRIGHT_BROWSERS_PATH=$PWD/var/ms-playwright \
+  E2E_UPSTREAM_KEY="$(node -e "import('./scripts/llm.mjs').then(m=>process.stdout.write(m.apiKey()||''))")" \
+  npx playwright test -c tests/e2e/playwright.config.ts --project=rules
+```
+
+- `E2E_UPSTREAM` is the endpoint WITHOUT the `/v1` suffix (the proxy appends the request
+  path, which already carries it).
+- `E2E_UPSTREAM_KEY` is the credential the PROXY presents. The profile keeps `apiKeyEnv:
+  LOCAL_API_KEY` and the boot still injects its `e2e-tape-proxy-dummy` when none is
+  configured — a real secret never enters a fixture profile.
+- `E2E_UPSTREAM_MODEL` rewrites the requested id, so the profile can keep pinning
+  `qwen3.8-flash-next` (the 32K stress-regime name) while a hosted endpoint is addressed by
+  the id it serves. **The tape records the profile's name**, because a tape is a fixture of
+  this rig, not of whatever service distilled it.
+- A remote `E2E_UPSTREAM` in record mode with no key refuses at boot in one line, instead of
+  discovering it 401 times across eight projects.
+- `scripts/llm.mjs` is the same resolution the dev scripts use (local server preferred, hosted
+  fallback, credential resolved from env → key file → profile export → harness store, value
+  never printed).
+
+Three 0.2.x host drifts the first boots found, all rig-side, all now handled — each is the
+kind that produces a wrong conclusion instead of an error:
+
+1. **the durable log is `session.v4.jsonl.zstd`.** Five places hardcoded `session.v3…`, so
+   every log-backed assertion decoded nothing and reported "the archive never landed".
+   `sessionLogFileFor()` resolves the highest `session.v<N>.jsonl.zstd`; a row scans
+   `tests/e2e/` for a hand-built versioned path (comment lines excluded — prose may name the
+   formats it explains).
+2. **the host opens a Preview Notice, and it is a focus trap** — the 2026-09-18 saga with a
+   new member. Dismissal now targets `[role=dialog]`-shaped elements and presses the control
+   that acknowledges *that* dialog; matching "any div mentioning a notice" matched the app
+   wrapper and pressed an unrelated 'Close'.
+3. **provider config must ride `cordis.patch.yml`.** A profile-dir `settings.yaml` is read by
+   nothing on 0.2.x, so `dev/settings.yaml`'s `llm-pi-ai` block was invisible: the host had no
+   `local` provider and the browser opened on "Add an API key to get started" with the
+   composer never reachable. `dev/profile-cordis.patch.yml` now defines the provider, and
+   `tests/e2e/boot.ts` guarantees the block in the copied home before rewriting the window
+   pins and the proxy `baseURL`.
+
 - **`release.yml`** — bare-semver tag (`0.1.0`, matching the Production
      environment's `*.*.*` tag protection) or manual dispatch → the full
      gated deterministic suite as publish blocker → `npm publish
@@ -574,3 +698,115 @@ Three traps, all paid for:
 
 Prune after: `var/host-versions/`, the throwaway homes and `var/coverage` are all regenerable in minutes and
 together cost ~2 GB — this repository's contract is the *measurements written down*, not their scratch.
+
+### The rig's regime has ONE table (`tests/e2e/rig-pins.ts`) — added 2026-10-23 (#56)
+
+Three copies had silently diverged: `scripts/distill-tapes.sh`'s `THRESH`/`EXTRA` tables, the inline
+env in `npm run test:e2e`, and `boot.ts`'s defaults — under a comment claiming distill "mirrors
+`npm run test:e2e`'s pins exactly". Measured result: replay booted `suite`/`rules`/`fork` with **no
+threshold** while their tapes had been recorded at 0.75/0.9/0.75. The realm differed, replay's requests
+carried `[dsh:artifact …]` stubs the tapes contain none of, and the chain failed as tape MISSes that
+look exactly like prompt drift.
+
+`RIG_PINS` is now the single source, with two consumers: `playwright.config.ts` derives each project's
+`env` through `rigEnv(proj)` (so workers see it), and `globalSetup` resolves the selected project from
+`fullConfig.argv` and calls `applyRigEnv()` **before booting**. The second half is not optional —
+Playwright applies project `env` to workers, and the object handed to `globalSetup` exposes an
+UNFILTERED `projects` list whose entries carry no `env` (measured: 11 projects for a
+`--project=heavy` run). "Just put it in the config" looked fixed and was not: the boot kept using
+defaults. An explicit command-line value still wins, so re-tuning one leg never needs an edit; an
+unknown project derives nothing instead of inventing defaults.
+
+Rows: `tests/unit/e2e-pins-single-authority.test.ts` (table contents, `rigEnv` derivation, argv parsing
+in both `--project=x` and `--project x` forms, apply-not-clobber, unknown-project, both consumers
+reading the table, a literal `env: { 'E2E_TAPE' … }` block failing, and the runners carrying no copy).
+`npm run test:e2e`'s per-leg header now prints the EFFECTIVE regime read from the table, so a tape's
+provenance is auditable from the runner log alone.
+
+### Provenance is generated (`scripts/write-provenance.mjs`), never hand-authored (#56)
+
+`PROVENANCE.md` lives inside each project directory — and the runner `rm -rf`s that directory before
+recording. The re-anchor commit therefore deleted `plans/PROVENANCE.md` and `prompt/PROVENANCE.md`,
+which are precisely the records stating those legs were distilled from the SCRIPTED stub rather than
+a live model. A claim about what a tape means must not be destroyed by the act of re-making the tape:
+the file is generated from the pin table plus the recorded verdict, and
+`tests/unit/tape-provenance.test.ts` fails if any project lacks it or if the runner stops
+regenerating it.
+
+### The pool mirror must be per-boot too, or notices are not reproducible (#85)
+
+`artifactStoreRoot` has been pinned per port since #61, and I believed that made a boot's state
+test-local. It did not: the compaction/continuation notice composes its `## CORE RULES` block from
+`path.join(cwd, DEFAULT_CLONE_DIR)` (`src/engine.ts`) — a **fixed path in whatever project the rig is
+running in**. In this repo that directory holds real development state, so a leg's notice content
+depended on rules that had nothing to do with the leg: measured 2026-10-23, `heavy`'s recorded notice
+carried `[dev2/001] (security) Never log raw tokens…` while the replayed notice carried none, the two
+texts agreeing to character 346 and diverging there. Same build, same pins, same tapes — a different
+repo.
+
+The realm config key `knowledgeMirrorDir` (default `.dsh-knowledge`, unchanged for real installs) now
+feeds that read, and `boot.ts` pins it to `var/e2e-home-<port>/knowledge`. The rule generalizes: any
+path a boot reads to build model-visible text must be per-port or per-session, because a tape is a
+claim about ONE world. `tests/unit/e2e-store-root.test.ts` keeps the pins honest, and
+`tests/unit/preset-declaration.test.ts` refuses a config key that drifts out of the preset row.
+
+### Don't push while an acceptance run is the thing you're waiting on (#89, measured against myself)
+
+`.github/workflows/ci.yml` sets `concurrency: ci-<ref>` with `cancel-in-progress: true`. Twice on
+2026-10-23 I pushed a small commit (a docs line, a corrected message) while the ~25-minute acceptance
+chain was mid-flight, and GitHub cancelled the run that held the answer — then the new run restarted
+from zero. The commit was never the problem; the wait was. Batch the push: while a long gate is
+running, either finish what you're doing locally first or park the commit, and push once. Same rule in
+the other direction: don't judge a fix by the run it cancelled — re-read which head each verdict belongs
+to before believing a green.
+
+### Throwaway homes live outside the repository — `E2E_HOME_ROOT` (#89)
+
+`e2eHomeRoot()` defaults to `os.tmpdir()/dsh-e2e`, and CI sets `E2E_HOME_ROOT=/tmp/dsh-e2e` explicitly
+so the diagnostics it uploads are the ones it booted. Not tidiness: Node resolves `@deepseek-ai/*`
+bundles by walking UP from the profile directory, so a home under `var/` reaches this repo's
+`node_modules` (0.1.5-rc.2 by lockfile) and then the developer's `~/node_modules`. On the machine that
+recorded the first re-anchored corpus, that second hop is a **linked dev build of the harness whose
+version string equals the pin** — so the boot mounted tool guidance (goals, ralph, subagents, web
+search, glob/grep, job output) the published tarball does not have.
+
+Measured by moving nothing but the home's location:
+
+| home root | system header composed by the SAME pinned binary | `suite` strict replay |
+|---|---|---|
+| `var/e2e-home-41731` | 7,276 chars | 4 passed, zero misses |
+| `/tmp/dsh-e2e/e2e-home-41731` | 2,783 chars (CI's shape) | `commonPrefix=1`, `divergeAt=msg1` |
+
+That is the whole "green on my laptop, impossible on CI" class in two rows of one table, and why
+`tests/unit/e2e-host-binary.test.ts` now asserts hermeticity structurally: the home root must be
+outside `ROOT`, and no ancestor of the home may contain `@deepseek-ai` packages — if one ever does, the
+row names the path instead of agreeing silently. Pinning the *binary* (`resolveHostBinary`) was not
+enough; the ancestor chain is part of the identity, and AGENTS' warning that these bundles' version
+strings are not identity turns out to apply one directory level up from any lockfile.
+
+Consequence, stated plainly: changing this changes what every boot composes, so the entire corpus was
+re-distilled afterward. A rule that doesn't cost a re-record is probably not a reproducibility rule.
+
+## One build per corpus (#90, measured 2026-10-24)
+
+A tape records what the **plugin** asked, not just what the model answered. So a corpus is only coherent
+if every leg in it was distilled against one `lib/`. This was violated all day by well-meaning
+incrementalism — re-recording whichever leg a fix touched — and the cost was invisible until a replay
+missed on a *post-compaction* surface: a 4-message request with `commonPrefix=0` against a tape that held
+the 6-message pre-compaction form. Record ran on a build whose last-resort deferral always abstained
+(`resolveConfig` defaults `maxTokens` to `headroomTokens` = 65,536, so the coexistence ceiling was
+underivable); replay ran on a build where it is derivable (11,880) and can fire. Both behaviors are
+correct. The corpus spanning them is not.
+
+Rules that follow, in the order they bite:
+
+1. **Change `src/` → rebuild → re-distill ALL nine legs.** A partial re-record is a mixed corpus, and a
+   mixed corpus fails at whichever step the builds disagreed — usually inside compaction, where message
+   counts are the thing being matched.
+2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it does not
+   say "this leg predates three plugin commits". When in doubt about build drift, re-record everything.
+3. **Test-only changes (`tests/e2e/**`) need no re-record** — normalization folds apply at load to both
+   sides. Product-behavior changes do. The distinction is exactly AGENTS' "re-record when PRODUCT prompt
+   bytes change", generalized: anything that changes what the plugin *sends*.
+4. If a green replay is ever obtained on a corpus whose legs have different build stamps, treat it as
+   unexplained rather than as evidence.

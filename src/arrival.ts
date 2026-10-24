@@ -53,13 +53,24 @@ export async function applyArrivalStubs(session: ArrivalSessionShim, opts: Arriv
     // — the text is nested one level below the wrapper. A unit fixture that
     // invented a flat shape hid this for a whole run; the fake mirrors the
     // real from now on.
-    const blocks = Array.isArray(data.message.content) ? data.message.content : []
-    const wrappers = blocks.filter((b: any) => b.type === 'tool-result')
-    if (wrappers.length === 0) continue
+    const blocks: any[] = Array.isArray(data.message.content) ? data.message.content
+      : typeof data.message.content === 'string' ? [{ type: 'text', text: data.message.content }] : []
+    // TWO real shapes, one per host generation — both measured, neither assumed.
+    //  0.1.x: content = [{ type: 'tool-result', toolCallId, isError, content: [{type:'text',text}] }]
+    //  0.2.0-rc.2: content = [{ type: 'text', text }]  ← flattened; measured 2026-10-22 in the
+    //    arrival leg's own durable log (seq 51, 54,763 bytes; message keys role,source,toolCallId,
+    //    content,isError,id; block keys type,text).
+    // Recognizing only the first meant `wrappers.length === 0` on EVERY result of the new host:
+    // nothing stubbed, `detail` unset, and no line anywhere — which is how arrival artifacting
+    // vanished from the whole acceptance chain while the engine's entry line proved it was running.
+    const wrappers = blocks.filter((b: any) => b?.type === 'tool-result')
+    const carriers: any[] = wrappers.length > 0 ? wrappers : blocks.filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+    if (carriers.length === 0) continue
     const textOf = (w: any): string => Array.isArray(w.content)
-      ? w.content.filter((c: any) => c.type === 'text').map((c: any) => c.text ?? '').join('')
-      : typeof w.content === 'string' ? w.content : ''
-    const text = wrappers.map(textOf).join('')
+      ? w.content.filter((c: any) => c?.type === 'text').map((c: any) => c.text ?? '').join('')
+      : typeof w.content === 'string' ? w.content
+      : typeof w.text === 'string' ? w.text : ''
+    const text = carriers.map(textOf).join('')
     if (text.length === 0 || text.includes(ARRIVAL_MARKER)) continue
     const tokens = opts.estimate(data.message)
     if (tokens < opts.floorTokens) continue
@@ -76,12 +87,15 @@ export async function applyArrivalStubs(session: ArrivalSessionShim, opts: Arriv
       return { stubbed, detail: `artifact write failed (${String((error as Error)?.message ?? error)}); ${stubbed} node(s) stubbed before the failure` }
     }
     const stub = `${ARRIVAL_MARKER} ${hash.slice(0, 12)}] ${kb(text.length)} ≈ ${tokens} tok stored at ${rel} — query it with chapters_artifact (path '${rel}' or the sha): action 'toc' for the heading map with line numbers, 'search' for term hits as small blocks, 'read' for exact line ranges. The full result is NOT elsewhere in this context; re-running the original tool only recreates it.`
-    const stubbedWrappers = wrappers.map((w: any, i: number) => ({
-      ...w, content: [{ type: 'text', text: i === 0 ? stub : '' }],
-    }))
+    // the stub goes back in the shape it arrived: nested wrappers keep their `content` blocks,
+    // flattened v4 blocks keep their own `text` and their `type: 'text'` — a replacement that
+    // changed the block type would be a new shape assumption on the read side.
+    const stubbedCarriers = carriers.map((w: any, i: number) => (wrappers.length > 0 && Array.isArray(w.content))
+      ? { ...w, content: [{ type: 'text', text: i === 0 ? stub : '' }] }
+      : { ...w, text: i === 0 ? stub : '' })
     const message = {
       ...data.message,
-      content: [...blocks.filter((b: any) => b.type !== 'tool-result'), ...stubbedWrappers],
+      content: [...blocks.filter((b: any) => !carriers.includes(b)), ...stubbedCarriers],
     }
     try {
       session.append('compaction/prune', {

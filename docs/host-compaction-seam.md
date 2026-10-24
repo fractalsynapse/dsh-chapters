@@ -115,3 +115,111 @@ durable log length **never decreased** (shadowing, not deletion — r12 proved t
 (c) a compacted session can still answer a question whose answer lives only in a chapter it chooses to
 `read`; (d) the summary call cost is **zero** tokens, since our `summarize()` is deterministic —
 proved with the r12 stub (no `usage` field), must re-prove with the real TOC.
+
+## Measured on 0.2.0-rc.2 (2026-10-23, #78) — what the seam actually does now
+
+Every line below came from an artifact in this repo's own run: the diagnostics sink
+(`realm:engine:compact`), the tape proxy journal (`reqBytes=`, `OVERFLOW refused`), or a decoded
+`session.v4.jsonl.zstd`. None of it is inferred from the 0.1.x notes above, which is the point —
+those notes are what made the failure legible as "the hook is never called", and that was wrong.
+
+1. **The host does call our override.** Pre-step, with `trigger="pressure"`:
+   `compactIfNeeded entered (trigger="pressure", session=session-…)` — three entries in one probe
+   session, seven compactions in one `heavy` session. The claim "never invoked" was an inference
+   from absent `compaction/*` events, and the instrument replaced it with a fact in one run.
+2. **The base decision path** (`dsh-compaction-basic/lib/index.js`) is: `routedTarget(session)` →
+   `undefined` ⇒ return `null` immediately; else `tokenMeter.measure(session)`, then
+   `llm.resolveModelInfo(provider, model)` for `contextWindow`, then
+   `resolveCompactSpec(policy, window, reservedCompletionTokens(agent, defaultMaxTokens))`, then
+   `measurement.totalTokens < spec.thresholdTokens` ⇒ `null`; else `selectCompactableRange(...)`,
+   which can itself return `null` — that is the documented "no safe range" case, and it is the case
+   `heavy` reaches.
+3. **Two failure shapes for the same field symptom.** A decline can be a `null` return or a THROW
+   (`selectCompactableRange` threw on a harness session whose surface it could not read). The
+   engine now reports on both paths, because "the endpoint said 400" was the only user-visible
+   trace of a state the product knew about.
+4. **A single oversized `tool/result` is not relievable by pressure.** Measured: one 120,650-byte
+   result (~30K tokens) in a 32,000 window at ratio 0.5 — six compactions of *older* content, then
+   the hard `400 … exceeds the context window`. The knob that prevents it is the **arrival floor**
+   (`toolResultArtifactTokens`), and `heavy` deliberately sets it to 1,000,000 so pressure — not
+   arrival — is what gets exercised. The engine does NOT override that floor: AGENTS calls it "a
+   behavior switch, not a knob", and an engine quietly reinterpreting an operator's switch is the
+   same species of dishonesty as a pin that is collected and never applied. What it does now is name
+   the switch, the offending node size, and the count of nodes above the trigger, in the sink.
+5. **Bytes ↔ tokens, calibrated.** 78,140 serialized request bytes measured 27,306 / 27,952 /
+   28,928 tokens by the host meter — **≈2.8 B/token**, not the conventional 4. The rig's window
+   enforcement uses whole-body `/3` (deliberately conservative: early refusal still exercises the
+   regime; late refusal exercises nothing) and the rows assert the estimator against the two field
+   values that matter, including the 120,129-byte / 35,428-token request that `4/` let through.
+6. **The regime must be identical in record and replay.** Enforcement applies in both modes now:
+   a distill whose request was refused, relieved, and re-asked recorded a sequence *shaped by* that
+   refusal, so a replay without it diverges and looks like prompt drift.
+7. **Realm config lives on the preset row, not the host row.** `thresholdRatio`,
+   `toolResultArtifactTokens`, `artifactStoreRoot`, `auto`, `elicitedPlot` are read from the
+   `chapters-engine` row inside `preset-chapters` (`cordis.patch.yml`); the host plugin row's
+   `compactionThresholdRatio` / `installChaptersPreset` are inert since 0.1.18. This is why an
+   apparently-configured rig ran every leg on realm defaults while its own header claimed 0.5.
+
+## Relief must not shadow the question (#87, measured 2026-10-23)
+
+The seam's real failure mode is not a crash — it is a **surface with no request in it**. Field
+evidence from one `heavy` session (299 events, decoded `session.v4.jsonl.zstd`):
+
+```
+13 compaction summaries, 108 distinct shadowed seqs
+STILL-HERE instruction seqs:      [109,116,138,154,172,188,216,236,254,268,291]
+shadowed away by relief:          [109,116,138,154,172,188,216,236,254,268]   ← 10 of 11
+final assistant text: ""
+```
+
+Why: `retainRatio` reserves a *token fraction* as a verbatim tail. When an oversized `tool/result`
+sits in that tail it eats the whole budget, and range selection shadows the newest `user/message`
+anyway. Our summary is deterministic and plot-shaped, so it carries no request. The user sees an agent
+that stopped responding, with nothing in the sink — a `#61a` violation twice over (undetected, and
+therefore undelivered).
+
+**The rule we ship.** We author the summary text, so the newest human turn travels *into* it — verbatim
+(`carryOpenRequest`, `src/engine.ts`). Nothing recorded is rewritten: this honors invariant 1, appends
+to our own output, and the input array is never mutated. Details that are the point:
+
+- **Injected scaffolding is skipped.** `<system-reminder>`, the host's checkpoint preamble,
+  `Time sampled …`, artifact stubs: re-injecting machine state as if it were a request would be a
+  different lie, so the predicate that decides "is this a human turn" lives in ONE place — the same
+  one-predicate rule that bit us with #59's title chooser.
+- **A cap is stated, never silent.** `openRequestCarryMaxChars` (realm config, default 4000) bounds the
+  block, and when it bites the text says `carried in part: N characters total, M included — the whole
+  turn stays in the durable log`. Never truncate to fit is a plugin rule, and it applies to our own
+  summaries.
+- **Nothing is claimed when there is nothing to carry.** No human turn in the region ⇒ no OPEN REQUEST
+  block, no empty promise of one.
+
+Rows: `tests/unit/engine-open-request.test.ts` (verbatim carry; injections excluded; stated truncation;
+empty region), written before the wiring was trusted. **Process lapse, recorded honestly:** the mandated
+cycle is Issue → Docs → Tests → Code, and here I wrote the implementation before this section. The
+issue (#87) and the tests did come first, and the docs landed before the commit — but the order slipped,
+and a rule that is only followed when convenient is the kind of drift this file exists to catch.
+
+## The last-resort deferral (#78 option A, decided 2026-10-23)
+
+**The rule.** A single `tool/result` that cannot coexist with the mandatory verbatim tail makes pressure
+relief *impossible*, not merely hard: `selectCompactableRange` finds no safe range, the engine declines,
+the endpoint refuses the request, and the session is left spinning (#86) or answering something other
+than what was asked (#78's original symptom). Survivability is therefore an invariant, not a tuning
+outcome: such a node is artifact-deferred **as a last resort**, with a delivered warning naming the seq,
+the node's tokens, and the ceiling it failed.
+
+**Three bounds, because the obvious implementation is the wrong one.**
+1. **After a decline, never before.** The trigger is the measured fact that relief ran, found no safe
+   range, and the surface is over the trigger. Deferring big nodes eagerly makes compaction unnecessary
+   and turns `oversized-turn.spec.ts` into a tautology — the trap AGENTS names in the rig rules — so an
+   anti-vacuity row asserts the ceiling does NOT fire when relief is possible.
+2. **Derived, not invented.** The ceiling is `windowTokens − retainBudget`, both from the base's own
+   config (`resolveCompactSpec` inputs), so no new magic constant appears. The one new key is the
+   operator-visible boolean switch `lastResortArtifact` (default on), which `preset-declaration.test.ts`
+   must see declared or the loader strips it.
+3. **The archive keeps every byte.** The deferral writes the artifact and leaves a citation, so the worst
+   case is a context-economy miss and `chapters_artifact` still answers for it — which is the only thing
+   that makes overriding a configured economy knob defensible at all.
+
+Rows: `tests/unit/last-resort.test.ts` (the ceiling math, `null` on incomplete inputs, and the anti-vacuity ordering row) plus the engine lifecycle suite; below the ceiling, untouched;
+switch off, untouched even after a decline; and the warning carries the numbers.

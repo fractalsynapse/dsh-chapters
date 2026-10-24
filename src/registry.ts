@@ -33,6 +33,15 @@ export interface SessionState {
    */
   nextPlanNumber: number
   chapters: ChapterRecord[]
+  /**
+   * Write counter, bumped by the store on every accepted put (#59). It exists so a read-modify-write
+   * can DETECT that the row moved underneath it — the row is one whole value and five doors plus the
+   * turn/end listener write it, so "last writer wins" is not a theoretical concern: in the field a
+   * stale enrichment put erased a compaction's committed manifest, reservation, `finalized` entry and
+   * chapter record while leaving its file on disk. Optional-with-default so a stored row from before
+   * the field parses unchanged.
+   */
+  rev?: number | undefined
   /** attemptKey -> numbers, so an idempotent retry reuses rather than duplicates. */
   reservations: Record<string, number[]>
   /**
@@ -57,6 +66,7 @@ export interface SessionState {
 }
 
 export const freshSession = (sessionId: string): SessionState => ({
+  rev: 0,
   parentSession: null,
   rootSession: sessionId,
   nextChapterNumber: 1,
@@ -116,11 +126,21 @@ export function reserve(state: SessionState, attemptId: string, count: number): 
     }
     return { state, numbers: [...existing] }
   }
-  const numbers = Array.from({ length: count }, (_, i) => state.nextChapterNumber + i)
+  // Never hand out a number the row already carries. A committed number with no matching
+  // reservation is a real state, not a bug: an orphan row written before this field existed, or a
+  // chapter whose record a lost update erased while its file survived (#59). Allocating into it would
+  // put two `0NN-*.md` in one tree, so allocation SKIPS it and spends the next free number instead.
+  const taken = new Set(state.chapters.map((c) => c.number))
+  const numbers: number[] = []
+  let cursor = state.nextChapterNumber
+  while (numbers.length < count) {
+    if (!taken.has(cursor)) numbers.push(cursor)
+    cursor += 1
+  }
   return {
     state: {
       ...state,
-      nextChapterNumber: state.nextChapterNumber + count,
+      nextChapterNumber: cursor,
       reservations: { ...state.reservations, [attemptId]: numbers },
     },
     numbers,
@@ -143,23 +163,83 @@ export function reservePlan(
     }
     return { state, numbers: [...existing] }
   }
-  const numbers = Array.from({ length: count }, (_, i) => state.nextPlanNumber + i)
+  // Same skip rule as reserve(): plan documents are numbered independently but the collision
+  // hazard is identical (a lost update rewinding nextPlanNumber re-issues `plan-003` over a twin).
+  const taken = new Set(
+    state.chapters.flatMap((c) => (c as unknown as { planDocs?: Array<{ path: string }> }).planDocs ?? [])
+      .map((d) => /plan-(\d+)-/.exec(d.path)?.[1]).filter((n): n is string => n !== undefined).map(Number),
+  )
+  const numbers: number[] = []
+  let cursor = state.nextPlanNumber
+  while (numbers.length < count) {
+    if (!taken.has(cursor)) numbers.push(cursor)
+    cursor += 1
+  }
   return {
     state: {
       ...state,
-      nextPlanNumber: state.nextPlanNumber + count,
+      nextPlanNumber: cursor,
       reservations: { ...state.reservations, [key]: numbers },
     },
     numbers,
   }
 }
 
-/** Append verified chapter records. A record with an existing (number) identity is a no-op — retries are safe. */
+/**
+ * Append verified chapter records.
+ *
+ * Identity is `(number, sha256)`, never `number` alone (#59). An identical record is a no-op — that is
+ * what makes a retry after a crash safe. A record reusing a number for DIFFERENT bytes is not a retry,
+ * it is a collision: one door's reservation was rewound by a lost update and another door has now been
+ * handed a number whose file already exists. Measured in the field: chapter 15 was spent twice in
+ * `session-aac0254e`, and number-only dedupe silently DROPPED the second record while its 960 KB file
+ * stayed on disk — a chapter no TOC cites and no tool can find. Refusing is the only honest option.
+ */
+/**
+ * The ONE test for "may this chapter be shown as knowledge?" (#60). Every derived layer — the TOC a
+ * child is seeded with, the enrichment queue, anything else that reads `state.chapters` — goes through
+ * this predicate, because a repair that left a husk in the corpus would be a lie a later reader cannot
+ * see past. Records written before this field existed are `undefined`, i.e. active: legacy archives
+ * are never silently hidden by a new filter.
+ */
+export function isActiveChapter(c: { status?: 'superseded' | undefined }): boolean {
+  return c.status !== 'superseded'
+}
+
 export function appendChapters(state: SessionState, records: readonly ChapterRecord[]): SessionState {
-  const known = new Set(state.chapters.map((c) => c.number))
-  const fresh = records.filter((r) => !known.has(r.number))
-  if (fresh.length === 0) return state
-  return { ...state, chapters: [...state.chapters, ...fresh] }
+  const byNumber = new Map(state.chapters.map((c) => [c.number, c]))
+  const fresh: ChapterRecord[] = []
+  for (const r of records) {
+    const prior = byNumber.get(r.number)
+    if (prior !== undefined) {
+      if (prior.sha256 !== r.sha256 || prior.path !== r.path) {
+        throw new Error(
+          `appendChapters: chapter number ${r.number} is already committed with different content `
+          + `(${prior.path} sha ${prior.sha256.slice(0, 12)}…) — refusing to overwrite or silently drop `
+          + `${r.path} (sha ${r.sha256.slice(0, 12)}…). A reused number means a lost registry update (#59).`,
+        )
+      }
+      continue // identical retry
+    }
+    fresh.push(r)
+    byNumber.set(r.number, r)
+  }
+  return fresh.length === 0 ? state : { ...state, chapters: [...state.chapters, ...fresh] }
+}
+
+/**
+ * Free an attempt's retry key WITHOUT un-spacing its numbers (#59). Reserve-before-write exists so a
+ * crash cannot re-issue a number whose file may already be on disk; that guarantee must not be undone
+ * here. What this does is stop a burned key from living forever: a door that reserved and then failed
+ * (a read-back that did not verify, a refusal after writing) currently leaves `reservations[k]` behind
+ * with no file and no record, which is the state the field showed at numbers 20 and 37.
+ *
+ * `numbersSpent` stays monotonic — only the attempt key goes.
+ */
+export function releaseReservation(state: SessionState, attemptId: string): SessionState {
+  if (state.reservations[attemptId] === undefined) return state
+  const { [attemptId]: _gone, ...rest } = state.reservations
+  return { ...state, reservations: rest }
 }
 
 /**

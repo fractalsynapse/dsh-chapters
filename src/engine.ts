@@ -17,21 +17,25 @@ import type { SessionEventLike } from './types.ts'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
-import { appendFileSync } from 'node:fs'
+import { diagnosticNote, diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
+import { makeChildArchiveListener } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import z from '@deepseek-ai/schemastery'
 import {
+  assertReservationMatchesPlan,
   CHAPTERS_PROVIDER, DETERMINISTIC_MODEL, buildFinalizedChapter, buildFinalizedChapters,
   findOpenCompactionId, planSummarize, reconstructShadowedSeqs, scanChaptersSummaries,
+  scanAndFinalize,
   type EngineConfig, type EngineSession, type SummarizeInputLike, type SummarizeResultLike,
 } from './engine-core.ts'
 import { composeChapters } from './compose.ts'
 import { carryActivePlan, detectPlans } from './plans.ts'
-import { stripReminderSpans } from './injections.ts'
+import { isInjectedProse, stripReminderSpans } from './injections.ts'
 import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
+import { lastResortCeilingTokens } from './last-resort.ts'
 import { extractPlot } from './engine-core.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
@@ -42,14 +46,27 @@ import { registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
 import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
 import { writeArchive } from './archive.ts'
+import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
+import { hostname } from 'node:os'
+import path from 'node:path'
+import { captureMinedRules, makeHeaderParentReader, makeRuleCaptureListener, renderRulesBlock } from './session-rules.ts'
 import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
 export interface ChaptersRowConfig extends BasicCompactionConfig {
   artifactStoreRoot?: string
+  /** #85: pool-mirror root for rules/knowledge reads that produce model-visible text. */
+  knowledgeMirrorDir?: string
+  /** #87: verbatim carry of the newest human turn, capped; the cap is stated, never silent. */
+  openRequestCarryMaxChars?: number
+  /** #78 A: defer a node relief cannot coexist with, after a measured decline. */
+  lastResortArtifact?: boolean
   chapterTokenTarget?: number
   toolResultDeferFloorTokens?: number
   mergeThreshold?: number
+  /** #61 Amendment A: the seventh archive moment, and its re-arm lag. */
+  childAutoArchive?: boolean | undefined
+  childAutoArchiveMinTurns?: number | undefined
   chapterLimit?: number
   syncDebounceMs?: number
   toolResultArtifactTokens?: number
@@ -61,6 +78,29 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   plansInCheckpoint?: boolean
   planCheckpointChars?: number
   elicitedPlot?: boolean
+  // #50 §7/§7.5 rules. Declared on the HOST plane (src/index.ts) and mirrored
+  // into this row exactly the way `elicitedPlot`/`enrichmentEnabled` already
+  // are, so a head rebuilt by the notice path and one rebuilt by the compaction
+  // path select the same rules from the same numbers.
+  harnessId?: string
+  sessionRulesEnabled?: boolean
+  rulesMarkerPrefix?: string
+  coreRulesBudgetTokens?: number
+  projectRulesDisplayCap?: number
+  sessionRulesDisplayCap?: number
+  rulesRelevance?: boolean
+  /** §7.5 model-mined rules; default ON. */
+  rulesEnrichment?: boolean
+  /** §7.5 per-chapter cap on mined rules */
+  rulesMinedPerChapter?: number
+  /** One auxiliary completion budget (annotation+mining, conflicts): must cover
+   * reasoning tokens as well as the visible answer — see enrich.ts. */
+  enrichmentMaxTokens?: number
+  /** §7.5: mined rules govern on arrival unless false (then they wait for review).
+   * Default true — inferring what nobody spelled out is the whole point. */
+  rulesAutoActivate?: boolean
+  /** §7.5: 'provider/model' for a dedicated mining call; '' ⇒ the annotation pass */
+  rulesModel?: string
   // P2 enrichment (record §6): the realm plane owns the AUTO triggers.
   enrichmentEnabled?: boolean
   enrichmentModel?: string
@@ -95,6 +135,8 @@ export function makeSignatureListener(deps: {
   onCollected?: (id: string, sig: { seqs: number[]; paths: string[]; terms: string[]; size: number }) => void
   /** Optional subprocess service for CodeGraph symbol verification. */
   subprocess?: import('./codegraph.ts').SubprocessLike | undefined
+  /** #61: `<store-root>` so the diagnostics sink can default to a file without any env setup. */
+  storeRoot?: string | undefined
 }): (session: unknown, event: unknown) => void {
   // Per-session promise chain: the store write is a read-modify-append, so
   // two turn-ends landing the same tick must serialize or the second put
@@ -116,13 +158,21 @@ export function makeSignatureListener(deps: {
       // CodeGraph symbol verification is async and fire-and-forget. The cwd
       // comes from the session header; missing cwd or missing CLI → silent no-op.
       const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+      // #61: the compaction realm is where the SAIP finalization failures happened, and all three left
+      // zero trace because the sink had to be configured before it existed. Resolve it from the session
+      // that is compacting, first one wins.
+      if (cwd !== undefined && deps.storeRoot !== undefined) {
+        ensureDiagnosticsDefault(path.join(cwd, deps.storeRoot, 'diagnostics.log'))
+      }
       const enrichPromise = cwd !== undefined
         ? enrichSignatureWithCodegraph(sig, span, deps.subprocess, cwd).catch(() => {})
         : Promise.resolve()
-      const job = (): Promise<void> => enrichPromise.then(() => deps.store()).then(({ store }) => {
-        const state = store.get(id)
-        return state.then((st) => store.put(id, appendCollection(st, sig)))
-      }).then(() => undefined).catch(deps.warn)
+      // One serialized section (#59): the signature listener used to get→append→put with the whole
+      // row snapshot, so a turn that landed during another door's await could erase that door's
+      // committed state. The lost signature is what dropped a COMPLETED turn out of the archive.
+      const job = (): Promise<void> => enrichPromise.then(() => deps.store()).then(({ store }) =>
+        store.mutate(id, (st) => appendCollection(st, sig)),
+      ).then(() => undefined).catch(deps.warn)
       const prev = chains.get(id)
       const next = prev === undefined ? job() : prev.then(job)
       chains.set(id, next)
@@ -152,6 +202,47 @@ export function makeFirstTurnPullListener(deps: { pull: (cwd: string) => Promise
       // never break the session path (§5.3)
     }
   }
+}
+
+/**
+ * #87 — carry the instruction that relief is about to shadow.
+ *
+ * Measured in the field: a `heavy` session whose thirteen compactions shadowed ten of the eleven
+ * copies of the human's follow-up question. What survives in the surface is the summary — a plot, not
+ * a request — so the model is never shown the thing it is being asked to do. Nothing errors; the user
+ * sees an agent that stopped answering.
+ *
+ * The fix stays inside our own seams and honors invariant 1 (nothing recorded is rewritten): WE author
+ * the summary text, so the newest human instruction travels INTO it, verbatim. Truncation is never
+ * silent — the cap is stated in the block. Injected scaffolding (workspace reminders, the host's own
+ * checkpoint preamble, our notices) is skipped: those are represented elsewhere, and carrying them
+ * would re-inject machine state as if it were a request.
+ */
+type SummaryPart = { type: 'text', text: string }
+
+export function carryOpenRequest(
+  parts: readonly SummaryPart[],
+  messages: readonly unknown[],
+  capChars: number,
+): SummaryPart[] {
+  // ONE predicate for "is this injected machine prose" — `src/injections.ts`, the same screen the
+  // archive body and the title chooser use. A second list here is the #59 bug re-made: it would lag
+  // the first, and a drift row exists precisely to catch that (it caught this, minutes after I wrote it).
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i] as { role?: string, content?: unknown }
+    if (m?.role !== 'user') continue
+    const c = m.content
+    const text = typeof c === 'string' ? c
+      : Array.isArray(c) ? (c as Array<{ type?: string, text?: string }>).filter((b) => b?.type === 'text').map((b) => b.text ?? '').join('\n') : ''
+    const t = text.trim()
+    if (t === '' || isInjectedProse(t)) continue
+    const clipped = t.length > capChars
+    const body = clipped
+      ? `${t.slice(0, capChars)}\n[carried in part: ${String(t.length)} characters total, ${String(capChars)} included — the whole turn stays in the durable log]`
+      : t
+    return [...parts, { type: 'text', text: `OPEN REQUEST (verbatim; this relief shadows the turn that asked it):\n"""\n${body}\n"""` }]
+  }
+  return [...parts]
 }
 
 export class ChaptersCompactionEngine extends BasicCompactionEngine {
@@ -185,6 +276,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     })),
     auto: z.boolean(),
     artifactStoreRoot: z.string(),
+    knowledgeMirrorDir: z.string().default('.dsh-knowledge'),
+    openRequestCarryMaxChars: z.number().step(1).min(200).default(4000),
+    /** #78 A: the last-resort deferral switch. Operator-visible, default on. */
+    lastResortArtifact: z.boolean().default(true),
     chapterTokenTarget: z.number().step(1).min(1),
     toolResultDeferFloorTokens: z.number().step(1).min(0),
     // The composition knobs ride the same row so the engine path and the fork
@@ -194,12 +289,29 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     chapterLimit: z.number().step(1).min(1).default(8000),
     syncDebounceMs: z.number().step(1).min(0).default(30000),
     toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
+    // #61 Amendment A — the seventh archive moment. A `ch-*` continuation child has origin `user`, so
+    // door 5 never sees it: the field case archived NOTHING across 2,363 events because no moment was
+    // watching. Save-only, fires at turn/end, thresholds are config and never literals.
+    childAutoArchive: z.boolean().default(true),
+    childAutoArchiveMinTurns: z.number().step(1).min(1).default(4),
     elicitedPlot: z.boolean().default(true),
+    harnessId: z.string().default(''),
+    sessionRulesEnabled: z.boolean().default(true),
+    rulesMarkerPrefix: z.string().default('ADD RULE:'),
+    coreRulesBudgetTokens: z.number().step(1).min(1).default(1200),
+    projectRulesDisplayCap: z.number().step(1).min(0).default(12),
+    sessionRulesDisplayCap: z.number().step(1).min(0).default(12),
+    rulesRelevance: z.boolean().default(true),
+    rulesEnrichment: z.boolean().default(true),
+    rulesMinedPerChapter: z.number().step(1).min(0).default(3),
+    rulesAutoActivate: z.boolean().default(true),
+    rulesModel: z.string().default(''),
     enrichmentEnabled: z.boolean().default(true),
     enrichmentModel: z.string().default(''),
     enrichmentTrigger: z.string().default('both'),
     enrichmentIdleMs: z.number().step(1).min(0).default(60000),
     enrichmentBatchCap: z.number().step(1).min(1).default(5),
+    enrichmentMaxTokens: z.number().step(1).min(400).default(ENRICH_MAX_TOKENS_DEFAULT),
     vocabApply: z.boolean().default(false),
     vocabCoMin: z.number().step(1).min(2).default(3),
     vocabOverlapMin: z.number().default(0.5),
@@ -212,7 +324,39 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   })
 
   private readonly chaptersConfig: EngineConfig
+  /** #50 §7.5/§7.3: capture + rendering numbers, host plane mirrored in. */
+  private ruleCfg: {
+    harnessId: string
+    captureEnabled: boolean
+    markerPrefix: string
+    budgetTokens: number
+    projectCap: number
+    sessionCap: number
+    relevance: boolean
+    /** §7.5 model-mined rules (the background half); default true from the row */
+    mine?: boolean | undefined
+    mineCap?: number | undefined
+    /** §7.5: do mined rules govern on arrival? Default true — that is the tier's premise */
+    autoActivate?: boolean | undefined
+    /** §7.5: dedicated mining model; '' ⇒ mine inside the annotation call */
+    model?: string | undefined
+  } = { harnessId: '', captureEnabled: false, markerPrefix: 'ADD RULE:', budgetTokens: 1200, projectCap: 12, sessionCap: 12, relevance: true, mine: true, mineCap: 3, autoActivate: true, model: '' }
   private storePromise: Promise<ChapterStoreHandle> | null = null
+
+  /** #52: the delegation-edge reader, built lazily because a field initializer
+   * cannot see the constructor parameter and the realm may hold neither service.
+   * null = not built yet; undefined = built and unavailable (registry edges only). */
+  private parentOfReader: ((id: string) => Promise<string | null | undefined>) | undefined | null = null
+
+  /** The reader the rule-ancestry walk uses. Absent ⇒ delegation contributes no edge. */
+  private ruleParentOf(): ((id: string) => Promise<string | null | undefined>) | undefined {
+    if (this.parentOfReader === null) {
+      this.parentOfReader = makeHeaderParentReader((name: string) => {
+        try { return this.ctx.get?.(name) } catch { return undefined }
+      })
+    }
+    return this.parentOfReader ?? undefined
+  }
 
   constructor(ctx: Context, config: ChaptersRowConfig = {}) {
     // The base's resolveConfig rejects unknown keys at runtime (measured r18:
@@ -220,11 +364,15 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, lastResortArtifact, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
+      childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
+      harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+      projectRulesDisplayCap, sessionRulesDisplayCap, rulesRelevance,
+      rulesEnrichment, rulesMinedPerChapter, rulesAutoActivate, rulesModel,
       enrichmentEnabled, enrichmentModel, enrichmentTrigger, enrichmentIdleMs, enrichmentBatchCap,
-      vocabApply, vocabCoMin, vocabOverlapMin,
+      vocabApply, vocabCoMin, vocabOverlapMin, enrichmentMaxTokens,
       treedxFetchTimeoutMs, treedxWorkspaceTtlSeconds, treedxLeaseRetries, treedxLeaseRetryDelayMs,
       ...baseConfig
     } = config
@@ -241,11 +389,16 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     }))
     this.chaptersConfig = {
       artifactStoreRoot: artifactStoreRoot ?? '.dsh-chapters',
+      knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
+      openRequestCarryMaxChars: openRequestCarryMaxChars ?? 4000,
+      lastResortArtifact: lastResortArtifact ?? true,
       chapterTokenTarget: chapterTokenTarget ?? 8000,
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
       chapterLimit: chapterLimit ?? 8000,
       toolResultArtifactTokens: toolResultArtifactTokens ?? 8000,
+      childAutoArchive: childAutoArchive ?? true,
+      childAutoArchiveMinTurns: childAutoArchiveMinTurns ?? 4,
       planInlineChars: planInlineChars ?? 900,
       callArgArtifactTokens: callArgArtifactTokens ?? 0,
       plansInCheckpoint: plansInCheckpoint ?? true,
@@ -257,11 +410,30 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.enrichCfg = {
       enabled: enrichmentEnabled ?? true,
       model: enrichmentModel ?? '',
+      mineRules: rulesEnrichment ?? true,
+      mineCap: rulesMinedPerChapter ?? 3,
+      rulesAutoActivate: rulesAutoActivate ?? true,
+      rulesModel: rulesModel ?? '',
+      maxTokens: enrichmentMaxTokens ?? ENRICH_MAX_TOKENS_DEFAULT,
       trigger: (enrichmentTrigger ?? 'both') as 'afterPush' | 'idle' | 'both' | 'manual',
       idleMs: enrichmentIdleMs ?? 60000,
       batchCap: enrichmentBatchCap ?? 5,
     }
+    this.ruleCfg = {
+      harnessId: harnessId ?? '',
+      captureEnabled: sessionRulesEnabled ?? true,
+      markerPrefix: rulesMarkerPrefix ?? 'ADD RULE:',
+      budgetTokens: coreRulesBudgetTokens ?? 1200,
+      projectCap: projectRulesDisplayCap ?? 12,
+      sessionCap: sessionRulesDisplayCap ?? 12,
+      relevance: rulesRelevance ?? true,
+      mine: rulesEnrichment ?? true,
+      mineCap: rulesMinedPerChapter ?? 3,
+      autoActivate: rulesAutoActivate ?? true,
+      model: rulesModel ?? '',
+    }
     this.#listenForSignatures()
+    this.#listenForRuleCapture()
     this.#listenForFirstTurnPull()
     ctx.logger?.info?.('dsh-chapters: engine constructed for a mount (signature listener live)')
   }
@@ -277,8 +449,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * lock and debounce keep the two honest against each other. */
   private syncDebounceMs = 30000
   private vocabCfg: { apply: boolean; coMin: number; overlapMin: number } = { apply: false, coMin: 3, overlapMin: 0.5 }
-  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number } =
-    { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5 }
+  private enrichCfg: { enabled: boolean; model: string; trigger: 'afterPush' | 'idle' | 'both' | 'manual'; idleMs: number; batchCap: number; maxTokens?: number; mineRules?: boolean | undefined; mineCap?: number | undefined; rulesAutoActivate?: boolean | undefined; rulesModel?: string | undefined } =
+    { enabled: false, model: '', trigger: 'both', idleMs: 60000, batchCap: 5, mineRules: true, mineCap: 3 }
   private enrichPromise: Promise<EnrichWiring> | null = null
   private lastCwd: string | null = null
   private lastRoute: { provider: string; model: string } | null = null
@@ -314,9 +486,29 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       fetch: async (prompt, route) => {
         const r = route ?? this.lastRoute
         if (r === null || r.provider === '' || r.model === '') throw new Error('no auxiliary route yet')
-        return await this.#auxComplete(prompt, r, 900)
+        return await this.#auxComplete(prompt, r, this.enrichCfg.maxTokens ?? ENRICH_MAX_TOKENS_DEFAULT)
       },
       conversationRoute: () => this.lastRoute,
+      // §7.5 the sink: the realm plane owns disk, identity and the registry, so it
+      // writes what the pass mined. Session rules are LOCAL — nothing is armed on
+      // the scheduler here, because the pool never carries them.
+      onMinedRules: async ({ sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
+        const cwd = this.lastCwd ?? undefined
+        if (cwd === undefined) return { written: 0, stated: 0, inferred: 0, pending: 0 }
+        const { store } = await this.store()
+        const res = captureMinedRules({
+          storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+          harnessId: (this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()),
+          sessionId,
+          records: store.rules(),
+          humanText,
+          rules,
+          maxPerChapter: max,
+          chapterNumber,
+          autoActivate,
+        })
+        return { written: res.ids.length, stated: res.stated, inferred: res.inferred, pending: res.pending }
+      },
       scheduler: { schedule: (cwd, why) => { void this.#scheduler().then((s) => s.schedule(cwd, why)).catch(() => undefined) } },
       log: (m) => this.ctx.logger?.info?.(`dsh-chapters: ${m}`),
       warn: (m) => this.ctx.logger?.warn?.(`dsh-chapters: ${m}`),
@@ -375,13 +567,64 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         store: () => this.store(),
         warn: (error) => { this.ctx.logger?.warn?.(`dsh-chapters: signature capture failed (${String(error)})`) },
         subprocess,
+        storeRoot: this.chaptersConfig.artifactStoreRoot,
         onCollected: (id, sig) => {
           this.ctx.logger?.info?.(`dsh-chapters: signature collected for ${id} (${sig.seqs.length} events, ${sig.paths.length} paths, ${sig.size} est tokens)`)
         },
       }))
+      // #61: the seventh moment, registered where the other turn/end doors already live. Its own
+      // watermark makes a re-run a no-op, and it creates NO session — the mid-step rule stays intact.
+      this.ctx.on('session/event', makeChildArchiveListener({
+        ctx: { logger: this.ctx.logger },
+        // the store opens lazily and once — same accessor the signature listener uses; a row that
+        // resolved it per turn would reopen the domain on every turn/end.
+        store: () => this.store().then(({ store }) => store),
+        wiring: {
+          presetId: 'chapters',
+          artifactStoreRoot: this.chaptersConfig.artifactStoreRoot,
+          chapterTokenTarget: this.chaptersConfig.chapterTokenTarget,
+          toolResultDeferFloorTokens: this.chaptersConfig.toolResultDeferFloorTokens,
+          mergeThreshold: this.chaptersConfig.mergeThreshold,
+          chapterLimit: this.chaptersConfig.chapterLimit,
+          scheduler: { schedule: (cwd: string, reason: string) => { void this.#scheduler().then((sc) => sc.schedule(cwd, reason)) } },
+        },
+        enabled: this.chaptersConfig.childAutoArchive ?? true,
+        minTurns: this.chaptersConfig.childAutoArchiveMinTurns ?? 4,
+      }))
     } catch {
       // A non-cordis ctx (L0 construction) has no event bus — signatures are
       // optional there by design; the compaction path is unaffected.
+    }
+  }
+
+  /**
+   * #50 §7.5: capture `ADD RULE:` markers at the SAME `turn/end` boundary the
+   * topic signatures use — this extends an existing door, it is not a sixth
+   * archive moment. Deterministic and model-free (invariant 1): no marker in the
+   * turn costs one string scan and nothing else. Gated off when `harnessId` is
+   * absent, because a rule with no author partition is a rule nothing can
+   * revoke.
+   */
+  #listenForRuleCapture(): void {
+    try {
+      this.ctx.on('session/event', makeRuleCaptureListener({
+        enabled: () => this.ruleCfg.captureEnabled,
+        prefix: () => this.ruleCfg.markerPrefix,
+        // The realm row's harnessId, or the same default the host plane's config
+        // uses (`hostname()`). A custom host-plane override does NOT strand the
+        // rule: the directory is only an author partition, and rendering walks
+        // every dir under `rules/` and activates by scope+ancestry (§7.5) — the
+        // id prefix differs, nothing else.
+        harnessId: () => (this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()),
+        storeRoot: (cwd) => resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+        store: async () => ({ store: (await this.store()).store as RegistryStore }),
+        warn: (error) => { this.ctx.logger?.warn?.(`dsh-chapters: session-rule capture failed (${String(error)})`) },
+        onCaptured: (sessionId, ids) => {
+          this.ctx.logger?.info?.(`dsh-chapters: ${ids.length} session rule(s) captured for ${sessionId} (${ids.join(', ')})`)
+        },
+      }))
+    } catch {
+      // same containment as signatures: a non-cordis ctx has no event bus
     }
   }
 
@@ -413,7 +656,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       // digest; NO chapter path is cited, so nothing can dangle. A distinct
       // provider tag keeps the finalizer's scan from claiming this record.
       return {
-        summary: [{ type: 'text', text: `Compacted ${input.messages.length} messages (deterministic digest; no chapter: ${cwd === null ? 'no workspace cwd' : cid === null ? 'no open transaction' : 'empty region'}).` }],
+        summary: carryOpenRequest([{ type: 'text', text: `Compacted ${input.messages.length} messages (deterministic digest; no chapter: ${cwd === null ? 'no workspace cwd' : cid === null ? 'no open transaction' : 'empty region'}).` }], input.messages, this.chaptersConfig.openRequestCarryMaxChars),
         provider: `${CHAPTERS_PROVIDER}-degraded`,
         model: DETERMINISTIC_MODEL,
       }
@@ -478,13 +721,38 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       }
     }
 
-    const { plan, state: next } = planSummarize(session, state, input, this.chaptersConfig, reserve, cid, composition, plot, planCarry)
-    const stored = rememberPlan(next, cid, {
-      number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
-      ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
+    // #50 §7.6: the rules ride the checkpoint the way the plot and the plan do.
+    // Anything that goes wrong here DEGRADES TO NOTHING and is reported on the
+    // operator channel — the compaction critical path stays zero-model-token and
+    // never fails because of a rules read (§1 invariant 1, §7.3's non-blocking rule).
+    let rulesCarry: string | null = null
+    try {
+      rulesCarry = await this.#rulesForCheckpoint(session)
+    } catch (error) {
+      this.#diagnostic(`dsh-chapters: rule carriage skipped (${String(error)}) — the archive still holds every rule`)
+    }
+
+    // #59: everything ABOVE this line (composition, plot elicitation, rules, plan carry) is
+    // expensive and may cross a model call; the WRITE re-runs on a fresh row inside one section, so
+    // the reservation and manifest can no longer be rewound by a stale whole-row put — and the TOC
+    // text we are about to hand the host cites numbers that are durable at this point.
+    let tocText = ''
+    await store.mutate(session.id, (fresh) => {
+      // #69: the realm resolves an ABSOLUTE store root; hand planSummarize the session cwd so the record it
+      // mints is workspace-relative like every door's.
+      const wcwd = (session as { header?: { cwd?: string } }).header?.cwd
+      const { plan, state: next } = planSummarize(session, fresh, input, { ...this.chaptersConfig, workspaceCwd: wcwd }, reserve, cid, composition, plot, planCarry, rulesCarry)
+      const stored = rememberPlan(next, cid, {
+        number: plan.numbers[0]!, path: plan.chapter.path, title: plan.chapter.title, summary: plan.chapter.summary,
+        ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
+      })
+      // The drift check that has existed with zero callers: a manifest whose reservation is not
+      // durable (or not the same numbers) means the TOC we are about to emit cites the unreachable.
+      assertReservationMatchesPlan(stored, cid, plan)
+      tocText = plan.tocText
+      return stored
     })
-    await store.put(session.id, stored) // reservation + manifest durable BEFORE the text cites them
-    return { summary: [{ type: 'text', text: plan.tocText }], provider: CHAPTERS_PROVIDER, model: DETERMINISTIC_MODEL }
+    return { summary: carryOpenRequest([{ type: 'text', text: tocText }], input.messages, this.chaptersConfig.openRequestCarryMaxChars), provider: CHAPTERS_PROVIDER, model: DETERMINISTIC_MODEL }
   }
 
   // ------------------------------------------------------------ entry points (finalize after commit)
@@ -559,9 +827,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   async #arrive(agent: Agent): Promise<void> {
     const session = agent.session as unknown as ArrivalSessionShim & { header?: { cwd?: string } }
     const cwd = session.header?.cwd
-    if (cwd === undefined || cwd === '') return
+    if (cwd === undefined || cwd === '') {
+      // #78: two bare returns made arrival artifacting vanish COMPLETELY, silently — the very
+      // silence that lets a leg fail while nobody can say whether the code path ran. And the
+      // reason is printed as the SHAPE it found, because `session.header?.cwd` is precisely the
+      // assumption a host format bump retires (the v3→v4 log lesson).
+      diagnosticNote(this.ctx.logger, 'realm:engine:arrive',
+        `arrival stubbing skipped: no session cwd (session keys=${Object.keys(session ?? {}).slice(0, 10).join(',')})`)
+      return
+    }
     const meter = (this.ctx as unknown as { tokenMeter?: { estimateMessage: (m: unknown) => number } }).tokenMeter
-    if (meter === undefined) return
+    if (meter === undefined) {
+      diagnosticNote(this.ctx.logger, 'realm:engine:arrive', 'arrival stubbing skipped: no tokenMeter on the realm context')
+      return
+    }
     const r = await applyArrivalStubs(session, {
       cwd,
       storeRoot: this.chaptersConfig.artifactStoreRoot,
@@ -571,9 +850,153 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     if (r.detail !== undefined) this.ctx.logger?.warn?.(`dsh-chapters: arrival stubbing degraded (${r.detail})`)
   }
 
+  /**
+   * One line per compaction decision — the second half of "is relief actually running?".
+   * `realm:engine:*` so the site is attributable, note-level so a routine decision never reads as
+   * a failure, and it names which entry point (`compactIfNeeded` on pressure/auto vs `compactNow`
+   * on `/compact`) because those two disagreeing is exactly the kind of drift a field report needs
+   * to be able to tell apart. (#78)
+   */
+  /**
+   * The last-resort deferral (#78 option A). Returns how many nodes it stubbed, and 0 — never a
+   * guess — unless every input to the ceiling is real: `resolveStoreRoot`-style derivation lives in
+   * `lastResortCeilingTokens`, so this method only supplies measured values. Runs only from the
+   * declined branch; the operator's `toolResultArtifactTokens` still governs every ordinary case.
+   */
+  async #lastResortRelief(agent: Agent, signal: AbortSignal): Promise<number> {
+    try {
+      if (this.chaptersConfig.lastResortArtifact !== true) return 0
+      const route = this.lastRoute
+      const meter = (this.ctx as unknown as {
+        tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number }, estimateMessage?: (m: unknown) => number }
+      }).tokenMeter
+      const llm = (this.ctx as unknown as {
+        llm?: { resolveModelInfo?: (p: string, m: string, s: AbortSignal) => Promise<unknown> }
+      }).llm
+      if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') return 0
+      const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
+        { context?: { contextWindow?: number, maxTokens?: number } } | undefined
+      const base = this as unknown as { config?: { retainRatio?: number, retainTokens?: number, maxTokens?: number } }
+      // Quiet unless there is a problem to solve. Relief declines on EVERY ordinary pre-step because
+      // the surface is below the trigger, and the first two notes this feature ever emitted were that
+      // non-event — noise that also hid the case worth naming. Every value here is measured at this
+      // point in the method: no invented field and no assumed window (my first attempt reached for a
+      // `lastWindowTokens` that does not exist, and `tsc` was the only thing that caught it).
+      const surfaceNow = Number(meter.measure?.(agent.session)?.totalTokens ?? NaN)
+      const ratioNow = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
+      const windowNow = Number(info?.context?.contextWindow ?? NaN)
+      const overTrigger = Number.isFinite(surfaceNow) && Number.isFinite(windowNow)
+        && typeof ratioNow === 'number' && surfaceNow > windowNow * ratioNow
+      const retainTokens = base.config?.retainTokens
+      const reserved = Number(info?.context?.maxTokens ?? base.config?.maxTokens ?? NaN)
+      const ceiling = lastResortCeilingTokens({
+        windowTokens: Number(info?.context?.contextWindow ?? NaN),
+        retainRatio: Number(base.config?.retainRatio ?? NaN),
+        // optional, not `| undefined`: `exactOptionalPropertyTypes` is on, and a property that can
+        // hold undefined is a different promise from one that may be absent.
+        ...(retainTokens !== undefined ? { retainTokens } : {}),
+        // The completion budget comes from the MODEL, measured: `resolveConfig` defaults
+        // `maxTokens` to `headroomTokens` (65,536 — a routing headroom, not a per-request output
+        // budget), so `32,000 − 5,120 − 65,536` is negative and the ceiling is permanently
+        // underivable. `info.context.maxTokens` (15,000 here) sits in the same object as
+        // `contextWindow`; the base config stays only as a fallback so the abstention path still
+        // fires and says so when neither is present.
+        reservedCompletionTokens: reserved,
+      })
+      if (ceiling === null) {
+        // Measured tonight: relief declined twice with `surface=39983 trigger=16000` and the last
+        // resort NEVER fired — and said nothing about why. A feature that abstains silently is
+        // indistinguishable from a feature that isn't installed, which is the exact complaint this
+        // branch has filed against everything else (#61a). So: name the missing input.
+        diagnosticNote(this.ctx.logger, 'realm:engine:last-resort',
+          `not applied: coexistence ceiling underivable (window=${String(info?.context?.contextWindow)}, retainRatio=${String(base.config?.retainRatio)}, retainTokens=${String(base.config?.retainTokens)}, maxTokens=${String(base.config?.maxTokens)}) — check the realm row's compaction keys, not this feature`)
+        return 0
+      }
+      const session = agent.session as unknown as ArrivalSessionShim & {
+        surface: { nodes: number[] }, header?: { cwd?: string }
+      }
+      const cwd = session.header?.cwd ?? ''
+      if (cwd === '') return 0 // no workspace identity, no deferral — same rule as `#arrive`
+      const before = [...session.surface.nodes].length
+      const r = await applyArrivalStubs(session, {
+        cwd,
+        storeRoot: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+        floorTokens: ceiling,
+        estimate: (m: unknown) => meter.estimateMessage?.(m) ?? 0,
+      })
+      if (r.stubbed > 0) {
+        diagnosticWarn(this.ctx.logger, 'realm:engine:last-resort',
+          `relief declined, so ${String(r.stubbed)} tool/result node(s) larger than the coexistence ceiling (${String(ceiling)} tok) were artifact-deferred regardless of toolResultArtifactTokens — survivability over economy (#78 A); the archive keeps every byte and chapters_artifact answers for them (surface nodes ${String(before)} → ${String(session.surface.nodes.length)})`)
+      }
+      return r.stubbed
+    } catch { /* a last resort must never become the reason relief failed */
+      return 0
+    }
+  }
+
+  /** See the call site: a decline while OVER the trigger is a statement, not a shrug. Never throws. */
+  async #reportDecline(agent: Agent, signal: AbortSignal): Promise<void> {
+    try {
+      const route = this.lastRoute
+      const meter = (this.ctx as unknown as {
+        tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number }, estimateMessage?: (m: unknown) => number }
+      }).tokenMeter
+      if (route === null || meter === undefined) return
+      const surface = meter.measure?.(agent.session)?.totalTokens
+      const llm = (this.ctx as unknown as {
+        llm?: { resolveModelInfo?: (p: string, m: string, s: AbortSignal) => Promise<unknown> }
+      }).llm
+      if (typeof surface !== 'number' || typeof llm?.resolveModelInfo !== 'function') return
+      const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
+        { context?: { contextWindow?: number } } | undefined
+      const window = info?.context?.contextWindow
+      const ratio = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
+      if (typeof window !== 'number' || typeof ratio !== 'number') return
+      const triggerTokens = Math.floor(window * ratio)
+      if (surface <= triggerTokens) return
+      const session = agent.session as unknown as ArrivalSessionShim & { surface: { nodes: number[] } }
+      let oversized = 0
+      let biggest = 0
+      for (const seq of session.surface.nodes) {
+        const ev = session.eventAt(seq)
+        if (ev?.type !== 'tool/result') continue
+        const est = meter.estimateMessage?.((ev as { data?: { message?: unknown } }).data?.message) ?? 0
+        if (est > biggest) biggest = est
+        if (est > triggerTokens) oversized += 1
+      }
+      diagnosticWarn(this.ctx.logger, 'realm:engine:decline',
+        `relief declined while the surface is over the trigger (surface=${String(surface)} trigger=${String(triggerTokens)} window=${String(window)} ratio=${String(ratio)}): no safe range to compact, and ${String(oversized)} inline tool/result node(s) individually exceed the trigger (largest ${String(biggest)} tok). Context relief needs the arrival floor below that node size — toolResultArtifactTokens is the operator switch, and the archive keeps every byte either way.`)
+    } catch { /* a report must never become the reason compaction failed */ }
+  }
+
+  #noteDecision(where: string, trigger: unknown, result: CompactionResult | null, agent: Agent): void {
+    // The INPUTS, not just the verdict: `decided: none` is one word covering two opposite bugs —
+    // no routed target (the base returns null on line one) and under-threshold (a real decision).
+    // Heavy's leg sat exactly there, so the note now carries route, surface tokens and ratio.
+    // All of it wrapped: a diagnostic that can throw is a diagnostic that will eat the step.
+    let route = 'unknown'
+    let surface = '? tok'
+    try {
+      route = this.lastRoute === null ? 'none' : `${this.lastRoute.provider}/${this.lastRoute.model}`
+      const meter = (this.ctx as unknown as { tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number } } }).tokenMeter
+      const measured = meter?.measure?.((agent as { session?: unknown }).session)
+      if (typeof measured?.totalTokens === 'number') surface = `${String(measured.totalTokens)} tok`
+    } catch { /* never let instrumentation break compaction */ }
+    diagnosticNote(this.ctx.logger, `realm:engine:${where}`,
+      `${where} decided: ${result === null ? 'none' : `compaction ${String((result as unknown as { compactionId?: string })?.compactionId ?? '?')}`} (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')}, route=${route}, surface=${surface}, ratio=${String((this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio ?? '?')})`)
+  }
+
   override async compactIfNeeded(
     agent: Agent, trigger: CompactionTrigger, signal: AbortSignal,
   ): Promise<CompactionResult | null> {
+    // #78: the entry line that proves the HOST called this. Every row in the lifecycle suite
+    // CALLS `compactIfNeeded` directly — the test has always been the caller, which is exactly
+    // how a suite stays green while the product relieves nothing. Field evidence on 0.2.0-rc.2:
+    // 35,428 tokens against a 16,000 trigger, ZERO `compaction/*` events, and no line anywhere
+    // saying whether relief ran. One info line per entry, carrying the trigger the host passed,
+    // makes "is context relief wired at all?" answerable from a session log instead of inferred.
+    diagnosticNote(this.ctx.logger, 'realm:engine:compact',
+      `compactIfNeeded entered (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')})`)
     this.#observeRoute(agent)
     await this.#arrive(agent)
     // Finalization runs whether super resolves OR throws: the pressure retry
@@ -586,9 +1009,47 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       result = await super.compactIfNeeded(agent, trigger, signal)
     } catch (error) {
       await this.#finalizeGuarded(agent)
+      // A throw while the surface is OVER the trigger is the same field failure as a null —
+      // arguably worse, because the user sees the endpoint's 400 rather than our explanation.
+      // Report first, then rethrow untouched; the report itself can never mask the error.
+      await this.#reportDecline(agent, signal)
+      // no result exists on this path — the base engine threw — so the line says `none` and the
+      // reason is the rethrown error, not a value invented for the log
+      this.#noteDecision('compactIfNeeded', trigger, null, agent)
       throw error
     }
     if (result !== null) await this.#finalizeGuarded(agent)
+    // #78: entry alone is half the question. Three `trigger="pressure"` entries on 0.2.0-rc.2
+    // produced no `compaction/*` event at all, and nothing could say whether the base engine
+    // declined (a meter/threshold disagreement) or acted and our finalization lost the evidence.
+    // The decision now sits beside the entry, in the same artifact.
+    // #78: the quiet failure was the worst part. Six compactions, then a raw `400 … exceeds the
+    // context window` from the endpoint, and nothing the product said about WHY relief stopped.
+    // This reports the numbers it actually had — surface, trigger, window, ratio, and how many
+    // inline tool/results are individually larger than the trigger — and changes no behavior:
+    // the arrival floor is the operator's switch (AGENTS: a behavior switch, not a knob), and the
+    // engine does not get to reinterpret it silently.
+    if (result === null) {
+      // #78 option A: relief declined, so a node that cannot coexist with the mandatory tail is no
+      // longer an economy question — the session is stuck. Defer THAT node as a last resort and give
+      // relief one more chance. Ordering is the whole design: this sits inside the declined branch,
+      // never in `#arrive`, so `heavy` still proves pressure compaction first. An eager version would
+      // arrival-stub the surface and make the leg's claim untestable (AGENTS' named trap), which is
+      // what the anti-vacuity rows below guard against.
+      const deferred = await this.#lastResortRelief(agent, signal)
+      if (deferred > 0) {
+        try {
+          const retry = await super.compactIfNeeded(agent, trigger, signal)
+          if (retry !== null) {
+            await this.#finalizeGuarded(agent)
+            this.#noteDecision('compactIfNeeded', trigger, retry, agent)
+            return retry
+          }
+        } catch { /* still stuck: fall through to the decline report, then rethrow nothing */ }
+      }
+      await this.#reportDecline(agent, signal)
+    }
+    this.#noteDecision('compactIfNeeded', trigger, result, agent)
     return result
   }
 
@@ -602,9 +1063,14 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       result = await super.compactNow(agent, signal, sourceCommandId)
     } catch (error) {
       await this.#finalizeGuarded(agent)
+      this.#noteDecision('compactNow', 'manual', null, agent)
       throw error
     }
     if (result !== null) await this.#finalizeGuarded(agent)
+    // #78: the same decision line on the manual path. Reporting only the pressure route would
+    // leave `/compact` — the door a human actually pulls — as silent as the bug this instrument
+    // exists to catch.
+    this.#noteDecision('compactNow', 'manual', result, agent)
     return result
   }
 
@@ -623,6 +1089,53 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   }
 
   /**
+   * §7.3/§7.6: the block this session's rebuilt head should carry, from the ONE
+   * builder that renders it for the notice too — a second rule-ranking or
+   * rule-selecting implementation is forbidden (record §8: two doors, one
+   * scorer). Zero bytes when nothing is active.
+   *
+   * Relevance topics come from the session's OWN stored turn signatures
+   * (deterministic, already on disk, no model call), newest last. With
+   * `rulesRelevance` off the selection falls back to category→id order, which is
+   * the order the tapes were distilled against.
+   */
+  async #rulesForCheckpoint(session: EngineSession): Promise<string | null> {
+    const cwd = (session as { header?: { cwd?: string } }).header?.cwd
+    if (cwd === undefined || cwd === '') return null
+    const { store } = await this.store()
+    const harness = this.ruleCfg.harnessId !== '' ? this.ruleCfg.harnessId : hostname()
+    const project = projectForCwd(store.projects(), cwd)
+    // the SAME renderer the doors use — one builder for every rebuilt head (§7.3)
+    const built = await renderRulesBlock({
+      // #85: the configured root, not the constant — an e2e boot pins this per port so a notice
+      // cannot pick up rules from whatever the developer's repo happens to contain.
+      mirrorDir: resolveStoreRoot(cwd, this.chaptersConfig.knowledgeMirrorDir ?? DEFAULT_CLONE_DIR),
+      storeDir: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+      projectKey: project?.projectKey ?? '',
+      harnessId: harness,
+      budgetTokens: this.ruleCfg.budgetTokens,
+      projectCap: this.ruleCfg.projectCap,
+      sessionCap: this.ruleCfg.sessionCap,
+      relevance: this.ruleCfg.relevance,
+      includeSession: true,
+      store,
+      sessionId: session.id,
+      // #52: the delegation edge. A subagent that compacts in place must see the
+      // rules of the session that delegated it, or the whole point of the tier is
+      // lost exactly where the work actually happens.
+      ...(() => { const p = this.ruleParentOf(); return p !== undefined ? { parentOf: p } : {} })(),
+    })
+    if (built.kind === 'none') return null
+    if (built.kind === 'refusal') {
+      // announced, never clipped: the head says the rules did not fit rather
+      // than silently carrying none of them
+      this.#diagnostic(`dsh-chapters: rules over budget at this checkpoint — ${built.reason}`)
+      return `Rules NOT carried into this checkpoint (their token budget was exceeded, so nothing was clipped): ${built.reason}`
+    }
+    return built.text
+  }
+
+  /**
    * The operator-visible warn channel (r19: headless profiles route ctx.logger
    * where nobody can see it; measured again 2026-09-27: even the in-process
    * logger surface is unassertable on this node build). Warn + mirror to the
@@ -630,23 +1143,37 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
    * not a tunable. Any degradation that leaves the user wondering "did the
    * feature run?" belongs here.
    */
-  #diagnostic(message: string): void {
-    this.ctx.logger?.warn?.(message)
-    const sink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
-    if (sink !== undefined) {
-      try {
-        appendFileSync(sink, `[${new Date().toISOString()}] ${message}\n`)
-      } catch { /* diagnostics must never mask the real failure */ }
-    }
+  #diagnostic(message: string, error?: unknown): void {
+    // #54: ONE writer, in src/diag.ts. This held a private three-line copy of the sink while
+    // the two places a user's door can actually fail — the host-plane tool and the shared
+    // continuation core — wrote nothing anywhere. Which is how a kernel refusal that ended the
+    // whole acceptance chain left no trace readable without a browser.
+    diagnosticWarn(this.ctx.logger, 'realm:engine', message, error)
   }
 
   /** Every provider-tagged summary without a finalized manifest, oldest first. */
+  /**
+   * Per-item containment (#59). The scan used to await `#finalizeOne` in a bare loop, and
+   * `#finalizeOne` THROWS when a manifest is missing — so one erased manifest (exactly what the
+   * SAIP lost-update produced) aborted the scan on its first iteration forever: every later
+   * compaction in that session could never write its chapters, and their numbers stayed burned.
+   * One bad item may never poison the items behind it: report it, name it, continue.
+   */
   async #finalizeAllOutstanding(session: EngineSession): Promise<void> {
     const { store } = await this.store()
-    const state = await store.get(session.id)
-    for (const found of scanChaptersSummaries(session)) {
-      if (isFinalized(state, found.compactionId)) continue
-      await this.#finalizeOne(session, store, found.compactionId, found.shadowedSeqs)
+    const out = await scanAndFinalize(
+      await store.get(session.id),
+      scanChaptersSummaries(session),
+      async (found) => { await this.#finalizeOne(session, store, found.compactionId, found.shadowedSeqs) },
+      (reason, error) => this.#diagnostic(
+        `dsh-chapters: chapter finalization deferred for compaction ${reason.compactionId} (${reason.reason}: `
+        + `${String((error as Error)?.message ?? error)}) — its chapter was never written and the `
+        + 'rest of the queue still proceeds. Run /chapters-repair (issue #60) to materialize it.',
+      ),
+    )
+    if (out.done.length > 0) {
+      const cwd = (session as unknown as { header?: { cwd?: string } }).header?.cwd
+      if (cwd !== undefined) void this.#scheduler().then((s2) => s2.schedule(cwd, 'archive:compaction')).catch(() => undefined)
     }
   }
 
@@ -688,9 +1215,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // jointly account for what the surface replacement hid (legacy single-
     // chapter behavior generalized).
     const records = wrote.records.map((r) => ({ ...r, shadowedSeqs: [...shadowedSeqs] }))
-    let next: SessionState = appendChapters(state, records)
-    next = markFinalized(next, compactionId, numbers)
-    await store.put(session.id, next)
+    // #59: `state` was read BEFORE writeArchive (render + every artifact write). Committing from it
+    // would erase anything another door committed meanwhile — which is how the SAIP compaction lost
+    // its record while its 960 KB file stayed on disk. The commit re-reads inside one section.
+    await store.mutate(session.id, (fresh) => markFinalized(appendChapters(fresh, records), compactionId, numbers))
     // §5.1: compaction finalization is a push point (debounced).
     const cwdNow = (session as unknown as { header?: { cwd?: string } }).header?.cwd
     if (cwdNow !== undefined) void this.#scheduler().then((s) => s.schedule(cwdNow, 'archive:compaction')).catch(() => undefined)
