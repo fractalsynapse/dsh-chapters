@@ -208,3 +208,27 @@ test('newSessionWithTurn actually uses the adoption (#77-class)', () => {
   assert.match(src, /if \(adopted !== null\) sid = adopted/,
     'and it may only OVERRIDE the view, never clear a good id with null')
 })
+
+/**
+ * The adoption has to reach the whole home, not just the ids the view happens to offer. Measured on
+ * the rules leg (cold home, 2026-10-23): the committed session directory was `2304a071…`, holding the
+ * question at seq 10 and `turn/end` at seq 21 — a completed turn the poll never saw, because every
+ * candidate the view offered (draft id, rotated id) named a directory that does not exist, and
+ * `sessionLogTextById` correctly answered '' for an id with no log. Twelve minutes of waiting on a
+ * session that had already finished is what "the view is a hint" fails to fix when the hint is empty.
+ */
+test('adoption discovers the session holding the turn when the view offers nothing real', () => {
+  const turn = line({ type: 'user/message', seq: 10, data: { message: { content: [{ type: 'text', text: 'Reply with exactly one short sentence naming an HTTP redirect status code.' }] } } })
+  const done = line({ type: 'turn/end', seq: 21, data: { turn: 1, reason: { kind: 'completed' } } })
+  const logs: Record<string, string> = {
+    'session-2304a071': [line({ type: 'session', version: 4, id: 'session-2304a071' }), turn, done].join('\n'),
+  }
+  const got = adoptSessionForTurn({
+    candidates: [null, null],                       // the view had nothing real to offer
+    discover: () => ['session-2304a071'],          // the home does
+    needle: 'Reply with exactly one short sentence',
+    readLog: (id: string) => logs[id] ?? '',
+  })
+  assert.equal(got, 'session-2304a071',
+    'the log that HOLDS the completed turn wins even when no candidate pointed at it')
+})

@@ -256,6 +256,24 @@ export const forkDoor = (page: Page) => page.locator('button[aria-label="Fork wi
  * open alike ("…then answer." vs "…then summarize it.") indistinguishable. A swallowed send is worse
  * than a duplicate: a duplicate is visible in the log, this is silent.
  */
+/**
+ * Session ids present in the boot's home, newest directory first. This is the discovery side of
+ * "the durable log decides" (#77-class, cold home): the SPA's own id can name a directory that was
+ * never committed, and then no predicate over the log can ever see the turn that did land.
+ */
+export function listRecentSessionIds(): string[] {
+  const out: Array<{ id: string, mtime: number }> = []
+  for (const dir of sessDirs()) {
+    const base = path.basename(dir)
+    const m = /^(session|ch|sub)-/.exec(base)
+    if (m === null) continue
+    let mtime = 0
+    try { mtime = fs.statSync(dir).mtimeMs } catch { continue }
+    out.push({ id: base.slice(m[1]!.length + 1).split('--')[0] ?? base, mtime })
+  }
+  return out.sort((a, b) => b.mtime - a.mtime).map((x) => x.id)
+}
+
 export function countHumanMessagesCarrying(logText: string, needle: string): number {
   if (logText === '' || needle === '') return 0
   const want = needle.trimEnd()
@@ -350,9 +368,21 @@ export function adoptSessionForTurn(opts: {
   candidates: Array<string | null>
   needle: string
   readLog: (id: string) => string
+  /** Newest-first session ids present in the home. The view's ids are a hint; on a cold home they
+   *  can name directories that do not exist at all (measured on the rules leg: the committed
+   *  session was `2304a071…` with the question at seq 10 and `turn/end` at 21, while the view
+   *  offered ids with no log — a finished turn was polled for twelve minutes). Discovery is what
+   *  makes "the durable log decides" literal instead of a preference. */
+  discover?: () => string[]
 }): string | null {
   const want = opts.needle.trimEnd().slice(0, 40)
-  for (const c of opts.candidates) {
+  const pool = [...opts.candidates]
+  if (opts.discover !== undefined) {
+    try {
+      for (const id of opts.discover()) if (id !== '' && !pool.includes(id)) pool.push(id)
+    } catch { /* a listing failure must not turn a stall into a crash */ }
+  }
+  for (const c of pool) {
     if (c === null || c === '') continue
     let text = ''
     try { text = opts.readLog(c) } catch { text = '' }
@@ -712,6 +742,7 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     candidates: [sid, rotated, await currentSessionId(page)],
     needle: question,
     readLog: sessionLogTextById,
+    discover: listRecentSessionIds,
   })
   if (adopted !== null) sid = adopted
   const needle = question.slice(0, 40)
