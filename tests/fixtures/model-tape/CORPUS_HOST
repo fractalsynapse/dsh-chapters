@@ -14,8 +14,11 @@ host = 0.2.0-rc.2
 # host this branch pins (dev/dsh-host-lock) — mismatch above is tracked by:
 pinned = 0.2.0-rc.2
 tracking = https://github.com/treeseed-ai/dsh-chapters/issues/56
-distilledAt = 2026-10-23
-reason = re-distilled 2026-10-23 under the PINNED hermetic host (`dev/dsh-host-lock`, booted by absolute
-path and recorded per boot as hostPinned=true) after closing the gate when the previous corpus proved to
-be distilled against a linked dev build (#89). One rig behavior: pin table, per-boot mirror, per-press
-delivery, window enforced in record AND replay.
+distilledAt = 2026-10-24
+reason = re-distilled 2026-10-24 against the same PINNED hermetic host (`dev/dsh-host-lock`, booted by
+absolute path, recorded per boot as hostPinned=true) because PRODUCT prompt bytes moved between 0.1.x and
+the 0.2.x line (64 tape entries across the nine projects changed their `key`), and the previous 2026-10-23
+corpus could no longer match a prefix it never saw. Proven by strict replay on this build, exit 0, all
+nine legs green (suite 4/4, heavy, arrival, enrich, fanout, rules, fork, plans, prompt 1/1 each, no miss
+log), with `corpus:check` matching lib=67b8b12a9e239446. One rig behavior: pin table, per-boot mirror,
+per-press delivery, window enforced in record AND replay. #92's advisory is retired by this measurement.

@@ -128,11 +128,14 @@ jobs:
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
-    # ADVISORY for this release, by maintainer decision — see https://github.com/treeseed-ai/dsh-chapters/
-    # issues/92, which also records the condition that restores it (the `suite`/`enrich`/`heavy` subset
-    # green in replay on staging, with `npm run corpus:check` matching the build). The deterministic
-    # plane above stays blocking, so code that does not compile or does not pass tests still cannot land.
-    continue-on-error: true
+    # BLOCKING again, because #92's recorded condition is met — measured 2026-10-24 on the re-anchored
+    # corpus, strict replay (`E2E_MODEL=replay npm run test:e2e`), exit 0, ALL NINE legs green: suite 4/4
+    # 37.2s, heavy 1/1 39.2s, arrival 1/1 23.9s, enrich 1/1 37.6s, fanout 1/1 18.8s, rules 1/1 37.3s,
+    # fork 1/1 21.1s, plans 1/1 25.6s, prompt 1/1 20.3s; no miss log created. `npm run corpus:check`
+    # reports `corpus matches the current build (lib=67b8b12a9e239446)` against the stamp committed with
+    # these tapes. The condition in #92 named only the suite/enrich/heavy subset, so this run covers more
+    # than the gate asked for. Re-advisories must cite a measurement the same way: a green local run that
+    # CI cannot reproduce is the failure mode this file was edited to avoid.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
