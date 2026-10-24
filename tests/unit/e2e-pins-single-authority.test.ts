@@ -111,3 +111,23 @@ test('the e2e typecheck ratchet exists, is wired, and only ratchets down', () =>
   const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
   assert.match(ci, /e2e-typecheck-ratchet\.sh/, 'the ratchet runs in CI, next to the other typechecks')
 })
+
+/**
+ * A gate may be weakened by decision, never by accident (#92). The row asserts the SHAPE of the
+ * decision: exactly one job is advisory, it names the issue that authorized it, and the plane that
+ * actually proves the code (typecheck/build/unit/integration, the drift gates) stays blocking. Without
+ * this, `continue-on-error: true` would be a silent permanent condition — the same drift that let a
+ * skipped journey look like a pass in the first place.
+ */
+test('the advisory acceptance gate is scoped, sourced, and reversible (#92)', () => {
+  const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
+  const advisory = ci.split('\n').filter((l) => /continue-on-error:\s*true/.test(l))
+  assert.equal(advisory.length, 1, `exactly one job may be advisory, found ${String(advisory.length)}: ${JSON.stringify(advisiveTrim(advisory))}`)
+  assert.match(ci, /issues\/92/, 'the weakening must cite the decision that authorized it')
+  const acceptance = /acceptance[^\n]*\n[\s\S]{0,4000}?continue-on-error: true/.test(ci)
+  assert.ok(acceptance, 'and the advisory line must belong to the acceptance job, not to another')
+  const deterministic = ci.slice(ci.indexOf('typecheck · build · unit + integration'), ci.indexOf('acceptance'))
+  assert.doesNotMatch(deterministic, /continue-on-error/, 'the deterministic plane is never advisory')
+})
+
+const advisiveTrim = (lines) => lines.map((l) => l.trim().slice(0, 40))
