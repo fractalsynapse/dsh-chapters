@@ -212,6 +212,22 @@ export function normalize(v: unknown): string {
   // durable plane (spec effects), not via tape equality. This rule is FINAL:
   // any further normalizer change invalidates existing tapes by definition.
   if (typeof v === 'object' && v !== null && (v as { role?: unknown }).role === 'tool') return '{"role":"tool"}'
+  // REASONING-BLIND (#90, measured 2026-10-24). A replay missed its VERY FIRST turn with
+  // `divergeAt=msg2` where both sides were `{"role":"assistant","content":null,
+  // "reasoning_content":"…"}` and only the reasoning prose differed ("The user asks: which file
+  // defines…" vs "Also check primaryMatch and merge decision…"). Reasoning text is model-internal
+  // volatility: it is not what the user was answered, not what this plugin claims, and the harness
+  // re-enters whatever bytes it was served — so equality on it is a lottery. Treating it as
+  // conversation identity meant no answer was served, no assistant row rendered, and the fork door
+  // never appeared: the 25-minute hang, caused by prose nobody controls. Same class as
+  // HOSTPORT/SESSIONID/WORKSPACE-BLIND, and applied to BOTH sides (stored prefixes re-normalize at
+  // load), so tapes recorded before this change keep matching. The FIELD is folded, not deleted: a
+  // reasoning-bearing turn stays distinguishable from one without, and visible `content` must still
+  // match exactly.
+  const o = v as { role?: unknown, reasoning_content?: unknown }
+  if (o.role === 'assistant' && typeof o.reasoning_content === 'string' && o.reasoning_content !== '') {
+    return substituteAll(JSON.stringify({ ...(v as object), reasoning_content: '⟦REASONING⟧' }))
+  }
   return substituteAll(JSON.stringify(v))
 }
 
