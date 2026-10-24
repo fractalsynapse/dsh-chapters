@@ -879,16 +879,23 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         return 0
       }
       const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
-        { context?: { contextWindow?: number } } | undefined
+        { context?: { contextWindow?: number, maxTokens?: number } } | undefined
       const base = this as unknown as { config?: { retainRatio?: number, retainTokens?: number, maxTokens?: number } }
       const retainTokens = base.config?.retainTokens
+      const reserved = Number(info?.context?.maxTokens ?? base.config?.maxTokens ?? NaN)
       const ceiling = lastResortCeilingTokens({
         windowTokens: Number(info?.context?.contextWindow ?? NaN),
         retainRatio: Number(base.config?.retainRatio ?? NaN),
         // optional, not `| undefined`: `exactOptionalPropertyTypes` is on, and a property that can
         // hold undefined is a different promise from one that may be absent.
         ...(retainTokens !== undefined ? { retainTokens } : {}),
-        reservedCompletionTokens: Number(base.config?.maxTokens ?? NaN),
+        // The completion budget comes from the MODEL, measured: `resolveConfig` defaults
+        // `maxTokens` to `headroomTokens` (65,536 — a routing headroom, not a per-request output
+        // budget), so `32,000 − 5,120 − 65,536` is negative and the ceiling is permanently
+        // underivable. `info.context.maxTokens` (15,000 here) sits in the same object as
+        // `contextWindow`; the base config stays only as a fallback so the abstention path still
+        // fires and says so when neither is present.
+        reservedCompletionTokens: reserved,
       })
       if (ceiling === null) {
         // Measured tonight: relief declined twice with `surface=39983 trigger=16000` and the last

@@ -79,3 +79,16 @@ test('when the last resort abstains, it says why (#61a, measured against myself)
   assert.ok((body.match(/diagnosticNote\(this\.ctx\.logger, 'realm:engine:last-resort'/g) ?? []).length >= 2,
     'every abstention path writes a line — one is not a mechanism')
 })
+
+test('the completion budget is the model-reported one, not the base headroom default (measured)', () => {
+  // `resolveConfig` defaults `maxTokens` to `headroomTokens` = 65,536. Subtracting that from a
+  // 32,000 window makes the ceiling negative — permanently underivable — which is why the last
+  // resort abstained on every real decline tonight while saying nothing. The row pins that the
+  // engine reads the model's own budget, the object that also carries `contextWindow`.
+  const src = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'src', 'engine.ts'), 'utf8')
+  const body = src.slice(src.indexOf('async #lastResortRelief'), src.indexOf('#reportDecline'))
+  assert.match(body, /info\?\.context\?\.maxTokens \?\? base\.config\?\.maxTokens/,
+    'model-reported completion budget, base config only as fallback')
+  assert.doesNotMatch(body, /reservedCompletionTokens: Number\(base\.config\?\.maxTokens \?\? NaN\)/,
+    'the headroom default must not be the primary value — it makes the invariant unreachable')
+})
