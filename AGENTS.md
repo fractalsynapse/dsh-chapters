@@ -381,6 +381,7 @@ not a plugin bug.
   reverts to HEAD and DESTROYS every uncommitted change in it. Measured against myself 2026-10-20:
   twice in one session, each costing a full re-application of ~14 edits to `src/rules.ts`. `cp f f.bak`
   first; restore from `f.bak`. Never reach for `git` to undo a mutation you made by hand.
+- **Commit, PR, and issue bodies go through a FILE (`git commit -F`, `gh ... --body-file`), never a quoted argument.** Measured four times on one branch (2026-10-22/23): backticks inside a double-quoted `-m "…"` are command substitutions, so the shell RAN the quoted identifiers and deleted them from the message — shipping text like "enforces: , its profile patch, and the installed  tree". Nothing failed; the record was just quietly wrong, which is the class of bug this repo exists to end. Single-quoted `-m '…'` is safe; `--body "…"` is not.
 - **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
   with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
   When a question stalls, change something real: different arguments, a different tool, or state what is

@@ -29,6 +29,7 @@ import path from 'node:path'
 import http from 'node:http'
 import https from 'node:https'
 import { createHash } from 'node:crypto'
+import { estimateRequestTokens, windowRefusal } from './model-proxy-window.ts'
 
 export interface ProxyHandle { url: string; close: () => Promise<void> }
 
@@ -49,6 +50,23 @@ const VOLATILE: Array<[RegExp, string]> = [
   // move whenever a body-render detail shifts); the chapter path already
   // identifies the line, so pinning the exact count only makes tapes brittle.
   [/\(\d+ est tokens\)/g, '(<N> est tokens)'],
+  // SESSIONID-BLIND (#85, measured): the compaction notice cites chapter paths under
+  // `<store-root>/<rootSession>/…`, and `rootSession` is a per-boot uuid — so a replay that
+  // compacted at the SAME step with the SAME bytes missed, because the path named a different
+  // session. Same class as HOSTPORT-BLIND above: a run-scheduling fact of the port-keyed-home
+  // design, never product content. Without it, `heavy` diverged at msg1 with commonPrefix=1 while
+  // the tape held the matching entry all along (0003/0006: notice at index 1, normLen 5).
+  [/\bs(?:ession|ubagent|ession-)?-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<SESSIONID>'],
+  [/\bch-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, '<SESSIONID>'],
+  // WORKSPACE-BLIND (#89, measured on hosted CI 2026-10-23): the recorded prefixes carry the
+  // absolute path of the machine that distilled them (`/home/adrian/Projects/dsh-chapters/…` in the
+  // system header's workspace line and in every `<path>…</path>` tool result), while GitHub Actions
+  // runs the same journey at `/home/runner/work/dsh-chapters/dsh-chapters`. Nothing masked it, so CI
+  // could not replay ANY tape recorded on a laptop: `[suite]` hung 25 minutes on
+  // `button[aria-label="Fork with chapters"]` because the first turn's request never matched an entry
+  // (no answer ⇒ no assistant row ⇒ no door). Same class as HOSTPORT/SESSIONID: a scheduling fact of
+  // the checkout, never product content. Applied to BOTH sides (stored prefixes re-normalize at load),
+  // so a laptop replay keeps working and a runner's paths fold to the same token.
   // ⟦omitted:host-injected …, N chars⟧ markers embed the injected document's
   // size — which shifts with any workspace-doc edit (and real target projects
   // edit their docs constantly). The marker's presence + label are the fact;
@@ -144,6 +162,7 @@ const VOLATILE: Array<[RegExp, string]> = [
   // and the same for the defused product token (enricher inputs): runs across
   // NEWLINES too — the dump shows spaces only because normalization ate them
   [/(?:⟦injected-context⟧[ \t\n]*){2,}/g, '⟦injected-context⟧ '],
+  [/(?:\/home\/runner\/work\/[\w.-]+\/[\w.-]+|\/(?:home|Users)\/[\w.-]+\/(?:Projects\/)?[\w.-]+)/g, '<WORKSPACE>'],
 ]
 /** substitution pass over ALREADY-textual content.
  *
@@ -184,6 +203,21 @@ export function substituteAll(str: string): string {
   return /^\{"role":"(?:user|system)","content":"(?:\s|<\/?system-reminder>|<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND)>)*"\}$/.test(t) ? '' : t
 }
 /** canonical form of a message OBJECT: one stringify + substitutions. */
+/**
+ * The reasoning fold, in ONE place so both sides of a match use the identical rule (#90).
+ * `⟦REASONING⟧` replaces the prose of any `reasoning_content` string; the field survives, so a
+ * reasoning-bearing turn is still distinguishable from one without. Applied to the INCOMING side via
+ * `normalize` and to STORED prefixes at load — which are already-serialized strings, where re-running
+ * `normalize` would double-stringify them (the S0 lesson in `loadTape`), so the fold is done textually
+ * on the same token. Without the stored side folded, adding the blind would have made every
+ * reasoning-bearing turn UNMATCHABLE rather than fixing anything.
+ */
+export const REASONING_TOKEN = '⟦REASONING⟧'
+const REASONING_RE = /"reasoning_content"\s*:\s*"(?:[^"\\]|\\.)*"/g
+export function foldReasoning(text: string): string {
+  return text.replace(REASONING_RE, `"reasoning_content":"${REASONING_TOKEN}"`)
+}
+
 export function normalize(v: unknown): string {
   // TOOL RESULTS ARE HARNESS-GENERATED, never model output: their bytes
   // depend on the workspace state at replay time (measured: a src/ edit
@@ -193,16 +227,40 @@ export function normalize(v: unknown): string {
   // durable plane (spec effects), not via tape equality. This rule is FINAL:
   // any further normalizer change invalidates existing tapes by definition.
   if (typeof v === 'object' && v !== null && (v as { role?: unknown }).role === 'tool') return '{"role":"tool"}'
-  return substituteAll(JSON.stringify(v))
+  // REASONING-BLIND (#90, measured 2026-10-24). A replay missed its VERY FIRST turn with
+  // `divergeAt=msg2` where both sides were `{"role":"assistant","content":null,
+  // "reasoning_content":"…"}` and only the reasoning prose differed ("The user asks: which file
+  // defines…" vs "Also check primaryMatch and merge decision…"). Reasoning text is model-internal
+  // volatility: it is not what the user was answered, not what this plugin claims, and the harness
+  // re-enters whatever bytes it was served — so equality on it is a lottery. Treating it as
+  // conversation identity meant no answer was served, no assistant row rendered, and the fork door
+  // never appeared: the 25-minute hang, caused by prose nobody controls. Same class as
+  // HOSTPORT/SESSIONID/WORKSPACE-BLIND, and applied to BOTH sides (stored prefixes re-normalize at
+  // load), so tapes recorded before this change keep matching. The FIELD is folded, not deleted: a
+  // reasoning-bearing turn stays distinguishable from one without, and visible `content` must still
+  // match exactly.
+  return substituteAll(foldReasoning(JSON.stringify(v)))
 }
 
 const messagesOf = (body: Record<string, unknown>): unknown[] => Array.isArray(body.messages) ? body.messages : []
 
-export interface TapeEntry { key: string; prefix: unknown[]; status: number; contentType: string; bytes: string /* base64 */; model: string; recordedAt: string }
+export interface TapeEntry { key: string; prefix: unknown[]; status: number; contentType: string; bytes: string /* base64 */; model: string; recordedAt: string;
+  /** stamped at load (line ~292) and what the HIT journal prints as `served=`; the interface had never
+   *  admitted it, so `hit.file` was a type error the unchecked plane had been living with. */
+  file?: string }
 
 export interface ProxyOpts {
   mode: 'record' | 'replay'
   tapeDir: string
+  /**
+   * #78: the context window the rig ENFORCES. A hosted upstream accepts a 33K prompt happily, so
+   * a context-pressure journey distilled against it never produces the `context-overflow` trigger
+   * the pinned 32K regime exists to exercise — it measures a boot where nothing is wrong. The
+   * local stress server refuses; this makes the refusal a property of the rig, identical on
+   * rented hardware. 0/unset means no enforcement: replay and deliberately-unwindowed runs are
+   * untouched.
+   */
+  windowTokens?: number
   /** journal override; default is next to the tapes */
   journalPath?: string
   upstream?: string // e.g. http://localhost:8080 — required in record mode
@@ -244,7 +302,7 @@ function loadTape(tapeDir: string): TapeEntry[] {
       // sides of the match on current rules without a re-record. (The earlier
       // attempt here re-RAN normalize(), which double-stringified stored
       // strings and broke every legacy match — the S0 root cause.)
-      e.prefix = e.prefix.map((p) => (typeof p === 'string' ? substituteAll(p) : normalize(p))).filter((x) => x !== '')
+      e.prefix = e.prefix.map((p) => (typeof p === 'string' ? substituteAll(foldReasoning(p)) : normalize(p))).filter((x) => x !== '')
       ;(e as Record<string, unknown>).file = f
       out.push(e)
     } catch { /* skip torn */ }
@@ -262,6 +320,68 @@ function loadTape(tapeDir: string): TapeEntry[] {
  * pins that. A legit re-run whose volatile content normalized identically
  * still matches.
  */
+/**
+ * Say WHAT DIVERGED, not only that something missed (#56).
+ *
+ * A bare MISS line told me `messages=5` and the last message's text — which could not answer the
+ * only question that matters when replay breaks: *which recorded turn* does this continue, and at
+ * which message do the bytes stop agreeing? The answer is what separates "the host asked a shorter
+ * conversation because an injection went missing" from "the tape is from a different journey
+ * entirely". Exported so a row can pin it, because an instrument that only runs inside a failing
+ * leg is an instrument nobody trusts.
+ */
+export function describeMiss(tape: TapeEntry[], incoming: unknown[], label = '?'): string {
+  const inc = incoming.map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+  // `file` is filled by the tape loader; a caller without it (a test, a partially built tape)
+  // still gets a usable index rather than a mysterious `?`
+  let best = { entry: '?', common: -1, idx: -1 }
+  const scored: Array<{ entry: string, common: number }> = []
+  for (let ti = 0; ti < tape.length; ti += 1) {
+    const e = tape[ti]
+    const stored = (e.prefix ?? []).map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+    let n = 0
+    while (n < stored.length && n < inc.length && stored[n] === inc[n]) n += 1
+    const name = e.file ?? `entry#${String(ti)}`
+    scored.push({ entry: name, common: n })
+    if (n > best.common) best = { entry: name, common: n, idx: ti }
+  }
+  // Ties were a lie: with msg0 matching every entry and msg1 matching none, the first entry won by
+  // accident and reported the QUESTION-bearing entry as "closest" — pointing a reader at the wrong
+  // turn. Report every entry that ties at the maximum, so "the notice matches no recorded notice"
+  // is visible as such.
+  const tied = scored.filter((x) => x.common === best.common).map((x) => x.entry)
+  const at = best.common
+  const wantIdx = at < inc.length ? String(at) : 'end'
+  const got = at < inc.length ? inc[at].slice(0, 110) : ''
+  const exp = (() => {
+    const e = best.idx >= 0 ? tape[best.idx] : tape.find((t) => t.file === best.entry)
+    if (e === undefined || at >= (e.prefix ?? []).length) return ''
+    const s = (e.prefix ?? [])[at]
+    return substituteAll(typeof s === 'string' ? s : JSON.stringify(s) ?? '').slice(0, 110)
+  })()
+  if (process.env.E2E_MISS_DUMP !== undefined && best.idx >= 0) {
+    // Opt-in, and it changes nothing about matching: the 400-char previews can show THAT two long
+    // notices differ without showing WHERE, and "where" is the whole diagnosis (#85). Both full
+    // normalized arrays go to the file named by the env var, once per divergence.
+    try {
+      const bestEntry = tape[best.idx]
+      const stored = (bestEntry.prefix ?? []).map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+      fs.appendFileSync(process.env.E2E_MISS_DUMP,
+        `=== MISS tape=${label} closest=${best.entry} commonPrefix=${String(best.common)}\n`
+        + `--- INCOMING (${String(inc.length)}) ---\n${inc.join('\n<<<msg>>>\n')}\n`
+        + `--- STORED (${String(stored.length)}) ---\n${stored.join('\n<<<msg>>>\n')}\n\n`)
+    } catch (error) {
+      // A diagnostic must never break a request — but swallowing the error outright is how this
+      // block silently produced NO dump for a whole run while the journal kept saying MISS
+      // (it referenced a variable that is not in scope here, and tsconfig.json never checks
+      // tests/e2e, so nothing compile-time caught it either). Say so on stderr instead.
+      console.error(`e2e: MISS dump failed (matching is unaffected): ${String(error)}`)
+    }
+  }
+  return `closest=${best.entry}${tied.length > 1 ? ` tied=[${tied.join(',')}]` : ''} commonPrefix=${String(best.common)} divergeAt=msg${wantIdx}`
+    + ` got=${JSON.stringify(got)} expected=${JSON.stringify(exp)}`
+}
+
 function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
   const inc = incoming.map(normalizeSingle).filter((x) => x !== '')
   let best: TapeEntry | null = null
@@ -456,7 +576,23 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let body: Record<string, unknown> = {}
         try { body = JSON.parse(raw.toString('utf8')) as Record<string, unknown> } catch { /* non-json passthrough below */ }
         const inc = messagesOf(body)
+        // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape
+        // records — a distill that saw a refusal and retried after relief must see the same refusal
+        // on replay, or the request sequence diverges and the chain fails for a reason that looks
+        // like prompt drift. Refusals are never recorded and never consume an entry.
+        const win = opts.windowTokens ?? Number(process.env.E2E_WINDOW_TOKENS ?? 0)
+        const refusal = windowRefusal(body, win)
+        if (refusal !== null) {
+          journal(`OVERFLOW refused mode=${opts.mode} est=${String(estimateRequestTokens(body))} tokens window=${String(win)} — rig-enforced (E2E_WINDOW_TOKENS); nothing recorded, no tape entry consumed`)
+          try { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify(refusal)) } catch { /* client gone */ }
+          return
+        }
         if (opts.mode === 'replay') {
+          // The journal must show replay's requests too. When enforcement was hoisted above this
+          // branch, `START` stayed down in the record/live path and replay went unobservable —
+          // which is how a divergence hunt ended up reasoning from silence. One line per request,
+          // same fields, mode named.
+          journal(`REQUEST mode=replay path=${(req.url ?? '/').split('?')[0]} msgs=${String(inc.length)} reqBytes=${String(raw.length)}`)
           const tape = loadTape(opts.tapeDir)
           const hit = findReplay(tape, inc)
           if (hit !== null) {
@@ -475,7 +611,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           // `heavy` looked like the failure of whichever project died last. Name
           // the tape AND how many entries it loaded — "entries=0" is a different
           // bug (missing/untracked tape) than a prefix mismatch.
-          fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${tape.length} messages=${inc.length} last=${JSON.stringify(inc[inc.length - 1] ?? '').slice(0, 200)}\n`)
+          fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${String(tape.length)} messages=${String(inc.length)} ${describeMiss(tape, inc, tapeName)}\n`)
           // A miss is fatal (503) — UNLESS liveFallback is on, where it falls
           // through to the record path: the real model answers the drifted
           // request AND it lands on the tape, so the next clean replay
@@ -540,10 +676,18 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // listening on the hard-coded 41799 and EVERY later boot died on EADDRINUSE.
   // Derive from the e2e boot port (E2E_PROXY_PORT, set by boot.ts from the same
   // env that keys the home) so projects and re-runs never collide.
-  const proxyPort = Number(process.env.E2E_PROXY_PORT ?? '41799')
-  await new Promise<void>((resolve) => server.listen(proxyPort, '127.0.0.1', resolve))
+  // #78: when nothing asks for a specific port, take an EPHEMERAL one. The fixed default
+  // (41799) was already the subject of the 2026-09-22 note above, but the derivation only
+  // covers boots: two unit-test files in the same `node --test` pass both defaulted to it, so
+  // one bound it and the other hung on EADDRINUSE with an error that read like a leaked
+  // process. `boot.ts` still sets E2E_PROXY_PORT (port+1000) because the profile patch must
+  // name the proxy URL before the proxy exists — that requirement is preserved exactly.
+  const wantPort = process.env.E2E_PROXY_PORT !== undefined ? Number(process.env.E2E_PROXY_PORT) : 0
+  await new Promise<void>((resolve) => server.listen(wantPort, '127.0.0.1', resolve))
+  const bound = server.address() as { port: number } | null
+  if (bound === null) throw new Error('tape proxy: listen reported no address — the URL cannot be built')
   return {
-    url: `http://127.0.0.1:${Number(process.env.E2E_PROXY_PORT ?? '41799')}/v1`,
+    url: `http://127.0.0.1:${String(bound.port)}/v1`,
     close: async () => { await new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve())) },
   }
 }

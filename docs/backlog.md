@@ -1,4 +1,78 @@
-# Open items — 2026-10-11
+# Open items — 2026-10-23 (host 0.2.0-rc.2)
+
+Handoff while the nine-leg re-record and strict replay are in flight on
+`feature/56-reanchor-tape-corpus`. Read this section first; the 2026-10-11 record below is history,
+and item 1 there (live-model proof of the plans journey) is still open — tonight's `plans` leg was
+again recorded through the scripted stub (`tests/e2e/stub-model.ts`), as its PROVENANCE says.
+
+**What the last two days changed about our claims.** The preset pin had been written to a retired row
+id (`agent-presets` → `agent-preset-registry`), so every browser boot since the 0.2.x move ran the
+STANDARD realm: no `compaction/*`, no artifacting, no `chapters_rules` — the legs were measuring an
+absence, not a failure (#56). The 0.2.x flattened `tool/result` shape silently disabled arrival
+artifacting chain-wide. `uiWorkspace.openSession` never existed, so the continuation door reported a
+switch it could not make (#77). All four are fixed with rows; the corpus is being re-anchored as I
+write, and **no e2e claim is current until replay is green** — `CORPUS_HOST` was flipped in the same
+change, so a red replay means that flip must be reverted, not the tape widened.
+
+0. **The acceptance chain is one rig bug from green — and it was #77's lesson, in my own tooling.**
+   A pristine home commits a draft under a **fresh session id** while `dsh.sessions.current` keeps
+   naming the draft, so `newSessionWithTurn` watched a log that received nothing (journey turn
+   completed at seq 42, 28 s after its question, in *another* directory). Warm homes hide it; CI is
+   always cold, which is why "green here, red there" survived the matcher fix (#89's path fold), the
+   host-binary fix (`resolveHostBinary`), the tracked profile seeds, and my own false
+   header-composition claim (withdrawn on #89). Fixed by `adoptSessionForTurn` — the durable log
+   decides, candidates are only where to look, `null` rather than an invented id — with 4 rows,
+   mutation-checked. **The pending step is mechanical but long**: re-distill the nine legs under it
+   (`var/run-decisive.sh`, heavy behind the #86 watchdog), strict-replay locally, then one push and
+   watch hosted acceptance. Only then: corpus commit + `CORPUS_HOST` re-lift, `coverage:e2e`,
+   merge #89, rewrite #73's verification from those numbers.
+
+0b. **One sequencer at a time (#82, live lesson 2026-10-23).** Two detached helper scripts
+   (`var/after-pass.sh`, `var/after-pass2.sh`) were both waiting on "runner idle"; the first fired,
+   relaunched a full eight-leg pass against a build taken *before* the newest commit, and the second
+   would have stacked a competing cycle on top. Killed the duplicate. Rules now written into the tooling:
+   `run-decisive.sh` honors `DISTILL_PROJECTS` so a follow-up re-records only the legs that need a new
+   build, and a cycle script must `pgrep` for any live `distill|playwright|run-decisive` before starting.
+   Careful with `pgrep -f` patterns from inside a shell whose own command line contains the pattern — my
+   cleanup killed its own tool call.
+
+1. **#83 — the e2e specs have never been type-checked.** `npm run typecheck:e2e` (new, deliberately not
+   in CI) reports **120 errors**: 39 wrong-arity calls, 12 cannot-find-name, 10 argument-type, 26
+   un-narrowed `unknown`, 22 missing-lib, 3 phantom properties. Two bugs this week (a missing import,
+   a dropped closing paren — both mine, both from the composer wiring) were invisible *only* because
+   this check did not exist. Close it: fix the arity class by giving `newSessionWithTurn` a named
+   options object (`{ turnMs, actionGrace }`) so a positional `false` is un-writable; triage the rest;
+   then wire the gate beside `typecheck` and `typecheck:client`. Do not exclude a file to shrink the
+   number — a dev-only tool moves out of `tests/e2e` instead.
+2. **#82 — a running distill and the deterministic suite share `tests/fixtures/model-tape`.** (Third live instance 2026-10-23: `tape-provenance.test.ts` correctly went red mid-re-record because the runner had cleared a project directory — that row is now the canary, don't soften it.) Tonight
+   the tape-coherence rows went red for exactly the projects being re-recorded, and a leg that dies
+   halfway can leave a partial project directory in the corpus. Recommended shape: record into
+   `tests/fixtures/.tape-staging/<proj>`, promote with `rename` on `rc == 0`. That makes "the corpus
+   is one coherent change" a mechanism instead of my self-control, which has already slipped once.
+3. **#80 — plugin command results produce nothing operator-visible.** Durable `command/done` yes, DOM
+   no (measured twice: this leg's own teardown aria snapshot; `/chapters-status` on a fresh boot).
+   Success paths are undelivered, which is #61a one layer up. Needs a host fact (`docs/contract.md`)
+   before code: is there a slot/toast/flow renderer for `command/done`, or must the plugin own the
+   affordance?
+4. **#81 criteria 3 and 4.** The delivery guard is now at every composer call site with a drift row,
+   but the browser assertion "one instruction ⇒ exactly one `user/message` carrying it" is not written
+   yet, and the predicate still decides from the durable log only — a synthetic turn whose record is
+   delayed is still a race we have not measured.
+5. **#78 — the design decision, still the maintainer's.** A single `tool/result` larger than what can
+   fit beside the mandatory retain tail is NOT relievable by pressure compaction (measured: 6
+   compactions + 6 `context-overflow` entries + the endpoint's `400`, with the arrival floor switched
+   off by design). Option A: treat survivability as an invariant (hard ceiling, artifact with a loud
+   warning — the archive keeps every byte, so the worst case is a context-economy miss). Option B:
+   accept "disable the floor, read 30K tokens, the session degrades" as correct. `heavy` is green, so
+   this no longer blocks a leg — it is a product statement we should make deliberately.
+6. **The remaining release steps for #56**, in order: green strict replay (no fallback) → fresh
+   `coverage:e2e` → PR to `staging` (reload the `release-workflow` skill first — the gate is
+   mandatory) → CI green → merge → rewrite PR #73's verification text so every claim carries the
+   artifact that proves it. `main` stays agent-forbidden.
+
+---
+
+# Open items — 2026-10-11 (history)
 
 Handoff for a fresh session. Everything below is *scoped and reachable*; none of it is a unknown
 defect. Shipped state: **0.1.13** (tag = npm `latest` = the user's installed profile), hosted CI green

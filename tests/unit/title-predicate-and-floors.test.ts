@@ -36,6 +36,10 @@ test('isInjectedProse recognises every injected shape the host actually sends', 
     ['agent-message', 'Agent acdab1f5-dfe7-446e-8e5a-93451de3a0d2 sent a message: INK 8.0.0 SOURCE SPIKE'],
     ['subagent-settled', 'Background subagent d57b4710-b24e-492f-8f62-a19c359bf47d finished and will do no further work unless you send it more.'],
     ['workspace-instructions', '[workspace instructions loaded]'],
+    // #87: the host's in-place relief preamble. It joins THIS list rather than getting a second one,
+    // because #87's carry needs the same "is this a human turn?" answer at the compaction seam — and a
+    // parallel list is the #59 drift this file already records. That row caught me writing one.
+    ['host-checkpoint-preamble', 'This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context.'],
   ]
   for (const [label, text] of injected) {
     assert.equal(isInjectedProse(text), true, `${label} must be recognised as injected — it was a chapter title in the field`)

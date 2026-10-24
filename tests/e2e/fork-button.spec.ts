@@ -1,7 +1,8 @@
 import fs from 'node:fs'
+import assert from 'node:assert/strict'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import { openApp, newSessionWithTurn, localModelUp, sessionLogFileFor, forkDoor, currentSessionId, countGhostCommandRuns, sessionLogTextById, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
 
 /**
  * The assistant-row door actions, on a session this spec CREATES through the
@@ -52,6 +53,8 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
   await expect(page.locator('button[aria-label="Continue with chapters"]').first()).toBeVisible()
   await expect(page.locator('button[aria-label="Branch into a new conversation"]')).toBeHidden()
 
+  const sid = await currentSessionId(page)
+  assert.ok(sid !== null, 'the spec created a session, so the client must name it before the door is clicked')
   const before = childCount()
   await forkDoor(page).click()
 
@@ -59,7 +62,16 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
   await expect.poll(() => childCount(), { timeout: 30_000, intervals: [500] }).toBeGreaterThan(before)
   // visible plane: the app switched to the branch (title carries it; a
   // plugin-sourced notice is context injection, not a chat bubble — by design)
-  await expect.poll(() => page.title(), { timeout: 40_000, intervals: [1000] }).toMatch(/—|branch|composer|Which file/i)
+  // #56: this assertion was VACUOUS and I nearly shipped a green on it. Every page title
+  // contains the em dash separator, so it passed while the app had not switched at all — the
+  // door's own note (`roster: MISSING, 1 sessions`) proved the truth. Name the session instead:
+  // the client's published current session must be the child the reply announced.
+  await expect.poll(async () => {
+    const cur = await currentSessionId(page)
+    // a continuation child is minted with the `ch-` prefix by continue-core; anything else
+    // means the client moved somewhere unrelated, which is not a pass either
+    return cur !== null && cur !== sid && cur.startsWith('ch-')
+  }, { timeout: 60_000, intervals: [1000] }, 'the client switched to the child session').toBe(true)
 
   // the newest child's seed carries the TOC notice + chapter citations
   const { execFileSync } = await import('node:child_process')
@@ -73,9 +85,29 @@ test('the fork action keeps its promises: ours visible, native hidden, click for
         const f = sessionLogFileFor(path.join(sessDir, k.d))
         if (f === null) continue
         const log = execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-        if (log.includes('chapters:toc') && log.includes('.dsh-chapters/')) return true
+        if (!log.includes('chapters:toc')) continue
+        // #56/#57: `.dsh-chapters/` was the OLD dialect — since #70 each boot pins its own
+        // store root (`<e2e home>/chapters`), so a literal here asserts a path the product no
+        // longer writes and the run fails while the feature works. Verify the citation is
+        // TRUE instead: take the chapter paths the notice names and require one to exist.
+        // That is strictly stronger than a substring, and it survives any store location.
+        const cites = [...log.matchAll(/([^\s"`'()\\]+chapters\/[^\s"`'()\\]+\.md)/g)].map((m) => m[1])
+        const real = cites.some((c) => fs.existsSync(path.isAbsolute(c) ? c : path.join(ROOT, c)))
+        if (cites.length > 0 && real) return true
       } catch { /* partial */ }
     }
     return false
   }, { timeout: 20_000, intervals: [1000] }).toBe(true)
+  // #79: a disabled feature must be silent in the DURABLE log, not merely invisible on screen.
+  // Measured before the fix: 4–26 `chapters-prompt` command runs per session on boots without
+  // `promptModel`, because a "fetch once per mount" effect listed `[props]` — and React makes a
+  // new props object every render, so each keystroke polled a host command into the transcript
+  // this plugin archives. Zero is the claim; the chip being absent proves nothing about it.
+  // The honest bound is ONE probe per mount, not zero: the client has to ask whether the
+  // feature exists (`/chapters-prompt model`), and that answer is what lets it stop asking
+  // anything else. What must never happen is a probe per render — measured 4–26 per session
+  // before the fix, in boots where the feature was off the whole time.
+  expect(countGhostCommandRuns(sessionLogTextById(sid)),
+    'the composer ghost polls at most once per mount on a boot where the feature is OFF')
+    .toBeLessThanOrEqual(1)
 })

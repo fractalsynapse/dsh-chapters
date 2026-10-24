@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, forkDoor, ROOT, E2E_REGISTRY } from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, forkDoor, ROOT, E2E_REGISTRY, deliveredFor} from './session.ts'
 
 /**
  * THE BIG EDGE CASE: one turn that outgrows the compaction threshold by
@@ -154,7 +154,7 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   // --- 4: graceful aftermath — the session takes the NEXT turn normally
   // (own-log turn/end count — immune to other sessions' flushes — then the
   // polled reply text, log flush lag absorbed by the poll).
-  await typeComposer(page, 'Reply with exactly the single word: STILL-HERE. Do not read or run anything.')
+  await typeComposer(page, 'Reply with exactly the single word: STILL-HERE. Do not read or run anything.', deliveredFor(sid, 'Reply with exactly the single word: STILL-HERE. Do not read or run anything.'))
   await expect.poll(() => eventTypes(sessionLogTextById(sid), 'turn/end').length >= 2,
     { timeout: 900_000, intervals: [5000] }, 'second turn completes in this session\u2019s own log').toBe(true)
   await expect.poll(() => assistantTexts(sessionLogTextById(sid)).some((t) => t.includes('STILL-HERE')),

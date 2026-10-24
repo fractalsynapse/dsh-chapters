@@ -116,6 +116,23 @@ export function describe(error: unknown): string {
  * enough (r19: headless profiles route `ctx.logger` where nobody can see it), and the sink
  * alone loses the operator channel — so do both, in that order.
  */
+/**
+ * The same delivery as `diagnosticWarn`, at INFO — for an OBSERVATION the field needs on disk
+ * without anyone reading it as a failure. #78 is the reason this exists: the acceptance suite had
+ * always been the caller of `compactIfNeeded`, so "did the host invoke context relief at all?"
+ * had no answer in any artifact. A line in the sink answers it, and `info` keeps it out of the
+ * warning vocabulary the composer and `/chapters-status` use.
+ */
+export function diagnosticNote(
+  logger: { info?(m: string): void } | undefined,
+  where: string,
+  message: string,
+): string {
+  const line = diagnostic(where, message)
+  try { logger?.info?.(line) } catch { /* a hostile logger must not eat the diagnostic */ }
+  return line
+}
+
 export function diagnosticWarn(
   logger: { warn?(m: string): void } | undefined,
   where: string,

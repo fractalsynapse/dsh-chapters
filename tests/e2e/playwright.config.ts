@@ -7,6 +7,7 @@
  * browsers); run via `npx playwright test -c tests/e2e/playwright.config.ts`.
  */
 import { defineConfig } from '@playwright/test'
+import { rigEnv } from './rig-pins.ts'
 
 export default defineConfig({
   testDir: '.',
@@ -17,13 +18,20 @@ export default defineConfig({
   use: { headless: true, viewport: { width: 1360, height: 900 } },
   globalSetup: './globalSetup.ts',
   projects: [
-    { name: 'suite', testIgnore: ['**/prompt-suggestion.spec.ts', '**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
+    // #56: the regime is AUTHORITY, not a runner flag. Pins lived in three places — this
+    // config's comment claimed distill "mirrors npm run test:e2e exactly", and nothing
+    // enforced it. Measured: `test:e2e` boots suite/rules/fork with NO threshold, while
+    // distill recorded them at 0.75/0.9/0.75 — so replay ran a different realm than the
+    // tape was distilled under, the surface diverged (stubs appearing where none were
+    // recorded), and the proxy MISSed. Playwright merges project `env` into every worker,
+    // so record, replay, coverage and a manual run now boot the SAME world.
+    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/prompt-suggestion.spec.ts', '**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
     // fork-button rides its OWN boot (2026-09-25, the fanout lesson applied
     // again): knowledge's fork child becomes the workspace's restore target,
     // so a shared boot records/replays whoever ran first's shape — the fork
     // spec's draft landed INSIDE knowledge's child on replay (tape diff proof:
     // its request's msg0 was the child's TOC notice). One boot, one journey.
-    { name: 'fork', testMatch: ['**/fork-button.spec.ts'] },
+    { name: 'fork', env: rigEnv('fork'), testMatch: ['**/fork-button.spec.ts'] },
     // explore.spec is the selector-archaeology DEV fixture (its header says so):
     // one plain turn + an aria dump, zero acceptance assertions beyond what
     // fork-button proves on the same machinery. Its live turn grew unbounded
@@ -41,30 +49,30 @@ export default defineConfig({
     // journey must never be interrupted by pressure compaction. The hosted runner
     // measured its header a little differently and fired a plot-elicitation call the
     // tape had never seen — a MISS that was real, and entirely avoidable (0.1.10).
-    { name: 'plans', testMatch: ['**/plans.spec.ts'] },
+    { name: 'plans', env: rigEnv('plans'), testMatch: ['**/plans.spec.ts'] },
     // cache-trajectory measures PHYSICAL prefix caching — live mode only, never
     // in the replay chain (tapes record usage bytes; they cannot show a warm cache).
     { name: 'cache', testMatch: ['**/cache-trajectory.spec.ts'], timeout: 900_000 },
     // heavy: oversized compaction scenarios boot at threshold 0.5 (trigger
     // 16K of 32K) so the crossing arrives in the FIRST chunks — capture on
     // the live model stays in minutes, and replay of the tape is identical.
-    { name: 'heavy', testMatch: ['**/oversized-turn.spec.ts'] },
-    { name: 'arrival', testMatch: ['**/artifact-arrival.spec.ts'] },
+    { name: 'heavy', env: rigEnv('heavy'), testMatch: ['**/oversized-turn.spec.ts'] },
+    { name: 'arrival', env: rigEnv('arrival'), testMatch: ['**/artifact-arrival.spec.ts'] },
     // fanout: the two-subagent research journey gets its OWN boot and tape
     // (2026-09-23, lesson of the suite-context chains): its child sessions
     // make the deepest request arrays on this hardware, and sharing the suite
     // boot made its tape record the shape of whoever ran first. Same 0.75
     // stress pin as the suite; E2E_TAPE=fanout in the scripts chain.
-    { name: 'fanout', testMatch: ['**/subagent-fanout.spec.ts'] },
+    { name: 'fanout', env: rigEnv('fanout'), testMatch: ['**/subagent-fanout.spec.ts'] },
     // enrich: the P2 enrichment ladder end-to-end; boots with
     // enrichmentEnabled TRUE (its tape carries the ladder's model call).
-    { name: 'enrich', testMatch: ['**/enrich.spec.ts'] },
+    { name: 'enrich', env: rigEnv('enrich'), testMatch: ['**/enrich.spec.ts'] },
     // rules: the P3 lifecycle in the browser over a local-path pool.
-    { name: 'rules', testMatch: ['**/rules.spec.ts'] },
+    { name: 'rules', env: rigEnv('rules'), testMatch: ['**/rules.spec.ts'] },
     // prompt: #71 — the composer ghost journey. Its boot is the ONLY one that
     // writes `promptModel` into the plugin row (E2E_PROMPT=1): the feature must
     // not exist on any other boot, and its absence there is the OFF-state test.
     // Threshold 0.99 + NO_AUX_MODEL like plans: one journey, no compaction races.
-    { name: 'prompt', testMatch: ['**/prompt-suggestion.spec.ts'] },
+    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-suggestion.spec.ts'] },
   ],
 })

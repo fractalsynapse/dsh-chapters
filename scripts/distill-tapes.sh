@@ -37,11 +37,37 @@ if [[ -z "${E2E_UPSTREAM:-}" ]]; then
   fi
 fi
 
-# project:port:threshold:extra — mirrors `npm run test:e2e`'s pins exactly
+# project:port — DISPLAY ONLY (the boot port comes from the project env in playwright.config.ts)
 declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739)
-declare -A THRESH=([suite]=0.75 [heavy]=0.5 [arrival]=0.9 [enrich]=0.9 [fanout]=0.75 [rules]=0.9 [fork]=0.75 [plans]=0.99 [prompt]=0.99)
-declare -A EXTRA=([heavy]="E2E_FLOOR=1000000" [arrival]="E2E_FLOOR=500" [enrich]="E2E_ENRICH=1" [plans]="E2E_NO_AUX_MODEL=1" [prompt]="E2E_NO_AUX_MODEL=1 E2E_PROMPT=1")
+# #56: THRESHOLD/EXTRA tables DELETED. The regime lives in `playwright.config.ts` as
+# per-project `env`, because three copies (this file, `npm run test:e2e`, boot defaults) had
+# silently diverged: replay booted suite/rules/fork with no threshold while distill had recorded
+# them at 0.75/0.9/0.75 — a different realm than the tape, so the surface diverged and replay
+# MISSed. PORTS below is display-only; a row asserts it still agrees with the config's env.
+trap 'stop_stub' EXIT
 ORDER=(suite heavy arrival enrich fanout rules fork plans prompt)
+
+# #56, measured: `plans` and `prompt` MUST be recorded through the scripted stub
+# (tests/e2e/stub-model.ts, :8081). Their PROVENANCE.md files say so, and the reason is the
+# product's: a tape must not freeze one model's decision to plan, and `prompt`'s assertion
+# compares a CONSTANT only the stub's `suggest` arm mints. Tonight the endpoint resolution above
+# sent them to the hosted model (nothing pinned or started :8081), so `prompt` failed an
+# unsatisfiable line and `plans` recorded a real model's improvisation. These two legs own their
+# upstream: start the stub, pin it, stop it — and fail loudly if it will not come up.
+STUB_PROJECTS="plans prompt"
+STUB_PORT="${STUB_PORT:-8081}"
+stub_pid=""
+start_stub() {
+  node tests/e2e/stub-model.ts > "var/stub-${1}.log" 2>&1 &
+  stub_pid=$!
+  for _ in $(seq 1 40); do
+    if curl -s --max-time 1 "http://127.0.0.1:${STUB_PORT}/v1/models" >/dev/null 2>&1        || curl -s --max-time 1 -o /dev/null "http://127.0.0.1:${STUB_PORT}/" ; then return 0; fi
+    sleep 0.5
+  done
+  echo "distill: the scripted stub never answered on :${STUB_PORT} — refusing to record $1 against a live model (its PROVENANCE.md forbids that)" >&2
+  return 1
+}
+stop_stub() { if [[ -n "${stub_pid}" ]]; then kill "${stub_pid}" 2>/dev/null || true; wait "${stub_pid}" 2>/dev/null || true; stub_pid=""; fi; }
 want=("${@:-}")
 [[ -z "${want[0]:-}" ]] && want=("${ORDER[@]}")
 
@@ -50,7 +76,20 @@ for proj in "${want[@]}"; do
   if [[ -z "${PORTS[$proj]:-}" ]]; then
     echo "distill: unknown project '$proj' (known: ${ORDER[*]})" >&2; failed+=("$proj:unknown"); continue
   fi
-  echo "=== distill $proj — port ${PORTS[$proj]}, threshold ${THRESH[$proj]} ${EXTRA[$proj]:-} ==="
+  leg_extra=""
+  # plans/prompt own their upstream: the scripted stub, or nothing (see STUB_PROJECTS above).
+  if [[ " ${STUB_PROJECTS} " == *" ${proj} "* ]]; then
+    if ! start_stub "${proj}"; then failed+=("${proj}:stub-down"); continue; fi
+    leg_extra="${leg_extra} E2E_UPSTREAM=http://127.0.0.1:${STUB_PORT}"
+  fi
+  # the header prints the EFFECTIVE regime, read from the one table the boot uses, so a tape's
+  # provenance is auditable from the runner log alone (the row in distill-upstream-pins insists).
+  regime=$(node --experimental-strip-types --input-type=module -e "
+    const m = await import('./tests/e2e/rig-pins.ts');
+    const p = m.RIG_PINS['$proj'];
+    process.stdout.write(p ? 'port=' + p.port + ' threshold=' + p.threshold + (p.floor ? ' floor=' + p.floor : '') + (p.enrich ? ' enrich=1' : '') + (p.noAuxModel ? ' noAux=1' : '') + (p.promptModel ? ' prompt=1' : '') : 'UNPINNED')
+  " 2>/dev/null)
+  echo "=== distill ${proj} — port ${PORTS[${proj}]} regime:${regime:-UNREADABLE} ${leg_extra} ==="
   [[ "${KEEP_TAPES:-}" == "1" ]] || rm -rf "tests/fixtures/model-tape/$proj"
   # shellcheck disable=SC2086
   # FULL output to a per-leg file, never through `tail`: #54 measured a leg that produced no
@@ -59,7 +98,8 @@ for proj in "${want[@]}"; do
   mkdir -p var/distill
   leg_log="var/distill/${proj}-$(date +%H%M%S).log"
   started=$(date +%s)
-  env E2E_MODEL=record E2E_PORT="${PORTS[$proj]}" E2E_THRESHOLD="${THRESH[$proj]}" E2E_TAPE="$proj" ${EXTRA[$proj]:-} \
+  # ${leg_extra} is the stub upstream only — the pins are the config's (#56).
+  env E2E_MODEL=record ${leg_extra:-} \
     timeout "${DISTILL_TIMEOUT:-1800}" npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "$leg_log" 2>&1 &
   leg_pid=$!
   # heartbeat: tape entries + last upstream journal line, every 60s. A stall becomes
@@ -72,13 +112,30 @@ for proj in "${want[@]}"; do
     echo "    …${proj} +$(( $(date +%s) - started ))s tapeEntries=${hn} | upstream: ${hj:-no journal yet}"
   done
   wait "$leg_pid"; rc=$?
+  stop_stub   # the scripted stub belongs to one leg; a leaked :8081 would mis-pin the next one
   echo "    full leg output: ${leg_log}"
   if [[ "$rc" -ne 0 ]]; then
     echo "    --- last 12 lines of ${leg_log} ---"; tail -12 "$leg_log" 2>/dev/null | sed 's/^/    /'
     echo "    --- upstream journal tail ---"; tail -6 var/e2e-upstream.log 2>/dev/null | sed 's/^/    /'
   fi
   n=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+  # A model-driven leg that recorded NOTHING did not talk to a model, whatever its exit code says:
+  # a `test.skip` (unreachable upstream, missing git http-backend) yields `3 passed / 1 skipped` and
+  # `exit 0`. Measured 2026-10-23: `--- suite: exit=0 tapeEntries=0` was read as green by me, for a
+  # round, until a tape count was compared with an exit code. Refuse it here, in the one place that
+  # summarises legs, and name the VACUOUS condition so a log scanner cannot read it as a pass.
+  if [[ "$rc" -eq 0 && "$n" -eq 0 ]]; then
+    echo "--- $proj: VACUOUS — exit 0 with zero tape entries (the journey never ran; refusing)" >&2
+    rc=1
+    failed+=("$proj:vacuous")
+  fi
   echo "--- $proj: exit=$rc tapeEntries=$n"
+  # Provenance is GENERATED, not hand-authored: the `rm -rf` above destroys whatever was in the
+  # project directory, and hand-written PROVENANCE.md files (plans, prompt — the records saying
+  # those legs come from the scripted stub, not a live model) were deleted by exactly that on the
+  # re-anchor (#56). One line per leg, with the verdict only the runner knows.
+  node --experimental-strip-types scripts/write-provenance.mjs --project "$proj" --verdict "exit=$rc tapeEntries=$n" \
+    >/dev/null 2>&1 || echo "    distill: provenance regeneration FAILED for $proj" >&2
   [[ "$rc" -ne 0 ]] && failed+=("$proj")
 done
 echo

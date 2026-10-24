@@ -23,6 +23,7 @@ import path from 'node:path'
 import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
 import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
+import { resolveStoredPath } from './archive.ts'
 
 /** The row shape the ladder may read and re-write — structural, never the registry's own type. */
 interface ChapterRowItem {
@@ -228,7 +229,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const state = await deps.store.get(sid)
       const rec = state.chapters.find((c) => c.number === num)
       if (rec === undefined) return { ok: false, skipped: 'record gone' }
-      const file = path.join(cwd, rec.path)
+      const file = resolveStoredPath(cwd, rec.path)
       if (!fs.existsSync(file)) return { ok: false, skipped: 'chapter file absent' }
       const doc = parseChapterFile(fs.readFileSync(file, 'utf8'))
       // A plan document is a WORK DIRECTIVE: its body is the approved text, and an

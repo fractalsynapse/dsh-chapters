@@ -52,6 +52,18 @@ export interface EngineConfig {
   workspaceCwd?: string | undefined
   /** Workspace-relative archive root; must be reachable by the `read` tool. */
   artifactStoreRoot: string
+  /**
+   * #85: where approved rules and the knowledge pool are read from when a notice is composed.
+   * Defaults to the historical `.dsh-knowledge` for real installs; an e2e boot pins it per port,
+   * because a tape is a claim about ONE world and a fixed path inside the developer's repo is not
+   * part of that world.
+   */
+  knowledgeMirrorDir: string
+  /** #87: how much of the newest human turn the summary carries verbatim when relief
+   *  shadows the turn that asked it. A cap, never a silent cut — the block says how much was left. */
+  openRequestCarryMaxChars: number
+  /** #78 A: the survivability switch. See `docs/host-compaction-seam.md` § the last-resort deferral. */
+  lastResortArtifact: boolean
   chapterTokenTarget: number
   toolResultDeferFloorTokens: number
   /** Composer tunables (record §4.2/§12) — same register, same defaults as the host plugin's. */
@@ -86,6 +98,9 @@ export interface EngineConfig {
 
 export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   artifactStoreRoot: '.dsh-chapters',
+  knowledgeMirrorDir: '.dsh-knowledge',
+  openRequestCarryMaxChars: 4000,
+  lastResortArtifact: true,
   chapterTokenTarget: 8000,
   toolResultDeferFloorTokens: 200,
   mergeThreshold: 0.3,

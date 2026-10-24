@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, localModelUp, sessionLogTextById, logEvents, typeComposer } from './session.ts'
+import {openApp, newSessionWithTurn, localModelUp, sessionLogTextById, logEvents, typeComposer, deliveredFor} from './session.ts'
 
 /**
  * CACHE TRAJECTORY PROBE — opt-in, live-only (`npm run test:e2e:cache`).
@@ -107,7 +107,7 @@ test('a serial session cache-warms: hit rate rises and cacheRead grows with the 
     for (const tn of tenants) {
       const q = `Cache probe tenant turn: answer in two short sentences about prompt prefixes, ending with ${tn.label.replace(' ', '-')}-${tn.ledger.length + 1}. No tools.`
       tn.inflight = (async () => {
-        await typeComposer(tn.page, q)
+        await typeComposer(tn.page, q, deliveredFor(sid, q))
         await expect.poll(() => usageLedger(tn.sid).length > tn.ledger.length, { timeout: TURN_MS, intervals: [5000] },
           `tenant chain grows (CONCUR=${CONCUR}: a timeout = QUEUE STARVATION — the slot cannot serve ${CONCUR} chains in budget)`).toBe(true)
         tn.ledger = usageLedger(tn.sid)
@@ -119,7 +119,7 @@ test('a serial session cache-warms: hit rate rises and cacheRead grows with the 
       sid = await newSessionWithTurn(page, q, TURN_MS, false)
     } else {
       const before = usageLedger(sid).length
-      await typeComposer(page, q)
+      await typeComposer(page, q, deliveredFor(sid, q))
       await expect.poll(() => usageLedger(sid).length > before, { timeout: TURN_MS + 60_000, intervals: [5000] },
         `turn ${t} completes (CONCUR=${CONCUR}: a timeout here means QUEUE STARVATION on the shared slot — the server cannot serve ${CONCUR} chains inside the budget; a completed-but-flat-cacheRead ledger instead means KV eviction — different fix)`).toBe(true)
     }

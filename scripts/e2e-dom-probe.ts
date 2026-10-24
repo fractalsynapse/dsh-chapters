@@ -172,6 +172,25 @@ try {
         .map((b) => b.getAttribute('aria-label') ?? (b.textContent ?? '').trim().slice(0, 24))
       return { ours, rowTag: row?.tagName ?? null, rowClass: (row?.className ?? '').slice(0, 90), rowRect: row ? JSON.stringify(row.getBoundingClientRect()) : null, siblings, menus }
     })
+    // #57 follow-up: the knowledge-loop runs host COMMANDS between the turn and the click, and
+    // those render as command flow nodes rather than chat rows. Whether the door is still
+    // reachable — and what it SAYS when the switch fails — can only be answered in a
+    // conversation of that shape, so the probe can put a command in the composer first.
+    const cmd = process.env.PROBE_CMD
+    if (cmd !== undefined && cmd !== '') {
+      await typeComposer(page, cmd)
+      await page.waitForTimeout(9000)
+    }
+    dump.probeCmd = cmd ?? null
+    // WHICH BYTES IS THE BROWSER RUNNING? A build stamp in the source only proves the source
+    // said something; if the note lacks it, the honest question is staleness, not behavior. So:
+    // list the loaded script resources and fetch them from node, then look for a marker string
+    // that exists only in the CURRENT door code. A stale client bundle makes every downstream
+    // conclusion wrong, and this is the only check that catches it without trusting a symlink.
+    dump.servedBundles = await page.evaluate(() => performance.getEntriesByType('resource')
+      .map((r) => r.name)
+      .filter((n) => /chapters|client|plugin/i.test(n))
+      .slice(0, 12))
     // and does the door, when force-clicked, leave anything observable behind?
     const clicked = await page.evaluate(() => {
       const b = Array.from(document.querySelectorAll('button')).find((x) => (x.getAttribute('aria-label') ?? '') === 'Fork with chapters')
@@ -179,41 +198,45 @@ try {
       ;(b as HTMLButtonElement).click()
       return 'clicked'
     })
-    await page.waitForTimeout(12000)
-    // What did the door ANSWER? Our component renders its result into a note span
-    // (.dsh-chapters_forkNote); an error text there is the difference between "the host
-    // lost the child" and "the plugin refused to fork".
-    dump.doorSaid = await page.evaluate(() => {
-      const notes = Array.from(document.querySelectorAll('[class*="forkNote"], [class*="dsh-chapters"]'))
-        .map((e) => (e.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 200))
-        .filter((t) => t !== '')
-      return { notes, bodyTail: (document.body.textContent ?? '').replace(/\s+/g, ' ').trim().slice(-300) }
+    // ONE snapshot function, read at every step, because the mistake this probe made once was
+    // reading the door's note AFTER a reload — React state is gone by then, so "no note
+    // element" looked like "the door reported success". Order is the whole answer here.
+    const snap = async (label: string) => {
+      const v = await page.evaluate(() => ({
+        title: document.title,
+        current: (JSON.parse(localStorage.getItem('dsh.sessions.current') ?? 'null') as { sessionId?: string } | null)?.sessionId ?? null,
+        // 400, not 170: the door's note now CARRIES the service verb list, and the cap that
+        // was fine for a one-line message truncated the diagnosis this probe exists to read.
+        note: (() => { const n = document.querySelector('[class*="forkNote"]'); return n === null ? null : (n.textContent ?? '').trim().slice(0, 400) })(),
+        rows: Array.from(document.querySelectorAll('[role="treeitem"]')).map((r) => (r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 48)),
+        bodyHasCh: /ch-[0-9a-f]{8}/.test(document.body.textContent ?? ''),
+      }))
+      dump.snapshots.push({ label, ...v })
+      return v
+    }
+    dump.snapshots = [] as Array<Record<string, unknown>>
+    await page.waitForTimeout(8000)
+    await snap('right after the door click (before any reload)')
+    // Wait out the switch: `sessions.open` may settle late, and a spec that polls 40–60 s
+    // would pass while a 12 s snapshot says nothing.
+    for (let i = 0; i < 5; i++) { await page.waitForTimeout(6000); await snap(`+${String((i + 1) * 6)}s`) }
+    // Does a sidebar row for the child exist, and does clicking IT switch? This separates
+    // "the child is invisible" from "open(id) is a no-op but a human click works".
+    const clickedRow = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('[role="treeitem"]'))
+      const hit = rows.find((r) => /ch-[0-9a-f]{8}/.test(r.textContent ?? '') || /branch|continuation/i.test(r.textContent ?? ''))
+      if (hit === undefined) return 'no row matched'
+      const b = hit as HTMLElement
+      b.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      return `clicked: ${(hit.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 48)}`
     })
-    // Does a RELOAD make the child visible? That is the question the journeys hinge on:
-    // if the sidebar lists it after a refetch, the rig (and the door) can open it; if a
-    // reload changes nothing, the session is invisible to the UI as well as to disk, and
-    // the honest conclusion is that 0.2.x will not show a created-but-never-started child.
+    await page.waitForTimeout(8000)
+    await snap('after clicking the sidebar row')
+    dump.rowClick = clickedRow
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(6000)
     await dismissTestingNotice(page)
-    dump.afterReload = await page.evaluate(() => ({
-      rows: Array.from(document.querySelectorAll('[role="treeitem"]')).map((r) => (r.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 42)),
-    }))
-    // The runner's OWN words. src/client/doors.ts returns a note ONLY when it could not
-    // switch: '' means sessions.open(child) worked, 'branch created — appearing in the
-    // sidebar' / '… open it in the sidebar' means the service path failed and the row-click
-    // fallback fell through too. That distinguishes a client-service drift from a
-    // switch-that-happened-but-didn't-stick without reading a minified bundle.
-    dump.doorNote = await page.evaluate(() => {
-      const n = document.querySelector('[class*="forkNote"]')
-      const dlg = document.querySelector('[role="dialog"], [aria-label*="Notice"]')
-      return {
-        note: n === null ? '(no note element — the runner reported success)' : (n.textContent ?? '').trim().slice(0, 160),
-        dialog: dlg === null ? null : (dlg.getAttribute('aria-label') ?? '?'),
-        active: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? 'none',
-        current: (JSON.parse(localStorage.getItem('dsh.sessions.current') ?? 'null') as { sessionId?: string } | null)?.sessionId ?? null,
-      }
-    })
+    await snap('after a full reload')
     const kids = (() => { try { return fs.readdirSync(E2E_SESS_DIR).filter((d) => d.startsWith('ch-')) } catch { return [] } })()
     dump.child = {
       clicked, dirs: kids.length,

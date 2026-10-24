@@ -254,3 +254,32 @@ test('§7.9 without a session context the session tier is reported UNRESOLVED, n
   assert.match(r.text, /session tier: 0/, r.text)
   h.dispose()
 })
+
+/**
+ * The stored-path dialect, in the READ direction (#56/#61 item 8, measured 2026-10-24 on the `enrich`
+ * leg). `toStoredPath` may hand back an ABSOLUTE path — the rig legitimately pins an absolute
+ * `artifactStoreRoot` per port — and `path.join(cwd, absolute)` CONCATENATES rather than resolving, so
+ * `/home/x/proj` + `/tmp/dsh-e2e/e2e-home-41734/chapters/….md` becomes a path that exists nowhere.
+ * The ladder then reported `chapter file absent` about a file sitting right there, and the repair
+ * engine's two joins had the same latent defect. Every path READ goes through one resolver.
+ */
+test('resolveStoredPath keeps an absolute stored path absolute and resolves a relative one', async () => {
+  const { resolveStoredPath } = await import('../../src/archive.ts')
+  assert.equal(resolveStoredPath('/work/proj', '/tmp/dsh-e2e/home/chapters/x.md'), '/tmp/dsh-e2e/home/chapters/x.md',
+    'an absolute stored path must survive untouched — concatenating it produces a path to nothing')
+  assert.equal(resolveStoredPath('/work/proj', 'chapters/x.md'), '/work/proj/chapters/x.md')
+  assert.equal(resolveStoredPath(undefined, 'chapters/x.md'), 'chapters/x.md', 'no cwd means no basis to join onto, not a guess')
+})
+
+test('chapter paths are read through the ONE resolver, never a bare join (#69-class)', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const root = path.resolve(import.meta.dirname, '..', '..')
+  for (const [file, count] of [['src/enrich-wire.ts', 1], ['src/repair-run.ts', 2]] as const) {
+    const src = fs.readFileSync(path.join(root, file), 'utf8')
+    assert.doesNotMatch(src, /path\.join\((cwd|base), (rec|written|f\.target)\.path\)/,
+      `${file} still joins a stored path onto a cwd — it must call resolveStoredPath`)
+    assert.ok((src.match(/resolveStoredPath\(/g) ?? []).length >= count,
+      `${file} must resolve its ${String(count)} stored path(s) through the helper`)
+  }
+})

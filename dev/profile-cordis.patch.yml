@@ -35,9 +35,22 @@
     provider: local
     model: qwen3.8-flash-next
 
-- id: agent-presets
+# #77/#56, measured: this row was `- id: agent-presets` with `default: chapters`, and BOTH halves
+# were wrong on 0.2.x. The registry's own Config is `{ default, selectedDefault }` and defaultId =
+# `selectedDefault.get() ?? default` (dsh-agent-preset-registry/lib/index.js:470-474, 493-494), so
+# `default` alone does not select the preset for a new session; and the row the host reads is
+# `agent-preset-registry`, while `agent-presets` exists only as a client UI *section*
+# (dsh-cordis-client-runner/lib/client.js:4751) — so this pin matched NOTHING and every e2e boot
+# silently ran the `standard` preset: no chapters persona, no ChaptersCompactionEngine, no
+# arrival-time artifacting, zero `compaction/*` events across 15 session logs. That single wrong
+# id is why the `heavy`/`arrival`/`fanout`/`enrich` legs reported "the archive never happened"
+# about a product that was never mounted. Mirrors the LIVE working profile (~/.dsh/profiles/web/
+# cordis.patch.yml:108-112) exactly in shape. `tests/unit/e2e-preset-pin.test.ts` pins both halves.
+- id: agent-preset-registry
+  name: "@deepseek-ai/dsh-agent-preset-registry"
   config:
-    default: chapters
+    default: standard
+    selectedDefault: chapters
 
 - id: llm-gate
   config:

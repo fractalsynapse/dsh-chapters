@@ -27,8 +27,24 @@ jobs:
       # All dependencies (incl. every @deepseek-ai/* devDep) resolve from the
       # PUBLIC registry — no install secret and no private-registry config.
       - run: npm ci
+      # The pinned host too, and BEFORE the gate: several deterministic rows read host FACTS out of
+      # the installed bundle (the overflow classifier in `@deepseek-ai/dsh-llm`, the plan-card shape in
+      # `dsh-session`) and refuse to read the repo's stale 0.1.5-rc.2 compile-time closure, because a
+      # drift gate against the wrong version is a rumor. The acceptance job already installs this; the
+      # deterministic job did not, so the rows passed on any laptop with a global `dsh` and went red on
+      # a runner that has none — measured 2026-10-23 on PR #89 (2 failures, not coverage).
+      - name: install the pinned DSH host for the host-fact rows
+        run: |
+          npm ci --prefix "$GITHUB_WORKSPACE/dev/dsh-host-lock" --no-save --no-audit --no-fund || (cd dev/dsh-host-lock && npm ci --no-audit --no-fund)
+          echo "$GITHUB_WORKSPACE/dev/dsh-host-lock/node_modules/.bin" >> "$GITHUB_PATH"
       - run: npm run typecheck
       - run: npm run typecheck:client
+      # #83 ratchet: `tests/e2e` has never been type-checked — tsconfig.json excludes the
+      # directory and Playwright transpiles without checking — which is how a
+      # `ReferenceError: rotated is not defined` in a spec helper cost a nine-leg re-record.
+      # Full cleanup stays the open issue; not getting worse is gateable today.
+      - name: e2e typecheck ratchet
+        run: bash scripts/e2e-typecheck-ratchet.sh
       - run: npm run build
       # The gate IS the contract: c8 --check-coverage fails the job below
       # 85% on statements, branches, functions (and lines). Current ledger:
@@ -112,6 +128,11 @@ jobs:
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
+    # ADVISORY for this release, by maintainer decision — see https://github.com/treeseed-ai/dsh-chapters/
+    # issues/92, which also records the condition that restores it (the `suite`/`enrich`/`heavy` subset
+    # green in replay on staging, with `npm run corpus:check` matching the build). The deterministic
+    # plane above stays blocking, so code that does not compile or does not pass tests still cannot land.
+    continue-on-error: true
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -160,6 +181,15 @@ jobs:
         run: bash scripts/ci-replay.sh
         env:
           E2E_TAPE_DIFF: ${{ github.workspace }}/var/e2e-tape-diffs
+          # #89: the throwaway homes are OUTSIDE the repository on purpose. Node resolves
+          # `@deepseek-ai/*` bundles by walking up from the profile dir, and a home under `var/`
+          # reaches this repo's node_modules (0.1.5-rc.2) and then the developer's ~/node_modules
+          # (a linked dev build wearing the pin's version string). Measured by moving nothing but
+          # the location: the same pinned host composed a 7,276-char system header under `var/` and
+          # the CI-shaped short one under /tmp, and the suite replay flipped from 4-passed to a
+          # `commonPrefix=1` miss. So the runner pins the root explicitly, and the artifact paths
+          # below follow it.
+          E2E_HOME_ROOT: /tmp/dsh-e2e
       - name: assert the production store root is untouched
         if: always()
         run: node scripts/assert-store-untouched.mjs verify
@@ -174,7 +204,7 @@ jobs:
             var/e2e-tape-diffs/
             var/e2e-server-*.log
             var/e2e-engine-errors.log
-            var/e2e-home-*/sessions/
-            var/e2e-home-*/storages/
-            var/e2e-home-*/settings.yaml
+            /tmp/dsh-e2e/e2e-home-*/sessions/
+            /tmp/dsh-e2e/e2e-home-*/storages/
+            /tmp/dsh-e2e/e2e-home-*/settings.yaml
           if-no-files-found: ignore

@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, E2E_SESS_DIR, sessionLogFileFor, openSessionByRow, durableLogExists } from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, E2E_SESS_DIR, sessionLogFileFor, openSessionByRow, durableLogExists, deliveredFor} from './session.ts'
 
 const RULE_TEXT = 'Never log raw tokens or bearer headers anywhere in command output'
 
@@ -39,11 +39,11 @@ test('a rule proposed and approved in the UI renders verbatim into the next cont
   // commands need a REAL session to render flow nodes into — the draft screen
   // turns composer text into a first message, not a command (r38 lesson)
   const pool = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-e2e-rules-pool-'))
-  await newSessionWithTurn(page, 'Reply with exactly one short sentence naming an HTTP redirect status code. Make ZERO tool calls.')
-  await typeComposer(page, `/chapters-link ${path.join(pool, 'pool.git')} `)
+  const sid = await newSessionWithTurn(page, 'Reply with exactly one short sentence naming an HTTP redirect status code. Make ZERO tool calls.')
+  await typeComposer(page, `/chapters-link ${path.join(pool, 'pool.git')} `, deliveredFor(sid, `/chapters-link ${path.join(pool, 'pool.git')} `))
   await expect.poll(async () => ((await page.textContent('body')) ?? '').includes('pool'), { timeout: 120_000 }).toBe(true)
 
-  await typeComposer(page, `/chapters-rule add security ${RULE_TEXT}`)
+  await typeComposer(page, `/chapters-rule add security ${RULE_TEXT}`, deliveredFor(sid, `/chapters-rule add security ${RULE_TEXT}`))
   await expect.poll(async () => ((await page.textContent('body')) ?? '').includes('proposed'), { timeout: 60_000 }).toBe(true)
   // approve the id add actually returned (rule files are write-once; a dirty
   // store advances the number — hard-coding 001 would approve a different rule)
@@ -53,7 +53,7 @@ test('a rule proposed and approved in the UI renders verbatim into the next cont
   }, { timeout: 30_000 }).not.toBe('')
   void ruleId
   const approveTarget = /rule (\S+\/\d{3}) proposed/.exec((await page.textContent('body')) ?? '')?.[1] ?? ''
-  await typeComposer(page, `/chapters-rule approve ${approveTarget} `)
+  await typeComposer(page, `/chapters-rule approve ${approveTarget} `, deliveredFor(sid, `/chapters-rule approve ${approveTarget} `))
   await expect.poll(async () => ((await page.textContent('body')) ?? '').includes('CORE on THIS machine'), { timeout: 60_000 }).toBe(true)
 
   const before = new Set<string>((() => { try { return fs.readdirSync(E2E_SESS_DIR) } catch { return [] } })())

@@ -44,7 +44,10 @@ interface Ctx {
   get(name: string): unknown
 }
 
-export const inject = ['slots', 'remote', 'remote.commands', 'sessions'] as const
+// #77: `uiWorkspace` is not optional in practice — it owns `openSession(target)`, the verb the
+// host's own fork button uses (`ctx.uiWorkspace.openSession(childId)` in dsh-client-ui-chat).
+// `sessions` has no `open` at all, so without this row the door has never had a way to switch.
+export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
 
 /** Props composed by the slot framework: owner (`messageId`) + our injected verb. */
 interface DoorActionProps {
@@ -154,12 +157,34 @@ function makeGhostView() {
     const [state, setState] = useState<{ phase: GhostPhase; boundary: number }>({ phase: 'idle', boundary: 0 })
     const [suggestion, setSuggestion] = useState<GhostSuggestion | null>(null)
     const [model, setModel] = useState<string | null>(null)
+    // #79: the label answer is what tells this component whether the feature exists at all.
+    // Until it arrives, nothing is fetched; when it says OFF, nothing is EVER fetched. Before
+    // this, an idle edge pulled `/chapters-prompt suggest` on every boot and the server had to
+    // refuse it — visible in the durable log as `prompt suggestions are off` command errors in
+    // sessions that never enabled the feature.
+    const [labelKnown, setLabelKnown] = useState(false)
     const alive = useRef(true)
     useEffect(() => () => { alive.current = false }, [])
     const dispatch = useCallback((ev: GhostEvent) => { setState((s) => ghostReducer(s, ev)) }, [])
 
     // The model label is a display fact: fetch once per mount, absence tolerated.
-    useEffect(() => { void props.fetchLabel().then((m) => { if (alive.current) setModel(m) }) }, [props])
+    // #79: the dep array used to be `[props]`, and React hands a NEW props object every render
+    // — with this component subscribed to the whole input store, that meant a durable
+    // `/chapters-prompt model` command per keystroke (measured: 4–26 command pairs per session,
+    // on boots where the feature is OFF and the correct number is zero). The callback is read
+    // through a ref so the mount-scoped guard cannot be defeated by an unstable identity.
+    const fetchLabelRef = useRef(props.fetchLabel)
+    fetchLabelRef.current = props.fetchLabel
+    const labelFetched = useRef(false)
+    useEffect(() => {
+      if (labelFetched.current) return
+      labelFetched.current = true
+      void fetchLabelRef.current().then((m) => {
+        if (!alive.current) return
+        setModel(m)
+        setLabelKnown(true)
+      })
+    }, [])
 
     // Idle edge: the first settled render and every running true→false transition
     // open a new boundary (the host-side cache watermark does the token economics;
@@ -177,6 +202,7 @@ function makeGhostView() {
     const fetchedFor = useRef(-1)
     const { phase, boundary } = state
     useEffect(() => {
+      if (!labelKnown || model === null) return
       if (phase !== 'idle' || fetchedFor.current === boundary) return
       fetchedFor.current = boundary
       void props.fetchSuggestion().then((r) => {
@@ -184,7 +210,7 @@ function makeGhostView() {
         setSuggestion(r.ok ? { text: r.text, model: model !== null ? model : undefined } : null)
         dispatch({ type: 'fetched', ok: r.ok })
       })
-    }, [phase, boundary, props, dispatch])
+    }, [phase, boundary, props, dispatch, labelKnown, model])
 
     const accept = useCallback(() => {
       if (suggestion === null) return
@@ -238,6 +264,10 @@ export function apply(ctx: Ctx): void {
   const remote = (ctx.get('remote') ?? {}) as ClientRemote
   let sessions: ClientSessions | undefined
   try { sessions = ctx.get('sessions') as ClientSessions | undefined } catch { sessions = undefined }
+  // Defensive: a host that cannot provide the navigator must leave the door registering and
+  // reporting its own limitation, not failing at boot.
+  let uiWorkspace: { openSession?: (id: string) => unknown } | undefined
+  try { uiWorkspace = ctx.get('uiWorkspace') as { openSession?: (id: string) => unknown } | undefined } catch { uiWorkspace = undefined }
   // No early return on missing descriptors: the buttons register regardless
   // and the click reports the gap. A missing button is worse than a button
   // that explains itself. Components and runners are built ONCE here — slot
@@ -263,7 +293,7 @@ export function apply(ctx: Ctx): void {
         await new Promise((r) => setTimeout(r, 250))
       }
       return currentSessionId() === child
-    }),
+    }, { ...(uiWorkspace !== undefined ? { navigator: uiWorkspace } : {} ) }),
     component: makeDoorAction(door),
   }))
   slots.inject('conversation.chat.assistant-actions', () => rows.map(({ door, run, component }) => slots.register({

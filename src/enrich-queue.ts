@@ -67,18 +67,30 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
   const drain = (forced = false): Promise<number> => {
     // auto drains honor the trigger choice; a forced drain (the command /
     // manual surface) only honors the kill switch
-    if (!deps.enabled || (!forced && deps.trigger === 'manual')) return Promise.resolve(0)
+    // #61a, and the reason this file exists in the release: a queue that decides not to work must
+    // say WHICH decision it made. The `enrich` leg burned 420 s polling for ladder output while the
+    // tape showed only the conversation and title requests and the sink had no enrichment line at
+    // all — the queue knew (disabled? manual trigger? no model? nothing pending?) and told nobody.
+    if (!deps.enabled) { deps.log('enrichment drain skipped: disabled (enrichmentEnabled=false)'); return Promise.resolve(0) }
+    if (!forced && deps.trigger === 'manual') { deps.log('enrichment drain skipped: trigger=manual — only /chapters-enrich run drains it'); return Promise.resolve(0) }
     if (draining !== null) return draining // one batch at a time; requests collapse
     draining = (async () => {
       try {
         const model = await deps.resolveModel()
         modelCache = model
+        if (model === '') { deps.log('enrichment drain skipped: no enrichment model resolvable'); return 0 }
         const pending = await deps.listPending(model, deps.batchCap)
         pendingEstimate = pending.length
+        if (pending.length === 0) deps.log(`enrichment drain: pending=0 via ${model} (trigger=${deps.trigger}, idleMs=${String(deps.idleMs)})`)
         let done = 0
         for (const item of pending) {
           const r = await deps.enrichOne(item.key)
           if (r.ok) done++
+          // Measured: the manual command reported `processed 0 chapter(s); 1 pending` and the sink
+          // had nothing, because only successes were ever written. A skip IS a decision with a cause
+          // (`skipped:` is the ladder's own label), and an unreported one turns a 420-second poll into
+          // an argument — the third time today a queue knew and said nothing (#61a).
+          else deps.log(`enrichment skipped ${item.key}: ${r.skipped ?? 'no reason given by the ladder'}`)
         }
         lastBatch = done
         if (done > 0) deps.log(`enrichment batch: ${done}/${pending.length} chapter(s) via ${model}`)
@@ -107,7 +119,9 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
       idleTimer = setTimer(() => { void drain() }, deps.idleMs)
     },
     drainNow: async () => {
-      if (!deps.enabled) return 0
+      // same rule as `drain`: an entry point that returns zero names its reason, or the next
+      // 420-second poll has nothing to read but a guess.
+      if (!deps.enabled) { deps.log('enrichment drain skipped: disabled (enrichmentEnabled=false)'); return 0 }
       return await drain(true)
     },
     state: () => ({

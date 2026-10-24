@@ -26,6 +26,18 @@ const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const CONTEXT_LITERALS = /\b(32_?000|32_?768|64_?000|128_?000|131_?072|1_?000_?000)\b/
 const WINDOW_KEYS = /contextWindow|maxContextTokens|context_window/i
 
+/**
+ * The invariant this file guards is that the plugin never DEFINES or DEFAULTS a context-window
+ * config key — the number belongs to the adapter (and the preset row must not pin it either).
+ * Matching every MENTION was too blunt: after #78 the engine reads `info.context.contextWindow`
+ * precisely in order to REPORT the number the base engine decided with, and the guard fired on a
+ * read. A guard that fires on the correct code teaches people to distrust guards, so the two
+ * claims are now separate: declaration-shaped text is rejected, reading the host's field is not.
+ * The mutation row below pins that the narrower pattern still catches what the rule is about.
+ */
+const WINDOW_DECLARATION = /(?:^|[\s{,(])(?:contextWindow|maxContextTokens|context_window)\s*:|['"](?:contextWindow|maxContextTokens|context_window)['"]\s*:\s*\d|\bdefault\([^)]*\)\s*\.?(?:contextWindow|maxContextTokens)/
+
+
 function walk(dir: string, out: string[]): string[] {
   // The composition moved from a shipped preset directory into `src/preset.ts`, so a
   // missing directory is not an error here — it is the shape of this repo now.
@@ -70,6 +82,21 @@ test('preset rows never pin a window key', () => {
 
 test('the engine Config declares no window field (adapter-config-only invariant)', () => {
   const body = fs.readFileSync(path.join(ROOT, 'src', 'engine.ts'), 'utf8')
-  assert.ok(!WINDOW_KEYS.test(body.split('\n').filter((l) => !/^\s*(\/\/|\*|#)/.test(l)).join('\n')),
+  const code = body.split('\n').filter((l) => !/^\s*(\/\/|\*|#)/.test(l)).join('\n')
+  assert.ok(!WINDOW_DECLARATION.test(code),
     'src/engine.ts must not define or default a context-window config key')
+  // and the reading of the host's value stays explicitly allowed, or the next agent "fixes" the
+  // report by deleting the number that makes it diagnosable
+  assert.match(code, /context\?\.contextWindow/,
+    'the engine reads the adapter-reported window in order to report a decline with its numbers (#78)')
+})
+
+test('the narrowed guard still rejects a declared or defaulted window key (mutation check)', () => {
+  // Proves the previous row is not quietly vacuous: three ways to do the forbidden thing, each
+  // caught, and one legitimate read, not caught.
+  assert.match('  contextWindow: 32_000,', WINDOW_DECLARATION)
+  assert.match('  config: { context_window: 32000 }', WINDOW_DECLARATION)
+  assert.match('  maxContextTokens: 8192,', WINDOW_DECLARATION)
+  assert.doesNotMatch('      const win = info?.context?.contextWindow', WINDOW_DECLARATION,
+    'reading the adapter-reported value is the point of the #78 report')
 })

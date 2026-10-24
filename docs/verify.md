@@ -390,3 +390,64 @@ silent-skip family #54 fixed for remotes. A ROW had pinned that behavior ("loopb
 refusing to run against a live stub. Per the house rule (change obsolete behavior with its tests):
 the row now pins probe-the-actual-base for local upstreams, plus a dead-local-port NO arm, with the
 reason in its comment. The guard lying by REFUSING is the same disease as lying by nodding.
+
+## Release gate — field checks, because green tests shipped a broken product twice
+
+Every item below is the shape of a defect that reached `main` or was found in the field (SAIP,
+issues #58–#61, #77–#82) **while the suite was green**. They are not more unit tests: several of
+this week's bugs had rows passing correctly around them. The gate is that a human or an agent
+observes the affordance working on a real project, and that every new instrument is shown to be
+capable of failing.
+
+Run on a scratch clone of a real project (not this repo), at the pinned host and pinned window.
+
+1. **A continuation opens, not just a continuation created.** Fork (button or `chapters_continue`),
+   then require: the app's current session IS the child (read `dsh.sessions.current`, or the door's
+   own note — it now refuses to claim a switch it cannot verify), the child is in the sidebar, and
+   the state survives a reload. *Why: #77 — three evenings of "the client refuses to catalogue
+   plugin-created children" were a door calling `sessions.open`, a verb that does not exist
+   (`docs/contract.md` § Client Sessions Service). Green throughout, because no test read the id.*
+2. **The realm is mounted, not declared.** One session header must read `agentPreset: "chapters"`,
+   and the sink must show at least one `compactIfNeeded entered` line. *Why: the preset pin sat on
+   a retired row id (`agent-presets` → `agent-preset-registry`) and every acceptance boot ran the
+   standard realm for two days — zero `compaction/*` events in 15 logs, while leg verdicts looked
+   like product failures (#56, #78). "Declared" was asserted; "invoked" never was.*
+3. **Context relief actually happens, with numbers.** Force one oversized read at the pinned
+   window; require `compaction/*` events (or an arrival stub pair) in the durable log, then that the
+   NEXT turn answers a plain question. *Why: #78's decline is now reported with
+   `surface=/trigger=/window=/ratio=`, and a session that survives but answers a stale transcript
+   token is exactly what `oversized-turn.spec` caught — after #81, the wrong answer had been the rig
+   sending the instruction twice.*
+4. **A command reaches the human.** Run `/chapters-status` and check BOTH the durable
+   `command/done` AND the screen; today the screen half fails and that is #80, not a flake. A
+   delivered-but-invisible result is a feature the operator cannot use (#61a, #67).
+5. **A disabled feature is quiet in the durable log.** On a boot without `promptModel`,
+   `countGhostCommandRuns(log)` must be ≤ 1 (one capability probe per mount). *Why: #79 measured 4–26
+   `chapters-prompt` command pairs per session — a "once per mount" effect depending on `[props]`,
+   writing into the transcript this plugin archives, with the OFF test passing because it only
+   looked at the chip.*
+6. **The rig's pins reach the realm.** The boot's own `cordis.patch.yml` must carry this project's
+   `thresholdRatio` and arrival floor on the `chapters-engine` row. *Why: `Pins` were collected and
+   applied to nothing for a whole release cycle (leg headers claimed 0.5 while realm defaults
+   ran).*
+7. **The corpus is one behavior.** `CORPUS_HOST`'s `host` equals the pin, and every project's
+   `recordedAgainst` names the same code generation. If any leg was recorded before a rig-behavior
+   change (send timing, window enforcement), re-record it: a mixed corpus passes for the wrong
+   reason (#56, #81, #82).
+8. **A boot may read only tracked state.** List every file the e2e home is seeded from and prove each is
+   in `git ls-files` — a gitignored path in that chain makes the corpus a recording of one laptop.
+   *Why: #89, three layers deep. First the matcher folded no workspace root (CI's `/home/runner/…` vs
+   the recorded `/home/adrian/…`); then `spawn('dsh')` took PATH and got a **linked dev build** whose
+   version string matched the pin; and even with the pinned tarball booted by absolute path, CI sent a
+   2-message first request against a 6-message tape — because `boot.ts` copied
+   `.dshdev-local/settings.yaml` (gitignored) with the provider route and `contextWindow: 32000`. Each
+   layer looked like the end of the story; the tape diff (`E2E_TAPE_DIFF` / `E2E_MISS_DUMP`) is what
+   said otherwise every time. Reproduce across machines before believing a green local chain.*
+
+9. **Instrumentation must be shown to be capable of failing.** For every gate this week added, name
+   the mutation that reddens it — the hygiene guard, the roster predicate, the report helper, the
+   window rows and the bounded-scroll row all have one. *Why: three bugs this week lived in code
+   written to observe the fourth — `\bpending\b` missing an escaped newline, `ids.size > 0`
+   disabling every #77 candidate, a helper resolving logs against an import-time home so a gate
+   could never pass, and an unbounded `scrollIntoViewIfNeeded` that hung a leg for 17 minutes. Each
+   looked like a product failure. **An unexercised assertion is a rumor of an assertion.**

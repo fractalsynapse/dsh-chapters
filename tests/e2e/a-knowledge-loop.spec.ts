@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
-import { openApp, newSessionWithTurn, typeComposer, localModelUp, currentSessionId, sessionLogTextById, durableLogExists, forkDoor, ROOT, E2E_REGISTRY, E2E_SESS_DIR } from './session.ts'
+import {openApp, newSessionWithTurn, typeComposer, localModelUp, currentSessionId, sessionLogTextById, durableLogExists, forkDoor, ROOT, E2E_REGISTRY, E2E_SESS_DIR, E2E_STORE_ROOT, deliveredFor} from './session.ts'
 
 /**
  * ORDERING (2026-09-24): filename 'a-' makes Playwright run this journey FIRST —
@@ -25,7 +25,7 @@ import { openApp, newSessionWithTurn, typeComposer, localModelUp, currentSession
  *   machine's chapter.
  */
 const registryPath = E2E_REGISTRY
-const statusPath = path.join(ROOT, '.dsh-chapters', '.sync-status.json')
+const statusPath = path.join(E2E_STORE_ROOT, '.sync-status.json') // #70 store root (#56)
 const sessDir = E2E_SESS_DIR
 
 const readRegistry = () => {
@@ -66,12 +66,12 @@ test('the knowledge loop end to end over a real git remote, from the browser', a
     // the remote holds them). 'synced' at this point means the transport is
     // healthy, not that bytes moved (the empty-mirror push is an honest
     // no-op — the 2026-09-25 hosted-CI product fix).
-    await typeComposer(page, `/chapters-link ${repoUrl} tok-e2e`)
+    await typeComposer(page, `/chapters-link ${repoUrl} tok-e2e`, deliveredFor(sid, `/chapters-link ${repoUrl} tok-e2e`))
     await expect.poll(() => projectRecords().some((r) => r.remote === repoUrl), { timeout: 30_000, intervals: [1000] }).toBe(true)
     const { remoteFiles } = httpMod
 
     // ---- 2. status command: synced, with the numbers behind it
-    await typeComposer(page, '/chapters-status ')
+    await typeComposer(page, '/chapters-status ', deliveredFor(sid, '/chapters-status '))
     await expect.poll(() => {
       try { return JSON.parse(fs.readFileSync(statusPath, 'utf8')).mode } catch { return null }
     }, { timeout: 30_000, intervals: [1000] }).toBe('synced')

@@ -21,6 +21,9 @@ export interface AttachPorts {
   workspaceRegistry: unknown
   /** the host's `sessionQuery` service; absent ⇒ listing cannot be verified, said out loud */
   sessionQuery: unknown
+  /** the host's `sessionController` service; its `list()` is the surface the BROWSER reads.
+   *  Absent ⇒ the gateway half of the verification is UNVERIFIED, said out loud. */
+  sessionController?: unknown
   /** the diagnostics seam (`src/diag.ts`): sink + logger, never throws */
   diagnostic(where: string, message: string, error?: unknown): void
   childId: string
@@ -35,6 +38,10 @@ export interface AttachOutcome {
   attached: boolean
   /** it appears in the session list. `undefined` = UNVERIFIABLE, which is NOT `true`. */
   listed: boolean | undefined
+  /** it appears in the GATEWAY list the browser renders and opens from. `undefined` = unverified.
+   *  Written as `| undefined` deliberately: this repo compiles with
+   *  `exactOptionalPropertyTypes`, where `?: boolean` forbids assigning undefined. */
+  gatewayListed?: boolean | undefined
   /** user-visible words for anything short of attached+listed — these reach the door result */
   warnings: string[]
 }
@@ -105,7 +112,33 @@ export async function attachCreatedChild(ports: AttachPorts): Promise<AttachOutc
       ports.diagnostic('attach:verify', reason, error)
       return { attached: true, listed: undefined, warnings: [reason] }
     }
-    if (ids.includes(ports.childId)) return { attached: true, listed: true, warnings: [] }
+    if (ids.includes(ports.childId)) {
+      // Listed by PERSISTENCE is not the same claim as listed to the BROWSER. The gateway's
+      // `sessionController.list()` is the surface the client renders and can `open()` against,
+      // and on 0.2.0-rc.2 a plugin-created child was present in one and absent from the other
+      // (measured: the door's roster note said `MISSING, 1 sessions` while `listSessions`
+      // listed it) — so a single boolean would have called that a success.
+      const sc = ports.sessionController as { list?: () => Promise<Array<{ sessionId?: string, header?: { id?: string } }>> } | undefined
+      if (typeof sc?.list !== 'function') {
+        // Silence here is what cost a round of the 0.2.x hunt: "no warning" got read as "the
+        // gateway lists it". An unverified surface is a STATE and must be delivered as one.
+        const reason = `child ${ports.childId} is listed in the durable session corpus, but its presence in the gateway (browser) session list could not be verified — no "sessionController" service to ask`
+        ports.diagnostic('attach:gatewayList', reason, `resolved=${shape(ports.sessionController)}`)
+        return { attached: true, listed: true, gatewayListed: undefined, warnings: [reason] }
+      }
+      let gids: string[] = []
+      try {
+        gids = (await sc.list() ?? []).map((r) => r?.sessionId ?? r?.header?.id ?? '')
+      } catch (error) {
+        const reason = `child ${ports.childId} is listed, but the gateway session list could not be verified: ${String((error as Error)?.message ?? error)}`
+        ports.diagnostic('attach:gatewayList', reason, error)
+        return { attached: true, listed: true, gatewayListed: undefined, warnings: [reason] }
+      }
+      if (gids.includes(ports.childId)) return { attached: true, listed: true, gatewayListed: true, warnings: [] }
+      const reason = `child ${ports.childId} is in the durable session list but NOT in the gateway's session list (sessionController.list returned ${String(gids.length)} sessions) — the browser cannot show or open it, so the door will not be able to switch`
+      ports.diagnostic('attach:gatewayList', reason, `gateway=${gids.slice(0, 4).join(',')}`)
+      return { attached: true, listed: true, gatewayListed: false, warnings: [reason] }
+    }
     if (Date.now() + intervalMs > deadline) {
       const reason = `child ${ports.childId} was attached but does not appear in the session list within ${String(budgetMs)}ms (${String(ids.length)} sessions listed) — the archive is durable; the sidebar may not show it`
       ports.diagnostic('attach:verify', reason, `listed=${ids.slice(0, 4).join(',')}`)
