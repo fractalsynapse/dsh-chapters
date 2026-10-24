@@ -39,7 +39,13 @@ export default async function setup(fullConfig?: {
     // happening or not happening. Set per project in the test:e2e chain.
     ...(process.env.E2E_NO_AUX_MODEL === '1' ? { noAuxModel: true } : {}),
   }
-  if (process.env.E2E_ENRICH === '1') pins.enrichment = true
+  // #90: assigned in BOTH states. The enrich/heavy legs opt in explicitly; every other leg opts OUT, so
+  // the idle-triggered ladder can never race the tape. Measured cause: `suite` replay missed on a
+  // 1-message annotation request that the record run never made inside its window — replay is served
+  // from tape and finishes in seconds, so an idle debounce that expired after teardown at record fires
+  // mid-leg at replay. Identical product behavior, different tape, and a miss that looks like a matcher
+  // bug. Leaving it unset would let the realm default (ON) decide, which is exactly the nondeterminism.
+  pins.enrichment = process.env.E2E_ENRICH === '1'
   // #71: the ghost journey boots WITH a defining model — the profile's local
   // fixture route, served in replay/record by the tape proxy (the scripted
   // upstream's `suggest` arm mints it on record). Absent ⇒ the config row is
