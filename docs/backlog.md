@@ -27,6 +27,15 @@ change, so a red replay means that flip must be reverted, not the tape widened.
    watch hosted acceptance. Only then: corpus commit + `CORPUS_HOST` re-lift, `coverage:e2e`,
    merge #89, rewrite #73's verification from those numbers.
 
+0b. **One sequencer at a time (#82, live lesson 2026-10-23).** Two detached helper scripts
+   (`var/after-pass.sh`, `var/after-pass2.sh`) were both waiting on "runner idle"; the first fired,
+   relaunched a full eight-leg pass against a build taken *before* the newest commit, and the second
+   would have stacked a competing cycle on top. Killed the duplicate. Rules now written into the tooling:
+   `run-decisive.sh` honors `DISTILL_PROJECTS` so a follow-up re-records only the legs that need a new
+   build, and a cycle script must `pgrep` for any live `distill|playwright|run-decisive` before starting.
+   Careful with `pgrep -f` patterns from inside a shell whose own command line contains the pattern — my
+   cleanup killed its own tool call.
+
 1. **#83 — the e2e specs have never been type-checked.** `npm run typecheck:e2e` (new, deliberately not
    in CI) reports **120 errors**: 39 wrong-arity calls, 12 cannot-find-name, 10 argument-type, 26
    un-narrowed `unknown`, 22 missing-lib, 3 phantom properties. Two bugs this week (a missing import,
