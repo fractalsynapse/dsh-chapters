@@ -17,7 +17,7 @@ import type { SessionEventLike } from './types.ts'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
-import { diagnosticNote, diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
+import { configureDiagnosticsCap, diagnosticNote, diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
 import { makeChildArchiveListener } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
@@ -61,6 +61,8 @@ export interface ChaptersRowConfig extends BasicCompactionConfig {
   openRequestCarryMaxChars?: number
   /** #78 A: defer a node relief cannot coexist with, after a measured decline. */
   lastResortArtifact?: boolean
+  /** #95 follow-up: sink size cap; 0 = uncapped. */
+  diagnosticsMaxBytes?: number
   chapterTokenTarget?: number
   toolResultDeferFloorTokens?: number
   mergeThreshold?: number
@@ -280,6 +282,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     openRequestCarryMaxChars: z.number().step(1).min(200).default(4000),
     /** #78 A: the last-resort deferral switch. Operator-visible, default on. */
     lastResortArtifact: z.boolean().default(true),
+    /** #95 follow-up: diagnostics sink cap, bytes. 0 = uncapped. */
+    diagnosticsMaxBytes: z.number().step(1).min(0).default(8388608),
     chapterTokenTarget: z.number().step(1).min(1),
     toolResultDeferFloorTokens: z.number().step(1).min(0),
     // The composition knobs ride the same row so the engine path and the fork
@@ -364,7 +368,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, lastResortArtifact, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, lastResortArtifact, diagnosticsMaxBytes, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
@@ -392,6 +396,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
       openRequestCarryMaxChars: openRequestCarryMaxChars ?? 4000,
       lastResortArtifact: lastResortArtifact ?? true,
+      diagnosticsMaxBytes: diagnosticsMaxBytes ?? 8388608,
       chapterTokenTarget: chapterTokenTarget ?? 8000,
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
@@ -405,6 +410,9 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       planCheckpointChars: planCheckpointChars ?? 1600,
       elicitedPlot: elicitedPlot ?? true,
     }
+    // The realm row is a second place the cap can legitimately come from (a plugin plane may boot before
+    // any session exists). Applying it here means the first door writes with the row's value.
+    configureDiagnosticsCap(this.chaptersConfig.diagnosticsMaxBytes)
     this.syncDebounceMs = syncDebounceMs ?? 30000
     this.vocabCfg = { apply: vocabApply ?? false, coMin: vocabCoMin ?? 3, overlapMin: vocabOverlapMin ?? 0.5 }
     this.enrichCfg = {
@@ -875,7 +883,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       }).llm
       if (route === null || meter === undefined || typeof llm?.resolveModelInfo !== 'function') return 0
       const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
-        { context?: { contextWindow?: number, maxTokens?: number } } | undefined
+        { context?: { contextWindow?: number, maxTokens?: number }, defaultMaxTokens?: number } | undefined
       const base = this as unknown as { config?: { retainRatio?: number, retainTokens?: number, maxTokens?: number } }
       // Quiet unless there is a problem to solve. Relief declines on EVERY ordinary pre-step because
       // the surface is below the trigger, and the first two notes this feature ever emitted were that
@@ -888,7 +896,12 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       const overTrigger = Number.isFinite(surfaceNow) && Number.isFinite(windowNow)
         && typeof ratioNow === 'number' && surfaceNow > windowNow * ratioNow
       const retainTokens = base.config?.retainTokens
-      const reserved = Number(info?.context?.maxTokens ?? base.config?.maxTokens ?? NaN)
+      // The host builds model-info as `{ context: { contextWindow }, ...defaultMaxTokens ? { defaultMaxTokens } : {} }`
+      // — read out of the pinned bundle today. `defaultMaxTokens` is a SIBLING of `context`, so the previous line
+      // read a field that never exists, fell through to the base config's `maxTokens` (65,536: a routing
+      // headroom, `resolveConfig` defaults it from `headroomTokens`), and made the ceiling negative forever. The
+      // model's real output budget is 15,000 here, which is what makes `window − retain − reserved` derivable.
+      const reserved = Number(info?.defaultMaxTokens ?? info?.context?.maxTokens ?? base.config?.maxTokens ?? NaN)
       const ceiling = lastResortCeilingTokens({
         windowTokens: Number(info?.context?.contextWindow ?? NaN),
         retainRatio: Number(base.config?.retainRatio ?? NaN),
