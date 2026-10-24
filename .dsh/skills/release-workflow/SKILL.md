@@ -111,7 +111,14 @@ v0.1.19       ❌ WRONG — no 'v' prefix, ever
 - The `package.json` version field matches exactly: `"version": "0.1.19"`
 - Development/prerelease tags use `-dev.<N>` suffix: `0.2.0-dev.1`, `0.2.0-dev.2`
 - Bump rules: breaking change → major, new feature → minor, fix/chore/docs → patch
-- Never reuse a tag. If a tag was pushed incorrectly, delete it (`git tag -d X.Y.Z && git push origin :refs/tags/X.Y.Z`) before creating the correct one.
+- **A pushed tag is immutable — never delete or move one.** A release number names exactly one commit
+  forever, the way a chapter's identity is `(number, sha256)` and never the number alone. If a tag was
+  pushed and the release failed or was wrong, **cut a new version** (next patch, or `X.Y.Z-dev.N` for a
+  prerelease) and leave the bad one in place with a note on the release/issue saying why it is dead.
+  Deleting a tag is legitimate ONLY while it is still local — before `git push --tags` ever ran.
+  (This replaces an instruction that said to delete bad tags, which was followed in good faith on
+  2026-10-24 when `0.2.0` first hit a failing publish gate; a pinned row now guards the wording,
+  `tests/unit/release-tag-immutability.test.ts`.)
 - Always verify the tag format BEFORE pushing: `git tag -l | tail -5`
 
 ## Issue Guidelines
@@ -510,7 +517,7 @@ The type prefix (`feat`, `fix`, `refactor`, `test`, `docs`, `chore`) drives rele
 | Open release candidate | `gh pr create --base main --head staging --title "RC: X.Y.Z"` |
 | Merge RC to main | `gh pr merge <N> --merge` |
 | Tag a release | `git tag -a X.Y.Z -m "message" && git push origin main --tags` |
-| Delete a bad tag | `git tag -d X.Y.Z && git push origin :refs/tags/X.Y.Z` |
+| Tag was wrong AFTER push | cut a new version (`0.1.26`, or `0.2.1-dev.1`); never delete/move the pushed tag — local-only tags may be deleted |
 | Emergency hotfix | Branch from main → PR to main → fast-gate → merge → tag → sync staging |
 | View failed CI logs | `gh run view <id> --log-failed` |
 | List open issues | `gh issue list --state open` |
