@@ -12,8 +12,9 @@ Knowledge pool, providers, search, rules, enrichment mechanics → `docs/knowled
 site Part III. Host API facts incl. exact file:line → `docs/contract.md`. Compaction seam →
 `docs/host-compaction-seam.md`. Build/test loop + tape system → `docs/development.md` + site §24.
 Claims & verification procedures → `docs/verify.md`. Transport truth table → `docs/provider.md`.
-Prompt recommendations / composer ghost layer / `/chapters-prompt` → site §28 +
-`docs/contract.md` § Composer Ghost Layer (measured host facts; pull transport, push on 0.2.x).
+Prompt recommendations / the Suggested Next Step bar / `/chapters-prompt` → site §28 +
+`docs/contract.md` § "Suggested Next Step bar" (interface lock) and § "Composer Ghost Layer"
+(superseded surface, kept for its MEASURED host facts: dock vs overlay, slot kit, `inputActions`).
 Session plans in chapters / the ACTIVE PLAN line / `kind: plan` documents / seeded plan mode / findability → `docs/plans-carriage.md` (+ the corpus amendments in `docs/knowledge-repo.md`).
 Project history — what was built, measured, proven by which round → `docs/project-state.md` (reference, not a rule surface)
 Open items / what a fresh session should pick up next → `docs/backlog.md` (NOTE: `tsconfig.json` excludes `src/client/` — the client plane is checked by `npm run typecheck:client` (`tsconfig.client.strict.json`), which CI runs beside `typecheck` (#71); keep both green) (scoped, with the traps already fixed on main).

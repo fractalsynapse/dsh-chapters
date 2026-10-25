@@ -512,6 +512,11 @@ not stylistic:
   a plain function callable **without an agent turn** — build that seam in Phase 1, not Phase 5, or the
   UI and automatic paths both force a rewrite.
 
+> **SUPERSEDED as a surface by § "Suggested Next Step bar" below** (#113, chip removed in #114). The facts in
+> this section stay authoritative and are the reason the replacement is a docked row: the overlay geometry,
+> the non-writable placeholder, and `inputActions.setDraft`/`submit` were all measured here first. Reviving an
+> overlay must answer all four defects #113 recorded, with measurements.
+
 ## Composer Ghost Layer — measured host facts (#71, verified 2026-10-21 against `examples/dsh` @ 0.2.1-rc.2; runtime pin 0.2.0-rc.2, compile deps still 0.1.5-rc.2)
 
 The prompt-recommendation feature renders a ghost layer in the composer. What the host does
