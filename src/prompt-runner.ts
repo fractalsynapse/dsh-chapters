@@ -31,6 +31,13 @@ export interface PromptRunnerDeps {
   eligible: (session: { id: string; header?: Record<string, unknown> }) => boolean
   store: { mutate(sessionId: string, fn: (state: SessionState) => SessionState): Promise<unknown> }
   generate: (session: { id: string; header?: Record<string, unknown> }, turnSeq: number) => Promise<GenerateOutcome>
+  /**
+   * Called after a `ready` offer is durably written, with the state as written. The autorun loop rides this
+   * rather than polling the row: firing on a persisted offer is what makes "the offer the human would have
+   * seen" and "the offer that ran" the same fact, and a loop that fires from its own memory can outrun the
+   * row it is supposed to be showing.
+   */
+  onReady?: (sessionId: string, state: PromptSuggestionState) => void
   now: () => string
   log?: (message: string) => void
   warn?: (message: string) => void
@@ -72,6 +79,7 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
           if (out.ok && typeof out.text === 'string' && out.text !== '') {
             await write(id, { status: 'ready', text: out.text, turnSeq, error: '', at: deps.now() })
             deps.log?.(`prompt: recommended next step ready for ${id} (turn ${String(turnSeq)})`)
+            deps.onReady?.(id, { status: 'ready', text: out.text, turnSeq, error: '', at: deps.now() })
             return
           }
           if (out.quiet === true) {

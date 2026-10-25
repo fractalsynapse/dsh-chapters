@@ -105,3 +105,16 @@ export interface PromptSuggestionState {
 }
 
 export const noSuggestion: PromptSuggestionState = { status: 'off', text: '', turnSeq: null, error: '', at: '' }
+
+/**
+ * What the Suggested Next Step bar can ask the server for (#113), and the single shape the command plane
+ * exposes to the client. Kept next to `PromptSuggestionState` rather than in the loop module because the bar
+ * and the row are the same contract — a client that can read it can render it.
+ */
+export interface PromptBarAccess {
+  read(sessionId: string): Promise<PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }>
+  setAutorun(sessionId: string, on: boolean): { autorun: 'armed' | 'disarmed'; fired: number }
+  disarmHuman(sessionId: string): void
+  setOff(sessionId: string): Promise<void>
+  setOn(sessionId: string): Promise<void>
+}

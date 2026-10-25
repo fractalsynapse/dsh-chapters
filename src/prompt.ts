@@ -45,7 +45,7 @@ export interface PromptRoute { provider: string; model: string }
  * human-facing command, or the refusal text being machine-tagged. Decided deliberately, not by prose-prefix
  * matching — see #113.
  */
-export interface PromptSuggestionResult { ok: boolean; text: string; quiet?: boolean }
+export interface PromptSuggestionResult { ok: boolean; text: string; /** 'nothing to recommend' when quiet; otherwise what went wrong — the bar shows it (#61). */ quiet?: boolean; reason?: string }
 
 /** What the surface will and won't accept, for a caller that must REPORT it (the command block, #113). */
 export interface PromptLimits { maxChars: number; contextChars: number }
@@ -77,7 +77,7 @@ export interface PromptDeps {
 
 /** A live session as the command hands it over: id, an optional title, and the
  *  surface events (what the working model sees — the same view the defining model reads). */
-export interface SuggestSession { id: string; title?: string | undefined; events: SessionEventLike[] }
+export interface SuggestSession { id: string; title?: string | undefined; events: SessionEventLike[]; /** #113: when a goal governs the session, the constraint on the next step — see `goalDirectiveOf`. Text, not a goal object: goal semantics stay in one module. */ goalDirective?: string | undefined }
 
 /** The surface the host command and `/chapters-status` speak to. */
 export interface PromptSurface {
@@ -85,6 +85,8 @@ export interface PromptSurface {
   effective(): { spec: string; source: 'override' | 'config' | 'unset' }
   setModel(spec: string | null): Promise<void>
   suggest(session: SuggestSession): Promise<PromptSuggestionResult>
+  /** #113: the Suggested Next Step bar's server-side access — the row plus the process-local loop flags. */
+  bar?: import('./prompt-state.ts').PromptBarAccess
   /** the configured caps, so an output can state the number it validated against */
   limits(): PromptLimits
   /** One line for /chapters-status — ON names the model, OFF names the command. */
@@ -138,6 +140,8 @@ export function tailFromEvents(events: SessionEventLike[]): { role: 'user' | 'as
 }
 
 export interface SuggestFacts {
+  /** #113: the active goal's constraint on the next step, already worded. Absent ⇒ no goal block. */
+  goalDirective?: string | undefined
   title?: string | undefined
   chapters: { number: number; title: string; summary: string }[]
   tail: { role: 'user' | 'assistant'; text: string }[]
@@ -167,6 +171,12 @@ export function buildSuggestInput(facts: SuggestFacts, capChars: number, maxChar
       head,
       '',
       `## Session${facts.title !== undefined && facts.title !== '' ? `: ${facts.title}` : ''}`,
+      // #113: the goal is stated BEFORE the history, because it is the thing that decides whether a candidate
+      // next step counts as progress. A suggestion that ignores an active goal is noise, and the maintainer's
+      // rule is that the two compose — so the constraint is not a footnote after the tail.
+      ...(facts.goalDirective !== undefined && facts.goalDirective !== ''
+        ? ['', facts.goalDirective, '']
+        : []),
       '',
       chapters.length > 0 ? '## Where it has been (chapters)' : '## Where it has been (no chapters yet)',
       ...chapters.map((c) => `${c.number}. ${c.title} — ${c.summary}`),
