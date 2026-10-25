@@ -677,3 +677,34 @@ also disarms autorun, while generation continues on later turn boundaries; re-ar
 `promptModel` remains the single switch (empty ⇒ no bar, no calls, no cost) — the model *is* the enable.
 `promptAutorunDefault` (bool, **false**) decides only whether a fresh session starts armed; nothing autoruns
 that a human did not opt into.
+
+### Where the goal's loop actually lives, and what that changes for us (measured 2026-10-25)
+
+The second probe corrected two things I had assumed, and one thing I had written:
+
+- **The goal loop has no timer.** `dsh-goal-round-driver` chains turns off `agent/status === "idle"` and
+  `goal/changed`, coalesced into one serialized task per agent, and starts the next turn with
+  `agent.followup(createUserMessage({…, source:{kind:'goal', goalId, revision, round}}))`. It stops **silently**
+  unless `phase === "active" && activation === "armed"`.
+- **`activation` is process-local and starts disarmed.** On mount the driver disarms every agent, and
+  `agent/created` disarms new ones; only a human `ctx.goals.resume` re-arms. A loop cannot survive a restart
+  on its own.
+- **A plugin may read the goal through the host, not just the log**: `ctx.get('goals').get(agent)` → `GoalView`
+  (adds `roundsStarted` + `activation`), or `ctx.sessionProjections.stateOf(session, 'goal')`. `readActiveGoal`
+  remains for log-only paths (repair, distill, tests).
+- **Trap that governs our authorship**: two invariant companions re-fold the goal stream and
+  `deepEqual`-check every `source.kind:'goal'` message against the package-owned `<goal_round>` template. So
+  **we never author as `goal`** — impersonating that kind is a loud invariant failure by design.
+
+**Decision this forces (and the one I'm making, since it is a semantics choice, not a style one).** Run and
+Autorun are different acts and must not share a mechanism:
+
+| control | mechanism | durable effect | survives a closed tab? |
+|---|---|---|---|
+| **Run** (a button the human pressed) | client `setDraft` + `submit` | an ordinary **human** `user/message` (`source.kind:'user'`) | no — and correctly so |
+| **Autorun** (a loop the human opted into) | server-side `agent.followup(...)` with our **own** producer kind `plugin:dsh-chapters` | a plugin-authored message, screened like a notice, never counted as human input | the loop itself is process-local and **disarms on restart**, mirroring the goal |
+
+That split is what makes it goal-shaped *and* honest: the suggestion reaches the model with the session's full
+tool capability (it is a real turn, not a browser trick), while nothing we generate can masquerade as the
+human typing it. Autorun defaulting off, and being off after any restart, is a safety property inherited from
+the goal driver rather than a limitation to apologize for.

@@ -29,9 +29,18 @@ const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0
  * The newest goal declaration in the events, or null when the session has no goal.
  *
  * A malformed or partial row is SKIPPED rather than thrown on: this is host-authored data crossing a plugin
- * boundary, and one unexpected row must not take the bar (or the archive) down with it. Operations that end
- * the purpose — `complete`, and either spelling of removing it, because the bundle I could read showed
- * `create`/`resume`/`pause` and the terminal spellings are NOT established — report `complete`/`none`.
+ * boundary, and one unexpected row must not take the bar (or the archive) down with it.
+ *
+ * The operation vocabulary is now established from the shipped types — `GoalOperation =
+ * 'create'|'edit'|'pause'|'resume'|'complete'|'block'|'clear'` (`dsh-goal/lib/types/domain.d.ts:12`) — so
+ * `clear` (which carries `cleared: GoalRef`, not `goal`) is the real terminal removal. `delete`/`remove` are
+ * still accepted defensively: when I first wrote this I could not see the type, and a reader should not have
+ * to trust that a host rename would not silently resurrect a finished goal.
+ *
+ * LIVE reads should prefer the host's own accessors over this fold — `ctx.get('goals').get(agent)` for a
+ * `GoalView` (which also carries `roundsStarted` and the process-local `activation`), or
+ * `ctx.sessionProjections.stateOf(session,'goal')` the way `tools.ts` already reads `agentPreset`. This
+ * function exists for the paths that have only the log: repair, distill, and tests.
  */
 export function readActiveGoal(events: readonly SessionEventLike[]): ActiveGoal | null {
   let current: ActiveGoal | null = null

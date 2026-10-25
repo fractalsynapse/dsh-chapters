@@ -28,7 +28,7 @@ test('completion and removal end the loop; active authorizes it', () => {
   assert.equal(goalAuthorizesAutorun(readActiveGoal([gc(1, 'create', GOAL)])), true)
   for (const op of ['clear', 'delete', 'remove'])
     assert.equal(readActiveGoal([gc(1, 'create', GOAL), gc(2, op, {})]), null,
-      `removal spelling '${op}' must end the goal — the terminal operation names are not established in the bundles I could read, so all three are handled rather than one assumed`)
+      `removal spelling '${op}' ends the goal — 'clear' is the real one per dsh-goal's GoalOperation; delete/remove stay handled because a host rename must not resurrect a finished goal`)
 })
 
 test('host rows that surprise us are skipped, never fatal', () => {
