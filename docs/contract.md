@@ -613,3 +613,67 @@ load-bearing, not historical:
 `fn` must apply its change to the row it is handed and may not return a captured snapshot — a
 `mutate(id, () => snapshot)` is a stale `put` with better branding (fixed once already in `repair-run.ts`
 for the hollow-payload supersede).
+
+## Suggested Next Step bar — interface lock (#113, builds on the measured goal-bar facts above)
+
+A composer dock row that, once per **completed turn**, generates a fresh prompt suggestion and offers
+**Run · Autorun · Off**. Modelled on the goal bar because the goal bar is tested and already fits — and the
+mechanical parallel is exact: *a goal re-injects the same directive every turn until the model stops; a
+suggestion re-derives a new directive every turn until the human stops it.*
+
+**Measured anchors for every claim below are in the section above** (dock slot, ordering, anatomy, hiding
+rules, `hooks:` observables, `remote.commands.execute` as the only plugin-reachable call path).
+
+### State, and who owns it
+
+| field | owner | values |
+|---|---|---|
+| `status` | server, persisted per session | `off` \| `analyzing` \| `ready` \| `failed` |
+| `text` | server | the suggestion, verbatim, never truncated (`promptMaxChars` is a **refusal** cap) |
+| `turnSeq` | server | the `turn/end` seq the suggestion was generated **for** — the identity of an offer |
+| `autorun` | client, process-local (exactly like the goal's `activation`) | `armed` \| `disarmed` |
+| `expanded` | client, per-mount | `false` collapsed one line · `true` full text shown |
+
+The durable pair (`status`, `turnSeq`) is the server's one-generation-per-turn key; the local pair
+(`autorun`, `expanded`) is transient UI intent and is never persisted — same split the goal bar uses
+between `goal.phase` and `activation`.
+
+### Dock placement
+`conversation.input.dock`, `order: 30` — after todo `0`, goal `10`, queue `20` (ascending sort), so it sits
+**under all other dock entries and directly above the composer card**, which is what "right above the chat
+input" means in this host. It is a docked row, never an overlay, so it cannot cover the placeholder.
+
+### Label and visibility (two fields decide both, as with the goal)
+- `analyzing` → **`Analyzing situation…`**
+- `ready` → **`Recommended Next Step`**
+- `failed` → **`Recommended Next Step`** *plus* an error span (`role="alert"`) naming the reason and code — a
+  detected failure must be a delivered failure (#61); nothing is silently blank.
+- `off`, or a **quiet** refusal (nothing to recommend yet) → renders **nothing**. A refusal is not an error,
+  and shouting it was defect #2 of the removed ghost.
+- Also renders nothing while the session zone is absent, and keeps a just-turned-off guard so it cannot
+  flicker back before the server state catches up (the goal's `clearedGoalId` trick).
+
+### Interactions
+1. **Click the prompt (collapsed)** → expand; full text shown in the same strip.
+2. **Click the prompt (expanded)** → `inputActions.setDraft(text)`: the draft is *replaced*, editable, and
+   nothing is sent. No `Edit`-button fallback unless a browser pass proves the click is captured by the host
+   editor — and if so the fallback is the goal's inline swap, which is already the house pattern.
+3. **Run** → `setDraft(text)` then `submit()`, in that order, so what goes out is visible in the composer
+   first and lands in the durable log as an ordinary **human** message.
+4. **Autorun / Autorun off** → toggles the process-local `armed`/`disarmed`. While armed, after each
+   completed turn the bar pulls, and on `ready` performs the Run path by itself.
+5. **Off** → server `status: 'off'`; generation stops, the row disappears, the configured model is kept so
+   turning it back on is one click.
+
+### Goal composition (per the maintainer's spec, which corrects my first plan)
+Autorun **runs alongside** an active goal — it does not stand aside. The suggested prompt is always generated
+*with the goal in view*: the server reads the newest `goal/change` from the session and feeds the live
+objective into the recommendation, with the directive that the next step must advance an active goal.
+**When the goal completes (or is cleared/paused out of `active`), autorun disarms itself** — the suggestion
+loop yields the stage back to the human at the moment the purpose it was serving is finished. A human prompt
+also disarms autorun, while generation continues on later turn boundaries; re-arming is a human act.
+
+### Enabling
+`promptModel` remains the single switch (empty ⇒ no bar, no calls, no cost) — the model *is* the enable.
+`promptAutorunDefault` (bool, **false**) decides only whether a fresh session starts armed; nothing autoruns
+that a human did not opt into.
