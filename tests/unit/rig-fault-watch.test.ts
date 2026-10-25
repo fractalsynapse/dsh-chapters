@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { findRigFault, watchRigFault } from '../../tests/e2e/rig-fault.ts'
+import { findRigFault } from '../../tests/e2e/rig-fault.ts'
 
 const FAULT = '2026-10-25T02:00:00.000Z RIG-CAPABILITIES tape=suite missing=[chaptersRules] present=[deliverables] — see #108'
 
@@ -20,23 +20,9 @@ test('findRigFault reads the journal as a diagnosis stream (#108)', () => {
   assert.match(findRigFault('2026-1-1 PERSONA-MISMATCH tape=x'), /PERSONA-MISMATCH/, 'the persona refusal aborts too')
   assert.match(findRigFault('2026-1-1 PERSONA-RECORD-REFUSED tape=x'), /PERSONA-RECORD-REFUSED/, 'and the record refusal')
 })
-
-test('watchRigFault fires once, when the journal appears late (#108)', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rigfault-'))
-  const journal = path.join(dir, 'e2e-tape-misses.log')
-  const seen: string[] = []
-  const stop = watchRigFault(journal, (line) => { seen.push(line) })
-  try {
-    await new Promise((r) => setTimeout(r, 1200))
-    assert.deepEqual(seen, [], 'a journal that does not exist yet is not a fault')
-    fs.writeFileSync(journal, `2026-1-1 HIT tape=suite\n${FAULT}\n`)
-    const deadline = Date.now() + 6000
-    while (seen.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 200))
-    assert.equal(seen.length, 1, 'the fault is reported exactly once')
-    assert.match(seen[0]!, /RIG-CAPABILITIES/)
-    fs.appendFileSync(journal, `\n${FAULT}\n`)
-    await new Promise((r) => setTimeout(r, 1500))
-    assert.equal(seen.length, 1, 'and later lines do not re-fire the abort')
-    stop()
-  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
-})
+/**
+ * The late-creation and fire-once properties formerly tested here now live in
+ * `tests/unit/rig-fault-guard.test.ts`, which drives the single public entry point
+ * (`installRigFaultGuard`) and additionally pins stop-before-exit. One predicate, one place to test it —
+ * coverage moved, nothing was dropped.
+ */

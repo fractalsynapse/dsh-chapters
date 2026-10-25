@@ -1,7 +1,7 @@
 import { bootE2eServer, ROOT, type Pins } from './boot.ts'
 import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
 import path from 'node:path'
-import { watchRigFault } from './rig-fault.ts'
+import { installRigFaultGuard } from './rig-fault.ts'
 
 /**
  * One server per CONFIG LOAD (proven lifecycle: project setupFiles die with
@@ -62,11 +62,19 @@ export default async function setup(fullConfig?: {
   // The SAME root the boot uses for `journalPath` (boot.ts:315) — importing ROOT instead of recomputing it is
   // the difference between watching the journal the proxy writes and watching a path that exists nowhere.
   const journal = path.join(ROOT, 'var', 'e2e-tape-misses.log')
-  const stopWatch = watchRigFault(journal, (line) => {
-    console.error(`\n[e2e] RIG FAULT — aborting this leg instead of waiting out browser timeouts:\n  ${line}\n  journal: ${journal}`)
-    process.exit(1)
+  // Late-bound: the guard is installed BEFORE the boot so a stale fault cannot slip a leg past it, yet it
+  // must stop a server that does not exist at install time. `bootStop` fills in the instant the boot
+  // returns — and is AWAITED, because an abort that leaves the host on the leg's port makes the next leg
+  // die of "port already in use": a rig fault must never manufacture a flake (#108).
+  let bootStop: (() => Promise<void>) | null = null
+  const guard = installRigFaultGuard({
+    journal,
+    getStopBoot: () => bootStop,
+    exit: (code) => { process.exit(code) },
+    log: (m) => { console.error(`\n${m}\n  journal: ${journal}`) },
   })
 
   const handle = await bootE2eServer(port, pins)
-  return async () => { stopWatch(); await handle.stop() }
+  bootStop = async () => { await handle.stop() }
+  return async () => { guard(); await handle.stop() }
 }
