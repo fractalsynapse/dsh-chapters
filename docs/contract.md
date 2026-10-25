@@ -721,3 +721,45 @@ That split is what makes it goal-shaped *and* honest: the suggestion reaches the
 tool capability (it is a real turn, not a browser trick), while nothing we generate can masquerade as the
 human typing it. Autorun defaulting off, and being off after any restart, is a safety property inherited from
 the goal driver rather than a limitation to apologize for.
+
+### Goal ↔ suggestion authority and precedence — measured 2026-10-25, host 0.2.0-rc.2
+
+Read this before touching either loop. The two features start turns, and the host reserves *some* turns for
+humans. Facts, with anchors in `dsh-tool-goal/lib/index.js`:
+
+- **`hasDirectHumanInput(ctx, execution)`** = the agent is a runtime root **and** the open turn contains
+  `user/message` with `data.source.kind === 'user'` (:49-52). **`requireDirectHuman`** (:62-65) gates goal
+  `create`/`edit`/`pause`/`resume` — a model cannot re-cut a goal without a human turn in progress.
+- **`isMatchingGoalRound`** (:54-56) additionally grants *completion* authority to the exact admitted goal
+  round (`source.kind === 'goal'` with matching `goalId/revision/round`), so the worker may close the goal it
+  was handed — but not re-author it.
+
+Consequences for this plugin, in order of how much they matter:
+
+1. **A `Run`n suggestion is a human turn, so it CAN re-cut the goal.** The composer's `setDraft`+`submit`
+   produces `source.kind: 'user'`. This is the director path the maintainer is building: the big model writes
+   *"edit the goal to X, because step 2 of the plan showed Y"*, the human presses Run, and the worker now has
+   authority to edit the goal. Nothing about our authorship needs to change for this to work.
+2. **An autorun suggestion is NOT a human turn, so it MUST NOT try to edit the goal.** Our loop authors under
+   `plugin:dsh-chapters` (see above: faking `kind:'user'` here would be a privilege escalation — it would hand
+   an automated loop the authority the host deliberately reserves). So the host's refusal is the correct
+   behaviour, and the feature must respect it rather than route around it.
+3. **Therefore an offer carries an intent, and intent decides whether autorun may act on it.** The suggestion
+   model prefixes its answer: `GOAL:` = this step changes the standing objective → **never auto-run**; the bar
+   holds it for the human's keystroke and says why. Anything else = a worker step → auto-run is allowed.
+   The prefix is stripped before the prompt reaches the composer or the followup, so the worker never sees
+   protocol scaffolding.
+4. **Exactly one thing may start a turn at a boundary.** The host goal driver queues a round on
+   `agent/status === 'idle'` when `phase === 'active' && activation === 'armed'`. If our loop also followed
+   up, the session would start two turns per idle edge — a race against the driver's own reservation fence.
+   So when the service reports the goal `active` **and** `armed`, the suggestion loop **yields**: it keeps
+   generating offers (that is the director's eye on the work) and runs none of them. It runs again when the
+   goal is `paused`, `blocked`, `complete`, disarmed, or absent.
+   Activation is process-local and reachable only through the service (`ctx.get('goals').get(agent)` →
+   `GoalView.activation`), never from the log — that read is the point, not a convenience.
+5. **A goal edit invalidates the offer made under the old revision.** `revision` bumps exactly +1 per
+   accepted mutation, so the loop compares the revision it generated against and refuses to run a stale one
+   instead of pushing last cycle's directive into a re-cut objective.
+
+This is the shape of the pair: the **goal** is the thing the human owns and re-cuts, the **suggestion** is the
+thing the director model re-derives every turn. Autorun drives the worker; the keystroke drives the objective.
