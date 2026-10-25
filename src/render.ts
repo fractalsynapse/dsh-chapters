@@ -138,16 +138,36 @@ export function validateRanges(
  * The field held an 89,982-token chapter, an unrepaired 237,870-token orphan and eleven over 32K.
  */
 export function oversizeRanges(
-  rendered: readonly { range: ChapterRange; stats: { estimatedTokens: number } }[],
+  rendered: readonly { range: ChapterRange; stats: { estimatedTokens: number; events?: number | undefined } }[],
   chapterTokenTarget: number,
   oversizeFactor: number,
-): string[] {
+): { errors: string[]; indivisible: string[] } {
   const ceiling = Math.floor(chapterTokenTarget * oversizeFactor)
-  return rendered
-    .filter((r) => r.stats.estimatedTokens > ceiling)
-    .map((r) => `"${r.range.title}" (seqs ${r.range.startSeq}-${r.range.endSeq}) rendered ${r.stats.estimatedTokens} est tokens, `
-      + `over the hard oversize ceiling ${ceiling} (= chapterTokenTarget ${chapterTokenTarget} × ${oversizeFactor}) `
+  const errors: string[] = []
+  const indivisible: string[] = []
+  for (const r of rendered) {
+    if (r.stats.estimatedTokens <= ceiling) continue
+    // #117: the escape valve. A range holding MORE THAN ONE event can be split, so exceeding the ceiling is
+    // the caller's mistake and stays a refusal. A range holding exactly ONE event cannot be reduced by any
+    // boundary choice — the event is the atom — and refusing it means a long session becomes permanently
+    // un-compactable. Measured, not theorised: this session's `chapters_continue` was refused four times
+    // because one `command/done` event rendered 77,903 est tokens. Clipping remains forbidden, so the honest
+    // options were "archive it whole" or "never archive this session again".
+    //
+    // The result is a loud, counted warning rather than silence (#61): the chapter carries one event larger
+    // than the window it exists for, and a reader must be told that `read` must go back to it in slices.
+    if (r.stats.events === 1) {
+      indivisible.push(`chapter "${r.range.title}" is ONE indivisible event (seq ${String(r.range.startSeq)}) at `
+        + `${String(r.stats.estimatedTokens)} est tokens, over the hard oversize ceiling ${String(ceiling)} `
+        + '(= chapterTokenTarget ' + String(chapterTokenTarget) + ' × ' + String(oversizeFactor) + ') — archived whole, '
+        + 'because clipping is forbidden and no split can shrink a single event; reload it with read offset/limit')
+      continue
+    }
+    errors.push(`"${r.range.title}" (seqs ${String(r.range.startSeq)}-${String(r.range.endSeq)}) rendered ${String(r.stats.estimatedTokens)} est tokens, `
+      + `over the hard oversize ceiling ${String(ceiling)} (= chapterTokenTarget ${String(chapterTokenTarget)} × ${String(oversizeFactor)}) `
       + '— split at the next boundary; clipping is forbidden')
+  }
+  return { errors, indivisible }
 }
 
 /** Enumerate tool results in a range so the model can decide keep/defer against real sizes. */

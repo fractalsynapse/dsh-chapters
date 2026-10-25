@@ -320,9 +320,12 @@ export async function runContinue(
     .filter((r) => r.stats.overTarget)
     .map((r) => `chapter "${r.range.title}" is ${r.stats.estimatedTokens} est tokens over chapterTokenTarget — split at the next continuation, never clip`))
   // Same hard ceiling as the save door (#59), same ordering: refuse before anything is reserved.
-  const tooBig = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
-  if (tooBig.length > 0) {
-    throw new Refusal({ ok: false, reason: `ranges refused as oversize: ${tooBig.join('; ')}`, warnings })
+  const oversize = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  // A single indivisible event is not a refusal: it is delivered as a warning so the human can see the
+  // chapter that will need sliced reloads (#61), and the continuation goes ahead.
+  warnings.push(...oversize.indivisible)
+  if (oversize.errors.length > 0) {
+    throw new Refusal({ ok: false, reason: `ranges refused as oversize: ${oversize.errors.join('; ')}`, warnings })
   }
 
   const fs = ports.fs()
