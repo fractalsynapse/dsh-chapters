@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { initialBarState, promptBarReducer, barLabel, barVisible, shouldAutoFire } from '../../src/client/prompt-bar.ts'
+import { barLabel, barVisible, initialBarState, parseBarAutorun, parseBarState, promptBarReducer, shouldAutoFire } from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -72,4 +72,42 @@ test('off hides and keeps the model, so back-on is one action', () => {
   assert.equal(barVisible(off), false)
   assert.equal(off.status, 'off')
   assert.equal(off.text, null, 'the stale offer is dropped, not kept out of sight to be resumed later')
+})
+
+test('the state payload parses without guessing at what it did not say', () => {
+  const ready = [
+    'suggested next step: ready',
+    '  model: local/qwen (config) — one offer per completed turn',
+    '  autorun: armed (2 round(s) started this process)',
+    '  turn: 41',
+    '  prompt:',
+    '    Land #114 and cut 0.2.2.',
+    '    Then wire the docked bar.',
+  ].join('\n')
+  const ev = parseBarState(ready)
+  assert.ok(ev && ev.t === 'polled')
+  assert.equal(ev.status, 'ready')
+  assert.equal(ev.turnSeq, 41)
+  assert.equal(ev.text, 'Land #114 and cut 0.2.2.\nThen wire the docked bar.', 'multi-line prompt rejoined, indent stripped')
+  assert.equal(parseBarAutorun(ready), 'armed')
+
+  const failed = ['suggested next step: failed', '  turn: 12', '  error: no route for the suggestion model'].join('\n')
+  const fev = parseBarState(failed)
+  assert.ok(fev && fev.t === 'polled')
+  assert.equal(fev.status, 'failed')
+  assert.equal(fev.error, 'no route for the suggestion model', 'the reason survives the wire (#61)')
+
+  // Absence is not a state. A payload we cannot read must NOT become `off` — that would hide a bar whose
+  // server is merely mid-reply, which is the "silence where there should be a fact" class again.
+  assert.equal(parseBarState('some other command output'), null)
+  assert.equal(parseBarAutorun('no autorun line here'), null)
+})
+
+test('a parsed payload drives the same reducer the component uses', () => {
+  const ev = parseBarState('suggested next step: ready\n  turn: 7\n  prompt:\n    Go on.')
+  assert.ok(ev)
+  const s = promptBarReducer(initialBarState(), ev)
+  assert.equal(barLabel(s), 'Recommended Next Step')
+  assert.equal(s.text, 'Go on.')
+  assert.equal(s.turnSeq, 7)
 })

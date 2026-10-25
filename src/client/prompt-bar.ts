@@ -101,3 +101,53 @@ export function shouldAutoFire(s: PromptBarState): boolean {
   if (s.hiddenTurnSeq !== null && s.hiddenTurnSeq === s.turnSeq) return false
   return true
 }
+
+/** The command the bar pulls. One string, so the client and the command plane cannot drift silently. */
+export const BAR_STATE_COMMAND = '/chapters-prompt state'
+
+/**
+ * Parse the `state` verb's `k: v` lines into a pull event.
+ *
+ * One output serving the human and the component is the design (see `docs/contract.md`); this function is
+ * the cost of that choice, and it is kept honest: an unrecognised line is IGNORED, not guessed at, and a
+ * payload that yields no `status` is `null` so the caller keeps its last state rather than inventing `off`
+ * (which would hide a bar that is merely mid-reply). Indentation and the prompt's own lines are the reason
+ * the prompt is collected separately from the scalar fields — it is the only multi-line value.
+ */
+export function parseBarState(text: string): PromptBarEvent | null {
+  const lines = text.split('\n')
+  const head = lines[0] ?? ''
+  const statusWord = head.startsWith('suggested next step:') ? head.slice('suggested next step:'.length).trim() : ''
+  const status = statusWord === 'off' ? 'off'
+    : statusWord === 'analyzing' ? 'analyzing'
+    : statusWord === 'ready' ? 'ready'
+    : statusWord === 'failed' ? 'failed'
+    : null
+  if (status === null) return null
+  const scalars: Record<string, string> = {}
+  const prompt: string[] = []
+  let inPrompt = false
+  for (const line of lines.slice(1)) {
+    if (inPrompt) { prompt.push(line.replace(/^ {4}/, '')); continue }
+    const m = /^ {2}([a-z]+): ?(.*)$/.exec(line)
+    if (m === null) continue
+    const key = m[1]!, value = m[2]!.trim()
+    if (key === 'prompt') { inPrompt = true; continue }
+    scalars[key] !== undefined ? (scalars[key] += ` ${value}`) : (scalars[key] = value)
+  }
+  const turnRaw = scalars['turn'] ?? ''
+  const turnSeq = /^\d+$/.test(turnRaw) ? Number(turnRaw) : null
+  const errorRaw = scalars['error'] ?? ''
+  return {
+    t: 'polled',
+    status,
+    ...(status === 'ready' ? { text: prompt.join('\n'), turnSeq } : {}),
+    ...(status === 'failed' ? { error: errorRaw, turnSeq } : {}),
+  }
+}
+
+/** The autorun flag, read from the same payload — the row is durable, the flag is not. */
+export function parseBarAutorun(text: string): 'armed' | 'disarmed' | null {
+  const m = /^ {2}autorun: (armed|disarmed)\b/m.exec(text)
+  return m === null ? null : (m[1] as 'armed' | 'disarmed')
+}

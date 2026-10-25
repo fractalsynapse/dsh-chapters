@@ -28,7 +28,8 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 // The host's own tooltip bubble — a platform module served by the loader table,
 // external like react. Every action in this row labels through it.
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import { DOOR_ACTIONS, makeDoorRunner, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
+import { PromptDock } from './prompt-dock.ts'
+import { DOOR_ACTIONS, makeDoorRunner, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -42,8 +43,7 @@ interface Ctx {
 
 // #77: `uiWorkspace` is not optional in practice — it owns `openSession(target)`, the verb the
 // host's own fork button uses (`ctx.uiWorkspace.openSession(childId)` in dsh-client-ui-chat).
-// `sessions` has no `open` at all, so without this row the door has never had a way to switch.
-export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
+// `sessions` has no `open` at all, so without this row the door has never had a way to switch.export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
 
 /** Props composed by the slot framework: owner (`messageId`) + our injected verb. */
 interface DoorActionProps {
@@ -164,4 +164,16 @@ export function apply(ctx: Ctx): void {
     order: door.order,
     inject: (sessionId: string) => ({ run: () => run(sessionId) }),
   }, component)))
+  slots.inject('conversation.input.dock', () => slots.register({
+    name: 'conversation.input.dock',
+    id: 'chapters-prompt',
+    // Under every other dock entry and directly above the composer card: todo 0, goal 10, queue 20, and the
+    // host sorts ascending by priority then order (measured in dsh-client-ui-slots).
+    order: 30,
+    inject: (sessionId: string) => ({
+      // The bar is a mouth for the command plane, and the ONE wire body in `doors.ts` carries it: a plugin has
+      // no declarable RPC namespace, so this pull transport is why the bar is push-shaped and pull-fed.
+      exec: (line: string) => runCommandText(remote, sessionId, line),
+    }),
+  }, PromptDock))
 }
