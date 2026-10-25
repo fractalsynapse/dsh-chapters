@@ -113,19 +113,24 @@ test('the e2e typecheck ratchet exists, is wired, and only ratchets down', () =>
 })
 
 /**
- * A gate may be weakened by decision, never by accident (#92). The row asserts the SHAPE of the
- * decision: exactly one job is advisory, it names the issue that authorized it, and the plane that
- * actually proves the code (typecheck/build/unit/integration, the drift gates) stays blocking. Without
- * this, `continue-on-error: true` would be a silent permanent condition — the same drift that let a
- * skipped journey look like a pass in the first place.
+ * A gate may be weakened by decision, never by accident (#92) — and a RETIRED weakening is a decision too,
+ * so this row now pins the stronger state: **no job in CI is advisory**. #92 made `acceptance` advisory
+ * while the corpus was un-anchored and recorded its own restore condition (the `suite`/`enrich`/`heavy`
+ * subset green in replay with `corpus:check` matching the build); 2026-10-24 measured all nine legs green
+ * plus that match, and PR #107 removed `continue-on-error`. Asserting `0` instead of "exactly one, cited"
+ * is deliberate: the row is red against the old file, so a silent re-advisory in either direction has to
+ * be argued with a measurement and an issue number, not shipped inside a workflow edit.
+ *
+ * The deterministic plane's assertion is kept even though it is now implied: it names WHY the rule exists
+ * (a skipped journey once looked like a pass), and if a future edit re-advisories one job, this line says
+ * which half of CI is not negotiable.
  */
-test('the advisory acceptance gate is scoped, sourced, and reversible (#92)', () => {
+test("no CI job is advisory: #92's restore condition was met and the gate is blocking (#92)", () => {
   const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
   const advisory = ci.split('\n').filter((l) => /continue-on-error:\s*true/.test(l))
-  assert.equal(advisory.length, 1, `exactly one job may be advisory, found ${String(advisory.length)}: ${JSON.stringify(advisiveTrim(advisory))}`)
-  assert.match(ci, /issues\/92/, 'the weakening must cite the decision that authorized it')
-  const acceptance = /acceptance[^\n]*\n[\s\S]{0,4000}?continue-on-error: true/.test(ci)
-  assert.ok(acceptance, 'and the advisory line must belong to the acceptance job, not to another')
+  assert.equal(advisory.length, 0, `no job may be advisory while the corpus is anchored and replay is green — re-advisoring needs a measurement and an issue, found ${String(advisory.length)}: ${JSON.stringify(advisiveTrim(advisory))}`)
+  assert.match(ci, /#92/, 'the retirement must cite the issue that authorized the advisory and defined its restore condition')
+  assert.match(ci, /corpus-anchored/, 'the gate still reads the corpus-anchor probe, so an un-anchored corpus is refused rather than quietly red')
   const deterministic = ci.slice(ci.indexOf('typecheck · build · unit + integration'), ci.indexOf('acceptance'))
   assert.doesNotMatch(deterministic, /continue-on-error/, 'the deterministic plane is never advisory')
 })
