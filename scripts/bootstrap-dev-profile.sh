@@ -49,6 +49,20 @@ TARBALL="$(cd "$ROOT" && npm pack --pack-destination "$PROF_ABS" 2>/dev/null | t
 node -e '
   const fs = require("node:fs")
   const [root, home, tarball] = process.argv.slice(1)
+  // #108: the peers our plugin needs must resolve INSIDE the profile, or the mount isolation just breaks the
+  // rig instead of fixing it (measured: with the tarball mount the profile held 0 @deepseek-ai packages and
+  // every host import was UNRESOLVABLE from the plugin). Versions come from the hermetic lock, one per name,
+  // so the profile resolves exactly what the pinned host carries — no developer tree anywhere in the chain.
+  const lockNm = root + "/dev/dsh-host-lock/node_modules"
+  const pluginPkg = JSON.parse(fs.readFileSync(root + "/package.json", "utf8"))
+  const peers = Object.keys(pluginPkg.peerDependencies ?? {})
+  const pinned = {}
+  for (const name of peers) {
+    let v = null
+    try { v = JSON.parse(fs.readFileSync(lockNm + "/" + name + "/package.json", "utf8")).version } catch { /* not in the lock */ }
+    if (v === null) throw new Error(`bootstrap-dev-profile: peer ${name} is not installed in dev/dsh-host-lock — run (cd dev/dsh-host-lock && npm ci)`)
+    pinned[name] = v
+  }
   const file = home + "/profiles/web/package.json"
   let pkg = { name: "dsh-profile-web", private: true, dependencies: {} }
   try { pkg = JSON.parse(fs.readFileSync(file, "utf8")) } catch { /* fresh profile */ }
@@ -56,6 +70,8 @@ node -e '
   pkg.dependencies ??= {}
   // a relative `file:` resolves against this package.json, i.e. the profile directory itself
   pkg.dependencies["@treeseed/dsh-chapters"] = "file:" + tarball
+  for (const [name, v] of Object.entries(pinned)) pkg.dependencies[name] = v
+  fs.writeFileSync(home + "/profiles/web/peers.json", JSON.stringify(pinned, null, 2))
   pkg.dsh ??= {}
   pkg.dsh.profile ??= {}
   pkg.dsh.profile.bundles = [...new Set(["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@treeseed/dsh-chapters", ...(pkg.dsh.profile.bundles || [])])]
