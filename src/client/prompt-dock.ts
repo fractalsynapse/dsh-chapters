@@ -102,6 +102,11 @@ const Action = (props: { label: string; glyph: string; onClick: () => void; disa
   return h(Tooltip, { label: props.label, side: 'bottom' as const, children: button as ReactElement<Record<string, unknown>> })
 }
 
+/** Run is allowed whenever there is an offer; AUTORUN is what the intent and the goal gate. Keeping the
+ * human's own button enabled is deliberate — the point of the protocol is to route a goal edit to a keystroke,
+ * never to disable the human's ability to send it. */
+const canRunHere = (state: PromptBarState): boolean => state.text !== null && state.text !== ''
+
 export function PromptDock(props: DockProps): ReactElement | null {
   const { sessionId, inputActions, exec } = props
   const [state, dispatch] = useReducer(promptBarReducer, initialBarState(), (s) => ({ ...s, running: props.running ?? true }))
@@ -165,6 +170,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
     h('div', { className: `dsh-chapters_promptBar${state.expanded ? ' dsh-chapters_promptExpanded' : ''}` },
       h('span', { className: 'dsh-chapters_promptGlyph' }, h(Glyph)),
       h('span', { className: 'dsh-chapters_promptLabel' }, barLabel(state as PromptBarState) ?? ''),
+      // A goal re-cut is held for the human's keystroke: the host reserves goal edits for a turn containing a
+      // direct human message, and an autorun message is not one. The bar says so on its face rather than
+      // letting Run appear to be a normal button that silently fails in the tool.
+      ...(state.intent === 'goal-edit' ? [h('span', { key: 'intent', className: 'dsh-chapters_promptError', 'aria-label': 'This step edits the goal' }, 'edits the goal · run it yourself')] : []),
       h('button', {
         type: 'button', className: 'dsh-chapters_promptText',
         'aria-label': state.expanded ? 'Put this suggested prompt in the input box' : 'Show the full suggested prompt',
@@ -176,7 +185,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
       h('div', { className: 'dsh-chapters_promptActions' },
         h(Action, {
           label: 'Run the suggested next step', glyph: '▶', onClick: run,
-          ...(state.text === null || state.text === '' ? { disabled: true } : {}),
+          ...(state.text === null || state.text === '' || !canRunHere(state) ? { disabled: true } : {}),
+          ...(state.intent === 'goal-edit'
+            ? { title: 'Goal edits need a human turn. Run still works; autorun will never do this one.' }
+            : {}),
         }),
         h(Action, {
           label: state.autorun === 'armed' ? 'Autorun off' : 'Autorun',

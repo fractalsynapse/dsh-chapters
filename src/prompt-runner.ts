@@ -12,12 +12,16 @@
  * failure are different states, and collapsing them was defect #2 of the removed ghost.
  */
 import type { SessionEventLike } from './types.ts'
-import { noSuggestion, type PromptSuggestionState } from './prompt-state.ts'
+import { classifyOffer, noSuggestion, type PromptSuggestionState } from './prompt-state.ts'
 import type { SessionState } from './registry.ts'
 
 export interface GenerateOutcome {
   ok: boolean
   text?: string
+  /** #113: the goal revision this offer was generated against (null = no goal). A later edit bumps it, and
+   * an outstanding offer made under the OLD revision must not run — that is how a re-cut objective interrupts
+   * the loop instead of being bulldozed by last cycle's directive. */
+  goalRevision?: number | null
   /** Present when !ok && !quiet: what actually went wrong. */
   reason?: string
   /** True for "there is nothing to recommend yet" — stored as `off`, never as an error. */
@@ -77,9 +81,18 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
         try {
           const out = await deps.generate(session, turnSeq)
           if (out.ok && typeof out.text === 'string' && out.text !== '') {
-            await write(id, { status: 'ready', text: out.text, turnSeq, error: '', at: deps.now() })
-            deps.log?.(`prompt: recommended next step ready for ${id} (turn ${String(turnSeq)})`)
-            deps.onReady?.(id, { status: 'ready', text: out.text, turnSeq, error: '', at: deps.now() })
+            // Classified HERE, at the moment of authorship: intent is a property of the durable offer, so the
+            // bar, the `state` verb and the loop read the same fact instead of re-parsing the text three ways
+            // (one predicate per decision, #59). The `GOAL:` prefix is stripped — the worker must never be
+            // handed protocol scaffolding as if it were the human's own words.
+            const offer = classifyOffer(out.text)
+            const ready: PromptSuggestionState = {
+              status: 'ready', text: offer.text, turnSeq, error: '', at: deps.now(),
+              intent: offer.intent, goalRevision: out.goalRevision ?? null,
+            }
+            await write(id, ready)
+            deps.log?.(`prompt: recommended next step ready for ${id} (turn ${String(turnSeq)}, ${offer.intent})`)
+            deps.onReady?.(id, ready)
             return
           }
           if (out.quiet === true) {
@@ -87,12 +100,12 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
             deps.log?.(`prompt: nothing to recommend for ${id} — bar stays silent`)
             return
           }
-          await write(id, { status: 'failed', text: '', turnSeq, error: out.reason ?? 'the suggestion call returned nothing', at: deps.now() })
+          await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: out.reason ?? 'the suggestion call returned nothing', at: deps.now() })
           deps.warn?.(`prompt: generation failed for ${id}: ${out.reason ?? 'unknown'}`)
         } catch (error) {
           // A failed generation is a DELIVERED failure (#61): the bar shows it, it does not vanish.
           const message = String((error as Error)?.message ?? error).slice(0, 200)
-          await write(id, { status: 'failed', text: '', turnSeq, error: message, at: deps.now() }).catch(() => undefined)
+          await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: message, at: deps.now() }).catch(() => undefined)
           deps.warn?.(`prompt: generation threw for ${id}: ${message}`)
         }
       })

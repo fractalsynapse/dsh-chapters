@@ -73,6 +73,29 @@ different purpose, and they are built to run together:
 That is the working pair this feature is for: a **director** that keeps defining the next
 move, and a **worker** that executes it, potentially on different models.
 
+### Who is allowed to start the next turn
+
+This is the part that has to be exact, because the host splits the authority and the feature has to live
+inside that split rather than around it:
+
+- **A goal that is active *and* armed owns the boundary.** The goal driver queues its own round when the
+  session goes idle, so if this loop also followed up, two turns would start at once and race the driver's
+  own reservation. When that is the case the bar **yields**: it keeps generating offers — the director's eye
+  stays open — and runs none of them. Autorun resumes the moment the goal is paused, blocked, completed,
+  disarmed, or absent.
+- **A step that re-cuts the goal is never auto-run.** The host reserves goal edits for a turn that contains a
+  direct human message. An autorun message is authored by the plugin, so it could not perform the edit even
+  if it ran — and faking a human message to make it work would hand an automated loop authority the host
+  deliberately withholds. Instead the recommending model prefixes such a step with `GOAL:`, the bar labels it
+  *edits the goal · run it yourself*, and **Run** stays enabled: your keystroke is exactly what makes it
+  legitimate. The prefix is stripped before the text reaches anyone, so the worker never sees scaffolding.
+- **A goal edit invalidates the offer made against the old revision.** Revisions bump by one per accepted
+  change, so an outstanding offer written against the previous objective is dropped rather than pushed into
+  the objective you just re-cut.
+
+So the pair divides cleanly: the **goal** is what you own and re-cut, the **suggestion** is what the director
+re-derives every turn. Autorun drives the worker; your keystroke drives the objective.
+
 ## What the model reads
 
 A bounded, deterministic slice — the same discipline as the enrichment input:
@@ -83,6 +106,7 @@ A bounded, deterministic slice — the same discipline as the enrichment input:
 - nothing else. Host-injected context is defused before the cap; command results, notices,
   and your private instruction files are not silently fed to a second model.
 
+The model is also told the `GOAL:` protocol above, so it can mark a step that changes the objective.
 The answer must be a single imperative prompt of at most `promptMaxChars` characters. An
 oversized or empty answer is retried **once** with the cap restated, then **refused** — this
 project does not truncate to fit.

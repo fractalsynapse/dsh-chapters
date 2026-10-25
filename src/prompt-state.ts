@@ -102,9 +102,53 @@ export interface PromptSuggestionState {
   turnSeq: number | null
   error: string
   at: string
+  /** #113: what kind of step this is. `goal-edit` re-cuts the standing objective, which the host reserves for
+   * a human turn, so autorun must never act on it. Measured: `dsh-tool-goal`'s `requireDirectHuman` gates
+   * create/edit/pause/resume on `source.kind === 'user'` in the open turn. */
+  intent: 'worker-step' | 'goal-edit'
+  /** The goal `revision` this offer was generated against, or null when no goal was active. A revision bump
+   * invalidates an outstanding offer rather than pushing last cycle's directive into a re-cut objective. */
+  goalRevision: number | null
 }
 
-export const noSuggestion: PromptSuggestionState = { status: 'off', text: '', turnSeq: null, error: '', at: '' }
+export const noSuggestion: PromptSuggestionState =
+  { status: 'off', text: '', turnSeq: null, error: '', at: '', intent: 'worker-step', goalRevision: null }
+
+/** What the loop needs to know about the goal RIGHT NOW, from the service (activation is process-local and
+ *  is not in the log, so this is the only honest source). */
+export interface GoalSignal {
+  phase: GoalPhaseView
+  activation: 'armed' | 'disarmed'
+  revision: number
+}
+
+/**
+ * Split the protocol prefix off a suggestion. `GOAL:` means "this step changes the objective" and the human
+ * must be the one to send it; anything else is worker execution and may auto-run.
+ *
+ * Deliberately a PREFIX rule on the model's own one-line answer rather than a second structured call: the
+ * suggestion surface already validates one bounded string, and a protocol the model can see in the rules
+ * (see `prompt.ts`) costs 5 characters of `promptMaxChars` instead of another auxiliary request.
+ */
+export function classifyOffer(raw: string): { intent: 'worker-step' | 'goal-edit'; text: string } {
+  const t = raw.trim()
+  const m = /^GOAL\s*:\s*/i.exec(t)
+  if (m === null) return { intent: 'worker-step', text: t }
+  const rest = t.slice(m[0].length).trim()
+  // `GOAL:` with nothing after it is not a re-cut; treat it as a worker step so an empty protocol never
+  // blocks the loop with a phantom "needs you" offer.
+  if (rest === '') return { intent: 'worker-step', text: t }
+  return { intent: 'goal-edit', text: rest }
+}
+
+/**
+ * Does the host goal driver intend to start the next turn itself? Measured rule (`dsh-goal-round-driver`):
+ * it queues a round on idle when `phase === 'active' && activation === 'armed'`. Two loops starting turns at
+ * one boundary is a race against the driver's own reservation fence, so when this says yes we yield.
+ */
+export function goalDriverOwnsTheTurn(goal: GoalSignal | null): boolean {
+  return goal !== null && goal.phase === 'active' && goal.activation === 'armed'
+}
 
 /**
  * What the Suggested Next Step bar can ask the server for (#113), and the single shape the command plane

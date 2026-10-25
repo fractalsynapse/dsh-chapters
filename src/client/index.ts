@@ -30,9 +30,6 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { PromptDock } from './prompt-dock.ts'
 import { DOOR_ACTIONS, makeDoorRunner, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
-=======
-import { DOOR_ACTIONS, makeDoorRunner, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
->>>>>>> origin/staging
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void

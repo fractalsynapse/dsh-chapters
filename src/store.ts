@@ -95,7 +95,9 @@ const sessionStateSchema = z.object({
     turnSeq: z.number().int().nullable(),
     error: z.string(),
     at: z.string(),
-  }).default({ status: 'off', text: '', turnSeq: null, error: '', at: '' }),
+    intent: z.enum(['worker-step', 'goal-edit']).default('worker-step'),
+    goalRevision: z.number().int().nullable().default(null),
+  }).default({ status: 'off', text: '', turnSeq: null, error: '', at: '', intent: 'worker-step', goalRevision: null }),
   plans: z.record(z.string(), z.object({
     number: z.number().int().positive(),
     path: z.string().min(1),

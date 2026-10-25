@@ -20,6 +20,9 @@ export interface PromptBarState {
   status: PromptBarStatus
   /** The offer, verbatim. Never truncated — an over-cap answer is refused upstream. */
   text: string | null
+  /** #113: what kind of step the server classified this as. `goal-edit` is held for the human's keystroke,
+   * because goal edits require a direct human turn in the host and an autorun message is not one. */
+  intent: 'worker-step' | 'goal-edit'
   /** The `turn/end` seq this offer belongs to; its identity, not a timestamp. */
   turnSeq: number | null
   /** Set only with `status: 'failed'`; rendered as `role="alert"` (#61: delivered, not swallowed). */
@@ -30,10 +33,12 @@ export interface PromptBarState {
   goalPhase: GoalPhaseView
   /** The offer a human dismissed or interrupted. A NEW `turnSeq` clears it; this one stays hidden. */
   hiddenTurnSeq: number | null
+  /** Live goal facts, when the caller can read them (the goal driver owns the next turn when active+armed). */
+  goal: { phase: string; activation: string; revision: number } | null
 }
 
 export type PromptBarEvent =
-  | { t: 'polled', status: PromptBarStatus, text?: string | null, turnSeq?: number | null, error?: string | null }
+  | { t: 'polled', status: PromptBarStatus, text?: string | null, turnSeq?: number | null, error?: string | null, intent?: 'worker-step' | 'goal-edit' }
   | { t: 'expand' } | { t: 'collapse' }
   | { t: 'autorun', on: boolean }
   | { t: 'human/prompt' }
@@ -42,7 +47,7 @@ export type PromptBarEvent =
   | { t: 'running', running: boolean }
 
 export function initialBarState(autorun: PromptBarAutorun = 'disarmed'): PromptBarState {
-  return { status: 'off', text: null, turnSeq: null, error: null, autorun, expanded: false, running: false, goalPhase: 'none', hiddenTurnSeq: null }
+  return { status: 'off', text: null, turnSeq: null, error: null, intent: 'worker-step', goalPhase: 'none', goal: null, autorun, expanded: false, running: false, hiddenTurnSeq: null }
 }
 
 export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarState {
@@ -55,6 +60,7 @@ export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): Pro
         ...state,
         status: ev.status,
         text: ev.status === 'ready' ? (ev.text ?? null) : null,
+        intent: ev.status === 'ready' ? (ev.intent ?? 'worker-step') : 'worker-step',
         turnSeq: ev.turnSeq ?? state.turnSeq,
         error: ev.status === 'failed' ? (ev.error ?? 'the suggestion call failed') : null,
       }
@@ -95,6 +101,11 @@ export function barVisible(s: PromptBarState): boolean {
 export function shouldAutoFire(s: PromptBarState): boolean {
   if (s.status !== 'ready') return false
   if (s.text === null || s.text === '') return false
+  // #113: two host-imposed stops before anything else. A goal re-cut needs a human turn (dsh-tool-goal's
+  // requireDirectHuman), and an armed goal driver already intends to start this turn — firing here would be
+  // two turn-starters at one boundary, racing the driver's own reservation fence.
+  if (s.intent === 'goal-edit') return false
+  if (s.goal !== null && s.goal.phase === 'active' && s.goal.activation === 'armed') return false
   if (s.autorun !== 'armed') return false
   if (s.running) return false
   if (s.goalPhase === 'complete') return false
@@ -138,8 +149,10 @@ export function parseBarState(text: string): PromptBarEvent | null {
   const turnRaw = scalars['turn'] ?? ''
   const turnSeq = /^\d+$/.test(turnRaw) ? Number(turnRaw) : null
   const errorRaw = scalars['error'] ?? ''
+  const intentWord = (scalars['intent'] ?? '').split(' ')[0] ?? ''
   return {
     t: 'polled',
+    intent: intentWord === 'goal-edit' ? 'goal-edit' : 'worker-step',
     status,
     ...(status === 'ready' ? { text: prompt.join('\n'), turnSeq } : {}),
     ...(status === 'failed' ? { error: errorRaw, turnSeq } : {}),

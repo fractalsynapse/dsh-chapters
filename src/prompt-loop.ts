@@ -17,6 +17,7 @@
  * goal-sourced message against the host's own template, so impersonating it is a loud failure by design.
  */
 import { assertKernelAcceptedUserMessage } from './notice.ts'
+import { goalDriverOwnsTheTurn, type GoalSignal } from './prompt-state.ts'
 import type { PromptSuggestionState } from './prompt-state.ts'
 
 export type AutorunFlag = 'armed' | 'disarmed'
@@ -26,6 +27,9 @@ export interface PromptLoopDeps {
   followup: (sessionId: string, text: string) => void
   /** counts only FIRED rounds, so a suggestion nobody armed never spends the budget. */
   maxRounds: () => number
+  /** The LIVE goal signal for a session, from the goal service. Optional: absent means "no goal read", and
+   * the loop then behaves as if there is no goal — never as if a goal is armed. */
+  goalSignal?: (sessionId: string) => GoalSignal | null
   now?: () => string
   log?: (message: string) => void
   warn?: (message: string) => void
@@ -38,9 +42,16 @@ export interface PromptLoop {
   /** A human took the wheel: disarm now, keep the offer visible, and say why. */
   disarmForHuman(sessionId: string): AutorunFlag
   /** Called after the runner persisted a `ready` offer. Fires at most one turn per offer. */
-  maybeFire(sessionId: string, state: PromptSuggestionState): boolean
+  /**
+   * `goal` is the LIVE goal signal from the service, or null when there is no goal. Passing it in rather than
+   * reading a cached copy is the point: activation is process-local and changes under us (a human pause, a
+   * goal edit), and a loop that starts turns must decide against the current fact.
+   */
+  maybeFire(sessionId: string, state: PromptSuggestionState, goal?: GoalSignal | null): boolean
   /** `agent/created` and mount parity with the host driver: nothing arrives armed. */
   reset(sessionId: string): void
+  /** The live goal signal, exposed so the door can pass it at the moment of firing (never a cached copy). */
+  goalSignal(sessionId: string): GoalSignal | null
 }
 
 export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
@@ -74,9 +85,31 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
       return s.armed
     },
 
-    maybeFire(id, state) {
+    maybeFire(id, state, goal = null) {
       const s = slot(id)
       if (s.armed !== 'armed' || state.status !== 'ready' || state.text === '') return false
+      // #113, the authority boundary the host drew: `GOAL:` offers RE-CUT the standing objective, and
+      // dsh-tool-goal gates that on a direct human turn (`source.kind === 'user'` in the open turn). Our
+      // autorun message is plugin-authored, so running it would either be refused mid-turn or — if we
+      // faked the kind — escalate the loop into authority it was never given. Hold it for the keystroke
+      // and SAY so, rather than trying.
+      if (state.intent === 'goal-edit') {
+        deps.log?.(`prompt: NOT auto-run for ${id} — this step re-cuts the goal, which needs your keystroke (Run)`)
+        return false
+      }
+      // One turn-starter per boundary. The host driver queues its own round when the goal is active AND
+      // armed; two loops following up at one idle edge is a race with the driver's reservation fence. We
+      // keep generating (the director's eye stays open) and run nothing until the driver is not owning it.
+      if (goalDriverOwnsTheTurn(goal)) {
+        deps.log?.(`prompt: yielding the next turn to the goal driver for ${id} (goal active and armed) — offers continue, autorun does not`)
+        return false
+      }
+      // A goal edit invalidates the offer made against the previous revision: do not push last cycle's
+      // directive into an objective the human just re-cut.
+      if (goal !== null && state.goalRevision !== null && goal.revision !== state.goalRevision) {
+        deps.log?.(`prompt: dropping a stale offer for ${id} (generated against revision ${String(state.goalRevision)}, goal is now ${String(goal.revision)})`)
+        return false
+      }
       if (state.turnSeq === null) return false
       if (s.firedFor === state.turnSeq) return false // one turn per offer, never a retry storm
       const cap = deps.maxRounds()
@@ -91,6 +124,8 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
       note(`prompt: autorun fired round ${String(s.fired)} of ${String(cap)} for ${id} (turn ${String(state.turnSeq)})`)
       return true
     },
+
+    goalSignal: (id) => (deps.goalSignal === undefined ? null : deps.goalSignal(id)),
 
     reset(id) {
       slots.set(id, { armed: 'disarmed', fired: 0, firedFor: null })

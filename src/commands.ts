@@ -425,6 +425,11 @@ export function registerHostCommands(
             `  model: ${spec !== '' ? spec : 'unset'} (${source}) — ${spec === '' ? 'the bar is absent' : 'one offer per completed turn'}`,
             `  autorun: ${st.autorun}${st.autorun === 'armed' ? ` (${String(st.fired)} round(s) started this process)` : ''}`,
             `  turn: ${st.turnSeq === null ? '-' : String(st.turnSeq)}`,
+            // #113: intent and the revision it was cut against, because they decide whether autorun may act.
+            // A `goal-edit` offer is held for a keystroke — the host reserves goal edits for a human turn —
+            // and the bar must be able to say that without re-parsing the prompt.
+            `  intent: ${st.intent}${st.intent === 'goal-edit' ? ' — re-cuts the goal, so Run it yourself; autorun will not' : ''}`,
+            `  goal: ${st.goalRevision === null ? 'none' : `revision ${String(st.goalRevision)}`}`,
             ...(st.error === '' ? [] : [`  error: ${st.error}`]),
             ...(st.text === '' ? [] : ['  prompt:', ...st.text.split('\n').map((l) => `    ${l}`)]),
           ].join('\n') }

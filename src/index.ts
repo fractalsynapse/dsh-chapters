@@ -465,6 +465,21 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         agent.followup(suggestPromptMessage(text, sessionId))
       },
       maxRounds: () => config.promptMaxRounds,
+      // The goal signal comes from the SERVICE, never folded from the log: `activation` is process-local by
+      // design (dsh-goal keeps it in a WeakMap), so the only honest read is the live GoalView. This is what
+      // lets the loop know when the driver owns the next turn.
+      goalSignal: (sessionId: string) => {
+        try {
+          const goals = (typeof ctx.get === 'function' ? ctx.get('goals') : undefined) as { get?: (agent: unknown) => { phase?: string; activation?: string; revision?: number } | undefined } | undefined
+          const agents = ctx.agents as unknown as { get?: (id: string) => unknown } | undefined
+          const agent = agents?.get?.(sessionId)
+          if (goals === undefined || agent === undefined) return null
+          const view = goals.get?.(agent)
+          if (view === undefined || typeof view.revision !== 'number') return null
+          const phase = view.phase === 'paused' ? 'paused' : view.phase === 'blocked' ? 'blocked' : view.phase === 'complete' ? 'complete' : 'active'
+          return { phase, activation: view.activation === 'armed' ? 'armed' : 'disarmed', revision: view.revision }
+        } catch { return null }
+      },
       log: (m) => ctx.logger?.info?.(`dsh-chapters: ${m}`),
       warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
     })
@@ -644,8 +659,9 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
           return { ok: false, reason: r.reason ?? r.text, ...(r.quiet === undefined ? {} : { quiet: r.quiet }) }
         },
         onReady: (sessionId, state) => {
-          // Fire only through the loop's own gate; it re-checks armed/idle/goal/budget and the one-per-offer key.
-          promptLoop.maybeFire(sessionId, state)
+          // Fire only through the loop's own gate, against the LIVE goal signal: armed/idle/budget/one-per-offer
+          // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
+          promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
         },
         now: () => new Date().toISOString(),
         log: (m) => ctx.logger?.info?.(`dsh-chapters: ${m}`),

@@ -166,7 +166,7 @@ export function buildSuggestInput(facts: SuggestFacts, capChars: number, maxChar
   const perMessage = (t: string) => (t.length > msgCap ? `${t.slice(0, msgCap - 1)}…` : t)
   const render = (announce: string): string => {
     const head = `You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.`
-    const rules = `Write the ONE next prompt the human should send. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt.`
+    const rules = `Write the ONE next prompt the human should send. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt. If it changes the standing objective, prefix it with GOAL: (the human sends those; autorun will not). Do not use the prefix for an ordinary next step.`
     const parts = [
       head,
       '',
@@ -202,7 +202,14 @@ export function buildSuggestInput(facts: SuggestFacts, capChars: number, maxChar
     if (tail.length > 1) { tail.shift(); droppedTail += 1; continue }
     if (msgCap > 40) { msgCap = Math.max(40, Math.floor(msgCap / 2)); continue }
     if (tail.length === 1) { tail = []; droppedTail += 1; continue }
-    return input
+    // Every compressible part is gone and the input is STILL over cap: the fixed frame (head + rules +
+    // section scaffolding) alone exceeds `promptContextChars`. That was previously returned in silence,
+    // which is the #61 class exactly — the code knows, and says nothing. It cannot be truncated (invariant:
+    // refuse or announce, never clip), so it announces what happened and how to fix it. Surfaced by my own
+    // added rules text, which is how I found it: a longer frame made a tight fixture impossible to fit.
+    return input.length > capChars
+      ? `${input}\n(frame alone exceeds the ${String(capChars)}-char budget by ${String(input.length - capChars)} chars — raise promptContextChars; nothing was truncated)`
+      : input
   }
 }
 
