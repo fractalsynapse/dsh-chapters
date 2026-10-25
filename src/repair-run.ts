@@ -29,6 +29,47 @@ import type { RegistryStore } from './store.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import type { SessionEventLike } from './types.ts'
 
+/**
+ * One refusal line → its class: the text before the first `': '`, or `'other'`. Grouping is presentation
+ * only — every item is kept — because the class is shared and the FILE NAMES are the content an operator
+ * needs (#101: 483 repeated `test-litter` lines buried 372 real findings in the maintainer's run, in the
+ * command surface, because only the offline report had been aggregated).
+ */
+const refusalClassOf = (line: string): string => {
+  const i = line.indexOf(':')
+  return i > 0 ? line.slice(0, i).trim() : 'other'
+}
+
+export interface RefusalGroup { cls: string; items: string[] }
+
+export function groupRefusals(refused: string[]): RefusalGroup[] {
+  const order: string[] = []
+  const map = new Map<string, string[]>()
+  for (const r of refused) {
+    const cls = refusalClassOf(r)
+    const bucket = map.get(cls)
+    if (bucket === undefined) { map.set(cls, [r]); order.push(cls) } else bucket.push(r)
+  }
+  // Loudest class first: the one that would otherwise fill the screen is the one to dispose of.
+  return order.map((cls) => ({ cls, items: map.get(cls)! })).sort((a, b) => b.items.length - a.items.length)
+}
+
+/** How many named examples a grouped class keeps visible. The rest is COUNTED, never dropped silently. */
+export const REFUSAL_EXAMPLES = 3
+
+export function renderRefusalGroups(refused: string[], examples: number = REFUSAL_EXAMPLES): string[] {
+  return groupRefusals(refused).map(({ cls, items }) => {
+    const detail = (r: string): string => { const i = r.indexOf(':'); return i > 0 ? r.slice(i + 1).trim() : r }
+    if (items.length === 1) return `refused: ${items[0]}`
+    const keep = Math.max(1, examples)
+    const shown = items.slice(0, Math.min(items.length, keep)).map(detail).join(' | ').slice(0, 300)
+    const withheld = items.length - Math.min(items.length, keep)
+    return `refused ×${String(items.length)} (${cls}): ${shown}`
+      + (withheld > 0 ? `; ${String(withheld)} more of the same class` : '')
+      + ' — each names its own file; nothing in this class is touched automatically'
+  })
+}
+
 export interface RepairPorts {
   store: RegistryStore
   /** A PAYLOAD-BEARING read of the durable log (#58's lesson: never a metadata-only record list). */
