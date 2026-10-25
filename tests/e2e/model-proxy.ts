@@ -30,6 +30,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { createHash } from 'node:crypto'
 import { estimateRequestTokens, windowRefusal } from './model-proxy-window.ts'
+import { capabilitiesOf } from './rig-capabilities.ts'
 
 export interface ProxyHandle { url: string; close: () => Promise<void> }
 
@@ -649,6 +650,21 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         // under a header another machine does not compose is worthless there anyway (that is exactly how run
         // 40145460775 lost 25 minutes per leg: the tapes and CI disagree at character 142 of the system
         // prompt, and nothing said so at record time).
+        // #108: the capability pin runs BEFORE the persona pin, in both modes. If the rig lost capability
+        // sections the corpus was recorded under, that is the diagnosis — reporting it as a persona mismatch
+        // (or, before this, as a bare prefix miss) would send the next reader chasing the wrong variable.
+        {
+          const caps = capabilitiesOf(inc)
+          if (caps !== null && caps.missing.length > 0) {
+            const sentence = `RIG-CAPABILITIES tape=${tapeName} missing=[${caps.missing.join(',')}] present=[${caps.present.join(',')}] — this rig composes an agent header without sections pinned in tests/e2e/fixtures/rig-capabilities.json; the corpus and this rig are not the same product surface (see #108)`
+            fs.appendFileSync(missLog, `${new Date().toISOString()} ${sentence}\n`)
+            journal(sentence)
+            res.writeHead(opts.mode === 'record' ? 500 : 503, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: { message: sentence } }))
+            return
+          }
+        }
+
         {
           const pd = personaDigest(inc)
           if (pd !== null && isAgentPersona(inc) && opts.mode === 'record') {

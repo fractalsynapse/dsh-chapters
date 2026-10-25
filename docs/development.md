@@ -851,3 +851,18 @@ So a machine-specific corpus is no longer possible by accident: re-distilling re
 what CI composes, or the operator to update `PERSONA` deliberately — a human decision, recorded in git, in
 the same spirit as `CORPUS_HOST`. Refusing to record is not a failure of the rig; it is the rig reporting
 that the two machines disagree about what the host says.
+
+### The rig capability pin (#108)
+
+`tests/e2e/fixtures/rig-capabilities.json` lists the sections a composed **agent** header must carry. The
+proxy checks it on the first agent-persona request of every boot, in **both** record and replay, through
+`tests/e2e/rig-capabilities.ts` (`headerCapabilities(head)` → `{present, missing}`). A section is missing:
+
+- **record** → refused, journal `RIG-CAPABILITIES`, no tape written. You cannot distill a corpus under a rig
+  that is missing capabilities, because the product being tested is the header too.
+- **replay** → `RIG-CAPABILITIES` + 503, naming the missing sections and the file that pins them. No prefix
+  archaeology, no 25-minute browser hang on a door that no answer could ever render.
+
+Adding a section to `required` is a deliberate decision with a measurement behind it — the six here are the
+markers that distinguished the corpus's 7,276-char header from CI's 2,783-char one. The pin reports the
+divergence; it does not yet make the two machines resolve the same bundle tree, and #108 stays open for that.

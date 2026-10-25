@@ -16,8 +16,8 @@ import path from 'node:path'
 import http from 'node:http'
 import { startModelProxy, personaDigest, corpusPersonas, isAgentPersona } from '../../tests/e2e/model-proxy.ts'
 
-const CI_PERSONA = '{"role":"system","content":"You are an AI agent powered by DeepSeek Harness. You are a coding agent powered by the qwen3.8-flash-next model. Prefer showing the primary results within your final response alongside a brief explanation. Use ![Description](<path/to/image.png>) when an image supports an explanation."}'
-const TAPE_PERSONA = '{"role":"system","content":"You are an AI agent powered by DeepSeek Harness. You are a coding agent powered by the qwen3.8-flash-next model. Tokens prefixed with @ are paths the user explicitly referenced. Relative paths resolve from the workspace root."}'
+const CI_PERSONA = JSON.stringify({ role: 'system', content: 'You are an AI agent powered by DeepSeek Harness. You are a coding agent powered by the qwen3.8-flash-next model. Prefer showing the primary results within your final response. The DeepSeek Harness Web GUI at http://127.0.0.1:3080. The implementation checkout is at /home/adrian/. Tokens prefixed with @ are paths the user explicitly referenced. Chapters memory and rules apply. create_goal may infer goal intent. CI-only paragraph about deliverables.' })
+const TAPE_PERSONA = JSON.stringify({ role: 'system', content: 'You are an AI agent powered by DeepSeek Harness. You are a coding agent powered by the qwen3.8-flash-next model. Prefer showing the primary results within your final response. The DeepSeek Harness Web GUI at http://127.0.0.1:3080. The implementation checkout is at /home/adrian/. Tokens prefixed with @ are paths the user explicitly referenced. Chapters memory and rules apply. create_goal may infer goal intent. Laptop-only paragraph about @-path references.' })
 
 const entry = (prefix: unknown[]) => ({ key: 'k1', prefix, status: 200, contentType: 'application/json', bytes: Buffer.from('{"choices":[{"message":{"content":"ok"}}]}').toString('base64') })
 
@@ -27,9 +27,12 @@ test('the persona digest is the masked header, not its machine-specific facts (#
   assert.equal(typeof a, 'string', 'a system-first request must yield a digest')
   assert.equal(a, b, 'the rig\u2019s HOSTPORT-BLIND and WORKSPACE-BLIND forms are masked facts, not prompt identity')
   assert.equal(personaDigest([{ role: 'user', content: 'hi' }]), null, 'a request without a system head has no persona')
-  // a tape prefix stores messages as JSON STRINGS and a live request sends OBJECTS: the digest is of the
-  // message, not the encoding. Without this the corpus would mismatch its own recorded header.
-  assert.equal(personaDigest([CI_PERSONA]), personaDigest([JSON.parse(CI_PERSONA)]), 'string-encoded and object-encoded heads must agree')
+  // Stored heads hold the ALREADY-MASKED text normalize produced at record time; a live request is masked on
+  // the way in. The two encodings therefore agree only for a head with nothing left to mask — which is what a
+  // real stored prefix is. Asserting equivalence on an unmasked string would claim something the corpus never
+  // does, and that claim is exactly what just failed as a digest mismatch on a port.
+  const PLAIN = { role: 'system', content: 'You are an AI agent powered by DeepSeek Harness. A paragraph with no machine-specific facts.' }
+  assert.equal(personaDigest([JSON.stringify(PLAIN)]), personaDigest([PLAIN]), 'a stored (masked) string head and the equivalent live object digest identically')
   assert.notEqual(personaDigest([JSON.parse(CI_PERSONA)]), personaDigest([JSON.parse(TAPE_PERSONA)]),
     'the two real paragraphs must land on different digests — that is what CI and the corpus disagree about')
 })
@@ -83,7 +86,10 @@ test('a replay whose header the corpus never saw fails fast and names the mismat
  * corpus was recorded under; an unknown digest refuses the record BEFORE the upstream is called, so no GPU
  * time buys a corpus that is guaranteed red on another machine.
  */
-const AGENT_HEAD = (tail: string) => `You are an AI agent powered by DeepSeek Harness. You are a coding agent powered by the qwen3.8-flash-next model. ${tail}`
+// A rig header has to satisfy the capability pin (#108) before the persona pin is even reached, so this
+// fixture carries the six required sections and varies only its tail — otherwise the persona rows would be
+// testing a header the rig is not allowed to record under.
+const AGENT_HEAD = (tail: string) => `You are an AI agent powered by DeepSeek Harness. You are a coding agent powered by the qwen3.8-flash-next model. Prefer showing the primary results within your final response. The DeepSeek Harness Web GUI at http://127.0.0.1:3080. The implementation checkout is at /home/adrian/. Tokens prefixed with @ are paths the user explicitly referenced. Chapters memory and rules apply. create_goal may infer goal intent. ${tail}`
 
 test('record bootstraps the persona file when none exists (#108)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'persona-rec-'))

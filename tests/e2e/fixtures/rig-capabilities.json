@@ -1,0 +1,24 @@
+{
+  "_note": [
+    "The capability sections a rig's COMPOSED AGENT HEADER must carry. Enforced by tests/e2e/rig-capabilities.ts",
+    "on the first agent-persona request of every boot, in BOTH record and replay (#108).",
+    "",
+    "Measured 2026-10-24 by marker-diffing the two headers that made PR #107 red on CI while green locally:",
+    "the corpus's head (7,276 chars, 57/57 agent heads across all nine legs) carries all six sections below;",
+    "CI's head (2,783 chars) carries only deliverables, webGui and checkout — file-reference guidance, the",
+    "chapters rules surface and the goal tools were absent. Same pinned host version, same three declared",
+    "profile bundles, so the divergence is in WHICH BUILD of those bundles got resolved, not in the list.",
+    "",
+    "This file is a pin, not a diagnosis: it turns 'replay misses at char 142, then 25 minutes of dead UI'",
+    "into a named, per-section refusal at the first request. The unresolved half of #108 is making both",
+    "machines resolve the same tree (the ancestor walk that #89 documents for HOME/node_modules)."
+  ],
+  "required": {
+    "deliverables": "Prefer showing the primary results",
+    "webGui": "DeepSeek Harness Web GUI",
+    "checkout": "implementation checkout",
+    "fileReference": "Tokens prefixed with @ are paths",
+    "chaptersRules": "Chapters memory and rules",
+    "goalTool": "create_goal"
+  }
+}
