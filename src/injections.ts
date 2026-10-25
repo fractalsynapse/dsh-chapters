@@ -69,6 +69,13 @@ export function isSessionStateNarration(data: Record<string, unknown>): boolean 
   // signature toward the filenames it mentions (record r28).
   if (source?.kind === 'agent-message' && source.form === 'relay') return true
   if (source?.kind === 'subagent-settled' && source.form === 'notice') return true
+  // #113: a Suggested Next Step the human armed. It is conversation the human authorized — a chapter that
+  // records an autorun response without the prompt that produced it is unexplainable — so it is captured like
+  // the others. Deliberately NOT `kind: 'user'`: the host's goal tool decides "a direct human turn exists" by
+  // looking for exactly that (measured, dsh-tool-goal:49-65), and laundering our loop through it would let a
+  // suggestion authorize model-side goal operations. Named by producer AND form like every arm above: the TOC
+  // notice (`form: 'snapshot'`) and any other plugin's message stay screened.
+  if (source?.kind === 'plugin:dsh-chapters' && source.form === 'prompt-suggestion') return true
   // v3 logs, still replayed from disk: the retired wrapper the exception was
   // written against. Both arms stay named by producer AND form — neither widens.
   return source?.kind === 'plugin' && source.plugin === 'plan-mode' && source.form === 'notice'
@@ -90,8 +97,9 @@ export function isArchivableConversation(data: Record<string, unknown>): boolean
 /** Label for the omission marker: kind, plus plugin name when the source
  * carries one (so `plugin:dsh-chapters` is recognizable in a chapter). */
 export function sourceLabel(data: Record<string, unknown>): string {
-  const source = data.source as { kind?: string; plugin?: string } | undefined
+  const source = data.source as { kind?: string; plugin?: string; form?: string } | undefined
   if (source === undefined) return 'unlabelled'
+  if (source.kind === 'plugin:dsh-chapters' && source.form === 'prompt-suggestion') return 'suggested-prompt'
   return source.kind === 'plugin' && typeof source.plugin === 'string'
     ? `plugin:${source.plugin}`
     : String(source.kind ?? 'unknown')

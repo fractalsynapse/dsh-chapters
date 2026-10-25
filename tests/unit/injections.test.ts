@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isHumanAuthored, omittedMarker, screenConversation, sourceLabel, stripReminderSpans } from '../../src/injections.ts'
+import { isArchivableConversation, isHumanAuthored, omittedMarker, screenConversation, sourceLabel, stripReminderSpans } from '../../src/injections.ts'
 import { renderChapter } from '../../src/render.ts'
 import type { SessionEventLike } from '../../src/types.ts'
 
@@ -172,4 +172,27 @@ test('the exception is narrow: another plugin notice, or a plan-mode snapshot, s
   // same narrowness for the legacy wrapper arms
   assert.equal(screenConversation({ role: 'user', source: { kind: 'plugin', plugin: 'plan-mode', form: 'snapshot' } }, 'x', 'user').omittedEvent, true)
   assert.equal(screenConversation({ role: 'user', source: { kind: 'plugin', plugin: 'plan-mode-x', form: 'notice' } }, 'x', 'user').omittedEvent, true)
+})
+
+/**
+ * An autorun suggestion is conversation the human authorized, not injected context (#113).
+ *
+ * The maintainer's decision: prompt suggestions that fire automatically must be archivable so a chapter can
+ * explain what the response was responding to — "treated just like user prompts as far as knowledge capture…
+ * we can label them differently or have different metadata." The narrow arm below is exactly that, and the
+ * reason it is NOT `kind: 'user'` is load-bearing: the host's goal tool decides "a direct human turn exists"
+ * by looking for `user/message` with `source.kind === 'user'` (measured, `dsh-tool-goal:49-65`), so authoring
+ * as `user` would let our loop authorize model-side goal operations it must not authorize.
+ */
+test('an autorun suggestion is captured as conversation, labelled apart from the human', () => {
+  const suggestion = { source: { kind: 'plugin:dsh-chapters', form: 'prompt-suggestion' }, content: [] }
+  assert.equal(isArchivableConversation(suggestion as never), true, 'in the archive, like any other turn')
+  assert.equal(isHumanAuthored(suggestion as never), false,
+    'but NOT human: the topic-signature layer stays strict (r28), and goal authority must not be laundered')
+  assert.equal(sourceLabel(suggestion as never), 'suggested-prompt', 'a chapter can say who wrote it')
+
+  // The arm is named by producer AND form, so it cannot widen: a TOC notice is still screened.
+  assert.equal(isArchivableConversation({ source: { kind: 'plugin:dsh-chapters', form: 'snapshot' }, content: [] } as never), false)
+  assert.equal(isArchivableConversation({ source: { kind: 'other-plugin', form: 'prompt-suggestion' }, content: [] } as never), false)
+  assert.equal(sourceLabel({ source: { kind: 'user' }, content: [] } as never), 'user', 'human labels are untouched')
 })
