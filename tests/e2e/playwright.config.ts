@@ -25,7 +25,7 @@ export default defineConfig({
     // tape was distilled under, the surface diverged (stubs appearing where none were
     // recorded), and the proxy MISSed. Playwright merges project `env` into every worker,
     // so record, replay, coverage and a manual run now boot the SAME world.
-    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/prompt-suggestion.spec.ts', '**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
+    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
     // fork-button rides its OWN boot (2026-09-25, the fanout lesson applied
     // again): knowledge's fork child becomes the workspace's restore target,
     // so a shared boot records/replays whoever ran first's shape — the fork
@@ -69,10 +69,5 @@ export default defineConfig({
     { name: 'enrich', env: rigEnv('enrich'), testMatch: ['**/enrich.spec.ts'] },
     // rules: the P3 lifecycle in the browser over a local-path pool.
     { name: 'rules', env: rigEnv('rules'), testMatch: ['**/rules.spec.ts'] },
-    // prompt: #71 — the composer ghost journey. Its boot is the ONLY one that
-    // writes `promptModel` into the plugin row (E2E_PROMPT=1): the feature must
-    // not exist on any other boot, and its absence there is the OFF-state test.
-    // Threshold 0.99 + NO_AUX_MODEL like plans: one journey, no compaction races.
-    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-suggestion.spec.ts'] },
   ],
 })

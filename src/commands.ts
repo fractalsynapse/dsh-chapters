@@ -417,7 +417,32 @@ export function registerHostCommands(
           const titleEvent = [...events].reverse().find((e) => e.type === 'session/title')
           const title = titleEvent !== undefined && typeof titleEvent.data.title === 'string' ? titleEvent.data.title : undefined
           const r = await config.prompt.suggest({ id: sess.id, title, events: [...events] })
-          return r.ok ? { kind: 'success', text: r.text } : { kind: 'error', text: r.text }
+          // #113: this returned `text: r.text` — ONE bare line, which the composer ellipsized with no way to
+          // recover it. /chapters-status gets an expander because it answers with a labelled multi-line block,
+          // so this does the same: the prompt verbatim inside a fence, then the facts that bound it (which
+          // model, from which source, against which cap, for which session). Stating the cap matters because an
+          // over-cap answer is refused and retried, never truncated — the number belongs in the output.
+          const F = String.fromCharCode(96).repeat(3)
+          const { spec, source } = config.prompt.effective()
+          const lim = config.prompt.limits !== undefined ? config.prompt.limits() : undefined
+          const who = `${title !== undefined && title !== '' ? `\u201c${title}\u201d ` : ''}(${sess.id})`
+          const capLine = lim !== undefined
+            ? `  cap: ${String(lim.maxChars)} characters — over-cap is refused and retried, never truncated`
+            : '  cap: (not reported by this surface)'
+          const meta = `  model: ${spec !== '' ? spec : 'unset'} (${source})\n${capLine}`
+          if (r.ok) {
+            return { kind: 'success', text: [
+              `/chapters-prompt suggest — the next prompt for ${who}`, '', F, r.text, F, '', meta,
+              '  use it: copy the text above into the composer (the ghost chip was removed by maintainer decision, #113)',
+            ].join('\n') }
+          }
+          if (r.quiet === true) {
+            // Nothing to offer is an ANSWER to an explicit request, not a failure. With the ghost gone there is
+            // no automated caller that reads a success line as an offer — that collision is what made wiring
+            // `quiet` wrong last time, and removing the chip is what unblocked it.
+            return { kind: 'success', text: [`/chapters-prompt suggest — nothing to offer yet for ${who}`, '', `  ${r.text}`, '', meta].join('\n') }
+          }
+          return { kind: 'error', text: `chapters-prompt: ${r.text}\n  model: ${spec !== '' ? spec : 'unset'} (${source})` }
         }
         return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest' }
       } catch (error) {

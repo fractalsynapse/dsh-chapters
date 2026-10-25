@@ -14,7 +14,7 @@ import path from 'node:path'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const TAPE = path.join(ROOT, 'tests', 'fixtures', 'model-tape')
-const PROJECTS = ['suite', 'heavy', 'arrival', 'enrich', 'fanout', 'rules', 'fork', 'plans', 'prompt']
+const PROJECTS = ['suite', 'heavy', 'arrival', 'enrich', 'fanout', 'rules', 'fork', 'plans']  // 'prompt' left with the composer ghost (#113, maintainer decision); this list IS the contract
 
 test('every tape project carries a PROVENANCE.md naming the host it was distilled against', () => {
   const missing = PROJECTS.filter((p) => !fs.existsSync(path.join(TAPE, p, 'PROVENANCE.md')))

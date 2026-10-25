@@ -87,7 +87,11 @@ test('suggest without a session scope refuses with the remedy; with one, it hand
   assert.match(bare.text!, /needs a session scope/)
   const ok = await h.run('suggest', AGENT)
   assert.equal(ok.kind, 'success')
-  assert.equal(ok.text, 'write the test')
+  // #113: the bare line became a labelled block so the composer gives it an expander — the prompt must still
+  // be in it VERBATIM (that is the whole point: it was previously truncated with no way to recover it).
+  assert.equal(typeof ok.text, 'string')
+  assert.ok((ok.text ?? '').includes('write the test'), 'the generated prompt appears whole inside the block')
+  assert.ok((ok.text ?? '').split('\n').length >= 4, 'multi-line, like /chapters-status, or the UI ellipsizes it again')
   const passed = seen[0] as { id: string; title?: string; events: { seq: number }[] }
   assert.equal(passed.id, 's-9')
   assert.equal(passed.title, 'The Wiring', 'the LAST session/title event is the current title')
