@@ -86,3 +86,22 @@ export function goalDirectiveOf(goal: ActiveGoal | null): string {
     'If the goal is already accomplished, recommend the step that closes it out (mark it complete) rather than another round.',
   ].join('\n')
 }
+
+/**
+ * The bar's durable facts, as stored on the session row (#113). `turnSeq` is the identity of an offer:
+ * it is the `turn/end` seq the suggestion was generated FOR, which is what makes "one generation per
+ * turn" idempotent across a re-delivered event, a restart, or a second pull by the client.
+ *
+ * Deliberately absent: `autorun` and `expanded`. Those are the client's process-local intent — the goal
+ * bar's `activation` in everything but name — and persisting them would let a loop resume itself across a
+ * restart, which is the property the host's goal driver explicitly does NOT have.
+ */
+export interface PromptSuggestionState {
+  status: 'off' | 'analyzing' | 'ready' | 'failed'
+  text: string
+  turnSeq: number | null
+  error: string
+  at: string
+}
+
+export const noSuggestion: PromptSuggestionState = { status: 'off', text: '', turnSeq: null, error: '', at: '' }

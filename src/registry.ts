@@ -17,6 +17,7 @@
 import type { ChapterRecord } from './archive.ts'
 
 import type { CollectionSignature } from './signature.ts'
+import { noSuggestion, type PromptSuggestionState } from './prompt-state.ts'
 
 export interface SessionState {
   /** Registry-level parent, set at continuation commit. null until linked. */
@@ -44,6 +45,12 @@ export interface SessionState {
   rev?: number | undefined
   /** attemptKey -> numbers, so an idempotent retry reuses rather than duplicates. */
   reservations: Record<string, number[]>
+  /**
+   * #113: what the Suggested Next Step bar last offered, and for which turn. `turnSeq` is the identity of
+   * an offer — the one-generation-per-turn key — and the pair (`status`, `turnSeq`) is what lets a re-read
+   * after a restart say "there is nothing pending" instead of firing a second model call for a finished turn.
+   */
+  promptSuggestion: PromptSuggestionState
   /**
    * compactionId -> the plan summarize() committed to: the TOC text already
    * cited `path`, so finalize (possibly after a crash and process restart)
@@ -74,6 +81,7 @@ export const freshSession = (sessionId: string): SessionState => ({
   collections: [],
   chapters: [],
   reservations: {},
+  promptSuggestion: noSuggestion,
   plans: {},
   finalized: {},
 })
