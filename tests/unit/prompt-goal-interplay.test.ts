@@ -26,13 +26,14 @@ const offer = (over: Partial<PromptSuggestionState> = {}): PromptSuggestionState
 })
 const GOAL = { phase: 'active' as const, activation: 'armed' as const, revision: 3 }
 
-function loop(deps: { maxRounds?: number } = {}) {
+function loop(deps: { maxRounds?: number, displace?: (id: string) => boolean } = {}) {
   const fired: Array<{ id: string; text: string }> = []
   const logs: string[] = []
   const warns: string[] = []
   const l = makePromptLoop({
     followup: (id, text) => { fired.push({ id, text }) },
     maxRounds: () => deps.maxRounds ?? 10,
+    ...(deps.displace === undefined ? {} : { displaceGoal: deps.displace }),
     log: (m) => { logs.push(m) },
     warn: (m) => { warns.push(m) },
   })
@@ -133,4 +134,43 @@ test('the full director cycle: offers keep coming while a goal is armed, and one
   assert.equal(turnsStarted, 0, 'while the driver is armed, our loop starts nothing — at any number of boundaries')
   assert.equal(fired.length, 0)
   assert.equal(logs.filter((m) => m.includes('yielding')).length, 3, 'each yield is reported, once per boundary')
+})
+
+test('arming the director loop DISPLACES the goal\'s own continuation — it does not stand aside', () => {
+  // The maintainer\'s rule, quoted in docs/contract.md: prompt autorun "can either introduce or replace the
+  // autorun by the goal if it is running". My first pass yielded to an armed goal instead, which made the two
+  // features mutually exclusive — with a goal armed, a director\'s autorun would have quietly done nothing.
+  const disarmed: string[] = []
+  const l = makePromptLoop({
+    followup: () => undefined,
+    maxRounds: () => 10,
+    displaceGoal: (id) => { disarmed.push(id); return true },
+    log: () => undefined,
+  })
+  const state = l.setArmed('S', true)
+  assert.equal(state.displaced, true, 'the caller is told a handover happened, so the message can name it')
+  assert.deepEqual(disarmed, ['S'])
+  // …and with the driver disarmed but the goal still ACTIVE as an objective, firing is allowed: the suggestion
+  // carries the goal (it was generated from goal/change), it does not compete with it.
+  assert.equal(l.maybeFire('S', offer({ goalRevision: 3 }), { phase: 'active', activation: 'disarmed', revision: 3 }), true)
+})
+
+test('without the disarm seam the loop degrades to yielding, never to double-firing', () => {
+  const l = makePromptLoop({ followup: () => undefined, maxRounds: () => 10, log: () => undefined })
+  const state = l.setArmed('S', true)
+  assert.equal(state.displaced, false, 'no seam is reported, not faked')
+  assert.equal(l.maybeFire('S', offer({ goalRevision: 3 }), GOAL), false,
+    'so the armed goal driver still owns the boundary — one turn-starter, either way')
+})
+
+test('displacement changes nothing durable: the goal stays the objective the next offer is built from', () => {
+  // `GoalService.disarm` is chosen precisely because the host documents it as "without changing durable goal
+  // phase or revision". The offer stream must therefore still read the live objective after a handover.
+  const { l, fired } = loop({ displace: () => true })
+  l.setArmed('S', true)
+  assert.equal(l.maybeFire('S', offer({ goalRevision: 3 }), { phase: 'active', activation: 'disarmed', revision: 3 }), true)
+  assert.equal(fired.length, 1)
+  assert.equal(l.maybeFire('S', offer({ turnSeq: 31, goalRevision: 4 }), { phase: 'active', activation: 'disarmed', revision: 4 }), true,
+    'and a human goal edit (revision 3 → 4) keeps the loop alive on the NEW objective')
+  assert.equal(fired.length, 2)
 })

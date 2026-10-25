@@ -763,3 +763,23 @@ Consequences for this plugin, in order of how much they matter:
 
 This is the shape of the pair: the **goal** is the thing the human owns and re-cuts, the **suggestion** is the
 thing the director model re-derives every turn. Autorun drives the worker; the keystroke drives the objective.
+
+### Displacement, not yielding — the maintainer's rule for two autoruns in one session (2026-10-25)
+
+My first pass had the suggestion loop **yield** whenever a goal was `active`+`armed`. That was wrong against
+the spec: *"the autorun for the suggested prompt … can either introduce or **replace** the autorun by the goal
+if it is running."* Yielding made the two features mutually exclusive, which is the opposite of built for each
+other — with a goal armed, a director's autorun would have quietly done nothing at all.
+
+The rule now: **arming prompt autorun displaces the goal's continuation, and the suggestion carries the goal.**
+- Mechanism: `GoalService.disarm(agent)` (`dsh-goal/lib/index.js:622-627`) — *"without changing durable goal
+  phase or revision"*, a later human-authorized `resume` records the new activation edge. That is precisely a
+  cooperative brake: the objective stays authoritative in the log, the driver simply stops re-injecting it, so
+  **exactly one loop starts a turn** at each boundary, and it is whichever the human armed last.
+- The goal is not lost by being disarmed: every suggestion is generated *from* `goal/change` (objective +
+  revision) and the directive still says the next step must advance it. The director's words replace the host's
+  repeated round; the objective is unchanged.
+- If `disarm` is unavailable (no `goals` service on this host) arming still succeeds, and the loop yields the
+  turn — so a missing seam degrades to the safe behaviour rather than double-firing.
+- Re-arming the goal (`/goal resume`, or the bar's next human Run of a `GOAL:` step) is a human act, matching
+  the host's own rule that a model may not resume a paused goal (`GOAL_TOOL_RESUME_PAUSED`).

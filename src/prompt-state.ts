@@ -157,7 +157,9 @@ export function goalDriverOwnsTheTurn(goal: GoalSignal | null): boolean {
  */
 export interface PromptBarAccess {
   read(sessionId: string): Promise<PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }>
-  setAutorun(sessionId: string, on: boolean): { autorun: 'armed' | 'disarmed'; fired: number }
+  /** `displaced` is the answer to "who starts the next turn": true when arming this loop also disarmed the
+   * goal driver's continuation, so the human is told which engine they just opted into. */
+  setAutorun(sessionId: string, on: boolean): { autorun: 'armed' | 'disarmed'; fired: number; displaced: boolean }
   disarmHuman(sessionId: string): void
   setOff(sessionId: string): Promise<void>
   setOn(sessionId: string): Promise<void>

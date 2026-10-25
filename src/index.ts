@@ -465,6 +465,19 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         agent.followup(suggestPromptMessage(text, sessionId))
       },
       maxRounds: () => config.promptMaxRounds,
+      // The host's cooperative brake: `GoalService.disarm` stops the driver re-injecting rounds and changes
+      // NOTHING durable ("without changing durable goal phase or revision"), so the objective stays
+      // authoritative while exactly one loop — the one the human armed last — starts the next turn.
+      displaceGoal: (sessionId: string) => {
+        try {
+          const goals = (typeof ctx.get === 'function' ? ctx.get('goals') : undefined) as { disarm?: (agent: unknown) => unknown } | undefined
+          const agents = ctx.agents as unknown as { get?: (id: string) => unknown } | undefined
+          const agent = agents?.get?.(sessionId)
+          if (goals?.disarm === undefined || agent === undefined) return false
+          goals.disarm(agent)
+          return true
+        } catch { return false }
+      },
       // The goal signal comes from the SERVICE, never folded from the log: `activation` is process-local by
       // design (dsh-goal keeps it in a WeakMap), so the only honest read is the live GoalView. This is what
       // lets the loop know when the driver owns the next turn.

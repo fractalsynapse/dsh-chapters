@@ -23,6 +23,13 @@ import type { PromptSuggestionState } from './prompt-state.ts'
 export type AutorunFlag = 'armed' | 'disarmed'
 
 export interface PromptLoopDeps {
+  /**
+   * Stop the goal driver re-injecting its own round while KEEPING the goal durable and unchanged
+   * (`GoalService.disarm` — "without changing durable goal phase or revision"). Optional: if the seam is
+   * absent the loop falls back to yielding the turn, so a missing host verb degrades safely instead of
+   * starting two turns at one boundary.
+   */
+  displaceGoal?: (sessionId: string) => boolean
   /** live-session authoring: the runner supplies the agent handle it was given at the turn boundary. */
   followup: (sessionId: string, text: string) => void
   /** counts only FIRED rounds, so a suggestion nobody armed never spends the budget. */
@@ -38,7 +45,13 @@ export interface PromptLoopDeps {
 export interface PromptLoop {
   statusOf(sessionId: string): { autorun: AutorunFlag; fired: number }
   /** The human's `/chapters-prompt autorun on|off`. Arming does not fire anything by itself. */
-  setArmed(sessionId: string, on: boolean): { autorun: AutorunFlag; fired: number }
+  /**
+   * The human's `/chapters-prompt autorun on|off`. Arming fires nothing by itself — but it DOES displace the
+   * goal's continuation, per the spec: prompt autorun "can either introduce or REPLACE the autorun by the
+   * goal if it is running". My first pass yielded to an armed goal instead, which made the two features
+   * mutually exclusive — with a goal armed, a director's autorun would have quietly done nothing.
+   */
+  setArmed(sessionId: string, on: boolean): { autorun: AutorunFlag; fired: number; displaced: boolean }
   /** A human took the wheel: disarm now, keep the offer visible, and say why. */
   disarmForHuman(sessionId: string): AutorunFlag
   /** Called after the runner persisted a `ready` offer. Fires at most one turn per offer. */
@@ -70,11 +83,22 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
     setArmed(id, on) {
       const s = slot(id)
       s.armed = on ? 'armed' : 'disarmed'
+      // Displace, do not defer. One loop owns the next turn: whichever the human armed last.
+      let displaced = false
+      if (on && deps.displaceGoal !== undefined) {
+        try { displaced = deps.displaceGoal(id) === true } catch (error) {
+          deps.warn?.(`prompt: could not disarm the goal driver for ${id}: ${String((error as Error)?.message ?? error).slice(0, 120)}`)
+        }
+      }
       // Arming mid-offer is allowed to fire for the offer already on screen: the human said "keep going
       // from here", and making them wait for the next turn boundary is the difference between a loop and a
       // poller. Re-arming does NOT reset the budget — that is what stops it being an infinite bypass.
-      note(`prompt: autorun ${on ? 'armed' : 'disarmed'} for ${id} (${String(s.fired)} round(s) spent of ${String(deps.maxRounds())})`)
-      return { autorun: s.armed, fired: s.fired }
+      note(on
+        ? `prompt: autorun armed for ${id} — ${displaced
+            ? "goal continuation DISARMED (objective unchanged); the suggestion loop drives the worker"
+            : 'the goal keeps its own continuation; this loop yields the turn to it'}`
+        : `prompt: autorun disarmed for ${id} (${String(s.fired)} round(s) spent of ${String(deps.maxRounds())})`)
+      return { autorun: s.armed, fired: s.fired, displaced }
     },
 
     disarmForHuman(id) {

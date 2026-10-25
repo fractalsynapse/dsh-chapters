@@ -154,7 +154,7 @@ test('`state` answers with the facts the bar renders, in one parseable block', a
     statusLine: () => 'prompt: ON (local/qwen)',
     bar: {
       read: async () => ({ ...barState, autorun: 'armed', fired: 2 }),
-      setAutorun: (_id: string, on: boolean) => { calls.push({ on }); return { autorun: on ? 'armed' as const : 'disarmed' as const, fired: 2 } },
+      setAutorun: (_id: string, on: boolean) => { calls.push({ on }); return { autorun: on ? 'armed' as const : 'disarmed' as const, fired: 2, displaced: true } },
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
     },
   })
@@ -179,7 +179,7 @@ test('a failure state prints its reason, and an unwired bar says so instead of g
     effective: () => ({ spec: 'local/qwen', source: 'config' }),
     bar: {
       read: async () => ({ status: 'failed', text: '', turnSeq: 12, error: 'no route for the suggestion model', at: '', autorun: 'disarmed', fired: 0 }),
-      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0 }), disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }), disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
     },
   })
   const ftext = (await failed.run('state', AGENT)).text ?? ''
@@ -199,7 +199,7 @@ test('`autorun` arms only with a model to generate from, and refuses by naming b
     effective: () => ({ spec, source: spec === '' ? 'unset' : 'config' }),
     bar: {
       read: async () => ({ ...barState, autorun: spec === '' ? 'disarmed' : 'armed', fired: 0 }),
-      setAutorun: (_id, on) => { calls.push(on); return { autorun: on ? 'armed' as const : 'disarmed' as const, fired: 0 } },
+      setAutorun: (_id, on) => { calls.push(on); return { autorun: on ? 'armed' as const : 'disarmed' as const, fired: 0, displaced: true } },
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
     },
   })
@@ -212,7 +212,9 @@ test('`autorun` arms only with a model to generate from, and refuses by naming b
   const armed = await mk('local/qwen').run('autorun on', AGENT)
   assert.equal(armed.kind, 'success')
   assert.match(armed.text ?? '', /ARMED/)
-  assert.match(armed.text ?? '', /until you stop it, send a prompt yourself, or the goal completes/, 'the ending conditions are stated at the moment of opting in')
+  assert.match(armed.text ?? '', /until you stop it or send a prompt yourself/, 'the ending conditions are stated at the moment of opting in')
+  assert.match(armed.text ?? '', /goal continuation is disarmed|auto-continuation is disarmed/, 'and the message names WHO now owns the turn — arming a director loop with a goal armed is a handover, not a second engine')
+  assert.match(armed.text ?? '', /Re-arm it with \/goal resume/, 'and how to hand it back, matching the host rule that a model may not resume a paused goal')
   assert.deepEqual(calls, [true])
 
   const off = await mk('local/qwen').run('autorun off', AGENT)
@@ -231,7 +233,7 @@ test('`on` restores generation but cannot invent a model that was never set', as
     effective: () => ({ spec, source: spec === '' ? 'unset' : 'config' }),
     bar: {
       read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
-      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0 }), disarmHuman: () => undefined, setOff: async () => undefined,
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }), disarmHuman: () => undefined, setOff: async () => undefined,
       setOn: async () => { setOn += 1 },
     },
   })

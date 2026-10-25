@@ -452,7 +452,9 @@ export function registerHostCommands(
           }
           const live = config.prompt.bar.setAutorun(sessId, on)
           return { kind: 'success', text: on
-            ? `autorun ARMED for ${sessId} — each completed turn's offer will be run for you, until you stop it, send a prompt yourself, or the goal completes. State: /chapters-prompt state`
+            ? `autorun ARMED for ${sessId} — each completed turn's offer runs for you, until you stop it or send a prompt yourself.` + (live.displaced
+                ? ' The goal remains the objective; its own auto-continuation is disarmed, so the suggestion loop now drives the worker. Re-arm it with /goal resume.'
+                : ' The goal still owns the turn; this loop yields to it until the goal is paused, completed, or disarmed.') + ' State: /chapters-prompt state'
             : `autorun disarmed for ${sessId} — offers still appear each turn; nothing runs itself (${String(live.fired)} round(s) were started this process)` }
         }
         if (verb === 'on') {
