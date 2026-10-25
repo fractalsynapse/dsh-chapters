@@ -35,21 +35,33 @@ if [[ ! -f lib/index.js ]]; then npm run build; fi
 # resolvable node_modules; npm's `file:` install symlinks dsh-chapters exactly
 # as the pnpm `link:` did, so we write it directly and stay on npm.
 mkdir -p "$HOME_ARG/profiles/web"
+# #108: PACK, do not link. A `file:<directory>` dependency installs as a symlink, so the mounted plugin's
+# realpath is the repo — its peer deps install into the repo's node_modules and every later require walks up
+# into the developer's HOME/node_modules (289 packages here, none on a runner). Measured consequence: the same
+# pinned host composed a 7,276-char agent header on a laptop and 2,783 on CI, so a corpus distilled locally
+# cannot replay anywhere else. A tarball is EXTRACTED into the profile, so resolution ends at the profile.
+# The tarball ships `files` = lib/…, so lib/ must be current or the rig silently tests an old plugin.
+[[ -f lib/index.js ]] || { echo "bootstrap-dev-profile: lib/index.js is missing — run \`npm run build\` first (the packed tarball ships lib/, so a stale build would test yesterday's plugin)" >&2; exit 2; }
+PROF_ABS="$(cd "$HOME_ARG/profiles/web" && pwd)"
+find "$PROF_ABS" -maxdepth 1 -name '*.tgz' -delete
+TARBALL="$(cd "$ROOT" && npm pack --pack-destination "$PROF_ABS" 2>/dev/null | tail -1)"
+[[ -n "$TARBALL" && -f "$PROF_ABS/$TARBALL" ]] || { echo "bootstrap-dev-profile: npm pack produced no tarball into $PROF_ABS" >&2; exit 2; }
 node -e '
   const fs = require("node:fs")
-  const [root, home] = process.argv.slice(1)
+  const [root, home, tarball] = process.argv.slice(1)
   const file = home + "/profiles/web/package.json"
   let pkg = { name: "dsh-profile-web", private: true, dependencies: {} }
   try { pkg = JSON.parse(fs.readFileSync(file, "utf8")) } catch { /* fresh profile */ }
   pkg.name ??= "dsh-profile-web"; pkg.private = true
   pkg.dependencies ??= {}
-  pkg.dependencies["@treeseed/dsh-chapters"] = "file:" + root
+  // a relative `file:` resolves against this package.json, i.e. the profile directory itself
+  pkg.dependencies["@treeseed/dsh-chapters"] = "file:" + tarball
   pkg.dsh ??= {}
   pkg.dsh.profile ??= {}
   pkg.dsh.profile.bundles = [...new Set(["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@treeseed/dsh-chapters", ...(pkg.dsh.profile.bundles || [])])]
   pkg.dsh.profile.patchReload ??= "live"
   fs.writeFileSync(file, JSON.stringify(pkg, null, 2))
-' "$ROOT" "$HOME_ARG"
+' "$ROOT" "$HOME_ARG" "$TARBALL"
 (cd "$HOME_ARG/profiles/web" && npm install --no-audit --no-fund --loglevel=error)
 [[ -f "$HOME_ARG/profiles/web/cordis.yml" ]] || printf '[]\n' > "$HOME_ARG/profiles/web/cordis.yml"
 
