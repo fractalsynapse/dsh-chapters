@@ -810,3 +810,27 @@ Rules that follow, in the order they bite:
    bytes change", generalized: anything that changes what the plugin *sends*.
 4. If a green replay is ever obtained on a corpus whose legs have different build stamps, treat it as
    unexplained rather than as evidence.
+
+## The persona pin: a tape miss on request zero is a rig fault, not a test failure (#108)
+
+A replay's first request carries the host's **composed system prompt** — assembled from whichever
+`@deepseek-ai/*` packages contribute prompt sections in the booting profile. That set is NOT in
+`tests/e2e/rig-pins.ts`, so two machines at the same pinned host version can compose different headers:
+measured 2026-10-24, CI's `suite` persona diverges from the corpus's after 142 identical characters — CI
+emits `Prefer showing the primary results…` (`dsh-client-ui-deliverables`) while the recorded tapes carry
+`Tokens prefixed with @ …` (`dsh-file-reference-local`). The miss was on **msg0** with `commonPrefix=0`,
+nothing was served, the fork door never rendered, and the spec burned **25 minutes** before failing on a
+locator. A corpus recorded under one header is only evidence for that header.
+
+The rule, enforced in `tests/e2e/model-proxy.ts`:
+
+- `personaDigest(incoming)` — the digest of the first message when it is a `system` turn, taken **after**
+  the rig's masking (`normalize`), so ports/paths/AGENTS text cannot change it.
+- `corpusPersonas(tape)` — the set of those digests the leg's tapes were actually recorded under.
+- On a replay miss whose incoming persona digest matches **no** entry in that leg, the proxy journals
+  `PERSONA-MISMATCH`, answers 503 naming the two digests and this issue, and **latches**: every later
+  request for that leg fails immediately with the same sentence instead of re-scanning a corpus that
+  cannot answer. Fast, explicit, and pointing at the real fix.
+- A persona mismatch is therefore never a reason to widen matching, lower a threshold, or re-record on the
+  spot: it means the rig and the corpus disagree about what the host says. Fix the rig's input set (or
+  re-distill inside the hermetic rig CI uses) and say which.

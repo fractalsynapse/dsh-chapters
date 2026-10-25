@@ -417,6 +417,39 @@ function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
   }
   return best
 }
+/**
+ * #108: the identity of the host's COMPOSED SYSTEM PROMPT, after the rig's masking. A replay's first
+ * request carries it; if the corpus was recorded under a different header, every entry mismatches on msg0
+ * (`commonPrefix=0`) and nothing on screen can explain itself — CI then hangs 25 minutes on a UI element
+ * that never appeared because no answer was ever served. Ports, workspace paths, injected docs and
+ * reasoning prose are masked by `normalize` first, so this digest changes only when prompt bytes change.
+ */
+export function personaDigest(incoming: unknown[]): string | null {
+  const first: unknown = Array.isArray(incoming) ? incoming[0] : undefined
+  if (first === undefined || first === null) return null
+  // A live request arrives as objects; `loadTape` hands prefix messages back as JSON STRINGS. The digest is
+  // of the masked MESSAGE, so the two encodings must agree — otherwise `corpusPersonas` comes out empty and
+  // the proxy falls through to a generic "tape miss", which is the dead end #108 was filed from.
+  let message: unknown = first
+  if (typeof first === 'string') {
+    try { message = JSON.parse(first) as unknown } catch { return null }
+  }
+  const n = normalize(message)
+  if (!n.startsWith('{"role":"system"')) return null
+  return createHash('sha256').update(n).digest('hex').slice(0, 16)
+}
+
+/** The personas this leg's tapes were actually recorded under. Entries with no system head (a pure
+ *  user-turn fixture) contribute nothing: they cannot prove a header was ever composed. */
+export function corpusPersonas(tape: TapeEntry[]): Set<string> {
+  const out = new Set<string>()
+  for (const e of tape) {
+    const d = personaDigest(Array.isArray(e.prefix) ? e.prefix : [])
+    if (d !== null) out.add(d)
+  }
+  return out
+}
+
 export function normalizeSingle(m: unknown): string { return JSON.stringify(m) === '' ? '' : normalize(m) }
 
 /**
@@ -549,6 +582,12 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   const tapeName = path.basename(opts.tapeDir)
   fs.mkdirSync(opts.tapeDir, { recursive: true })
   const missLog = opts.journalPath ?? path.join(opts.tapeDir, '..', 'e2e-tape-misses.log')
+  // #108: once a leg's header is proven foreign to its corpus, every later request in that leg is answered
+  // the same way immediately. Continuing to re-scan a corpus that cannot answer is how one miss became a
+  // 25-minute browser hang in run 40145460775 — the diagnosis was already in hand.
+  const personaLatched = new Map<string, boolean>()
+  const personaSentence = (incoming: string, recorded: string): string =>
+    `e2e tape: PERSONA-MISMATCH (see #108) — this rig composes a system prompt the corpus never saw. incoming=${incoming} recorded=[${recorded}]. Nothing after this can render: no answer is served, so no door, no chapter, no assertion. Fix the rig's prompt-contributing input set (tests/e2e/rig-pins.ts) or re-distill inside the hermetic rig CI uses; do NOT widen matching or lower a threshold.`
   // #54: the DISTELLER's visibility. A tape miss is loud by design; a request that
   // simply never comes back was silent for as long as the harness's own hour timeout.
   // Every upstream attempt now logs start / stalled / first-byte / done / dead, with
@@ -594,6 +633,12 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           // same fields, mode named.
           journal(`REQUEST mode=replay path=${(req.url ?? '/').split('?')[0]} msgs=${String(inc.length)} reqBytes=${String(raw.length)}`)
           const tape = loadTape(opts.tapeDir)
+          if (personaLatched.get(tapeName) === true) {
+            const d0 = personaDigest(inc) ?? 'unknown'
+            res.writeHead(503, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: { message: personaSentence(d0, [...corpusPersonas(tape)].join(',')) } }))
+            return
+          }
           const hit = findReplay(tape, inc)
           if (hit !== null) {
             if (process.env.E2E_TAPE_HITS) {
@@ -612,6 +657,20 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           // the tape AND how many entries it loaded — "entries=0" is a different
           // bug (missing/untracked tape) than a prefix mismatch.
           fs.appendFileSync(missLog, `${new Date().toISOString()} MISS tape=${tapeName} entries=${String(tape.length)} messages=${String(inc.length)} ${describeMiss(tape, inc, tapeName)}\n`)
+          // #108 first, before any candidate archaeology: if this request's header matches NO entry in the
+          // leg, the mismatch is the rig's, not the journey's, and saying so is more useful than printing
+          // seven nearest prefixes.
+          {
+            const dIn = personaDigest(inc)
+            const known = corpusPersonas(tape)
+            if (dIn !== null && known.size > 0 && !known.has(dIn)) {
+              personaLatched.set(tapeName, true)
+              fs.appendFileSync(missLog, `${new Date().toISOString()} PERSONA-MISMATCH tape=${tapeName} incoming=${dIn} recorded=[${[...known].join(',')}] entries=${String(tape.length)} messages=${String(inc.length)}\n`)
+              res.writeHead(503, { 'content-type': 'application/json' })
+              res.end(JSON.stringify({ error: { message: personaSentence(dIn, [...known].join(',')) } }))
+              return
+            }
+          }
           // A miss is fatal (503) — UNLESS liveFallback is on, where it falls
           // through to the record path: the real model answers the drifted
           // request AND it lands on the tape, so the next clean replay
