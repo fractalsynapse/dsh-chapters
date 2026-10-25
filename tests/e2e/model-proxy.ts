@@ -424,19 +424,37 @@ function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
  * that never appeared because no answer was ever served. Ports, workspace paths, injected docs and
  * reasoning prose are masked by `normalize` first, so this digest changes only when prompt bytes change.
  */
+/**
+ * The masked form of a message head, from either side of the tape. A LIVE request arrives as objects and is
+ * normalized here; a STORED prefix entry is already the normalized string `loadTape` handed back — measured
+ * 2026-10-24, the stored text is NOT valid JSON (`@"..." quotes a path containing spaces.` sits unescaped
+ * inside it, along with `<HOSTPORT>`/`<DSH-CHECKOUT>` placeholders), so parsing it returns nothing and an
+ * implementation that tried silently produced an EMPTY persona set. An empty set means the mismatch check is
+ * never true, which is how the fast-fail landed looking correct while being inert against real tapes.
+ */
+function headView(first: unknown): string | null {
+  if (typeof first === 'string') return first
+  if (typeof first !== 'object' || first === null) return null
+  return normalize(first)
+}
+
 export function personaDigest(incoming: unknown[]): string | null {
-  const first: unknown = Array.isArray(incoming) ? incoming[0] : undefined
-  if (first === undefined || first === null) return null
-  // A live request arrives as objects; `loadTape` hands prefix messages back as JSON STRINGS. The digest is
-  // of the masked MESSAGE, so the two encodings must agree — otherwise `corpusPersonas` comes out empty and
-  // the proxy falls through to a generic "tape miss", which is the dead end #108 was filed from.
-  let message: unknown = first
-  if (typeof first === 'string') {
-    try { message = JSON.parse(first) as unknown } catch { return null }
-  }
-  const n = normalize(message)
-  if (!n.startsWith('{"role":"system"')) return null
-  return createHash('sha256').update(n).digest('hex').slice(0, 16)
+  const view = headView(Array.isArray(incoming) ? incoming[0] : undefined)
+  if (view === null || !view.startsWith('{"role":"system"')) return null
+  return createHash('sha256').update(view).digest('hex').slice(0, 16)
+}
+
+/**
+ * Is this the HARNESS AGENT's own header, as opposed to an auxiliary model turn (title generation,
+ * enrichment)? The persona pin guards the agent header only: auxiliary prompts are short task strings that
+ * legitimately differ per leg, and lumping them in would make the pin refuse work that is not drift.
+ */
+export function isAgentPersona(incoming: unknown[]): boolean {
+  const view = headView(Array.isArray(incoming) ? incoming[0] : undefined)
+  // the head must BE a system turn: measured 2026-10-24, five corpus entries are user-headed requests that
+  // QUOTE the harness persona (a chapter reload, a prompt inspection). Testing only for the marker text
+  // called them agent headers and polluted the pin with digests of nothing.
+  return view !== null && view.startsWith('{"role":"system"') && view.includes('You are an AI agent powered by DeepSeek Harness')
 }
 
 /** The personas this leg's tapes were actually recorded under. Entries with no system head (a pure
@@ -626,6 +644,34 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           try { res.writeHead(400, { 'content-type': 'application/json' }); res.end(JSON.stringify(refusal)) } catch { /* client gone */ }
           return
         }
+        // #108 prevention: a header this corpus was never pinned to may not be RECORDED either. Checked
+        // BEFORE the upstream call, because the whole cost of a distill is the model — and a corpus recorded
+        // under a header another machine does not compose is worthless there anyway (that is exactly how run
+        // 40145460775 lost 25 minutes per leg: the tapes and CI disagree at character 142 of the system
+        // prompt, and nothing said so at record time).
+        {
+          const pd = personaDigest(inc)
+          if (pd !== null && isAgentPersona(inc) && opts.mode === 'record') {
+            const pf = path.join(path.dirname(path.resolve(opts.tapeDir)), 'PERSONA')
+            if (!fs.existsSync(pf)) {
+              fs.writeFileSync(pf, `# Pinned agent-header digests — the composed system prompts this corpus was\n`
+                + `# recorded under (#108). A record whose agent header is not listed here is REFUSED; adding\n`
+                + `# a digest is a deliberate, human decision like CORPUS_HOST, not something a run does quietly.\n${pd}\n`)
+              journal(`PERSONA-Pinned tape=${tapeName} digest=${pd} → ${pf} (first digest recorded)`)
+            } else {
+              const pinned = fs.readFileSync(pf, 'utf8')
+              if (!pinned.includes(pd)) {
+                const listed = pinned.split('\n').filter((l) => l.length > 0 && !l.startsWith('#')).join(',')
+                fs.appendFileSync(missLog, `${new Date().toISOString()} PERSONA-RECORD-REFUSED tape=${tapeName} incoming=${pd} pinned=[${listed}] — this rig composes an agent header the corpus was not recorded under; refuse to distill (see #108)\n`)
+                journal(`PERSONA-RECORD-REFUSED tape=${tapeName} incoming=${pd} pinned=[${listed}]`)
+                res.writeHead(500, { 'content-type': 'application/json' })
+                res.end(JSON.stringify({ error: { message: `e2e record: PERSONA-RECORD-REFUSED (#108) — incoming agent header ${pd} is not pinned in ${pf}; pinned=[${listed}]. No upstream call, no tape written: update the rig's prompt-contributing package set, or change ${pf} deliberately as a human decision.` } }))
+                return
+              }
+            }
+          }
+        }
+
         if (opts.mode === 'replay') {
           // The journal must show replay's requests too. When enforcement was hoisted above this
           // branch, `START` stayed down in the record/live path and replay went unobservable —

@@ -1,0 +1,10 @@
+# Pinned agent-header digests — every composed AGENT system prompt this corpus
+# was recorded under (#108). A record whose agent header is not listed here is REFUSED before any
+# upstream call, because two machines composing different headers produce corpora that cannot replay on
+# each other: measured on CI run 40145460775, where CI and these tapes split at character 142 of the
+# system prompt and every leg then hung ~25 minutes on UI that no answer could render.
+# This is a SET because header composition depends on session state — the plans leg is recorded in plan
+# mode, which contributes a paragraph. Adding or removing a digest is a deliberate human decision,
+# like CORPUS_HOST, and must be justified by a measurement.
+d424453063168b94
+efd4a5d11076a2f7

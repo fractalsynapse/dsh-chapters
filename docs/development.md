@@ -834,3 +834,20 @@ The rule, enforced in `tests/e2e/model-proxy.ts`:
 - A persona mismatch is therefore never a reason to widen matching, lower a threshold, or re-record on the
   spot: it means the rig and the corpus disagree about what the host says. Fix the rig's input set (or
   re-distill inside the hermetic rig CI uses) and say which.
+
+### Prevention: recording refuses an unpinned header (#108)
+
+`tests/fixtures/model-tape/PERSONA` holds the digests of every **agent** system prompt the corpus was
+recorded under — "agent" meaning a header containing `You are an AI agent powered by DeepSeek Harness`, so
+auxiliary model turns (title generation, enrichment) are not mixed in. In **record** mode the proxy checks
+the digest of each agent-persona request *before* it forwards to the model:
+
+- file absent → bootstrap: the digest is written and the recording proceeds (first corpus on a rig).
+- digest already listed → proceed.
+- **digest unknown → refuse (500), journal `PERSONA-RECORD-REFUSED`, and write no tape.** The GPU is never
+  spent producing a corpus this rig cannot replay.
+
+So a machine-specific corpus is no longer possible by accident: re-distilling requires the header to match
+what CI composes, or the operator to update `PERSONA` deliberately — a human decision, recorded in git, in
+the same spirit as `CORPUS_HOST`. Refusing to record is not a failure of the rig; it is the rig reporting
+that the two machines disagree about what the host says.
