@@ -1,6 +1,7 @@
-import { bootE2eServer, type Pins } from './boot.ts'
+import { bootE2eServer, ROOT, type Pins } from './boot.ts'
 import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
 import path from 'node:path'
+import { watchRigFault } from './rig-fault.ts'
 
 /**
  * One server per CONFIG LOAD (proven lifecycle: project setupFiles die with
@@ -53,6 +54,19 @@ export default async function setup(fullConfig?: {
   if (process.env.E2E_PROMPT === '1') pins.promptModel = 'local/qwen3.8-flash-next'
   const floor = process.env.E2E_FLOOR
   if (floor !== undefined) pins.toolResultArtifactTokens = floor
+  // #108: watch the miss journal for a RIG fault and stop the leg outright. The pins already answer 503 in
+  // milliseconds, but a refused request leaves the browser waiting for UI that cannot render — measured on CI
+  // run 40151570099 at 22+ minutes with the pins firing. Exiting here is the difference between "proxy fast"
+  // and "run fast": the diagnosis lands in the log, the remaining specs do not burn their timeouts, and no
+  // one reads a locator failure as a product bug.
+  // The SAME root the boot uses for `journalPath` (boot.ts:315) — importing ROOT instead of recomputing it is
+  // the difference between watching the journal the proxy writes and watching a path that exists nowhere.
+  const journal = path.join(ROOT, 'var', 'e2e-tape-misses.log')
+  const stopWatch = watchRigFault(journal, (line) => {
+    console.error(`\n[e2e] RIG FAULT — aborting this leg instead of waiting out browser timeouts:\n  ${line}\n  journal: ${journal}`)
+    process.exit(1)
+  })
+
   const handle = await bootE2eServer(port, pins)
-  return async () => { await handle.stop() }
+  return async () => { stopWatch(); await handle.stop() }
 }
