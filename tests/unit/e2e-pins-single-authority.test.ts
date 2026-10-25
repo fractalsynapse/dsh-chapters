@@ -30,12 +30,11 @@ const EXPECTED: Record<string, Record<string, string>> = {
   rules: { E2E_PORT: '41735', E2E_THRESHOLD: '0.9' },
   fork: { E2E_PORT: '41737', E2E_THRESHOLD: '0.75' },
   plans: { E2E_PORT: '41738', E2E_THRESHOLD: '0.99', E2E_NO_AUX_MODEL: '1' },
-  prompt: { E2E_PORT: '41739', E2E_THRESHOLD: '0.99', E2E_NO_AUX_MODEL: '1', E2E_PROMPT: '1' },
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {
   assert.deepEqual(Object.keys(RIG_PINS).sort(), Object.keys(EXPECTED).sort(),
-    'the nine tape projects and nothing else (dev projects are not pinned here)')
+    'the eight tape projects and nothing else (dev projects are not pinned here) — `prompt` left with the composer ghost (#113, maintainer decision) and this table is what makes that removal complete: a leg in the table with no spec would be a silent lie')
   for (const [proj, pins] of Object.entries(EXPECTED)) {
     const env = rigEnv(proj)
     assert.equal(env.E2E_TAPE, proj, `${proj}: the tape dir is part of the regime, not a runner flag`)

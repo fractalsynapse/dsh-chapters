@@ -19,7 +19,6 @@ export interface RigPin {
   floor?: string
   enrich?: boolean
   noAuxModel?: boolean
-  promptModel?: boolean
 }
 
 export const RIG_PINS: Record<string, RigPin> = {
@@ -31,7 +30,6 @@ export const RIG_PINS: Record<string, RigPin> = {
   rules: { port: 41735, threshold: '0.9' },
   fork: { port: 41737, threshold: '0.75' },
   plans: { port: 41738, threshold: '0.99', noAuxModel: true },
-  prompt: { port: 41739, threshold: '0.99', noAuxModel: true, promptModel: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
@@ -42,7 +40,6 @@ export function rigEnv(project: string): Record<string, string> {
   if (p.floor !== undefined) env.E2E_FLOOR = p.floor
   if (p.enrich === true) env.E2E_ENRICH = '1'
   if (p.noAuxModel === true) env.E2E_NO_AUX_MODEL = '1'
-  if (p.promptModel === true) env.E2E_PROMPT = '1'
   return env
 }
 
@@ -75,6 +72,5 @@ export function applyRigEnv(project: string | null): RigPin | null {
   if (p.floor !== undefined) set('E2E_FLOOR', p.floor)
   if (p.enrich === true) set('E2E_ENRICH', '1')
   if (p.noAuxModel === true) set('E2E_NO_AUX_MODEL', '1')
-  if (p.promptModel === true) set('E2E_PROMPT', '1')
   return p
 }

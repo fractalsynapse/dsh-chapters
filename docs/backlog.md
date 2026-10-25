@@ -414,3 +414,11 @@ facts in `docs/contract.md` § Composer Ghost Layer). When the workspace deps mo
   with a non-surface synthetic event (the `plan/mode` precedent) and one seeded with the notice, run one
   step each, then reload through the host's own reader. Ship (b) behind a config flag only if the state
   seed is admitted AND the header lands as the first surface event. Related: #77, #58, #101, #61.
+- **#113 / the composer ghost is REMOVED (maintainer decision 2026-10-25), `/chapters-prompt` survives as a
+  deliberate command.** The chip re-fired per step inside one turn, errored on empty threads, and its overlay
+  was unreadable and overlapped the placeholder. What landed instead: turn-scoped generation (`src/prompt.ts`
+  keys on `turn/end`, not the last surface event), a `quiet` class on "nothing to offer" refusals, and a
+  multi-line labelled block from `/chapters-prompt suggest` so the prompt is shown whole with its model,
+  source and cap (the same shape `/chapters-status` gets an expander for). Site §28 and
+  `docs/contract.md` § Composer Ghost Layer still describe the removed overlay — they need a pass, and if the
+  ghost is ever revived it must answer all four defects with measurements, not a restyle.

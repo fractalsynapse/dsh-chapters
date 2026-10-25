@@ -179,15 +179,20 @@ test('nothing to recommend yet: no events, and no completed assistant turn, both
 test('a valid answer is cached for the turn boundary: the same seq costs one call total', async () => {
   const w = world({ settings: new Map([[PROMPT_SETTING_KEY, 'p/m']]), fetches: ['run the migration'] })
   const first = await w.surface.suggest(SESSION)
-  assert.deepEqual(first, { ok: true, text: 'run the migration' })
+  assert.equal(first.ok, true)
+  assert.equal(first.text, 'run the migration')
   const second = await w.surface.suggest(SESSION)
   assert.equal(second.ok, true)
   assert.equal(w.calls(), 1, 'fresh cache ⇒ zero model tokens on the repeat')
-  // A new completed turn moves the watermark: the answer is recomputed, never served stale.
-  const moved = { ...SESSION, events: [...SESSION.events, ev(3, 'user/message', { role: 'user', content: [{ type: 'text', text: 'and now?' }] }), ev(4, 'assistant/message', { message: { content: [{ type: 'text', text: 'considering' }] } })] }
+  // A new COMPLETED turn moves the watermark: the answer is recomputed, never served stale. The fixture used
+  // to append a bare `user/message` and call that a new turn — it isn't one, and #113 is precisely the bug that
+  // made an unfinished turn re-ask the model (one turn, three suggestions). Key on `turn/end`, so say `turn/end`.
+  const moved = { ...SESSION, events: [...SESSION.events,
+    ev(3, 'user/message', { role: 'user', content: [{ type: 'text', text: 'and then?' }] }),
+    ev(4, 'turn/end', { turn: 2 })] }
   const third = await w.surface.suggest(moved)
   assert.equal(third.ok, true)
-  assert.equal(w.calls(), 2, 'boundary moved ⇒ recompute')
+  assert.equal(w.calls(), 2, 'a new turn/end ⇒ recompute')
 })
 
 test('concurrent requests for one session share ONE in-flight call', async () => {
