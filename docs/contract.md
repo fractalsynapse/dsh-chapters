@@ -631,12 +631,20 @@ rules, `hooks:` observables, `remote.commands.execute` as the only plugin-reacha
 | `status` | server, persisted per session | `off` \| `analyzing` \| `ready` \| `failed` |
 | `text` | server | the suggestion, verbatim, never truncated (`promptMaxChars` is a **refusal** cap) |
 | `turnSeq` | server | the `turn/end` seq the suggestion was generated **for** — the identity of an offer |
-| `autorun` | client, process-local (exactly like the goal's `activation`) | `armed` \| `disarmed` |
+| `autorun` | **server, process-local** (exactly like the goal's `activation`) | `armed` \| `disarmed` |
 | `expanded` | client, per-mount | `false` collapsed one line · `true` full text shown |
 
-The durable pair (`status`, `turnSeq`) is the server's one-generation-per-turn key; the local pair
-(`autorun`, `expanded`) is transient UI intent and is never persisted — same split the goal bar uses
-between `goal.phase` and `activation`.
+The durable pair (`status`, `turnSeq`) is the server's one-generation-per-turn key; the process-local pair
+(`autorun`, `expanded`) is never persisted — same split the goal bar uses between `goal.phase` and
+`activation`.
+
+**Correction, found while wiring the loop and kept visible because the first version of this table was
+wrong.** `autorun` is *not* client-local: the whole point of the feature is that a suggestion drives the
+next real turn, and a turn is started host-side (`agent.followup`), so the flag has to live where the loop
+does. It is **server-side process-local state**, disarmed on mount and on `agent/created`, re-armed only by
+an explicit human action through the command — the host goal driver's `WeakMap` semantics copied on purpose,
+including the safety property: **a loop cannot resurrect itself after a restart.** `expanded` stays purely
+client-local, because only a browser cares.
 
 ### Dock placement
 `conversation.input.dock`, `order: 30` — after todo `0`, goal `10`, queue `20` (ascending sort), so it sits
