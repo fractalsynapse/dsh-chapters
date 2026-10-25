@@ -185,7 +185,7 @@ test('the exception is narrow: another plugin notice, or a plan-mode snapshot, s
  * as `user` would let our loop authorize model-side goal operations it must not authorize.
  */
 test('an autorun suggestion is captured as conversation, labelled apart from the human', () => {
-  const suggestion = { source: { kind: 'plugin:dsh-chapters', form: 'prompt-suggestion' }, content: [] }
+  const suggestion = { source: { kind: 'plugin:dsh-chapters', form: 'notice' }, content: [] }
   assert.equal(isArchivableConversation(suggestion as never), true, 'in the archive, like any other turn')
   assert.equal(isHumanAuthored(suggestion as never), false,
     'but NOT human: the topic-signature layer stays strict (r28), and goal authority must not be laundered')
@@ -193,6 +193,6 @@ test('an autorun suggestion is captured as conversation, labelled apart from the
 
   // The arm is named by producer AND form, so it cannot widen: a TOC notice is still screened.
   assert.equal(isArchivableConversation({ source: { kind: 'plugin:dsh-chapters', form: 'snapshot' }, content: [] } as never), false)
-  assert.equal(isArchivableConversation({ source: { kind: 'other-plugin', form: 'prompt-suggestion' }, content: [] } as never), false)
+  assert.equal(isArchivableConversation({ source: { kind: 'other-plugin', form: 'notice' }, content: [] } as never), false)
   assert.equal(sourceLabel({ source: { kind: 'user' }, content: [] } as never), 'user', 'human labels are untouched')
 })

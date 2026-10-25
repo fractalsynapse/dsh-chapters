@@ -75,7 +75,7 @@ export function isSessionStateNarration(data: Record<string, unknown>): boolean 
   // looking for exactly that (measured, dsh-tool-goal:49-65), and laundering our loop through it would let a
   // suggestion authorize model-side goal operations. Named by producer AND form like every arm above: the TOC
   // notice (`form: 'snapshot'`) and any other plugin's message stay screened.
-  if (source?.kind === 'plugin:dsh-chapters' && source.form === 'prompt-suggestion') return true
+  if (source?.kind === 'plugin:dsh-chapters' && source.form === 'notice') return true
   // v3 logs, still replayed from disk: the retired wrapper the exception was
   // written against. Both arms stay named by producer AND form — neither widens.
   return source?.kind === 'plugin' && source.plugin === 'plan-mode' && source.form === 'notice'
@@ -99,7 +99,7 @@ export function isArchivableConversation(data: Record<string, unknown>): boolean
 export function sourceLabel(data: Record<string, unknown>): string {
   const source = data.source as { kind?: string; plugin?: string; form?: string } | undefined
   if (source === undefined) return 'unlabelled'
-  if (source.kind === 'plugin:dsh-chapters' && source.form === 'prompt-suggestion') return 'suggested-prompt'
+  if (source.kind === 'plugin:dsh-chapters' && source.form === 'notice') return 'suggested-prompt'
   return source.kind === 'plugin' && typeof source.plugin === 'string'
     ? `plugin:${source.plugin}`
     : String(source.kind ?? 'unknown')
