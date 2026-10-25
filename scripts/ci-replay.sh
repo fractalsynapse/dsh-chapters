@@ -88,6 +88,10 @@ if [[ "$STATUS" -ne 0 ]]; then
     [[ -n "$line" ]] || continue
     DIAG+=$'\n'"${line:0:280}"
   done < <(
+    # A rig fault comes FIRST. `divergeAt=msg0` plus a browser timeout reads like a UI bug and cost a full
+    # CI run that interpretation; RIG-CAPABILITIES / PERSONA-* are the rig stating, in its own words, that the
+    # machine and the corpus disagree about the composed header — which is a different fix entirely (#108).
+    grep -E "RIG-CAPABILITIES|PERSONA-MISMATCH|PERSONA-RECORD-REFUSED" var/e2e-tape-misses.log 2>/dev/null | tail -3
     grep -E "^\[e2e\] boot pins" var/ci-replay.log | tail -2
     grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found" var/ci-replay.log | head -12
     # playwright's own saved context: the snippet plus the page snapshot, i.e. the
