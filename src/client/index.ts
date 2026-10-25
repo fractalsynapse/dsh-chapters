@@ -30,6 +30,9 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { PromptDock } from './prompt-dock.ts'
 import { DOOR_ACTIONS, makeDoorRunner, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
+=======
+import { DOOR_ACTIONS, makeDoorRunner, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
+>>>>>>> origin/staging
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -43,7 +46,8 @@ interface Ctx {
 
 // #77: `uiWorkspace` is not optional in practice — it owns `openSession(target)`, the verb the
 // host's own fork button uses (`ctx.uiWorkspace.openSession(childId)` in dsh-client-ui-chat).
-// `sessions` has no `open` at all, so without this row the door has never had a way to switch.export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
+// `sessions` has no `open` at all, so without this row the door has never had a way to switch.
+export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
 
 /** Props composed by the slot framework: owner (`messageId`) + our injected verb. */
 interface DoorActionProps {
