@@ -452,6 +452,18 @@ Run on a scratch clone of a real project (not this repo), at the pinned host and
    could never pass, and an unbounded `scrollIntoViewIfNeeded` that hung a leg for 17 minutes. Each
    looked like a product failure. **An unexercised assertion is a rumor of an assertion.**
 
+## Refusal output is grouped by class, with the remainder counted (#101)
+
+`/chapters-repair` prints **one line per refusal class per session** via `renderRefusalGroups`
+(`src/repair-run.ts`) — the count, up to three named examples, and `N more of the same class` when items
+were withheld. Un-grouped, the command printed 21 identical `test-litter` refusals across 23 sessions:
+483 repeated lines that made 372 actionable findings unreadable in the maintainer's run, while the offline
+runner had already been aggregating. Aggregation is presentation only — every item survives in
+`groupRefusals`'s output, and a class with a single refusal prints plainly, with no `×1` ceremony.
+
+If you add a refusal class, its line must carry the class name before the first `': '`: that is the grouping
+key, and a class that does not follow it will not aggregate (it will not be hidden, just alone).
+
 ## One unreadable session must not stop a repair (#101)
 
 The kernel refuses to open a session log it considers invalid — measured 2026-10-24 when

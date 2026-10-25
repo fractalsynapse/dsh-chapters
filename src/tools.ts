@@ -8,7 +8,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
-import { runRepair, restoreRepair } from './repair-run.ts'
+import { renderRefusalGroups, runRepair, restoreRepair } from './repair-run.ts'
 import { formatWarnings } from './warnings.ts'
 import { ensureDiagnosticsDefault } from './diag.ts'
 import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
@@ -1069,7 +1069,10 @@ export function buildChaptersTools(
         if (out.findingsBefore.length > 0 || out.applied.length > 0) {
           const by = out.findingsBefore.reduce<Record<string, number>>((m, f) => ({ ...m, [f.class]: (m[f.class] ?? 0) + 1 }), {})
           outcomes.push(`${id.slice(0, 14)}…: ${out.findingsBefore.length} finding(s) ${JSON.stringify(by)}${out.blindSpots.length > 0 ? ` blind to ${out.blindSpots.join(',')}` : ''}`)
-          for (const r of out.refused) outcomes.push(`  refused: ${r}`)
+          // #101: the same predicate the offline report uses, in one line per class. Un-grouped, this command
+          // printed 21 identical `test-litter` refusals for each of 23 sessions and the operator could not see
+          // the 372 findings that were actually actionable.
+          for (const line of renderRefusalGroups(out.refused)) outcomes.push(`  ${line}`)
           if (!dryRun) outcomes.push(`  → ${out.applied.length} move(s) journalled ${out.journalId}; ${out.findingsAfter.length} finding(s) remain`)
         }
       }
