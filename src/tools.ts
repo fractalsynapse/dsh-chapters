@@ -8,7 +8,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
-import { renderRefusalGroups, runRepair, restoreRepair } from './repair-run.ts'
+import { capReportLines, renderRefusalGroups, runRepair, restoreRepair } from './repair-run.ts'
 import { formatWarnings } from './warnings.ts'
 import { ensureDiagnosticsDefault } from './diag.ts'
 import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
@@ -72,6 +72,9 @@ export interface ToolsConfig extends ContinueConfig {
   warningsDisplayCap?: number
   /** #61: token ceiling on `chapters_segment`'s candidate list (0 = uncapped). */
   segmentCandidateCapTokens?: number
+  /** #117: cap on the printed `/chapters-repair` report lines. The finding COUNT always leads; this bounds
+   * the detail so one dry-run cannot emit a 311 KB event larger than the archive's oversize ceiling. */
+  repairReportMaxLines?: number
   /** Token budget for chapters_search result packing (record §8). */
   searchMaxTokens?: number
   /** The §5 sync scheduler: pull at fork, debounced push after archives. */
@@ -1087,7 +1090,14 @@ export function buildChaptersTools(
         ? [`${String(new Set(unreadable.map((l) => l.split(':')[0]!)).size)} session(s) could not be read and were NOT repaired:`,
            ...[...new Set(unreadable)].slice(0, 12).map((l) => `  ! ${l}`)]
         : []
-      return { kind: 'success' as const, text: [head, ...skipped, ...outcomes, tail].join('\n') }
+      // #117: a dry-run over 23 sessions printed **2,796 findings** as one command result — 311 KB, an event
+      // larger than the archive's whole oversize ceiling, which is how this session became un-compactable.
+      // The AGENTS rule already said a tool caps and NAMES its output instead of dumping it into a 32K
+      // window; the command predates its own discipline. So: the count always leads (it is the headline, not
+      // a withheld number), the lines are bounded by `repairReportMaxLines`, and the cap says what to do
+      // about the rest — a remedy, never a silent cut.
+      const { shown, capLine } = capReportLines([...skipped, ...outcomes], config.repairReportMaxLines ?? 60)
+      return { kind: 'success' as const, text: [head, ...shown, ...(capLine === '' ? [] : [capLine]), tail].join('\n') }
     },
   }
 

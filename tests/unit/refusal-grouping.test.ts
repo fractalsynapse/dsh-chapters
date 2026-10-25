@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { groupRefusals, renderRefusalGroups } from '../../src/repair-run.ts'
+import { capReportLines, groupRefusals, renderRefusalGroups } from '../../src/repair-run.ts'
 
 const R = (cls: string, what: string): string => `${cls}: ${what}`
 const LITTER = [1, 2, 3, 4, 5].map((n) => R('test-litter', `the store holds a second root .dsh-chapters/root-${String(n)}; not touched automatically`))
@@ -45,4 +45,33 @@ test('a class with one refusal is not wrapped in ceremony (#101)', () => {
 test('order is by volume, so the loudest class is dealt with first (#101)', () => {
   const lines = renderRefusalGroups([...LITTER, TWIN], 3)
   assert.ok(lines[0]!.includes('test-litter'), 'the 5-item class leads')
+})
+
+/**
+ * The report cap (#117) — same rule, one place, so the command and the offline runner cannot drift.
+ *
+ * Measured cause: a 23-session dry-run emitted 2,796 findings as ONE `command/done` event — 311 KB, larger
+ * than `2 × chapterTokenTarget` — and that single event made the session permanently un-compactable by
+ * `chapters_continue`, because clipping is forbidden and no range split can shrink one event. The cap is the
+ * honest half of the fix; the count leading is the other half, since a withheld number is the #61 bug in new
+ * clothes.
+ */
+test('capReportLines bounds the detail without losing the headline (#117)', () => {
+  const body = Array.from({ length: 200 }, (_, i) => `finding ${String(i)}`)
+  const out = capReportLines(body, 60)
+  assert.equal(out.shown.length, 60, 'the printed body is bounded')
+  assert.equal(out.withheld, 140)
+  assert.match(out.capLine, /capped at 60 of 200 lines/, `the numbers are stated: ${out.capLine}`)
+  assert.match(out.capLine, /140 withheld/, 'and the remainder is counted')
+  assert.match(out.capLine, /nothing dropped/, 'and the reader is told the detail still exists')
+  assert.match(out.capLine, /repairReportMaxLines/, 'naming the key that raises it')
+  assert.match(out.capLine, /dry-run <session-id>/, 'and a remedy that needs no restart')
+})
+
+test('a short report is not wrapped in ceremony, and a zero cap cannot mean silence (#117)', () => {
+  const body = ['one line', 'two lines']
+  const out = capReportLines(body, 60)
+  assert.deepEqual(out.shown, body, 'the lines pass through untouched')
+  assert.equal(out.capLine, '', 'no cap sentence when nothing was withheld')
+  assert.equal(capReportLines(['a'], 0).shown.length, 1, 'a cap of 0 clamps to one line, never to "print nothing"')
 })

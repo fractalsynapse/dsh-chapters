@@ -177,6 +177,8 @@ export interface Config {
   /** #113: how many turns an armed autorun may start before it stops and says so. Re-arming does NOT
    * refresh it, so arming cannot become an infinite loop; the budget is per process, like the flag. */
   promptMaxRounds: number
+  /** #117: cap on the printed `/chapters-repair` report, so one dry-run cannot emit 300 KB into a 32K window. */
+  repairReportMaxLines: number
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -287,6 +289,8 @@ export const Config = Schema.object({
   promptContextChars: Schema.number().default(4000),
   promptMaxChars: Schema.number().default(240),
   promptMaxRounds: Schema.number().default(24),
+  /** #117: how many lines a `/chapters-repair` report may print. The finding COUNT always leads; */
+  repairReportMaxLines: Schema.number().default(60),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -496,6 +500,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     registerChaptersTools(ctx as never, store, {
       artifactStoreRoot: config.artifactStoreRoot,
       chapterTokenTarget: config.chapterTokenTarget,
+      repairReportMaxLines: config.repairReportMaxLines,
       toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
       continuationBudgetRatio: config.continuationBudgetRatio,
       fallbackPreset: config.fallbackPreset,

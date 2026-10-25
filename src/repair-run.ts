@@ -477,3 +477,28 @@ export async function restoreRepair(ports: RepairPorts, journalId: string, sessi
 }
 
 export type { RepairFinding, SessionState }
+
+/**
+ * Bound a repair report so one command result cannot outgrow the archive (#117).
+ *
+ * Why this is a function and not arithmetic in the command: the same rule has to hold for the in-host
+ * `/chapters-repair` and the offline runner, and a decision that exists in two places is a decision that
+ * drifts (#59's lesson). Pure, so the three things that matter are rows rather than intentions — the count
+ * always survives, the withheld remainder is counted and named with a remedy, and a short report is not
+ * wrapped in ceremony.
+ *
+ * The trigger was measured: a 23-session dry-run printed 2,796 findings as ONE `command/done` result —
+ * 311 KB, an event larger than `2 × chapterTokenTarget` — which is what made that session permanently
+ * un-compactable by `chapters_continue`. Clipping is forbidden by invariant, so the only honest options were
+ * to stop generating the monster or to cap with a remedy. Both are here: the cap, and the count leading.
+ */
+export function capReportLines(body: readonly string[], capLines: number): { shown: string[]; withheld: number; capLine: string } {
+  const cap = Math.max(1, Math.floor(capLines))
+  const withheld = Math.max(0, body.length - cap)
+  if (withheld === 0) return { shown: [...body], withheld: 0, capLine: '' }
+  return {
+    shown: body.slice(0, cap),
+    withheld,
+    capLine: `  … report capped at ${String(cap)} of ${String(body.length)} lines (repairReportMaxLines) — ${String(withheld)} withheld, nothing dropped: per-session detail is /chapters-repair dry-run <session-id>, or raise the cap`,
+  }
+}
