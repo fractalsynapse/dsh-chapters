@@ -21,23 +21,60 @@ export function findRigFault(text: string): string | null {
   return null
 }
 
+export interface FaultGuardDeps {
+  /** the miss journal the proxy writes (`ROOT/var/e2e-tape-misses.log`). */
+  journal: string
+  /**
+   * The boot's stop, or `null` while the boot has not returned yet. Awaited BEFORE `exit`, because an abort
+   * that leaves the server on the leg's port makes the NEXT leg fail with "port already in use" — a rig
+   * fault must never manufacture a flake. Measured 2026-10-24: a guard installed before the boot, holding a
+   * late-bound `stopBoot`, fired against a journal line that predated the boot and exited with the child
+   * already spawned and nothing wired to stop it. So the guard ASKS for the stop until one exists
+   * (`waitMs`), then uses it — and gives up rather than hanging.
+   */
+  getStopBoot: () => (() => void | Promise<void>) | null
+  exit: (code: number) => void
+  /** how long to wait for a boot to exist before giving up and leaving anyway */
+  waitMs?: number
+  log?: (message: string) => void
+  intervalMs?: number
+}
+
 /**
- * Watch `journalPath` and report the first fault. A missing file is NOT a fault (CI removes the journal before
- * each chain); a file created mid-watch is read, so a proxy that writes the journal lazily is still caught.
- * Returns a disposer; the caller decides whether the watch keeps the process alive.
+ * Watch → report → **stop the boot** → exit. `exit` and `stopBoot` are injected so the ordering is a tested
+ * property rather than something `process.exit` hides: a fault must reap the server before it leaves.
  */
-export function watchRigFault(journalPath: string, onFault: (line: string) => void): () => void {
+export function installRigFaultGuard(deps: FaultGuardDeps): () => void {
   let done = false
   const check = (): void => {
     if (done) return
     let text: string
-    try { text = fs.readFileSync(journalPath, 'utf8') } catch { return }
+    try { text = fs.readFileSync(deps.journal, 'utf8') } catch { return }
     const fault = findRigFault(text)
-    if (fault !== null) { done = true; onFault(fault) }
+    if (fault === null) return
+    done = true
+    void (async () => {
+      const stop = await waitForStop(deps.getStopBoot, deps.waitMs ?? 5000)
+      if (stop !== null) { try { await stop() } catch { /* a failed stop must not mask the fault; the exit below still happens */ } }
+      deps.log?.(`[e2e] RIG FAULT — aborting this leg instead of waiting out browser timeouts:\n  ${fault}`)
+      deps.exit(1)
+    })()
   }
   let watcher: fs.FSWatcher | undefined
-  try { watcher = fs.watch(journalPath, { persistent: false }, check) } catch { /* created later; the interval covers it */ }
-  const timer = setInterval(check, 1000)
+  try { watcher = fs.watch(deps.journal, { persistent: false }, check) } catch { /* created later; the poll covers it */ }
+  const timer = setInterval(check, deps.intervalMs ?? 1000)
   timer.unref()
   return () => { done = true; clearInterval(timer); watcher?.close() }
+}
+
+/** Poll for a stop until one exists or the window closes; never throws, never hangs past `waitMs`. */
+async function waitForStop(get: () => (() => void | Promise<void>) | null, waitMs: number): Promise<(() => void | Promise<void>) | null> {
+  const deadline = Date.now() + Math.max(0, waitMs)
+  for (;;) {
+    let stop: (() => void | Promise<void>) | null = null
+    try { stop = get() } catch { stop = null }
+    if (stop !== null) return stop
+    if (Date.now() >= deadline) return null
+    await new Promise<void>((r) => setTimeout(r, 50))
+  }
 }
