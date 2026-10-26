@@ -399,6 +399,12 @@ not a plugin bug.
   ledger, `chapters_segment`'s counts — and where no measurement exists, say the number is unknown and
   continue. "My context is nearly spent" with no reading behind it is a fabrication, and it is the class of
   wrong this repository exists to end.
+- **Never end a turn asking for permission to continue.** Uncertainty is not a blocker and a `PLOT:` line is
+  not a question. Report a blocker only when it is real and external: a missing credential you cannot read,
+  hardware that is not there, a decision that is the maintainer's by right (a release to `main`, a scope
+  change, a destructive act), or an error you have already tried to work around and cannot. Anything else:
+  act, verify, and report what happened. Stopping to ask "should I proceed?" several times in one session is
+  the failure mode this bullet exists to end — it makes the maintainer a gate on work they already asked for.
 - **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
   with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
   When a question stalls, change something real: different arguments, a different tool, or state what is
