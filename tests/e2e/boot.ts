@@ -3,6 +3,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { describeRoute, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 
@@ -282,6 +283,41 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // is wrong, which is precisely the "green tests, dead product" failure this repo keeps being
   // told about. Override with E2E_WINDOW_TOKENS=0 to run against the endpoint's real window.
   const PINNED_CONTEXT_WINDOW = Number(process.env.E2E_WINDOW_TOKENS ?? '32000')
+  // HARNESS-NATIVE ROUTE (#56 lineage, maintainer decision 2026-10-25). This plugin is developed INSIDE DSH,
+  // against a provider the running host already holds — so `E2E_PROVIDER=harness` takes that route from the
+  // ambient profile instead of the tracked `local`/localhost:8080 block, which exists only because a GitHub
+  // runner has no credentials. Distilling and running live legs through a DIFFERENT model than the product
+  // runs against is how the #90 `reasoning_content` divergence class was born: the shape mismatch gets masked
+  // in the blind list instead of removed.
+  //
+  // Credential order, exactly as the maintainer specified: (1) the PARENT ENVIRONMENT's
+  // QWEN_TOKEN_PLAN_API_KEY — how this harness itself gets it; (2) an untracked `.dshdev-local/e2e.env`.
+  // If neither is present the boot REFUSES, loudly, with the remedy — it does not fall back to `local`, and
+  // no leg silently skips. #54 already proved that a route asked of the wrong endpoint skips six projects and
+  // reads like a pass.
+  const harnessRoute = (() => {
+    if (process.env.E2E_PROVIDER !== 'harness') return null
+    const ambient = process.env.E2E_AMBIENT_PROFILE
+      ?? path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'profiles', 'web', 'cordis.patch.yml')
+    let text = ''
+    try { text = fs.readFileSync(ambient, 'utf8') } catch {
+      throw new Error(`e2e: E2E_PROVIDER=harness but the ambient profile is unreadable at ${ambient}`
+        + ' — point E2E_AMBIENT_PROFILE at the profile this host actually runs.')
+    }
+    const route = routeFromProfile(text)
+    if (route === null) {
+      throw new Error(`e2e: could not read a provider route from ${ambient} (needs an agent-default-model row`
+        + ' naming a provider whose block declares apiKeyEnv). Nothing was guessed.')
+    }
+    const fileText = (() => {
+      const f = path.join(ROOT, '.dshdev-local', 'e2e.env')
+      try { return fs.readFileSync(f, 'utf8') } catch { return null }
+    })()
+    const resolved = resolveKey(process.env, fileText, route.apiKeyEnv)
+    if (resolved.key === null) throw new Error(`e2e: harness-native route ${route.id}/${route.model} needs ${route.apiKeyEnv}. ${resolved.remedy}`)
+    console.log(describeRoute(route, resolved, process.env.E2E_MODEL ?? 'live'))
+    return { route, key: resolved.key }
+  })()
   const modelMode = process.env.E2E_MODEL ?? 'live'
   // REPLAY asserts against recorded prompt prefixes, which carry the host's prompt
   // composition. If the corpus was distilled against a different host than we pin, the
@@ -342,7 +378,11 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const patchPath = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
     if (fs.existsSync(patchPath)) {
       let p = fs.readFileSync(patchPath, 'utf8')
-      if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
+      if (harnessRoute !== null) {
+        // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host
+        // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
+        p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
+      } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
         p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: 0\n` + p
       }
       p = p.replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`).replace(/maxTokens: \d+/g, 'maxTokens: 15000')
@@ -447,6 +487,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       ...(process.env.DSH_CHAPTERS_ENGINE_ERRORS !== undefined && process.env.DSH_CHAPTERS_ENGINE_ERRORS !== ''
         ? { DSH_CHAPTERS_ENGINE_ERRORS: process.env.DSH_CHAPTERS_ENGINE_ERRORS }
         : {}),
+      ...(harnessRoute !== null ? { [harnessRoute.route.apiKeyEnv]: harnessRoute.key } : {}),
       ...(proxy !== null && process.env.LOCAL_API_KEY === undefined
         && !fs.existsSync(path.join(E2E_HOME, '.credentials.yaml'))
         ? { LOCAL_API_KEY: 'e2e-tape-proxy-dummy' }

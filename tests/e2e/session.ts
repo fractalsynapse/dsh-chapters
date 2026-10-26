@@ -65,6 +65,11 @@ export async function localModelUp(): Promise<boolean> {
   // without any 8080 must still RUN the suite, and it must FAIL if a tape is
   // missing. Only live/record runs ask the server the question.
   if ((process.env.E2E_MODEL ?? 'live') === 'replay') return true
+  // LIVE MODE MUST NOT QUIETLY SKIP (#54's lesson, finished): a leg that skips "because the model is not
+  // running" reports as a pass to anyone scanning a log, and that is how six of eight projects went unrun for
+  // a month. A failed probe in live mode is now a FAILURE naming the remedy, unless the operator opts out
+  // explicitly with E2E_ALLOW_SKIP=1 — which is the only way a silent skip may happen again, and it is loud
+  // in the code, not implied.
   const base = (process.env.E2E_UPSTREAM ?? '').trim().replace(/\/+$/, '')
   // #54: RECORD against a REMOTE endpoint. The guard asks "is the model this run talks
   // to reachable?" — and answering it by probing port 8080 alone made every remote
