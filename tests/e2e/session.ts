@@ -58,6 +58,19 @@ export function collectionTotal(): number {
   } catch { return -1 }
 }
 
+/**
+ * A failed availability probe in a mode that NEEDS the model is a FAILURE, not a skip (#54's doctrine, and
+ * the thing my previous commit claimed but did not do — the comment landed, the behaviour did not, and
+ * `LEG=fork MODE=live` came back `1 skipped`, which reads as a pass to anyone scanning a log). `E2E_ALLOW_SKIP=1`
+ * is the single explicit opt-out: for the rare run that genuinely means "skip legs I cannot serve".
+ */
+function unavailable(what: string): false {
+  if (process.env.E2E_ALLOW_SKIP === '1') return false
+  throw new Error(`e2e: ${what} — this leg needs a reachable model and none is. Start it, or point the run at one `
+    + '(E2E_UPSTREAM=http://host:port, or E2E_PROVIDER=harness for this host\'s own route), or set E2E_ALLOW_SKIP=1 '
+    + 'to skip on purpose. A silent skip is indistinguishable from a pass in CI output, which is the bug.')
+}
+
 export async function localModelUp(): Promise<boolean> {
   // Model-tape replay IS the model for this run: every turn is served from
   // tests/fixtures/model-tape, so real-server reachability is irrelevant.
@@ -65,6 +78,12 @@ export async function localModelUp(): Promise<boolean> {
   // without any 8080 must still RUN the suite, and it must FAIL if a tape is
   // missing. Only live/record runs ask the server the question.
   if ((process.env.E2E_MODEL ?? 'live') === 'replay') return true
+  // HARNESS-NATIVE MODE: the route IS the host's own provider, resolved and credential-checked by the boot
+  // (which refuses if the key cannot be found). Asking "is 8080 listening?" here is #54's exact bug reborn —
+  // a probe pointed at an endpoint this run never uses, answering `false`, and the journey SKIPS while the
+  // log reads as though nothing needed doing. Measured: `LEG=fork MODE=live E2E_PROVIDER=harness` came back
+  // `1 skipped` for precisely this reason.
+  if (process.env.E2E_PROVIDER === 'harness') return true
   // LIVE MODE MUST NOT QUIETLY SKIP (#54's lesson, finished): a leg that skips "because the model is not
   // running" reports as a pass to anyone scanning a log, and that is how six of eight projects went unrun for
   // a month. A failed probe in live mode is now a FAILURE naming the remedy, unless the operator opts out
@@ -102,7 +121,7 @@ export async function localModelUp(): Promise<boolean> {
     const r = await fetch(`${localBase}/v1/models`, { signal: AbortSignal.timeout(3000) })
     return r.ok
   } catch {
-    return false
+    return unavailable(`no model answered ${localBase}/v1/models`)
   }
 }
 
