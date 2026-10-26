@@ -15,12 +15,32 @@ import path from 'node:path'
 import { test, expect } from '@playwright/test'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
+
+/**
+ * Console capture for the leg that has to prove a component renders.
+ *
+ * A missing dock row has four possible causes and the DOM cannot tell them apart: plugin not mounted (the
+ * assistant-action buttons settle that), slot not registered, registration rejected by a host guard, or the
+ * component throwing during render. Only the browser says which — and `page.on` must be attached before
+ * navigation, so it lives here rather than in the discovery spec.
+ */
+function captureConsole(page: import('@playwright/test').Page, sink: string[]): void {
+  // The URL, not just the status. "Failed to load resource: 404" tells me something is missing; the request
+  // path tells me WHETHER it is the bar's own command plane or some unrelated asset.
+  page.on('response', (r) => { if (r.status() >= 400) sink.push(`http ${String(r.status())}: ${r.url().slice(0, 160)}`) })
+  page.on('requestfailed', (r) => { sink.push(`requestfailed: ${r.url().slice(0, 160)} :: ${String(r.failure()?.errorText ?? '')}`.slice(0, 240)) })
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning' || m.text().includes('[client:prompt]')) sink.push(`${m.type()}: ${m.text()}`.slice(0, 300)) })
+  page.on('pageerror', (e) => { sink.push(`pageerror: ${String(e.message).slice(0, 300)}`) })
+}
+
 import { countHumanMessagesCarrying, newSessionWithTurn, openApp, sessionLogTextById } from './session.ts'
 
 const DOCK_BAR = 'div.dsh-chapters_promptDock[data-prompt-bar="true"]'
 
 test.describe('the suggested-next-step bar docked above the composer', () => {
   test('it registers into the composer dock and is visible without hovering anything', async ({ page }) => {
+    const errors: string[] = []
+    captureConsole(page, errors)
     await openApp(page)
     const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
     expect(sid, 'the leg needs a completed turn before a suggestion can exist').toBeTruthy()
@@ -33,7 +53,7 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
         .map((el) => ({ tag: el.tagName, cls: el.className?.toString?.().slice(0, 60) ?? '', attr: el.getAttribute('data-plugin-root') ?? el.getAttribute('data-prompt-bar') ?? '' }))
       return { dockish, buttons: [...document.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')).filter(Boolean).slice(0, 40) }
     })
-    fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-dom.json'), JSON.stringify(dump, null, 1))
+    fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-dom.json'), JSON.stringify({ ...dump, consoleErrors: errors }, null, 1))
 
     const bar = page.locator(DOCK_BAR)
     await expect(bar, 'the dock row exists on a boot that configured promptModel').toBeVisible({ timeout: 30_000 })

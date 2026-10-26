@@ -124,9 +124,14 @@ export function PromptDock(props: DockProps): ReactElement | null {
       if (ev !== null) dispatch(ev)
       const autorun = parseBarAutorun(text)
       if (autorun !== null) dispatch({ t: 'autorun', on: autorun === 'armed' })
-    } catch {
+    } catch (error) {
+      // #61: a detected failure is a DELIVERED failure. Keeping the last known state is right; saying
+      // nothing was not — with a bare `catch {}` a wire that never answers is indistinguishable from a
+      // feature that is switched off, and that is exactly how this bar looked "unverifiable" in a browser
+      // while the real fault was one line of swallowed output.
       // A failed pull is not a state: the bar keeps what it last knew rather than rendering `off`,
       // which would read as "suggestions are disabled" when the wire merely hiccoughed.
+      console.warn(`[client:prompt] pull failed: ${String((error as Error)?.message ?? error).slice(0, 180)}`)
     } finally { pulling.current = false }
   }, [exec])
 

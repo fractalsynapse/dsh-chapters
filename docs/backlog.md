@@ -448,3 +448,31 @@ facts in `docs/contract.md` § Composer Ghost Layer). When the workspace deps mo
 5. Standing diagnosability fixes owed: boot must assert a provider answered before journeys poll; failure
    artifacts must include a DOM (`error-context.md` has none, which is how I claimed "present but not visible"
    from a call log).
+
+### The bar renders nothing because its pull never returns (2026-10-26, measured)
+
+Proven by instrumenting rather than reasoning, each step eliminating a hypothesis:
+
+- the profile row reaches the plugin: `[chapters-config] promptModel delivered = "qwen-token-plan/qwen3.8-flash"`
+  — so the server-side enable rule is satisfied;
+- the component **is mounted** by the host and receives real props: `[client:prompt] mount; sid=session-…
+  exec=function inputActions=object status=off` — so the dock registration and slot name are correct;
+- the initial `status=off` then hides the row (`barVisible` false), which is the *by-design* default;
+- but the mount-time `refresh()` produced **no** dispatch, **no** catch, and **no** `finally` — it awaits
+  `exec(...)` and never returns, and nothing reached the host (the server log has no `chapters-prompt` line).
+
+So the remaining fault is the command wire from the dock: `runCommandText(remote, sessionId, line)` resolves
+for the assistant-action doors (the fork leg clicks it successfully) and hangs when fired at mount. Ordering
+hypothesis: at mount the session may not be attached for a command dispatch yet, or the doors' path awaits a
+different signal. Fix, in this order:
+1. bound the pull (`Promise.race` with a timeout) so a hung wire becomes a **delivered** failure, not silence —
+   the bare `catch {}` that swallowed tonight's diagnosis is already replaced with `console.warn` (#61);
+2. fire the first pull on the same edge the doors succeed on (after a completed turn / idle), not at mount;
+3. only then decide whether `off`-until-first-answer stays the default or the bar shows `Analyzing…` while the
+   first pull is in flight. The maintainer's approved shape says *Analyzing… then Recommended Next Step*, so if
+   the pull is reliable, `off` is the wrong default for a configured session.
+
+Rig gaps found on the way, worth their own rows: `E2E_KEEP_HOME=1` is documented but no longer implemented in
+`tests/e2e/*` — so a passing boot deletes the only copy of the profile it wrote and post-hoc inspection is
+impossible; and `typecheck:e2e`'s `TS2769` count is structural (one per `projects` entry, because Playwright's
+`Project` type has no `env`), so it must move with the number of legs, not be treated as a regression.
