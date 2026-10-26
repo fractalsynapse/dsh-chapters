@@ -1,6 +1,9 @@
 # dsh-chapters — agent core
 
-Working spec for an agent with a 32K–128K context. This file holds only what you must not get wrong.
+Working spec for an agent running on 32K–128K models — that is the hardware this project serves, not a
+limit you ration against. Context on such a host is renewable: the chapters preset archives and continues
+by design, so capacity is never a reason to stop, shorten, or defer work (see the Hard Rule on context
+capacity). This file holds only what you must not get wrong.
 Detail lives in `docs/` and is linked at the point of use — read those on demand, not first.
 **User-facing documentation lives ONLY on the site: https://treeseed-ai.github.io/dsh-chapters/**
 (numbered §1–§28; `site/src/content/docs/` holds its sources) — never duplicate a how-to into this
