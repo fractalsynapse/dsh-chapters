@@ -27,8 +27,19 @@ if [ -n "$PROJECT_ARG" ] && [ -n "${LEG:-}" ] && [ "$PROJECT_ARG" != "$LEG" ]; t
 fi
 [ -n "$PROJECT_ARG" ] && LEG="$PROJECT_ARG"
 export LEG
-: "${LEG:?set LEG=<suite|heavy|arrival|enrich|fanout|rules|fork|plans>, or pass --project=<leg>}"
-: "${MODE:?set MODE=<live|replay|record|heal>}"
+if [ -z "${LEG:-}" ]; then
+  # An explicit usage line, exit 2. The previous form was `${LEG:?…}`, which bash reports as
+  # `scripts/e2e-one.sh: line 30: LEG: set LEG=…` — a parameter-expansion error that looks like a broken
+  # script rather than guidance. The maintainer read that line and reasonably concluded nothing worked; the
+  # cause was a stale checkout, but the message earned none of the credit.
+  echo "usage: LEG=<suite|heavy|arrival|enrich|fanout|rules|fork|plans> MODE=<live|replay|record|heal> bash scripts/e2e-one.sh" >&2
+  echo "   or: npm run corpus:heal -- --project=suite" >&2
+  exit 2
+fi
+if [ -z "${MODE:-}" ]; then
+  echo "usage: LEG=… MODE=<live|replay|record|heal> bash scripts/e2e-one.sh  (no default: the mode decides whether a tape is written)" >&2
+  exit 2
+fi
 case "$MODE" in
   live)   export E2E_MODEL=live ;;
   replay) export E2E_MODEL=replay ;;
@@ -45,4 +56,13 @@ esac
 if [ "$MODE" = live ]; then export E2E_WINDOW_TOKENS="${E2E_WINDOW_TOKENS:-0}"; fi
 export PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright"
 echo "[e2e-one] leg=$LEG mode=$MODE provider=${E2E_PROVIDER:-tracked-local} window=${E2E_WINDOW_TOKENS:-pinned-32K}"
+
+# DRY=1 resolves everything and runs nothing. This exists because "did my flags land?" used to require a full
+# harness boot to answer — minutes of GPU/port/credential work to check a line of parsing — which is how a
+# broken script gets handed to a human to discover. Prove the resolution, then decide whether to boot.
+if [ "${DRY:-0}" = "1" ]; then
+  echo "[e2e-one] DRY RUN — would exec: npx playwright test -c tests/e2e/playwright.config.ts ${ARGS[*]-}"
+  echo "[e2e-one] DRY RUN — no boot, no browser, no model call, no tape written"
+  exit 0
+fi
 exec npx playwright test -c tests/e2e/playwright.config.ts "${ARGS[@]}"
