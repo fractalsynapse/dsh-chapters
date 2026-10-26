@@ -24,10 +24,14 @@ has an icon, a status label, the suggested prompt, and three actions:
   Step`** with the prompt in one line. The label is the state; you are never guessing whether
   it is thinking or stuck.
 - **Click the prompt to expand it.** The row opens in place and shows the complete prompt.
-- **Click it again while expanded and it goes into the input box** — the draft is replaced,
-  editable, and *nothing is sent*. Reading and committing are two gestures on purpose.
-- **Run** puts the prompt in the input and submits it, so what leaves is visible in the
-  composer for the instant before it goes.
+- **Click it again while expanded to put it in the input box for editing.** This is the part
+  the host does not yet support: on 0.2.0-rc.2 a dock cannot write the composer — `insertText`
+  raises `draftRev` and `setDraft` only mirrors at mount — so the bar **says so on its face**
+  instead of leaving you with a button that did nothing. Reading and committing stay two
+  gestures, and the second one becomes available the day the host exposes a draft API
+  ([#126](https://github.com/treeseed-ai/dsh-chapters/issues/126)).
+- **Run** submits the offer as your own turn, through the same follow-up path autorun uses —
+  one code path for "run it", whether you clicked it or the loop armed it.
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
   step and runs it, until you stop it, until you send a prompt yourself, or until the goal
   finishes.
@@ -38,6 +42,20 @@ has an icon, a status label, the suggested prompt, and three actions:
 
 The prompt names the model that wrote it. That matters: the whole point is a *different*
 model defining the work, and you should know which mind suggested it.
+
+## What the bar's states mean
+
+| state | what you see | what it means |
+|---|---|---|
+| *(nothing)* | no row at all | switched off: no model configured, or you pressed **Off** |
+| `idle` | "No suggestion yet — I will recommend one after your next turn" | enabled, and there is no completed turn to read yet |
+| `analyzing` | "Analyzing the session…" | a generation is running for the current turn |
+| `ready` | **Recommended Next Step** + the prompt | an offer is on screen, yours to run or ignore |
+| `failed` | the reason, in red | the call did not work — the bar keeps the last offer rather than pretending |
+
+`idle` exists because an earlier build collapsed "enabled but nothing to say yet" into `off`, and the bar
+rendered nothing while the feature was in fact working. A disabled feature and a waiting one must not look
+alike.
 
 ## Why a docked bar and not a ghost over the placeholder
 
