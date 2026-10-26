@@ -476,3 +476,28 @@ Rig gaps found on the way, worth their own rows: `E2E_KEEP_HOME=1` is documented
 `tests/e2e/*` — so a passing boot deletes the only copy of the profile it wrote and post-hoc inspection is
 impossible; and `typecheck:e2e`'s `TS2769` count is structural (one per `projects` entry, because Playwright's
 `Project` type has no `env`), so it must move with the number of legs, not be treated as a regression.
+
+### Why the bar is invisible: a refusal is stored as `off` (2026-10-26, measured end to end)
+
+The chain, each link proven rather than assumed:
+- dock registration correct → component mounts with real props (`exec=function`, `inputActions=object`);
+- pull resolves (no timeout, no catch) → the wire works;
+- reply read verbatim: `suggested next step: off` + `model: qwen-token-plan/qwen3.8-flash (config)`;
+- `parseBarState` parses that block correctly and dispatches `off`; `barVisible(off)` is false → row hidden.
+
+So the client is right and the profile row arrives. The fault is on the server: `prompt-runner.ts` /
+`prompt.ts` map a **quiet refusal** to `status: 'off'` ("a quiet refusal (`nothing to recommend yet`) is
+`off`, not `failed`"). That single choice makes three different things indistinguishable to the human and to
+the bar: suggestions switched off, nothing to recommend yet, and suggestions **unable to run at all**
+(`refuse('prompt suggestions cannot run: ' + reason)` when `resolvePromptRoute` finds no route). In this rig
+the model is configured, so what the bar is actually reporting is a route-resolution failure wearing the
+costume of "off".
+
+Fix, in this order, rows first:
+1. Only "there is nothing to recommend yet" may store `off`. A route/transport failure stores `failed` with
+   its reason, because the human must be able to tell a disabled feature from a broken one — the rule
+   `off` means off and `unavailable` means unavailable, already adopted for `/chapters-rules` in #109.
+2. Add a unit row per refusal class over the runner's write, so the mapping cannot collapse again.
+3. Then re-run `LEG=prompt` and read the reply: `analyzing`/`ready` means the bar renders; `failed` means it
+   renders *with the reason*, and the remaining bug is the host route discovery (`hostRoute` in `src/index.ts`)
+   — a different, narrower problem.

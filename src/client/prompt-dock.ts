@@ -107,6 +107,25 @@ const Action = (props: { label: string; glyph: string; onClick: () => void; disa
  * never to disable the human's ability to send it. */
 const canRunHere = (state: PromptBarState): boolean => state.text !== null && state.text !== ''
 
+/** How long a state pull may take before we call it failed. Generous on purpose: this is a local RPC that
+ * answers in milliseconds when the session is attachable, and the failure it guards against is a hang. */
+const PULL_TIMEOUT_MS = 15_000
+
+/** Retry ceiling for the FIRST pull only, in attempts and spacing. A mount-time race must not be able to
+ * starve the bar forever, and a real `off` answer stops the loop on the first reply either way. */
+const FIRST_PULL_ATTEMPTS = 6
+const FIRST_PULL_SPACING_MS = 1_500
+
+function execWithTimeout(exec: (line: string) => Promise<string>, line: string, ms: number): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => { reject(new Error(`no answer within ${String(ms)}ms`)) }, ms)
+    exec(line).then(
+      (text) => { clearTimeout(timer); resolve(text) },
+      (error: unknown) => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
+    )
+  })
+}
+
 export function PromptDock(props: DockProps): ReactElement | null {
   const { sessionId, inputActions, exec } = props
   const [state, dispatch] = useReducer(promptBarReducer, initialBarState(), (s) => ({ ...s, running: props.running ?? true }))
@@ -114,14 +133,18 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // A fetch in an effect with no such guard re-fires on every render.
   const pulling = useRef(false)
   const mounted = useRef(false)
+  const answered = useRef(false)
 
   const refresh = useCallback(async (): Promise<void> => {
     if (exec === undefined || pulling.current) return
     pulling.current = true
     try {
-      const text = await exec(BAR_STATE_COMMAND)
+      // Bounded, and loudly so. Tonight's whole diagnosis cost was paid because this await had no ceiling:
+      // a wire that never answers produced no dispatch, no catch and no `finally`, which looked identical to
+      // "the feature is switched off". A hung command is now a named failure with a number on it (#61).
+      const text = await execWithTimeout(exec, BAR_STATE_COMMAND, PULL_TIMEOUT_MS)
       const ev = parseBarState(text) as PromptBarEvent | null
-      if (ev !== null) dispatch(ev)
+      if (ev !== null) { answered.current = true; dispatch(ev) }
       const autorun = parseBarAutorun(text)
       if (autorun !== null) dispatch({ t: 'autorun', on: autorun === 'armed' })
     } catch (error) {
@@ -139,7 +162,17 @@ export function PromptDock(props: DockProps): ReactElement | null {
     ensureCss()
     if (mounted.current) return
     mounted.current = true
-    void refresh()
+    // Retry until SOMETHING answers. `answered` flips on any parseable reply, including an honest `off`, so
+    // this loop cannot make a disabled session look enabled — it only closes the window where a pull fired
+    // before the session could take a command and the bar then stayed blank for the rest of the session.
+    let attempts = 0
+    const tick = (): void => {
+      if (answered.current || attempts >= FIRST_PULL_ATTEMPTS) return
+      attempts += 1
+      void refresh().finally(() => { if (!answered.current) timer = setTimeout(tick, FIRST_PULL_SPACING_MS) })
+    }
+    let timer = setTimeout(tick, 0)
+    return () => { clearTimeout(timer) }
   }, [refresh])
 
   // Autorun fires off the IDLE edge, never off a render. `running` comes from the host when it publishes it;
