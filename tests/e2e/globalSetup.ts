@@ -15,32 +15,34 @@ import { routeFromProfile } from './harness-provider.ts'
  * instead, so the row can only ever name something the host actually has.
  */
 function promptModelForBoot(): string {
+  // Which model the Suggested Next Step bar may ask, per MODE — and the two answers differ, which is the point.
+  //
+  // In record/replay/heal the auxiliary call goes through the rig's TAPE PROXY, and the proxy is the only thing
+  // that speaks `openai-completions` here: the host's own LLM service answers `no adapter registered for provider
+  // "qwen-token-plan"` when asked to route that provider directly (measured via the bar's own error path, which is
+  // the reason `hostStreamFailure` exists). So the row names the proxy's route — `local/<fixture>` — and the proxy
+  // translates it to the ambient provider's real model (E2E_UPSTREAM_MODEL, derived in boot.ts from the live
+  // profile). The model that answers is still the maintainer's; the ROUTE the plugin may name is the proxy's.
+  //
+  // In `live` there is no proxy: the plugin must name the provider route itself, so the ambient route is correct
+  // there and only there.
   const override = process.env.E2E_PROMPT_MODEL
   if (override !== undefined && override !== '') return override
-  if (process.env.E2E_PROVIDER === 'harness') {
-    // Candidate order matters, and this is the bug it fixes: by the time globalSetup runs, the rig has
-    // ALREADY repointed `DSH_HOME` at its own throwaway home, whose profile is a copy of the tracked SEED —
-    // no token-plan route in it. Reading `DSH_HOME` first therefore resolved to nothing and the function
-    // silently returned the fixture route, so the bar was configured against a model the boot cannot call
-    // and the dock row never rendered. The ambient live home is the source of truth for harness mode; the
-    // rig home is a derived copy of it, patched later.
-    const candidates = [
-      process.env.E2E_AMBIENT_PROFILE,
-      path.join(os.homedir(), '.dsh', 'profiles', 'web', 'cordis.patch.yml'),
-      process.env.DSH_HOME === undefined ? undefined : path.join(process.env.DSH_HOME, 'profiles', 'web', 'cordis.patch.yml'),
-    ].filter((c): c is string => c !== undefined && c !== '')
+  if ((process.env.E2E_MODEL ?? 'replay') === 'live') {
+    const candidates = [process.env.E2E_AMBIENT_PROFILE,
+      path.join(os.homedir(), '.dsh', 'profiles', 'web', 'cordis.patch.yml')].filter((c): c is string => c !== undefined && c !== '')
     for (const profile of candidates) {
       let route = null
       try { route = routeFromProfile(fs.readFileSync(profile, 'utf8')) } catch { continue }
       if (route !== null) {
-        console.log(`[e2e] bar promptModel = ${route.id}/${route.model} (from ${profile})`)
+        console.log(`[e2e] live leg: bar route = ${route.id}/${route.model} (from ${profile})`)
         return `${route.id}/${route.model}`
       }
     }
-    console.warn('[e2e] harness-native boot found NO provider route in any ambient profile; the bar would be '
-      + 'configured against the fixture route and silently not render. Set E2E_PROMPT_MODEL=<provider/model> '
-      + 'or E2E_AMBIENT_PROFILE=<path> to decide explicitly.')
+    console.warn('[e2e] live leg found no ambient provider route; falling back to the fixture route')
   }
+  console.log('[e2e] bar route = local/qwen3.8-flash-next — the tape proxy translates this to the ambient '
+    + "provider's real model, because the host LLM service has no adapter for that provider directly")
   return 'local/qwen3.8-flash-next'
 }
 import { installRigFaultGuard } from './rig-fault.ts'

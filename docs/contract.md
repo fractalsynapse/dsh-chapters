@@ -621,6 +621,14 @@ for the hollow-payload supersede).
 
 ## Suggested Next Step bar
 
+**Verbs (interface lock, #113).** `/chapters-prompt` accepts `model …|clear`, `off`, `on`, `state`, `autorun on|off`,
+and **`run`** — submit the offer currently on screen as a **human-authored user turn**, through the same follow-up
+path autorun uses (`agent.followup(suggestPromptMessage(…))`). Run goes through the command plane rather than the
+composer's `inputActions.setDraft` because a dock cannot rely on writing the host editor: measured, `setDraft` is
+accepted and the composer still reads empty, and the goal bar's own `setDraft` is plain React state, not a
+composer write. A plugin's only dependable wire to its own server plane is the command — which is why the bar is
+push-shaped and pull-fed.
+
 **State vocabulary (interface lock, #113).** `/chapters-prompt state` reports one of:
 `off` — switched off by the human (a stored override), or no defining model is configured, so the bar renders
 nothing; `idle` — **enabled and awaiting its first recommendation** (no completed turn yet); `analyzing` — a

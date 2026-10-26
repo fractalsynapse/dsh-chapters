@@ -334,8 +334,13 @@ export function countHumanMessagesCarrying(logText: string, needle: string): num
   for (const line of logText.split('\n')) {
     if (!line.includes('"user/message"')) continue
     try {
-      const ev = JSON.parse(line) as { data?: { message?: { content?: unknown } } }
-      const c = ev?.data?.message?.content
+      const ev = JSON.parse(line) as { data?: { message?: { content?: unknown }, content?: unknown } }
+      // Nested-first with a flat fallback, the same shape rule `unwrapEvent` carries for the gateway: the host
+      // wraps composer-authored messages as `data.message`, while a message a plugin injected through
+      // `agent.followup` is stored FLAT (`{id, role, source, content}`). Measured on the Run test: the offer
+      // was in the log the whole time (seq 34) and this reader could not see it. Reading one shape and
+      // calling the absence a failure is the error this repo has been bitten by repeatedly.
+      const c = ev?.data?.message?.content ?? ev?.data?.content
       const text = typeof c === 'string' ? c
         : Array.isArray(c) ? (c as Array<{ text?: string }>).map((b) => b?.text ?? '').join(' ') : ''
       if (text.includes(want)) n += 1

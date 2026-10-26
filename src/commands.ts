@@ -439,6 +439,21 @@ export function registerHostCommands(
             ...(st.text === '' ? [] : ['  prompt:', ...st.text.split('\n').map((l) => `    ${l}`)]),
           ].join('\n') }
         }
+        if (verb === 'run') {
+          // The bar's Run button. Session-scoped like `state`, because "the offer on screen" is a per-session
+          // fact and a global command would run whatever the last session happened to be shown.
+          const runId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })?.session?.id
+            ?? (invocation.agent as { agent?: { session?: { id?: string } } })?.agent?.session?.id
+          if (runId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'run needs a session scope and the chapters prompt store' }
+          }
+          console.error(`[chapters-prompt] /run invoked for session=${String(runId)}`)
+          const res = await config.prompt.bar.runNow(runId)
+          console.error(`[chapters-prompt] /run result ok=${String(res.ok)} reason=${String(res.reason ?? '')}`)
+          return res.ok
+            ? { kind: 'success', text: `running the suggested next step as your own turn:\n${res.text}` }
+            : { kind: 'error', text: `cannot run: ${res.reason ?? 'the offer is no longer available'}` }
+        }
         if (verb === 'autorun') {
           const arg = parts[1]
           const sessId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })

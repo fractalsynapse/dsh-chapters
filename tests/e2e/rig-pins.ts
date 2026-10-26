@@ -37,6 +37,10 @@ export const RIG_PINS: Record<string, RigPin> = {
   // The bar's own leg: its own port (one journey, one boot) and a 32K-friendly threshold like
   // its neighbours. Nothing about it is special beyond `prompt: true`.
   prompt: { port: 41739, threshold: '0.9', prompt: true },
+  // The OFF half of the same switch, on its own port. Without it the negative assertion could only ever skip
+  // (it lived in the project that turns the feature ON), which is a test that cannot fail — the exact shape of
+  // vacuous green this repo keeps being bitten by (#113, and #54 before it).
+  'prompt-off': { port: 41740, threshold: '0.9' },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */

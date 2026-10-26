@@ -72,5 +72,7 @@ export default defineConfig({
     // The docked Suggested Next Step bar (#113). Its own boot, because the bar only exists when a defining
     // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
     { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
+    // Same journey, switch off: the bar must be absent. See tests/e2e/prompt-off.spec.ts.
+    { name: 'prompt-off', env: rigEnv('prompt-off'), testMatch: ['**/prompt-off.spec.ts'] },
   ],
 })

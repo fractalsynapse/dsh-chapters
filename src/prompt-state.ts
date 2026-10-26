@@ -160,6 +160,9 @@ export interface PromptBarAccess {
   /** `displaced` is the answer to "who starts the next turn": true when arming this loop also disarmed the
    * goal driver's continuation, so the human is told which engine they just opted into. */
   setAutorun(sessionId: string, on: boolean): { autorun: 'armed' | 'disarmed'; fired: number; displaced: boolean }
+  /** #113: the bar's Run. Submits the offer on screen as a HUMAN-authored user turn, through the same
+   * follow-up path autorun uses — one behavior for "run it", whether a keystroke or the loop came first. */
+  runNow(sessionId: string): Promise<{ ok: boolean; text?: string; reason?: string }>
   disarmHuman(sessionId: string): void
   setOff(sessionId: string): Promise<void>
   setOn(sessionId: string): Promise<void>

@@ -164,7 +164,12 @@ export function makeSignatureListener(deps: {
       // zero trace because the sink had to be configured before it existed. Resolve it from the session
       // that is compacting, first one wins.
       if (cwd !== undefined && deps.storeRoot !== undefined) {
-        ensureDiagnosticsDefault(path.join(cwd, deps.storeRoot, 'diagnostics.log'))
+        // Absolute stays absolute. `path.join(cwd, artifactStoreRoot)` silently nested an ABSOLUTE store root
+        // under the workspace (`/wsp/var/e2e-home-41739/chapters/…`), so on the rig — where #61 pins
+        // `artifactStoreRoot` to an absolute per-port path to keep test chapters out of the repo's store — the
+        // diagnostics file was written to a path nobody looked at. The failure this repo exists to end: a
+        // mechanism that detects and then loses the evidence. Same dialect rule as `toStoredPath` (#69).
+        ensureDiagnosticsDefault(path.join(path.isAbsolute(deps.storeRoot) ? deps.storeRoot : path.join(cwd, deps.storeRoot), 'diagnostics.log'))
       }
       const enrichPromise = cwd !== undefined
         ? enrichSignatureWithCodegraph(sig, span, deps.subprocess, cwd).catch(() => {})

@@ -27,6 +27,8 @@ export interface PromptBarState {
   turnSeq: number | null
   /** Set only with `status: 'failed'`; rendered as `role="alert"` (#61: delivered, not swallowed). */
   error: string | null
+  /** Why an action did not happen, on the bar's face (#113). Empty when there is nothing to explain. */
+  note: string
   autorun: PromptBarAutorun
   expanded: boolean
   running: boolean
@@ -40,6 +42,8 @@ export interface PromptBarState {
 export type PromptBarEvent =
   | { t: 'polled', status: PromptBarStatus, text?: string | null, turnSeq?: number | null, error?: string | null, intent?: 'worker-step' | 'goal-edit' }
   | { t: 'expand' } | { t: 'collapse' }
+  /** Why an action did not happen, on the bar's own face (#113). Cleared when a new offer lands. */
+  | { t: 'note'; note: string }
   | { t: 'autorun', on: boolean }
   | { t: 'human/prompt' }
   | { t: 'off' }
@@ -47,10 +51,19 @@ export type PromptBarEvent =
   | { t: 'running', running: boolean }
 
 export function initialBarState(autorun: PromptBarAutorun = 'disarmed'): PromptBarState {
-  return { status: 'off', text: null, turnSeq: null, error: null, intent: 'worker-step', goalPhase: 'none', goal: null, autorun, expanded: false, running: false, hiddenTurnSeq: null }
+  return { status: 'off', text: null, turnSeq: null, error: null, note: '', intent: 'worker-step', goalPhase: 'none', goal: null, autorun, expanded: false, running: false, hiddenTurnSeq: null }
 }
 
 export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarState {
+  if (ev.t === 'note') return { ...state, note: ev.note }
+  const next = baseBarReducer(state, ev)
+  // A note is about the gesture that just failed, so a NEW offer retires it. A poll that repeats the same
+  // offer (the bar re-reads every few seconds) does not — otherwise the explanation would blink out before
+  // the human could read it.
+  return ev.t === 'polled' && (next.turnSeq !== state.turnSeq || next.text !== state.text) ? { ...next, note: '' } : next
+}
+
+function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarState {
   switch (ev.t) {
     case 'polled': {
       if (ev.status === 'off') return { ...state, status: 'off', text: null, turnSeq: null, error: null, expanded: false, autorun: 'disarmed' }
@@ -80,6 +93,9 @@ export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): Pro
       // suggestion loop exists to serve the session's purpose, and stops when that purpose stops.
       return { ...state, goalPhase: ev.phase, autorun: ev.phase === 'complete' ? 'disarmed' : state.autorun }
   }
+  // Exhaustive fallback: a new event without a case must return the state unchanged rather than
+  // compile into `undefined` and blank the bar.
+  return state
 }
 
 /** The status label. `failed` keeps the ready label so the error span is the delta, not a mystery row. */
@@ -117,6 +133,8 @@ export function shouldAutoFire(s: PromptBarState): boolean {
 
 /** The command the bar pulls. One string, so the client and the command plane cannot drift silently. */
 export const BAR_STATE_COMMAND = '/chapters-prompt state'
+/** The bar's Run button: the server submits the on-screen offer as the human's own turn. */
+export const BAR_RUN_COMMAND = '/chapters-prompt run'
 
 /**
  * Parse the `state` verb's `k: v` lines into a pull event.

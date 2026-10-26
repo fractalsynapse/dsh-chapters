@@ -20,9 +20,10 @@
  * @module dsh-chapters/src/client/prompt-dock
  */
 
-import { createElement as h, useCallback, useEffect, useReducer, useRef, type ReactElement } from 'react'
+import { createElement as h, useCallback, useEffect, useReducer, useRef, useState, type ReactElement } from 'react'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
+  BAR_RUN_COMMAND,
   BAR_STATE_COMMAND,
   barLabel,
   barVisible,
@@ -39,7 +40,7 @@ import {
  *  shape crossing a plugin boundary, and an absent field must degrade visibly, not throw at boot (#58). */
 export interface DockProps {
   sessionId?: string
-  inputActions?: { setDraft?: (text: string) => void; submit?: () => void }
+  inputActions?: { insertText?: (text: string) => void; setDraft?: (text: string) => void; submit?: () => void }
   /** The host publishes running/idle through the composer kit on some builds; if it is absent, autorun
    *  refuses to fire rather than guessing that the session is idle. Fail-safe, not fail-open. */
   running?: boolean
@@ -145,10 +146,26 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // #79's discipline, kept because the failure it prevents was real: one pull per mount, then per edge.
   // A fetch in an effect with no such guard re-fires on every render.
   const pulling = useRef(false)
-  const mounted = useRef(false)
+  // TWO different facts, two different refs — conflating them is the bug I just shipped: `pulled` is the
+  // once-per-mount pull guard, `alive` is "may this component still call dispatch/setState". Initializing the
+  // pull guard to true made every mount skip its first pull, so the bar sat at its `off` default and rendered
+  // nothing at all — a regression that looked, from outside, like the feature having stopped working.
+  const probed = useRef(false)
+  const pulled = useRef(false)
+  const alive = useRef(true)
+  useEffect(() => () => { alive.current = false }, [])
+  const [busy, setBusy] = useState(false)
   const answered = useRef(false)
+  const replyStatus = useRef<string>('unknown')
   const stateRef = useRef<PromptBarState>(initialBarState())
   stateRef.current = state
+  if (!probed.current) {
+    probed.current = true
+    // One print, on the first mount: which composer verbs does THIS host actually hand a dock? The click-to-draft
+    // requirement needs one, `setDraft` is accepted but never reaches the editor, and guessing at the surface
+    // again would be a third wrong theory in a row.
+    console.info(`[client:prompt] inputActions keys: ${Object.keys(inputActions ?? {}).join(',') || 'NONE'}`)
+  }
 
   const refresh = useCallback(async (): Promise<void> => {
     if (exec === undefined || pulling.current) return
@@ -158,8 +175,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // a wire that never answers produced no dispatch, no catch and no `finally`, which looked identical to
       // "the feature is switched off". A hung command is now a named failure with a number on it (#61).
       const text = await execWithTimeout(exec, BAR_STATE_COMMAND, PULL_TIMEOUT_MS)
+      // Handed to the leg through the page, because the state block is the contract and I need to see the
+      // bytes the browser parsed, not the bytes the server meant. Overwritten each pull; read on failure.
+      try { (window as unknown as { __dshPromptReply?: string }).__dshPromptReply = text } catch { /* test seam only */ }
       const ev = parseBarState(text) as PromptBarEvent | null
-      if (ev !== null) { answered.current = true; dispatch(ev) }
+      if (ev !== null) { answered.current = true; replyStatus.current = (ev as { status?: string }).status ?? replyStatus.current; dispatch(ev) }
       const autorun = parseBarAutorun(text)
       if (autorun !== null) dispatch({ t: 'autorun', on: autorun === 'armed' })
     } catch (error) {
@@ -175,8 +195,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
 
   useEffect(() => {
     ensureCss()
-    if (mounted.current) return
-    mounted.current = true
+    if (pulled.current) return
+    pulled.current = true
     // Retry until SOMETHING answers. `answered` flips on any parseable reply, including an honest `off`, so
     // this loop cannot make a disabled session look enabled — it only closes the window where a pull fired
     // before the session could take a command and the bar then stayed blank for the rest of the session.
@@ -187,7 +207,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
     let timer: ReturnType<typeof setTimeout> | undefined
     const tick = async (): Promise<void> => {
       await refresh()
-      if (stateRef.current.status === 'off') return
+      if (replyStatus.current === 'off') return
+      // The reply, not the React state. The old condition read `stateRef.current`, which is only advanced by a
+      // render — and while the row is hidden there is no render to wait for, so the poll stopped after its
+      // first read and the bar could never observe the offer that landed a minute later. Measured: every
+      // `state read` in the boot log precedes its `ready` write, with none following. 
       timer = setTimeout(() => { void tick() }, POLL_SPACING_MS)
     }
     void tick()
@@ -200,12 +224,24 @@ export function PromptDock(props: DockProps): ReactElement | null {
     dispatch({ t: 'running', running: props.running ?? true })
   }, [props.running])
 
+  // Run is a COMMAND, not a keystroke. The composer-write path (`inputActions.setDraft` + `submit`) looked
+  // like the obvious implementation and does not work on this host build: `setDraft` is accepted, and the
+  // editor stays empty — measured, twice, after I had convinced myself it was the test's locator or a focus
+  // ordering problem. The plugin already has a dependable wire to its own server plane, and the server has
+  // exactly one human-authored submission path (the follow-up autorun uses), so Run rides that. The
+  // consequence is also the point: what the human clicks and what the loop arms are the same code.
   const run = useCallback((): void => {
-    if (state.text === null || state.text === '') return
-    inputActions?.setDraft?.(state.text)
-    inputActions?.submit?.()
-    dispatch({ t: 'collapse' })
-  }, [inputActions, state.text])
+    if (state.text === null || state.text === '' || exec === undefined) return
+    setBusy(true)
+    void exec(BAR_RUN_COMMAND)
+      .then((out) => {
+        if (!alive.current) return
+        if (/^cannot run:/i.test(out.trim())) dispatch({ t: 'polled', status: 'failed', text: state.text, error: out.trim().slice(0, 200), turnSeq: state.turnSeq } as PromptBarEvent)
+        else dispatch({ t: 'collapse' })
+      })
+      .catch((error: unknown) => { console.warn(`[client:prompt] run failed: ${String((error as Error)?.message ?? error).slice(0, 160)}`) })
+      .finally(() => { if (alive.current) setBusy(false) })
+  }, [exec, state.text, state.turnSeq])
 
   useEffect(() => {
     if (!shouldAutoFire(state)) return
@@ -218,8 +254,53 @@ export function PromptDock(props: DockProps): ReactElement | null {
     // Collapsed: reading. Expanded: the maintainer's click-to-edit gesture — setDraft REPLACES the draft,
     // which is what they asked for ("the prompt replaces the chat input contents so you can edit it"), and
     // nothing is submitted. Run is a separate, deliberate button.
+    // Printed on every branch, because "the button did nothing" and "the button took the other path" looked
+    // identical from outside for three runs.
+    console.info(`[client:prompt] populate expanded=${String(state.expanded)} hasInsertText=${String(typeof inputActions?.insertText)} hasSetDraft=${String(typeof inputActions?.setDraft)} textLen=${String(state.text?.length ?? -1)}`)
     if (!state.expanded) { dispatch({ t: 'expand' }); return }
-    if (state.text !== null && state.text !== '') inputActions?.setDraft?.(state.text)
+    if (state.text === null || state.text === '') return
+    // Delivered, not assumed. The click-to-draft gesture is the interaction the maintainer asked for, so a
+    // silent no-op here is indistinguishable from "the feature does not work" — and that ambiguity cost the
+    // rest of this leg's diagnosis. Absent verb, absent text: both say so.
+    // The host's composer kit is `{ captureInsertion, insertText, setDraft, addAttachments, removeAttachment,
+    // pruneAttachments, submit }` (measured on 0.2.0-rc.2). `setDraft` writes the STORE, and the store is
+    // mirrored into the editor only at mount while the editor is empty — which is why a click that "worked"
+    // (no refusal, no throw) left the box visibly empty. `insertText` is the verb that reaches the editor, so
+    // click-to-draft uses it and keeps `setDraft` only as a fallback for builds that lack it.
+    if (typeof inputActions?.insertText === 'function') {
+      // `insertText` inserts AT THE CARET, and clicking this button moves the caret out of the editor — so the
+      // call ran and put the words nowhere. Focusing the composer first is the whole difference, and it is done
+      // with a tolerant query rather than a class name: the host's own module hashes (`wSkVaW_…`) are not mine
+      // to depend on, and a bar that silently stops drafting after a host restyle is worse than one that tries.
+      try {
+        const box = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
+        box?.focus()
+      } catch { /* a host without the editor mounted: the insert below still records the intent */ }
+      // Measured on host 0.2.0-rc.2: called from a dock this throws
+      // `Cannot read properties of undefined (reading 'draftRev')`, and the kit's other verb (`setDraft`) writes
+      // a store the editor mirrors only at mount. Neither reaches the composer. A silent no-op is what cost the
+      // last six runs, so the refusal now appears on the bar and points at Run, which does work.
+      try {
+        inputActions.insertText(state.text)
+      } catch (error) {
+        console.warn(`[client:prompt] insertText threw: ${String((error as Error)?.message ?? error).slice(0, 160)}`)
+        dispatch({ t: 'note', note: 'This host does not let a plugin write the composer, so the prompt cannot be edited before sending — Run submits it as your turn' })
+      }
+      // Read the editor back from inside the component, so "insertText is a no-op on this host" is a fact with
+      // a number next to it rather than a conclusion the test reaches after the fact.
+      setTimeout(() => {
+        try {
+          const box = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
+          console.info(`[client:prompt] after insertText: editorText=${String(box?.innerText?.length ?? 'NO-BOX')} focused=${String(document.activeElement === box)}`)
+        } catch { /* diagnostics never break the gesture */ }
+      }, 250)
+      return
+    }
+    if (typeof inputActions?.setDraft === 'function') {
+      inputActions.setDraft(state.text)
+      return
+    }
+    console.warn('[client:prompt] click-to-draft refused: this host exposes neither insertText nor setDraft')
   }
 
   const autorunDisabled = props.running === undefined
@@ -238,10 +319,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
       }, state.expanded
         ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
         : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
+      ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptError' }, state.note)]),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },
         h(Action, {
-          label: 'Run the suggested next step', glyph: '▶', onClick: run,
+          label: 'Run the suggested next step', glyph: '▶', onClick: run, disabled: busy,
           ...(state.text === null || state.text === '' || !canRunHere(state) ? { disabled: true } : {}),
           ...(state.intent === 'goal-edit'
             ? { title: 'Goal edits need a human turn. Run still works; autorun will never do this one.' }

@@ -33,7 +33,10 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // #113: the docked Suggested Next Step bar needs its own leg, and the ghost's port map is the
   // convention it returns to (distill-tapes.sh: prompt=41739). The switch is `prompt: true`, which
   // derives E2E_PROMPT — the defining-model row — and NO other leg gets one.
-  prompt: { E2E_TAPE: 'prompt', E2E_PORT: '41739', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1' }
+  prompt: { E2E_TAPE: 'prompt', E2E_PORT: '41739', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1' },
+  // The OFF half: same table entry, no `E2E_PROMPT` key at all. The row below asserts the maps agree, so a
+  // stray switch here would fail the derivation comparison rather than silently turning a leg on.
+  'prompt-off': { E2E_TAPE: 'prompt-off', E2E_PORT: '41740', E2E_THRESHOLD: '0.9' }
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {
