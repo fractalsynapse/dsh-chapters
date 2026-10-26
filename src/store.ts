@@ -87,6 +87,17 @@ const sessionStateSchema = z.object({
   nextPlanNumber: z.number().int().positive().default(1),
   chapters: z.array(chapterRecordSchema),
   reservations: z.record(z.string(), z.array(z.number().int().positive())).default({}),
+  // #113: the Suggested Next Step bar's durable facts. Optional-with-default (the `nextPlanNumber`
+  // precedent) so a stored row from before the feature parses unchanged and no chapter bytes move.
+  promptSuggestion: z.object({
+    status: z.enum(['off', 'analyzing', 'ready', 'failed']),
+    text: z.string(),
+    turnSeq: z.number().int().nullable(),
+    error: z.string(),
+    at: z.string(),
+    intent: z.enum(['worker-step', 'goal-edit']).default('worker-step'),
+    goalRevision: z.number().int().nullable().default(null),
+  }).default({ status: 'off', text: '', turnSeq: null, error: '', at: '', intent: 'worker-step', goalRevision: null }),
   plans: z.record(z.string(), z.object({
     number: z.number().int().positive(),
     path: z.string().min(1),

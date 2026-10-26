@@ -409,6 +409,65 @@ export function registerHostCommands(
           await config.prompt.setModel('')
           return { kind: 'success', text: 'prompt suggestions OFF (stored override; /chapters-prompt model clear restores the config default)' }
         }
+        // #113: the bar's three pulls. `state` answers in k: v lines so ONE output serves both the human
+        // typing it and the component rendering it — a separate JSON verb would be a second contract to keep
+        // in step, and the goal bar's own dock reads plainly-worded state for the same reason.
+        if (verb === 'state') {
+          const sessId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })
+            .session?.id ?? (invocation.agent as { agent?: { session?: { id?: string } } }).agent?.session?.id
+          if (sessId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'state needs a session scope and the chapters prompt store — run it inside a session' }
+          }
+          const st = await config.prompt.bar.read(sessId)
+          const { spec, source } = config.prompt.effective()
+          return { kind: 'success', text: [
+            `suggested next step: ${st.status}`,
+            `  model: ${spec !== '' ? spec : 'unset'} (${source}) — ${spec === '' ? 'the bar is absent' : 'one offer per completed turn'}`,
+            `  autorun: ${st.autorun}${st.autorun === 'armed' ? ` (${String(st.fired)} round(s) started this process)` : ''}`,
+            `  turn: ${st.turnSeq === null ? '-' : String(st.turnSeq)}`,
+            // #113: intent and the revision it was cut against, because they decide whether autorun may act.
+            // A `goal-edit` offer is held for a keystroke — the host reserves goal edits for a human turn —
+            // and the bar must be able to say that without re-parsing the prompt.
+            `  intent: ${st.intent}${st.intent === 'goal-edit' ? ' — re-cuts the goal, so Run it yourself; autorun will not' : ''}`,
+            `  goal: ${st.goalRevision === null ? 'none' : `revision ${String(st.goalRevision)}`}`,
+            ...(st.error === '' ? [] : [`  error: ${st.error}`]),
+            ...(st.text === '' ? [] : ['  prompt:', ...st.text.split('\n').map((l) => `    ${l}`)]),
+          ].join('\n') }
+        }
+        if (verb === 'autorun') {
+          const arg = parts[1]
+          const sessId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })
+            .session?.id ?? (invocation.agent as { agent?: { session?: { id?: string } } }).agent?.session?.id
+          const on = arg === 'on' || arg === 'arm'
+          const off = arg === 'off' || arg === 'disarm'
+          if (sessId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'autorun needs a session scope — run it inside the session you want to drive' }
+          }
+          if (!on && !off) {
+            return { kind: 'error', text: `autorun needs 'on' or 'off' (got ${arg ?? 'nothing'}) — /chapters-prompt autorun on starts the loop, off leaves the offers in place and stops the running` }
+          }
+          const { spec } = config.prompt.effective()
+          if (on && spec === '') {
+            return { kind: 'error', text: 'cannot arm autorun with no prompt model — the loop has nothing to generate offers. /chapters-prompt model <provider/model> first' }
+          }
+          const live = config.prompt.bar.setAutorun(sessId, on)
+          return { kind: 'success', text: on
+            ? `autorun ARMED for ${sessId} — each completed turn's offer runs for you, until you stop it or send a prompt yourself.` + (live.displaced
+                ? ' The goal remains the objective; its own auto-continuation is disarmed, so the suggestion loop now drives the worker. Re-arm it with /goal resume.'
+                : ' The goal still owns the turn; this loop yields to it until the goal is paused, completed, or disarmed.') + ' State: /chapters-prompt state'
+            : `autorun disarmed for ${sessId} — offers still appear each turn; nothing runs itself (${String(live.fired)} round(s) were started this process)` }
+        }
+        if (verb === 'on') {
+          if (config.prompt.bar === undefined) return { kind: 'error', text: 'the chapters prompt store is unavailable in this context' }
+          const { spec } = config.prompt.effective()
+          if (spec === '') {
+            return { kind: 'error', text: 'nothing to turn on: the prompt model is unset. /chapters-prompt model <provider/model> sets it, and setting it IS the enable' }
+          }
+          const holder = invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } }
+          const sessId = holder.session?.id ?? holder.agent?.session?.id
+          if (sessId !== undefined) await config.prompt.bar.setOn(sessId)
+          return { kind: 'success', text: `suggestions ON (${spec}) — the next completed turn offers a next step; /chapters-prompt state shows it, /chapters-prompt autorun on runs them` }
+        }
         if (verb === 'suggest') {
           const holder = invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }
           const sess = holder.session ?? holder.agent?.session

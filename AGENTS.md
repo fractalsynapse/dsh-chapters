@@ -1,6 +1,9 @@
 # dsh-chapters — agent core
 
-Working spec for an agent with a 32K–128K context. This file holds only what you must not get wrong.
+Working spec for an agent running on 32K–128K models — that is the hardware this project serves, not a
+limit you ration against. Context on such a host is renewable: the chapters preset archives and continues
+by design, so capacity is never a reason to stop, shorten, or defer work (see the Hard Rule on context
+capacity). This file holds only what you must not get wrong.
 Detail lives in `docs/` and is linked at the point of use — read those on demand, not first.
 **User-facing documentation lives ONLY on the site: https://treeseed-ai.github.io/dsh-chapters/**
 (numbered §1–§28; `site/src/content/docs/` holds its sources) — never duplicate a how-to into this
@@ -12,8 +15,9 @@ Knowledge pool, providers, search, rules, enrichment mechanics → `docs/knowled
 site Part III. Host API facts incl. exact file:line → `docs/contract.md`. Compaction seam →
 `docs/host-compaction-seam.md`. Build/test loop + tape system → `docs/development.md` + site §24.
 Claims & verification procedures → `docs/verify.md`. Transport truth table → `docs/provider.md`.
-Prompt recommendations / composer ghost layer / `/chapters-prompt` → site §28 +
-`docs/contract.md` § Composer Ghost Layer (measured host facts; pull transport, push on 0.2.x).
+Prompt recommendations / the Suggested Next Step bar / `/chapters-prompt` → site §28 +
+`docs/contract.md` § "Suggested Next Step bar" (interface lock) and § "Composer Ghost Layer"
+(superseded surface, kept for its MEASURED host facts: dock vs overlay, slot kit, `inputActions`).
 Session plans in chapters / the ACTIVE PLAN line / `kind: plan` documents / seeded plan mode / findability → `docs/plans-carriage.md` (+ the corpus amendments in `docs/knowledge-repo.md`).
 Project history — what was built, measured, proven by which round → `docs/project-state.md` (reference, not a rule surface)
 Open items / what a fresh session should pick up next → `docs/backlog.md` (NOTE: `tsconfig.json` excludes `src/client/` — the client plane is checked by `npm run typecheck:client` (`tsconfig.client.strict.json`), which CI runs beside `typecheck` (#71); keep both green) (scoped, with the traps already fixed on main).
@@ -382,6 +386,19 @@ not a plugin bug.
   twice in one session, each costing a full re-application of ~14 edits to `src/rules.ts`. `cp f f.bak`
   first; restore from `f.bak`. Never reach for `git` to undo a mutation you made by hand.
 - **Commit, PR, and issue bodies go through a FILE (`git commit -F`, `gh ... --body-file`), never a quoted argument.** Measured four times on one branch (2026-10-22/23): backticks inside a double-quoted `-m "…"` are command substitutions, so the shell RAN the quoted identifiers and deleted them from the message — shipping text like "enforces: , its profile patch, and the installed  tree". Nothing failed; the record was just quietly wrong, which is the class of bug this repo exists to end. Single-quoted `-m '…'` is safe; `--body "…"` is not.
+- **Do not track, infer, or reason about your own context capacity — unless asked, or measuring for a
+  specific diagnosis.** Nothing in the runtime snapshot reports token usage or a percentage, so any such number
+  you "know" is an inference dressed as a fact, and this plugin's whole design makes the question moot: the
+  chapters preset compacts and continues automatically, so capacity is not a resource an agent rations.
+  Measured against myself 2026-10-26: I reported exhaustion at **56% used**, and that invented constraint
+  changed engineering — a `staging` merge aborted after three of four hunks were verified to be supersets, the
+  docked component deferred twice, and a commit message asserting a test-harness fix that existed only as a
+  comment (a maintainer run disproved it with `1 skipped`). So: never let a capacity *feeling* end a task,
+  defer a verification step, or shrink an implementation. When you are asked, or when a measurement genuinely
+  serves a diagnosis, **answer only from what you have read** — the meter's number, a log line, the artifact
+  ledger, `chapters_segment`'s counts — and where no measurement exists, say the number is unknown and
+  continue. "My context is nearly spent" with no reading behind it is a fabrication, and it is the class of
+  wrong this repository exists to end.
 - **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
   with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
   When a question stalls, change something real: different arguments, a different tool, or state what is
@@ -393,7 +410,7 @@ not a plugin bug.
 ## Where we are — state lives in docs, not here
 
 **Shipped and CI-green on the real model:** the engine, tools, preset, all seven archive moments, the
-knowledge layer (P1–P3c), the repair engine (#60), the prompt-ghost surface (#71). **Still unverified:
+knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), still unverified in a browser. **Still unverified:
 the browser plane** — the tape corpus is not re-anchored to the pinned host, so replay refuses by name
 and no e2e claim is current (issues #56/#57). Do not quote an e2e result as fresh until that lands.
 

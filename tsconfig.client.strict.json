@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "files": ["src/client/index.ts", "src/client/doors.ts"]
+  "files": ["src/client/index.ts", "src/client/doors.ts", "src/client/prompt-bar.ts", "src/client/prompt-dock.ts"]
 }

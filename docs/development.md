@@ -810,3 +810,49 @@ Rules that follow, in the order they bite:
    bytes change", generalized: anything that changes what the plugin *sends*.
 4. If a green replay is ever obtained on a corpus whose legs have different build stamps, treat it as
    unexplained rather than as evidence.
+
+## Harness-native acceptance (`E2E_PROVIDER=harness`)
+
+The rig used to have exactly one model route: a tracked profile block pinning `local` at
+`http://localhost:8080/v1`, because a GitHub runner has no credentials and can start a llama.cpp server. On
+this machine that made acceptance a second-class citizen — the model was almost never up, live legs
+`test.skip`-ed themselves (which reads like a pass), and re-distilling meant standing up an inference server
+before you could look at UI.
+
+`E2E_PROVIDER=harness` takes the route from **the profile this host is actually running** — read from
+`$DSH_HOME/profiles/web/cordis.patch.yml` (override with `E2E_AMBIENT_PROFILE`) — and the credential from, in
+order:
+
+1. **the parent environment**, `QWEN_TOKEN_PLAN_API_KEY` — the same way this harness instance got it. When you
+   run a leg from your own shell, this is the only step.
+2. `.dshdev-local/e2e.env`, untracked and gitignored, parsed **without executing it** (`readEnvFile` — values
+   are data, never a shell).
+3. otherwise the boot **refuses**, naming the remedy. No fallback to `local`, no silent skip, no guessed route.
+
+What it deliberately keeps: the **pinned 32K stress window**. `harnessProviderPatch` rewrites
+`contextWindow` rather than inheriting the endpoint's 196K, because the whole pressure/cache journey exists to
+observe `context-overflow` — a hosted window would swallow a 33K prompt and the leg would measure a boot where
+nothing is wrong.
+
+Commands (all of them print one `[provider] …` line naming provider, model, window and where the key came
+from, with the credential's length but never its value):
+
+| command | mode | what it's for |
+|---|---|---|
+| `npm run e2e:harness:live` | live | a real look at the UI on the model the product runs against |
+| `npm run e2e:harness:heal` | replay + fallback | tape hits replay, **misses go live and are appended** — a self-healing pass instead of a full re-record (the switch existed in code but was never surfaced) |
+| `npm run corpus:heal -- --project=<leg>` | replay + fallback | one leg, when you know which one drifted |
+| `npm run corpus:record -- --project=<leg>` | record | re-distill one leg after a deliberate product-prompt change |
+
+Why this is more than convenience: the `#90 REASONING-BLIND` entry in the tape's blind list masks
+`reasoning_content` shape differences. Tapes distilled through a different provider than the product uses will
+always need masks; distilling through the product's own route removes a class of divergence instead of hiding
+it. Stated as strong inference from the measurement, to be confirmed the first time a harness-native
+re-distill stops needing that mask.
+
+Note on what an agent shell can see: the harness **withholds** `QWEN_TOKEN_PLAN_API_KEY` from tool processes
+(measured — the harness's own process env has it, the agent's child shell does not). So a distill or live run
+from inside an agent session needs the `.dshdev-local/e2e.env` path, or the operator runs it. Reading the key
+out of the parent process's environment is technically possible for the same user and is deliberately **not**
+done: the withholding looks intentional, and reaching around it to move a credential into a tool shell would be
+exactly the kind of quiet workaround this project documents itself out of.

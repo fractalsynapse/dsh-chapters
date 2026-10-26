@@ -265,11 +265,11 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   // #59: refuse before reserving anything, exactly like the payloadless gate — a spent number with no
   // file behind it is the burned-reservation state this whole round is eliminating. The factor is
   // config, never a literal: over `chapterTokenTarget` warns, over `target × factor` refuses.
-  const tooBig = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
-  if (tooBig.length > 0) {
+  const oversize = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  if (oversize.errors.length > 0) {
     return {
       skipped: 'oversize', fromSeq, anchor, lastArchived,
-      priorChapters: state.chapters.length, records: [], warnings: tooBig,
+      priorChapters: state.chapters.length, records: [], warnings: oversize.errors,
     }
   }
 
@@ -308,5 +308,5 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     await commitChapters(store, sessionId, wrote.records)
   }
 
-  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...hollowNotes, ...wrote.warnings] }
+  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...hollowNotes, ...oversize.indivisible, ...wrote.warnings] }
 }
