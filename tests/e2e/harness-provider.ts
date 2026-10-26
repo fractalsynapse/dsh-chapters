@@ -172,3 +172,13 @@ export function describeRoute(route: ProviderRoute, resolved: KeyResolution, mod
   return `[provider] ${route.id}/${route.model} · window pinned · mode=${mode} · ${route.apiKeyEnv}: ${where}`
     + (route.baseURL !== undefined ? ` · ${route.baseURL}` : ' · endpoint resolved by the host plugin')
 }
+
+/**
+ * The plan's OpenAI-compatible endpoint, read out of the installed provider module rather than typed in.
+ * The profile carries no `baseURL` for this provider (the plugin resolves it), and hard-coding a region URL
+ * here is the drift this repo keeps being bitten by: the day the route moves, the rig would quietly talk to
+ * the wrong host. Returns null when the module cannot be read, and the caller refuses rather than guessing.
+ */
+export function endpointFromProviderModule(providerModuleText: string): string | null {
+  return /baseUrl:\s*"(https?:\/\/[^"]+)"/.exec(providerModuleText)?.[1] ?? null
+}

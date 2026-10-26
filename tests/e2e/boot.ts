@@ -3,7 +3,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { describeRoute, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
+import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
@@ -316,6 +316,23 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     })()
     const resolved = resolveKey(process.env, fileText, route.apiKeyEnv)
     if (resolved.key === null) throw new Error(`e2e: harness-native route ${route.id}/${route.model} needs ${route.apiKeyEnv}. ${resolved.remedy}`)
+    // RECORD and HEAL need a plain OpenAI-compatible URL to forward through, because the proxy — not the
+    // host — is what writes the tape. `live` does not: it lets the harness resolve the route itself, which
+    // is why only these two modes require the endpoint and why live must never invent one.
+    if (process.env.E2E_MODEL !== 'live' && process.env.E2E_UPSTREAM === undefined) {
+      const modPath = path.join(ROOT, 'dev', 'dsh-host-lock', 'node_modules', '@earendil-works', 'pi-ai',
+        'dist', 'providers', `${route.id}.js`)
+      let modText = ''
+      try { modText = fs.readFileSync(modPath, 'utf8') } catch {
+        throw new Error(`e2e: harness-native ${process.env.E2E_MODEL ?? 'replay'} needs a proxy endpoint, but the provider module is unreadable at ${modPath}`)
+      }
+      const endpoint = endpointFromProviderModule(modText)
+      if (endpoint === null) throw new Error(`e2e: no baseUrl: in ${modPath} — cannot point the tape proxy at ${route.id}`)
+      process.env.E2E_UPSTREAM = endpoint
+      process.env.E2E_UPSTREAM_KEY = resolved.key
+      process.env.E2E_UPSTREAM_MODEL = route.model
+      console.log(`[e2e] proxy upstream = ${endpoint} (model ${route.model}, key ${String(resolved.key.length)} chars from ${String(resolved.source)})`)
+    }
     console.log(describeRoute(route, resolved, process.env.E2E_MODEL ?? 'live'))
     return { route, key: resolved.key }
   })()
