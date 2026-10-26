@@ -69,5 +69,8 @@ export default defineConfig({
     { name: 'enrich', env: rigEnv('enrich'), testMatch: ['**/enrich.spec.ts'] },
     // rules: the P3 lifecycle in the browser over a local-path pool.
     { name: 'rules', env: rigEnv('rules'), testMatch: ['**/rules.spec.ts'] },
+    // The docked Suggested Next Step bar (#113). Its own boot, because the bar only exists when a defining
+    // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
+    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
   ],
 })

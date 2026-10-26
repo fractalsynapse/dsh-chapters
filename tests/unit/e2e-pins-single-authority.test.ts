@@ -30,6 +30,10 @@ const EXPECTED: Record<string, Record<string, string>> = {
   rules: { E2E_PORT: '41735', E2E_THRESHOLD: '0.9' },
   fork: { E2E_PORT: '41737', E2E_THRESHOLD: '0.75' },
   plans: { E2E_PORT: '41738', E2E_THRESHOLD: '0.99', E2E_NO_AUX_MODEL: '1' },
+  // #113: the docked Suggested Next Step bar needs its own leg, and the ghost's port map is the
+  // convention it returns to (distill-tapes.sh: prompt=41739). The switch is `prompt: true`, which
+  // derives E2E_PROMPT — the defining-model row — and NO other leg gets one.
+  prompt: { E2E_TAPE: 'prompt', E2E_PORT: '41739', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1' }
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {

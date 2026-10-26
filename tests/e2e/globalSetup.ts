@@ -1,6 +1,32 @@
 import { bootE2eServer, ROOT, type Pins } from './boot.ts'
 import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+import { routeFromProfile } from './harness-provider.ts'
+
+/**
+ * The preset row that makes the Suggested Next Step bar exist.
+ *
+ * It was hard-coded to `local/qwen3.8-flash-next` — the tracked seed's fixture route — which is correct
+ * right up until the rig boots on the maintainer's real provider, where that route does not exist and the
+ * bar silently never renders: a leg that fails because its own switch pointed at a model the boot cannot
+ * resolve looks exactly like a leg that fails because the feature is broken. Resolved from the boot's route
+ * instead, so the row can only ever name something the host actually has.
+ */
+function promptModelForBoot(): string {
+  const override = process.env.E2E_PROMPT_MODEL
+  if (override !== undefined && override !== '') return override
+  if (process.env.E2E_PROVIDER === 'harness') {
+    const profile = process.env.E2E_AMBIENT_PROFILE
+      ?? path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'profiles', 'web', 'cordis.patch.yml')
+    try {
+      const route = routeFromProfile(fs.readFileSync(profile, 'utf8'))
+      if (route !== null) return `${route.id}/${route.model}`
+    } catch { /* fall through to the fixture route below */ }
+  }
+  return 'local/qwen3.8-flash-next'
+}
 import { installRigFaultGuard } from './rig-fault.ts'
 
 /**
@@ -51,7 +77,7 @@ export default async function setup(fullConfig?: {
   // fixture route, served in replay/record by the tape proxy (the scripted
   // upstream's `suggest` arm mints it on record). Absent ⇒ the config row is
   // absent ⇒ the feature does not exist on that boot (the OFF-state test).
-  if (process.env.E2E_PROMPT === '1') pins.promptModel = 'local/qwen3.8-flash-next'
+  if (process.env.E2E_PROMPT === '1') pins.promptModel = promptModelForBoot()
   const floor = process.env.E2E_FLOOR
   if (floor !== undefined) pins.toolResultArtifactTokens = floor
   // #108: watch the miss journal for a RIG fault and stop the leg outright. The pins already answer 503 in

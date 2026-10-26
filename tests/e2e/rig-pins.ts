@@ -19,6 +19,10 @@ export interface RigPin {
   floor?: string
   enrich?: boolean
   noAuxModel?: boolean
+  /** The Suggested Next Step bar exists ONLY where a defining model is configured. This
+   * leg's boot turns that switch on; every other leg leaves it off, so `OFF` is the default realm and
+   * no unrelated leg can acquire a bar and start asserting on pixels nobody asked for (#113). */
+  prompt?: boolean
 }
 
 export const RIG_PINS: Record<string, RigPin> = {
@@ -30,6 +34,9 @@ export const RIG_PINS: Record<string, RigPin> = {
   rules: { port: 41735, threshold: '0.9' },
   fork: { port: 41737, threshold: '0.75' },
   plans: { port: 41738, threshold: '0.99', noAuxModel: true },
+  // The bar's own leg: its own port (one journey, one boot) and a 32K-friendly threshold like
+  // its neighbours. Nothing about it is special beyond `prompt: true`.
+  prompt: { port: 41739, threshold: '0.9', prompt: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
@@ -38,6 +45,7 @@ export function rigEnv(project: string): Record<string, string> {
   if (p === undefined) return {}
   const env: Record<string, string> = { E2E_TAPE: project, E2E_PORT: String(p.port), E2E_THRESHOLD: p.threshold }
   if (p.floor !== undefined) env.E2E_FLOOR = p.floor
+  if (p.prompt === true) env.E2E_PROMPT = '1'
   if (p.enrich === true) env.E2E_ENRICH = '1'
   if (p.noAuxModel === true) env.E2E_NO_AUX_MODEL = '1'
   return env
