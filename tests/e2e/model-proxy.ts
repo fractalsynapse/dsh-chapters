@@ -624,7 +624,14 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           }
         }
         // ---- record: stream through, capture bytes, append tape
-        const upstreamUrl = new URL((opts.upstream ?? 'http://localhost:8080') + req.url!)
+        // Join, do not concatenate. The base for an OpenAI-compatible provider conventionally INCLUDES its
+        // `/v1` (the Alibaba token-plan route is `…/compatible-mode/v1`) while the request path the harness
+        // sends also starts with `/v1/`, so naive `base + req.url` produced
+        // `/compatible-mode/v1/v1/chat/completions` → 404 → no assistant message → "Fork with chapters element
+        // not found" across every leg. The doubled prefix, not the model or the key, was the blocker.
+        const base = (opts.upstream ?? 'http://localhost:8080').replace(/\/+$/, '')
+        const path = req.url!
+        const upstreamUrl = new URL(base.match(/\/v1$/) && path.startsWith('/v1/') ? base + path.slice(3) : base + path)
         const transport = upstreamUrl.protocol === 'https:' ? https : http
         const fwd: Record<string, unknown> = { ...req.headers, host: upstreamUrl.host }
         if (opts.upstreamKey !== undefined && opts.upstreamKey !== '') {
