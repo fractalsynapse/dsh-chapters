@@ -1,4 +1,4 @@
-import { bootE2eServer, ROOT, type Pins } from './boot.ts'
+import { bootE2eServer, rigStoreRoot, ROOT, type Pins } from './boot.ts'
 import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -118,5 +118,22 @@ export default async function setup(fullConfig?: {
 
   const handle = await bootE2eServer(port, pins)
   bootStop = async () => { await handle.stop() }
-  return async () => { guard(); await handle.stop() }
+  return async () => {
+    guard()
+    // Deliver the evidence BEFORE the home is deleted. The plugin writes its own diagnostics to
+    // `<store-root>/diagnostics.log` (#61) and the store root is per-port inside the throwaway home, so every
+    // leg has been destroying the only record of what its boot actually said — which is precisely the failure
+    // this repo calls "a detected failure that was thrown away", now aimed at my own rig. Copied, not moved:
+    // the boot still owns its file, and `var/` keeps the transcript.
+    try {
+      const src = path.join(rigStoreRoot(port), 'diagnostics.log')
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(ROOT, 'var', `e2e-diagnostics-${String(port)}.log`))
+        console.log(`[e2e] diagnostics delivered → var/e2e-diagnostics-${String(port)}.log`)
+      }
+    } catch (error) {
+      console.warn(`[e2e] could not deliver diagnostics: ${String((error as Error)?.message ?? error)}`)
+    }
+    await handle.stop()
+  }
 }

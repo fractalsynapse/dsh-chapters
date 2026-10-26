@@ -49,9 +49,9 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     // the component returning null on its switch — are indistinguishable. Measured cost tonight: I chased a
     // stale bundle, a wrong model route, and a deleted rig home before the DOM could tell me which it was.
     const dump = await page.evaluate(() => {
-      const dockish = [...document.querySelectorAll('[data-plugin-root], [data-prompt-bar], [class*="promptDock"], [class*="_composer"]')]
+      const dockish = Array.from(document.querySelectorAll('[data-plugin-root], [data-prompt-bar], [class*="promptDock"], [class*="_composer"]'))
         .map((el) => ({ tag: el.tagName, cls: el.className?.toString?.().slice(0, 60) ?? '', attr: el.getAttribute('data-plugin-root') ?? el.getAttribute('data-prompt-bar') ?? '' }))
-      return { dockish, buttons: [...document.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')).filter(Boolean).slice(0, 40) }
+      return { dockish, buttons: Array.from(document.querySelectorAll('button')).map((b) => b.getAttribute('aria-label')).filter(Boolean).slice(0, 40) }
     })
     fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-dom.json'), JSON.stringify({ ...dump, consoleErrors: errors }, null, 1))
 
@@ -91,10 +91,6 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     // a guess: `idle` → `Analyzing the session…` → an actual next step is the sequence the product owes, and
     // which link of the chain broke is visible in the transitions.
     const seen: string[] = []
-    await expect.poll(() => {
-      const t = bar.innerText ? '' : ''
-      return t
-    }, { timeout: 1 }).toBe('')
     const started = Date.now()
     while (Date.now() - started < 150_000) {
       const line = (await bar.innerText()).replace(/\s+/g, ' ').trim()

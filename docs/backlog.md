@@ -519,6 +519,8 @@ Therefore, in order:
 1. Deliver the rig's own logs: on teardown, copy the boot's stdout and the per-port diagnostics file to
    `var/e2e-<port>-diagnostics.log` BEFORE the home is deleted, and re-implement or delete the
    `E2E_KEEP_HOME=1` doc claim. A rig that discards the only evidence of a boot is the #61 bug in my own tooling.
+1b. **The delivery attempt itself failed**: the teardown copy ran but found nothing at
+    `rigStoreRoot(port)/diagnostics.log` — the store root is not directly under the home (the journey's workspace is), so the path must be derived from the boot's actual store root, not assumed. Prove it by listing the home's tree inside the copy step once, then point the copy at the real file.
 2. Re-run `LEG=prompt MODE=record` and read whether the door armed. If REFUSED, the event bus/registration is
    the bug and the fix is to register where the working doors register.
 3. If armed but no claim, instrument `promptRunner`'s three early returns (`ev.type`, `enabled`, `eligible`)
