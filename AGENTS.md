@@ -383,6 +383,19 @@ not a plugin bug.
   twice in one session, each costing a full re-application of ~14 edits to `src/rules.ts`. `cp f f.bak`
   first; restore from `f.bak`. Never reach for `git` to undo a mutation you made by hand.
 - **Commit, PR, and issue bodies go through a FILE (`git commit -F`, `gh ... --body-file`), never a quoted argument.** Measured four times on one branch (2026-10-22/23): backticks inside a double-quoted `-m "…"` are command substitutions, so the shell RAN the quoted identifiers and deleted them from the message — shipping text like "enforces: , its profile patch, and the installed  tree". Nothing failed; the record was just quietly wrong, which is the class of bug this repo exists to end. Single-quoted `-m '…'` is safe; `--body "…"` is not.
+- **Do not track, infer, or reason about your own context capacity — unless asked, or measuring for a
+  specific diagnosis.** Nothing in the runtime snapshot reports token usage or a percentage, so any such number
+  you "know" is an inference dressed as a fact, and this plugin's whole design makes the question moot: the
+  chapters preset compacts and continues automatically, so capacity is not a resource an agent rations.
+  Measured against myself 2026-10-26: I reported exhaustion at **56% used**, and that invented constraint
+  changed engineering — a `staging` merge aborted after three of four hunks were verified to be supersets, the
+  docked component deferred twice, and a commit message asserting a test-harness fix that existed only as a
+  comment (a maintainer run disproved it with `1 skipped`). So: never let a capacity *feeling* end a task,
+  defer a verification step, or shrink an implementation. When you are asked, or when a measurement genuinely
+  serves a diagnosis, **answer only from what you have read** — the meter's number, a log line, the artifact
+  ledger, `chapters_segment`'s counts — and where no measurement exists, say the number is unknown and
+  continue. "My context is nearly spent" with no reading behind it is a fabrication, and it is the class of
+  wrong this repository exists to end.
 - **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
   with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
   When a question stalls, change something real: different arguments, a different tool, or state what is
