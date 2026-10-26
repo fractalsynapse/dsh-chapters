@@ -61,3 +61,31 @@ test('a conflicting LEG and --project is refused rather than guessed', () => {
     assert.match(`${err.stderr}`, /conflicts with --project=suite/, 'naming the leg twice, differently, is never resolved silently')
   }
 })
+
+/**
+ * The dry-run line and the exec share one argv array, so the diagnostic cannot disagree with the action.
+ *
+ * Why this is a row and not a comment: my first cut assembled the two separately, so `LEG=fork` printed a
+ * correct-looking leg and then exec'd **without any `--project` filter** — running all 13 specs across every
+ * project. The maintainer watched 25 minutes go by on work he had not asked for while my own output looked
+ * right. A check that can lie is worse than no check, so both spellings and the no-duplication rule are
+ * pinned here.
+ */
+test('both spellings produce one --project, and extra args survive', () => {
+  // Plain string assertions, not regex: my first cut of this row died on `/x/` followed by a template
+  // literal, which parses as a tagged template — "is not a function". Checking a shell line for substrings
+  // needs no pattern language.
+  const inv = (out: string): string => out.split('\n').find((l) => l.includes('would exec')) ?? ''
+  const count = (hay: string, needle: string): number => hay.split(needle).length - 1
+
+  const viaLeg = inv(execFileSync('bash', ['-c', `MODE=live LEG=fork DRY=1 bash ${SCRIPT}`], { encoding: 'utf8' }))
+  assert.ok(viaLeg.includes('--project=fork'), `LEG= must reach the invocation: ${viaLeg}`)
+  assert.equal(count(viaLeg, '--project='), 1, 'exactly one project flag')
+
+  const viaFlag = inv(execFileSync('bash', ['-c', `MODE=heal DRY=1 bash ${SCRIPT} --project=suite`], { encoding: 'utf8' }))
+  assert.equal(count(viaFlag, '--project=suite'), 1, `the translated flag is not passed twice: ${viaFlag}`)
+
+  const extra = inv(execFileSync('bash', ['-c', `MODE=replay LEG=rules DRY=1 bash ${SCRIPT} --grep=door`], { encoding: 'utf8' }))
+  assert.ok(extra.includes('--project=rules'), 'the leg is still filtered')
+  assert.ok(extra.includes('--grep=door'), 'and the caller extra argument is forwarded')
+})

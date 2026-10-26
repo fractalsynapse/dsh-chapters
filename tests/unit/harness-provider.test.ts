@@ -17,6 +17,7 @@ const PROFILE = `- id: llm-pi-ai
         models:
           - id: qwen3.8-flash
             contextWindow: 196608
+            maxTokens: 131072
         apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY
 - id: agent-default-model
   config:
@@ -59,13 +60,33 @@ test('readEnvFile parses without executing anything (#54 class: never `source` a
   assert.equal(parsed['comment'], undefined)
 })
 
-test('the profile block keeps the pinned stress window — the regime is the point', () => {
-  const patch = harnessProviderPatch({ id: 'qwen-token-plan', model: 'qwen3.8-flash', apiKeyEnv: 'QWEN_TOKEN_PLAN_API_KEY' }, 32000)
-  assert.match(patch, /contextWindow: 32000/, 'a hosted 196K window would swallow the 33K prompt and the overflow trigger would never fire')
-  assert.match(patch, /apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY/)
-  assert.match(patch, /provider: qwen-token-plan\n    model: qwen3\.8-flash/)
-  assert.ok(!patch.includes('localhost:8080'), 'the harness-native route must not smuggle the old local block back in')
-  assert.ok(!patch.includes('baseURL'), 'no baseURL is emitted when the profile has none — the host plugin resolves it')
+test('the patch COPIES the live provider block and edits only the regime — inventing keys was the bug', () => {
+  const route = routeFromProfile(PROFILE)
+  assert.ok(route)
+  const patch = harnessProviderPatch(route, 32000)
+  // The old synthesized shape added `api: openai-completions` and dropped the models list. The live profile
+  // declares neither key because its endpoint is resolved by the host provider plugin; writing an `api:`
+  // anyway gave the rig a provider that could not answer, which is the single cause behind the nine browser
+  // legs that "failed" at missing doors, plan cards, and markers.
+  assert.ok(!/^\s{8}api:/m.test(patch), 'no api: key unless the source has one')
+  assert.ok(!/localhost:8080/.test(patch), 'and never the old local route smuggled back in')
+  assert.match(patch, /contextWindow: 32000/, 'the stress regime is still pinned — that part is ours to edit')
+  assert.match(patch, /maxTokens: 15000/, 'a declared maxTokens is pinned to the regime value')
+  assert.match(patch, /contextWindow: \d+/, 'and the window is pinned, not dropped')
+  assert.match(patch, /provider: qwen-token-plan\n {4}model: qwen3\.8-flash/)
+  assert.ok(patch.includes(route.providerBlock.replace(/contextWindow: \d+/g, 'contextWindow: 32000').replace(/maxTokens: \d+/g, 'maxTokens: 15000')),
+    'the provider block arrives byte-identical apart from the two regime numbers')
+})
+
+test('a source block that DOES carry api: and baseURL keeps them', () => {
+  const withUrls = PROFILE.replace('        apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY',
+    '        api: openai-completions\n        baseURL: http://example:9/v1\n        apiKeyEnv: QWEN_TOKEN_PLAN_API_KEY')
+  const route = routeFromProfile(withUrls)
+  assert.ok(route)
+  assert.equal(route.baseURL, 'http://example:9/v1')
+  const patch = harnessProviderPatch(route, 32000)
+  assert.match(patch, /api: openai-completions/, 'copying means copy — a real local-provider profile must survive intact')
+  assert.match(patch, /baseURL: http:\/\/example:9\/v1/)
 })
 
 test('the terminal line describes the route without ever printing the credential', () => {

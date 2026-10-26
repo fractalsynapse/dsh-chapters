@@ -57,12 +57,28 @@ if [ "$MODE" = live ]; then export E2E_WINDOW_TOKENS="${E2E_WINDOW_TOKENS:-0}"; 
 export PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright"
 echo "[e2e-one] leg=$LEG mode=$MODE provider=${E2E_PROVIDER:-tracked-local} window=${E2E_WINDOW_TOKENS:-pinned-32K}"
 
-# DRY=1 resolves everything and runs nothing. This exists because "did my flags land?" used to require a full
-# harness boot to answer — minutes of GPU/port/credential work to check a line of parsing — which is how a
-# broken script gets handed to a human to discover. Prove the resolution, then decide whether to boot.
+# ONE argv array, used by both the dry-run print and the exec. Building them separately is how this script
+# lied: the DRY line was assembled from a different expression than the exec, so `LEG=fork` reported a leg it
+# then failed to filter on — and my first exec line also carried literal `''` from a botched escape, which
+# bash passed through as part of an argument. A diagnostic that disagrees with the action it describes is
+# worse than none: it retires the very suspicion that would have found the bug.
+RUN=("--project=$LEG")
+for a in "${ARGS[@]-}"; do
+  # The `--project=` the caller used already became $LEG above; passing it twice would make the invocation
+  # ambiguous about which spelling is authoritative (Playwright de-duplicates projects, but a reader
+  # re-reading a CI line should not have to know that).
+  [ -n "$a" ] && case "$a" in --project=*) ;; *) RUN+=("$a") ;; esac
+done
+
+# DRY=1 resolves everything and runs nothing: leg, mode, provider, window, and the exact invocation.
 if [ "${DRY:-0}" = "1" ]; then
-  echo "[e2e-one] DRY RUN — would exec: npx playwright test -c tests/e2e/playwright.config.ts ${ARGS[*]-}"
+  echo "[e2e-one] DRY RUN — would exec: npx playwright test -c tests/e2e/playwright.config.ts ${RUN[*]}"
   echo "[e2e-one] DRY RUN — no boot, no browser, no model call, no tape written"
   exit 0
 fi
-exec npx playwright test -c tests/e2e/playwright.config.ts "${ARGS[@]}"
+
+# The leg is ALWAYS passed as --project, whether it arrived as `LEG=` or `--project=`. `ARGS` holds only the
+# caller's EXTRA arguments (a `--grep`, a worker count): my first cut exec'd from ARGS alone, so
+# `LEG=fork npm run corpus:heal` ran all 13 specs across every project and spent 25 minutes of the
+# maintainer's afternoon on work he did not ask for.
+exec npx playwright test -c tests/e2e/playwright.config.ts "${RUN[@]}"
