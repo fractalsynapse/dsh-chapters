@@ -64,11 +64,29 @@ export function collectionTotal(): number {
  * `LEG=fork MODE=live` came back `1 skipped`, which reads as a pass to anyone scanning a log). `E2E_ALLOW_SKIP=1`
  * is the single explicit opt-out: for the rare run that genuinely means "skip legs I cannot serve".
  */
+/**
+ * A probe ANSWERS a question. `localModelUp` keeps returning the boolean, because `tape-proxy-upstream-key`
+ * pins the remote branch's contract — "an unreachable remote must be a NO, never an assumed yes" — and
+ * turning the answer into an exception made a probe function throw where a test asked whether the endpoint
+ * was reachable. That was my error in `a45bc10`: the loudness is right, the place was wrong. It moves to
+ * `requireModelForLeg()`, which runs when a leg is about to act on the answer.
+ */
 function unavailable(what: string): false {
-  if (process.env.E2E_ALLOW_SKIP === '1') return false
+  void what
+  return false
+}
+
+/**
+ * The loud half: called by a leg that is about to run against the model. A skip is legal only when the
+ * operator said so (`E2E_ALLOW_SKIP=1`); otherwise an unreachable model FAILS the leg with the remedy,
+ * because "# skipped" in a CI log is indistinguishable from "# passed" and that silence cost six of eight
+ * projects once before (#54).
+ */
+export function requireModelForLeg(reachable: boolean, what: string): void {
+  if (reachable || process.env.E2E_ALLOW_SKIP === '1') return
   throw new Error(`e2e: ${what} — this leg needs a reachable model and none is. Start it, or point the run at one `
     + '(E2E_UPSTREAM=http://host:port, or E2E_PROVIDER=harness for this host\'s own route), or set E2E_ALLOW_SKIP=1 '
-    + 'to skip on purpose. A silent skip is indistinguishable from a pass in CI output, which is the bug.')
+    + 'to skip on purpose.')
 }
 
 export async function localModelUp(): Promise<boolean> {
@@ -737,6 +755,10 @@ export function countGhostCommandRuns(logText: string): number {
  * A union needs a type annotation, not a pipe in the default position.
  */
 export async function newSessionWithTurn(page: Page, question: string, turnMs = 420_000, actionGraceMs: number | false = 20_000): Promise<string> {
+  // Every journey that needs a real turn arrives here, so this is where the skip becomes a failure. The
+  // probe stays a yes/no question (rows depend on that); the CONSEQUENCE of "no" lives here, where a leg is
+  // about to run blind. `E2E_ALLOW_SKIP=1` is the only way a leg declines without failing.
+  requireModelForLeg(await localModelUp(), 'no reachable model for this journey')
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))
       .find((b) => /New Session/i.test(b.textContent ?? '')) as HTMLButtonElement | undefined
