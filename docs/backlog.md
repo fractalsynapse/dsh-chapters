@@ -501,3 +501,25 @@ Fix, in this order, rows first:
 3. Then re-run `LEG=prompt` and read the reply: `analyzing`/`ready` means the bar renders; `failed` means it
    renders *with the reason*, and the remaining bug is the host route discovery (`hostRoute` in `src/index.ts`)
    — a different, narrower problem.
+
+### Next unknown, isolated: did the suggested-next-step door register at all? (2026-16 17:20)
+
+Eliminated by measurement, one link at a time: listener arg order (`(session, event)` — matches
+`makeSignatureListener`'s published shape), `enabled()` (`prompt.effective().spec !== ''`, and the profile row
+is delivered), the read/write store (both the registry row's `promptSuggestion`), and the merge order
+(`statusOf` contributes only `{autorun, fired}` — it cannot clobber the status).
+
+What is left: `ctx.on('session/event', …)` at `src/index.ts:684` may not be the bus the *realm* doors use
+(`src/engine.ts:560/574/585` register inside the realm class on `this.ctx`). The registration prints
+"dsh-chapters: suggested-next-step door armed" — or "REFUSED" — through `ctx.logger`, and the rig deletes the
+home (and any per-port log inside it) at teardown, so tonight's run cannot answer it. `E2E_KEEP_HOME=1` is
+documented but no longer implemented anywhere in `tests/e2e/`.
+
+Therefore, in order:
+1. Deliver the rig's own logs: on teardown, copy the boot's stdout and the per-port diagnostics file to
+   `var/e2e-<port>-diagnostics.log` BEFORE the home is deleted, and re-implement or delete the
+   `E2E_KEEP_HOME=1` doc claim. A rig that discards the only evidence of a boot is the #61 bug in my own tooling.
+2. Re-run `LEG=prompt MODE=record` and read whether the door armed. If REFUSED, the event bus/registration is
+   the bug and the fix is to register where the working doors register.
+3. If armed but no claim, instrument `promptRunner`'s three early returns (`ev.type`, `enabled`, `eligible`)
+   with the reason each one took, delivered to the diagnostics sink, and re-read.

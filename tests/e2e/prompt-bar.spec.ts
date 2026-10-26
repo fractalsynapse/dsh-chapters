@@ -87,6 +87,25 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     const prompt = (await bar.innerText()).trim()
     expect(prompt.length, 'the row says something — an empty row is not a suggestion').toBeGreaterThan(0)
 
+    // Record the row's words as they change, so "it never got a recommendation" is a measurement rather than
+    // a guess: `idle` → `Analyzing the session…` → an actual next step is the sequence the product owes, and
+    // which link of the chain broke is visible in the transitions.
+    const seen: string[] = []
+    await expect.poll(() => {
+      const t = bar.innerText ? '' : ''
+      return t
+    }, { timeout: 1 }).toBe('')
+    const started = Date.now()
+    while (Date.now() - started < 150_000) {
+      const line = (await bar.innerText()).replace(/\s+/g, ' ').trim()
+      if (seen[seen.length - 1] !== line) seen.push(line)
+      if (seen.length > 1 && !/No suggestion yet|Analyzing/.test(line) && line.length > 24) break
+      await page.waitForTimeout(2_000)
+    }
+    fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-transitions.json'), JSON.stringify(seen, null, 1))
+    expect(seen.length, 'the row said something').toBeGreaterThan(0)
+    expect(seen[seen.length - 1], 'the bar produced a recommendation for the completed turn').not.toMatch(/No suggestion yet/)
+
     // Click-to-draft: the composer ends up holding the whole prompt, not a fragment of it.
     await bar.click()
     const composer = page.locator('[contenteditable="true"], textarea').first()
