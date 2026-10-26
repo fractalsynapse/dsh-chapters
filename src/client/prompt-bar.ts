@@ -11,7 +11,7 @@
  * justified it. Each has a row in `tests/unit/prompt-bar.test.ts`.
  */
 
-export type PromptBarStatus = 'off' | 'analyzing' | 'ready' | 'failed'
+export type PromptBarStatus = 'off' | 'idle' | 'analyzing' | 'ready' | 'failed'
 export type PromptBarAutorun = 'armed' | 'disarmed'
 /** Mirrors the host's `GoalPhase` vocabulary (`dsh-goal` types) so goal composition needs no translation. */
 export type GoalPhaseView = 'none' | 'active' | 'paused' | 'blocked' | 'complete'
@@ -90,6 +90,8 @@ export function barLabel(s: PromptBarState): string | null {
 }
 
 export function barVisible(s: PromptBarState): boolean {
+  // Only `off` hides the row. `idle` is enabled-and-waiting, and showing it is the difference between
+  // "the feature is live, nothing to say yet" and silence that reads as disabled (#113).
   if (s.status === 'off') return false
   if (s.status === 'ready' && (s.text === null || s.text === '')) return false
   // The goal bar's `clearedGoalId` guard, in our terms: don't flicker back the offer just dismissed.
@@ -130,6 +132,7 @@ export function parseBarState(text: string): PromptBarEvent | null {
   const head = lines[0] ?? ''
   const statusWord = head.startsWith('suggested next step:') ? head.slice('suggested next step:'.length).trim() : ''
   const status = statusWord === 'off' ? 'off'
+    : statusWord === 'idle' ? 'idle'
     : statusWord === 'analyzing' ? 'analyzing'
     : statusWord === 'ready' ? 'ready'
     : statusWord === 'failed' ? 'failed'

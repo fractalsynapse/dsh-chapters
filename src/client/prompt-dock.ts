@@ -105,6 +105,18 @@ const Action = (props: { label: string; glyph: string; onClick: () => void; disa
 /** Run is allowed whenever there is an offer; AUTORUN is what the intent and the goal gate. Keeping the
  * human's own button enabled is deliberate — the point of the protocol is to route a goal edit to a keystroke,
  * never to disable the human's ability to send it. */
+/**
+ * The words the collapsed row shows, per state. `idle` and `analyzing` must say something, because an empty
+ * row is indistinguishable from a broken one — the whole reason this feature took a day to read: the bar was
+ * live, enabled, and rendering nothing but whitespace.
+ */
+function lineFor(state: PromptBarState): string {
+  if (state.status === 'ready') return state.text ?? ''
+  if (state.status === 'analyzing') return 'Analyzing the session…'
+  if (state.status === 'failed') return state.error !== null && state.error !== '' ? `Cannot recommend: ${state.error}` : 'Cannot recommend a next step right now'
+  return 'No suggestion yet — I will recommend one after your next turn'
+}
+
 const canRunHere = (state: PromptBarState): boolean => state.text !== null && state.text !== ''
 
 /** How long a state pull may take before we call it failed. Generous on purpose: this is a local RPC that
@@ -113,8 +125,9 @@ const PULL_TIMEOUT_MS = 15_000
 
 /** Retry ceiling for the FIRST pull only, in attempts and spacing. A mount-time race must not be able to
  * starve the bar forever, and a real `off` answer stops the loop on the first reply either way. */
-const FIRST_PULL_ATTEMPTS = 6
-const FIRST_PULL_SPACING_MS = 1_500
+/** Cadence of the keep-poll. A local RPC that answers in milliseconds; the cost is one command per
+ * interval, and it ends the moment the state is `off`. */
+const POLL_SPACING_MS = 10_000
 
 function execWithTimeout(exec: (line: string) => Promise<string>, line: string, ms: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
@@ -134,6 +147,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
   const pulling = useRef(false)
   const mounted = useRef(false)
   const answered = useRef(false)
+  const stateRef = useRef<PromptBarState>(initialBarState())
+  stateRef.current = state
 
   const refresh = useCallback(async (): Promise<void> => {
     if (exec === undefined || pulling.current) return
@@ -165,14 +180,18 @@ export function PromptDock(props: DockProps): ReactElement | null {
     // Retry until SOMETHING answers. `answered` flips on any parseable reply, including an honest `off`, so
     // this loop cannot make a disabled session look enabled — it only closes the window where a pull fired
     // before the session could take a command and the bar then stayed blank for the rest of the session.
-    let attempts = 0
-    const tick = (): void => {
-      if (answered.current || attempts >= FIRST_PULL_ATTEMPTS) return
-      attempts += 1
-      void refresh().finally(() => { if (!answered.current) timer = setTimeout(tick, FIRST_PULL_SPACING_MS) })
+    // Keep reading while the feature is live. This host publishes no idle edge — the same absence that
+    // makes Autorun refuse to fire — so a pull that only ran at mount would answer `idle` once and then go
+    // quiet for the rest of the session. The poll stops on `off`, which is the only state that means the
+    // human (or the config) switched it away, so a disabled session costs one read and nothing more.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const tick = async (): Promise<void> => {
+      await refresh()
+      if (stateRef.current.status === 'off') return
+      timer = setTimeout(() => { void tick() }, POLL_SPACING_MS)
     }
-    let timer = setTimeout(tick, 0)
-    return () => { clearTimeout(timer) }
+    void tick()
+    return () => { if (timer !== undefined) clearTimeout(timer) }
   }, [refresh])
 
   // Autorun fires off the IDLE edge, never off a render. `running` comes from the host when it publishes it;
@@ -218,7 +237,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
         onClick: populate,
       }, state.expanded
         ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
-        : h('span', { className: 'dsh-chapters_promptEllipsis' }, state.text ?? '')),
+        : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },
         h(Action, {

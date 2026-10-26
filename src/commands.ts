@@ -420,8 +420,13 @@ export function registerHostCommands(
           }
           const st = await config.prompt.bar.read(sessId)
           const { spec, source } = config.prompt.effective()
+          // #113: `off` must mean OFF. A session with a defining model and no stored offer is `idle` — enabled,
+          // awaiting its first turn — and collapsing that into `off` is what made the bar look switched-off
+          // while the config row was present. The distinction is the human's only signal that the feature is
+          // live but has nothing to say yet, so it is made here, at the one place the state is rendered.
+          const resting = st.status === 'off' && spec !== '' ? { ...st, status: 'idle' as const } : st
           return { kind: 'success', text: [
-            `suggested next step: ${st.status}`,
+            `suggested next step: ${resting.status}`,
             `  model: ${spec !== '' ? spec : 'unset'} (${source}) — ${spec === '' ? 'the bar is absent' : 'one offer per completed turn'}`,
             `  autorun: ${st.autorun}${st.autorun === 'armed' ? ` (${String(st.fired)} round(s) started this process)` : ''}`,
             `  turn: ${st.turnSeq === null ? '-' : String(st.turnSeq)}`,

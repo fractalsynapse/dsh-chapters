@@ -619,7 +619,17 @@ load-bearing, not historical:
 `mutate(id, () => snapshot)` is a stale `put` with better branding (fixed once already in `repair-run.ts`
 for the hollow-payload supersede).
 
-## Suggested Next Step bar — interface lock (#113, builds on the measured goal-bar facts above)
+## Suggested Next Step bar
+
+**State vocabulary (interface lock, #113).** `/chapters-prompt state` reports one of:
+`off` — switched off by the human (a stored override), or no defining model is configured, so the bar renders
+nothing; `idle` — **enabled and awaiting its first recommendation** (no completed turn yet); `analyzing` — a
+generation is in flight for the current turn; `ready` — an offer is on screen with `text`; `failed` — the
+generation could not run, with the reason. `idle` exists because collapsing "nothing yet" into `off` made a
+working feature indistinguishable from a disabled one: measured in the rig, the bar replied
+`suggested next step: off` while the profile row read `model: qwen-token-plan/qwen3.8-flash (config)`.
+The bar stays hidden on `off` only, and re-reads while the state is `idle`/`analyzing`/`ready`.
+ — interface lock (#113, builds on the measured goal-bar facts above)
 
 A composer dock row that, once per **completed turn**, generates a fresh prompt suggestion and offers
 **Run · Autorun · Off**. Modelled on the goal bar because the goal bar is tested and already fits — and the
