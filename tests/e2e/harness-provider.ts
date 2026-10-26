@@ -23,6 +23,17 @@ export interface ProviderRoute {
   apiKeyEnv: string
   /** omitted when the host plugin resolves the endpoint (our own live profile is exactly that case) */
   baseURL?: string | undefined
+  /**
+   * The provider block and the default-model block **verbatim from the source profile** (#124 follow-up).
+   * Inventing a block is how harness-native mode broke nine legs at once: I synthesized
+   * `api: openai-completions` with no `baseURL` because the live profile declares neither — the endpoint is
+   * resolved by the host's own provider plugin — so the rig booted a provider that could never answer,
+   * produced no assistant message, and every journey then "failed" at a missing door, a missing plan card, a
+   * missing marker. The rig must carry the SAME config this session is actually running on, edited only
+   * where the stress regime says to edit it.
+   */
+  providerBlock: string
+  defaultModelBlock: string
 }
 
 /**
@@ -70,7 +81,21 @@ export function routeFromProfile(yaml: string): ProviderRoute | null {
   // An unusable route is reported as null, not half-built: a provider with no `apiKeyEnv` cannot be
   // authenticated by a throwaway home, and inventing one is the #54 class in a new costume.
   if (apiKeyEnv === undefined) return null
-  return { id: provider, model, apiKeyEnv, ...(baseURL !== undefined ? { baseURL } : {}) }
+  const blockAt = (startIdx: number): string => {
+    let end = startIdx + 1
+    while (end < lines.length && !/^\S/.test(lines[end]!)) end++
+    return lines.slice(startIdx, end).join('\n')
+  }
+  const providerStart = lines.findIndex((l) => new RegExp(`^\\s{6}${provider}:\\s*$`).test(l))
+  const defaultStart = lines.findIndex((l) => /^- id: agent-default-model\s*$/.test(l))
+  if (providerStart === -1 || defaultStart === -1) return null
+  const providerBlock = blockAt(providerStart)
+  const defaultModelBlock = blockAt(defaultStart)
+  return {
+    id: provider, model, apiKeyEnv,
+    ...(baseURL !== undefined ? { baseURL } : {}),
+    providerBlock, defaultModelBlock,
+  }
 }
 
 export interface KeyResolution {
@@ -124,26 +149,21 @@ export function readEnvFile(text: string): NodeJS.ProcessEnv {
  * swallow a 33K prompt and the `context-overflow` trigger would never fire).
  */
 export function harnessProviderPatch(route: ProviderRoute, windowTokens: number): string {
-  const lines = [
-    `- id: llm-pi-ai`,
-    `  config:`,
-    `    providers:`,
-    `      ${route.id}:`,
-    ...(route.baseURL !== undefined ? [`        baseURL: ${route.baseURL}`] : []),
-    `        api: openai-completions`,
-    `        apiKeyEnv: ${route.apiKeyEnv}`,
-    `        models:`,
-    `          - id: ${route.model}`,
-    `            name: ${route.model} (harness-native rig route)`,
-    `            contextWindow: ${String(windowTokens)}`,
-    `            maxTokens: 15000`,
-    `- id: agent-default-model`,
-    `  config:`,
-    `    provider: ${route.id}`,
-    `    model: ${route.model}`,
+  // Copy, then edit the ONE thing the stress regime requires. Nothing else is synthesized: no `api:`, no
+  // `baseURL`, no ordering, because those choices belong to the host's provider plugin and my guess was the
+  // bug. The context window is replaced on both blocks so the rig still refuses an over-window request the
+  // way the tape's own run did (#78).
+  const pinWindow = (block: string): string => block
+    .replace(/contextWindow: \d+/g, `contextWindow: ${String(windowTokens)}`)
+    .replace(/maxTokens: \d+/g, 'maxTokens: 15000')
+  return [
+    '- id: llm-pi-ai',
+    '  config:',
+    '    providers:',
+    pinWindow(route.providerBlock).replace(/^\s{6}/, '      '),
+    pinWindow(route.defaultModelBlock),
     '',
-  ]
-  return lines.join('\n')
+  ].join('\n')
 }
 
 /** One readable terminal line about the route, with the key NEVER shown. */
