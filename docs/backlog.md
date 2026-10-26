@@ -422,3 +422,29 @@ facts in `docs/contract.md` § Composer Ghost Layer). When the workspace deps mo
   source and cap (the same shape `/chapters-status` gets an expander for). Site §28 and
   `docs/contract.md` § Composer Ghost Layer still describe the removed overlay — they need a pass, and if the
   ghost is ever revived it must answer all four defects with measurements, not a restyle.
+
+## Tape generation + acceptance (state at 2026-10-26, end of the debugging round)
+
+**Resolved, with evidence:**
+- The Alibaba token-plan credential is **valid**: `GET …/compatible-mode/v1/models` → `http=200`. My earlier
+  `401 Invalid API-key` reports were **my invalid model id** (`qwen3.8-flash`, then a broken extraction that
+  yielded `"json"`), because this gateway reports a bad model as a key error. Do not re-diagnose the key.
+- File/`~/.bashrc`/harness-process key fingerprints are identical (`5ff7ab0a`, 114 chars) — the credential
+  path works; an agent tool shell still can't inherit it, so `.dshdev-local/e2e.env` is the supported route.
+- `qwen3.8-flash-next` (the fixture name in the tracked seed) is **not** in the plan's `/models` list; that is
+  exactly what `E2E_UPSTREAM_MODEL` exists to translate.
+
+**Next, in order:**
+1. Pick a real id from `/models` (a flash-tier one, e.g. from the list returned), verify one
+   `chat/completions` call answers `200`, and record which id.
+2. In harness mode set `E2E_UPSTREAM=https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`
+   and `E2E_UPSTREAM_MODEL=<that id>`, then `LEG=rules MODE=record` — the shortest leg.
+3. Read a **fresh** session tree (mtime-since-start) for `assistant/message`. Two prior readings were wrong:
+   one used an Oct 23 stale dir, another found none because sessions land under the port-keyed home only if the
+   model answered at all.
+4. Only then revisit: the live-mode `composer did not take focus (active: API key)` wall, and the missing
+   `Fork with chapters` door. Both may be downstream of a provider that never answered — do not treat either as
+   a UI bug until step 3 shows an assistant message existing.
+5. Standing diagnosability fixes owed: boot must assert a provider answered before journeys poll; failure
+   artifacts must include a DOM (`error-context.md` has none, which is how I claimed "present but not visible"
+   from a call log).
