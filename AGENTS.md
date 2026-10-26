@@ -410,7 +410,7 @@ not a plugin bug.
 ## Where we are — state lives in docs, not here
 
 **Shipped and CI-green on the real model:** the engine, tools, preset, all seven archive moments, the
-knowledge layer (P1–P3c), the repair engine (#60), the prompt-ghost surface (#71). **Still unverified:
+knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), still unverified in a browser. **Still unverified:
 the browser plane** — the tape corpus is not re-anchored to the pinned host, so replay refuses by name
 and no e2e claim is current (issues #56/#57). Do not quote an e2e result as fresh until that lands.
 
