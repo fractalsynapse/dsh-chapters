@@ -134,3 +134,25 @@ test('the advisory acceptance gate is scoped, sourced, and reversible (#92)', ()
 })
 
 const advisiveTrim = (lines) => lines.map((l) => l.trim().slice(0, 40))
+
+test('applyRigEnv derives the SAME map as rigEnv — one table, one reader', () => {
+  // The bug this row exists for: `rigEnv` (Playwright's project env) and `applyRigEnv` (the ambient
+  // process, used by globalSetup) were two hand-written enumerations of the same pin table. Adding the
+  // bar's `prompt: true` updated one and missed the other, so the boot never set `promptModel`, the dock
+  // row never rendered, and an unverified PRODUCT feature was actually an unverified RIG wire. A pin key
+  // must reach both paths or neither — which is what comparing the two maps here enforces.
+  const saved = { ...process.env }
+  try {
+    for (const proj of Object.keys(RIG_PINS)) {
+      for (const k of Object.keys(rigEnv(proj))) delete process.env[k]
+      applyRigEnv(proj)
+      const derived = rigEnv(proj)
+      for (const [k, v] of Object.entries(derived)) {
+        assert.equal(process.env[k], v, `${proj}: applyRigEnv must set ${k} exactly as rigEnv derives it`)
+      }
+    }
+  } finally {
+    for (const k of Object.keys(RIG_PINS).flatMap((proj) => Object.keys(rigEnv(proj)))) delete process.env[k]
+    Object.assign(process.env, saved)
+  }
+})

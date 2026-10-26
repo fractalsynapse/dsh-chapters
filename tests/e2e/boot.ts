@@ -394,7 +394,18 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // append it when absent and rewrite the baseURL when a tape proxy is in front.
   {
     const patchPath = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
-    if (fs.existsSync(patchPath)) {
+    // Refuse, never skip. `if (fs.existsSync(patchPath))` made a MISSING profile patch a silent no-op: the
+    // rig booted with no plugin row, no provider block, and no `promptModel`, and every leg still ran — so a
+    // missing profile looked exactly like a feature that does not exist. Measured tonight: clearing one home's
+    // patch file made the Suggested Next Step bar "fail to render" while the actual fault was the rig having
+    // nothing to configure. A boot cannot proceed against a profile it did not write.
+    if (!fs.existsSync(patchPath)) {
+      throw new Error(`e2e boot: the profile patch is missing at ${patchPath} — the rig would boot with no plugin `
+        + 'row, no provider block and no promptModel, which looks identical to a feature that does not exist. '
+        + 'Delete the whole home (rm -rf ' + path.dirname(path.dirname(path.dirname(patchPath))) + ') so it is rebuilt from '
+        + `the tracked seed (${PROFILE_SEED}).`)
+    }
+    {
       let p = fs.readFileSync(patchPath, 'utf8')
       if (harnessRoute !== null) {
         // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host

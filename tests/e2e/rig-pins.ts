@@ -73,12 +73,14 @@ export function applyRigEnv(project: string | null): RigPin | null {
   if (project === null) return null
   const p = RIG_PINS[project]
   if (p === undefined) return null
-  const set = (key: string, value: string): void => { if (process.env[key] === undefined) process.env[key] = value }
-  set('E2E_TAPE', project)
-  set('E2E_PORT', String(p.port))
-  set('E2E_THRESHOLD', p.threshold)
-  if (p.floor !== undefined) set('E2E_FLOOR', p.floor)
-  if (p.enrich === true) set('E2E_ENRICH', '1')
-  if (p.noAuxModel === true) set('E2E_NO_AUX_MODEL', '1')
+  // ONE derivation, not two lists. This function used to hand-enumerate E2E_TAPE/E2E_PORT/E2E_THRESHOLD/
+  // E2E_FLOOR/E2E_ENRICH/E2E_NO_AUX_MODEL while `rigEnv` derived the same set for Playwright's project env —
+  // so when the bar's leg added `prompt: true` I updated one and missed the other, the boot never set
+  // `promptModel`, the dock row never rendered, and a rig wiring bug wore the exact costume of an unverified
+  // product feature. Deriving from `rigEnv` makes a new pin key impossible to half-wire.
+  const derived = rigEnv(project)
+  for (const [key, value] of Object.entries(derived)) {
+    if (process.env[key] === undefined) process.env[key] = value
+  }
   return p
 }

@@ -18,12 +18,28 @@ function promptModelForBoot(): string {
   const override = process.env.E2E_PROMPT_MODEL
   if (override !== undefined && override !== '') return override
   if (process.env.E2E_PROVIDER === 'harness') {
-    const profile = process.env.E2E_AMBIENT_PROFILE
-      ?? path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'profiles', 'web', 'cordis.patch.yml')
-    try {
-      const route = routeFromProfile(fs.readFileSync(profile, 'utf8'))
-      if (route !== null) return `${route.id}/${route.model}`
-    } catch { /* fall through to the fixture route below */ }
+    // Candidate order matters, and this is the bug it fixes: by the time globalSetup runs, the rig has
+    // ALREADY repointed `DSH_HOME` at its own throwaway home, whose profile is a copy of the tracked SEED —
+    // no token-plan route in it. Reading `DSH_HOME` first therefore resolved to nothing and the function
+    // silently returned the fixture route, so the bar was configured against a model the boot cannot call
+    // and the dock row never rendered. The ambient live home is the source of truth for harness mode; the
+    // rig home is a derived copy of it, patched later.
+    const candidates = [
+      process.env.E2E_AMBIENT_PROFILE,
+      path.join(os.homedir(), '.dsh', 'profiles', 'web', 'cordis.patch.yml'),
+      process.env.DSH_HOME === undefined ? undefined : path.join(process.env.DSH_HOME, 'profiles', 'web', 'cordis.patch.yml'),
+    ].filter((c): c is string => c !== undefined && c !== '')
+    for (const profile of candidates) {
+      let route = null
+      try { route = routeFromProfile(fs.readFileSync(profile, 'utf8')) } catch { continue }
+      if (route !== null) {
+        console.log(`[e2e] bar promptModel = ${route.id}/${route.model} (from ${profile})`)
+        return `${route.id}/${route.model}`
+      }
+    }
+    console.warn('[e2e] harness-native boot found NO provider route in any ambient profile; the bar would be '
+      + 'configured against the fixture route and silently not render. Set E2E_PROMPT_MODEL=<provider/model> '
+      + 'or E2E_AMBIENT_PROFILE=<path> to decide explicitly.')
   }
   return 'local/qwen3.8-flash-next'
 }
