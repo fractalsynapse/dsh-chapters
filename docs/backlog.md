@@ -541,6 +541,12 @@ Open, in order:
 
 ### The orphan reaper covers the host port but not the tape-proxy port (2026-10-26, measured twice)
 
+**Correction, a day late and worth the edit:** when I wrote the sentence above the reaper was NOT in the tree.
+PR #124 was still open, `tests/e2e/boot-reap.ts` did not exist, and `boot.ts` still only advised `pkill` — so
+nothing was reaped, host port or proxy port. My diagnosis described a component I believed in rather than one I
+checked for. It merged as `a8ff124`; the chain now running gets to find out whether it actually works, against a
+live orphan holding 41733. The proxy-port gap below stands on its own evidence (two EADDRINUSE faults today:
+42739 and 42733).
 `tests/e2e/boot-reap.ts` reaps repo-owned `dsh web --port <n>` holders before a boot. The proxy binds
 `<rig port> + 1000` (`42731`-`42740`) and is covered by nothing, so a leg killed mid-boot leaves a proxy
 holding that port and the **next** chain dies at once:
