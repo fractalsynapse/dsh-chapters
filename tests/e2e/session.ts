@@ -642,6 +642,24 @@ export function sessionLogTextById(id: string): string {
  * to the rig (measured 2026-10-27: the plans leg polled 240s for a continuation whose seed was on disk and
  * carried the plan — a false red about the product, caused by our own read).
  */
+/**
+ * Do these two spellings denote the same session?
+ *
+ * The durable log writes the session event's id WITH the `session-` prefix; the view (`dsh.sessions.current`) and
+ * `sessionIdFromDir` hand back the bare uuid for parents while children keep `ch-`/`sub-`. A guard that compares
+ * the raw strings therefore fires on a spelling — measured as `identity mismatch: dir claims session
+ * session-2ba8…, spec targets 2ba8…` on the bar's own leg, a false red on the exact journey that is supposed to
+ * be trustworthy. A child prefix is NOT a spelling difference: `ch-x` and `x` are different sessions, so the
+ * guard still fires there.
+ */
+export function sameSessionId(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a === null || a === undefined || b === null || b === undefined) return false
+  const norm = (x: string): string => (x.startsWith('session-') ? x.slice('session-'.length) : x)
+  const [na, nb] = [norm(a), norm(b)]
+  // Children keep their prefix deliberately: stripping it would equate a parent with its continuation.
+  return na === nb && (a.startsWith('ch-') || a.startsWith('sub-')) === (b.startsWith('ch-') || b.startsWith('sub-'))
+}
+
 export function sessionIdFromDir(dir: string): string {
   const name = path.basename(dir)
   return name.startsWith('session-') ? name.slice('session-'.length) : name
@@ -894,7 +912,7 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     const text = sid !== null ? sessionLogTextById(sid) : ''
     if (text === '') return false
     const header = logHeaderId(text)
-    if (header !== null && header !== sid) throw new Error(`identity mismatch: dir claims session ${header}, spec targets ${sid}`)
+    if (header !== null && !sameSessionId(header, sid)) throw new Error(`identity mismatch: dir claims session ${header}, spec targets ${sid}`)
     const evs = logEvents(text)
     const mine = evs.find((e) => e.type === 'user/message' && e.seq > preSeq && e.raw.includes(needle))
     return mine !== undefined && evs.some((e) => e.type === 'turn/end' && e.seq > mine.seq)
