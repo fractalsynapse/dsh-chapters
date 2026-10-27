@@ -1233,3 +1233,38 @@ Next read, from CI's own two-phase artifact: does the runner's patch also grow m
 at request 1 match its boot-time id set or the later one? If the runner's id set is stable at 43 and tools stay
 7, the failure is runtime mounting (silent), and the rig must surface it — e.g. by having the plugin print the
 registered tool names at boot into the per-port diagnostics, which the artifact already uploads.
+
+### Elimination table: what the 34-vs-7 tool gap is NOT (2026-10-27, all measured)
+
+The gap is real and stable, and it is the reason a locally recorded corpus cannot replay on the runner (message 0
+is the tape key). Everything below was a hypothesis I raised and then killed with a run rather than an argument:
+
+| hypothesis | how it was refuted |
+|---|---|
+| host install is a dev build wearing the pin | lock `resolved:` = `registry.npmjs.org/…/dsh-0.2.0-rc.2.tgz`, integrity equals `npm view`; both report `topVersion=0.2.0-rc.2` |
+| deps differ on disk | both: `declared=79 missing=0`, `deepseek-ai-packages=289`, `installed-top-level=179` |
+| package CONTENT differs | both: `checked=289 mismatched=0 allIntegrityMatch=true` |
+| undeclared repo-root packages | both report `repo-root-deepseek-ai=34`, 18 undeclared (hoisted transitives) |
+| profile plugin list differs by machine | two-phase boot report: runner `44 at boot / 44 late`; here `43 at boot / 44 late` — same final set, and `ui-settings-general` appears mid-run on both |
+| mounted tool rows missing on the runner | both patched profiles contain the same 21 `tool-*` rows (`tool-bash, tool-fs, tool-goal, tool-jobs, tool-subagent*, tool-web, tool-workflow, …`) |
+| ancestor `node_modules` walk | a clean clone at `/var/tmp` (no `@deepseek-ai` at any ancestor) still composes `7396/34` |
+| `$HOME` state | reran with `HOME=/var/tmp/clean-home`: unchanged |
+| ambient-profile leak (`DSH_PROFILE_DIR`) | `rigChildEnv` strips it (2 rows); unchanged |
+| external host install location | `E2E_HOST_DIR` preferred when set (2 rows); unchanged |
+| CI environment flags | `CI=true GITHUB_ACTIONS=true`: unchanged |
+| `NODE_PATH` | not set in this environment at all |
+| record-vs-replay mode | local `suite` replay in CI shape AND in harness shape both dump `7396/34` |
+| host config / adapter defaults | the host's own `request/header` event: `config` and `adapterDefaults` differ in **0 keys**; aux header identical (`396/0`) on both |
+| mount timing race | the runner's tool count is 7 on every captured request, and its patch is 44 ids at both phases |
+
+What is left: the runner boots the identical host, identical bytes, identical profile, and registers only our
+plugin's 7 tools, while this host registers 34 — with no error anywhere in the boot's output (CI's server log is
+292 bytes, just the URL line). The next instrument worth building is therefore not another environment A/B:
+capture the mount FAILURE itself, e.g. have the rig ask the host to report per-plugin load results (the loader
+knows which `tool-*` rows it resolved) and fail the boot when a `tool-*` row in the profile does not appear in
+the registered tool list. That is a red row with a real assertion, it converts a silent gap into a loud one, and
+it is the version of "a detected failure is a delivered failure" that this incident needs.
+
+Until that gap is closed, no corpus recorded here is replayable by the runner, so item (2) of the objective
+cannot be satisfied by re-distilling harder. Local-only items that ARE still actionable: `heavy`'s ties,
+`coverage:e2e`, and the Autorun-displaces-goal pixel.
