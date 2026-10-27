@@ -54,6 +54,10 @@ const VOLATILE: Array<[RegExp, string]> = [
   // `[America/New_York]` replayed on a runner that reports `[UTC]`, which made CI miss at msg3 with messages 0-2
   // matching. Scoped by the sentence that follows it, so a timezone written anywhere else in prose stays content.
   [/\[(?:[A-Za-z]+(?:\/[A-Za-z_]+)+|UTC)\](?= Browser time zone)/g, '[<TZ>]'],
+  // The same line states the zone a SECOND time, as the value of "Browser time zone for this request: UTC." — CI
+  // missed `fork`/`prompt-off` at commonPrefix=3 with both sides already reading `[<TZ>]`, because only the
+  // bracketed half was folded. One fact, both spellings, both blind.
+  [/(Browser time zone for this request: )(?:UTC|[A-Za-z]+(?:\/[A-Za-z_]+)+)/g, '$1<TZ>'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
   // the system head embeds the GUI URL `http://127.0.0.1:<port>` and the e2e
   // home path carries `var/e2e-home-<port>` — run-scheduling facts of the
