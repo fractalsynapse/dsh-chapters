@@ -407,7 +407,15 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     }
     {
       let p = fs.readFileSync(patchPath, 'utf8')
-      if (harnessRoute !== null) {
+      // The host profile is NOT rewritten by default. Measured on CI 2026-10-27: the acceptance job missed
+      // `tape=suite messages=3` with `commonPrefix=0`, i.e. the SYSTEM HEADER itself differed, because the
+      // tapes had been re-distilled with `E2E_PROVIDER=harness` while CI composes `provider=local,
+      // model=qwen3.8-flash-next`. Rewriting the provider row changes the header — which is the one thing a
+      // tape cannot survive. The harness route therefore belongs to the PROXY only (E2E_UPSTREAM below), so the
+      // host stays on the fixture route, the proxy translates it, and CI, the distill run, and the replay run
+      // all compose the same bytes. `E2E_HARNESS_PROFILE=1` restores the rewrite for the live-model `live`
+      // mode, where there is no tape to stay byte-identical with.
+      if (harnessRoute !== null && process.env.E2E_HARNESS_PROFILE === '1') {
         // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host
         // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
         p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
