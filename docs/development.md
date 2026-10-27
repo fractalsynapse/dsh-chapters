@@ -881,3 +881,23 @@ Two consequences worth holding onto: the `reasoning`/`retryPolicy` fields of the
 behavior (`maxRetries: 0` versus the host default), so "same model, different row" is not a neutral edit; and
 a re-distill must run the leg to **green** — a tape distilled by a failing journey is an incomplete capture, and
 replaying it back as a miss blames the artifact for a run that never finished.
+
+## Two rig rules from the 2026-10-27 mount chase
+
+**A boot must resolve what its profile declares, before the host starts.** The booted profile's preset names 28
+`@deepseek-ai/*` plugin packages, and none of them is a dependency of this repository. On a development host they
+resolve out of `~/node_modules`; on a CI runner they resolve nowhere, `pruneUnresolvableRows()` drops them
+without complaint, and the session composes a 7-tool surface where a laptop gets 34. Because the system header
+is message 0 of every request — the thing tapes match on — that asymmetry makes a locally recorded corpus
+unreplayable in CI, which is what every `commonPrefix=0` on this branch actually was. `linkPinnedToolPackages()`
+now symlinks the pinned install's packages into `node_modules/@deepseek-ai` **before** `spawn`, skipping anything
+the repo already provides (never replace a hoisted dependency with a symlink and risk the build under test), and
+`var/e2e-tool-links-<port>.log` records `rows/linked/skippedAlreadyPresent/missingFromPin` for every boot. The
+ordering is not ceremonial: linking after the URL line was measured to change nothing, because the host has
+already mounted by then.
+
+**Normalize, THEN diff.** Comparing two machines' RAW header dumps showed an 18-character gap — exactly the
+length of the two checkout paths — and produced a duplicate blind for a fold that already existed
+(`<DSH-CHECKOUT>`, `model-proxy.ts:159`). The #89 ordering row caught the collision the moment it shipped; the
+procedure error was mine and is the one to remember: run the text through `substituteAll` before concluding a
+fold is missing. One predicate per semantic decision, and a fold that already exists is not a missing fold.
