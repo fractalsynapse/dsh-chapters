@@ -172,6 +172,15 @@ const VOLATILE: Array<[RegExp, string]> = [
   // served response bytes are untouched, and this rule self-repairs tapes
   // recorded before it (substituteAll runs over stored prefixes at load).
   [/chapters\/\d+-/g, 'chapters/<CH>-'],
+  // TOC-LINE collapse (#56, 2026-10-27): a checkpoint notice lists one line per chapter, and how many lines
+  // exist is a derived count — a session that tips one extra split sends a longer message, so `heavy`'s replay
+  // diverged at the FIRST miss for the same reason the hosted fanout run needed CH-ORDINAL above. Scoped to
+  // lines that cite a path under `chapters/`, so an ordinary numbered list of files in real conversation is
+  // never touched; the count is not the thing a leg claims.
+  // The patterns here run on the JSON-escaped string, where a line break is a literal backslash-n — so an
+  // anchored `^…$` /m rule can never fire (mine did not, and the row caught it). `[^\\]*` stops at the next
+  // escape, which is the end of the line in that representation.
+  [/\d+\.\s*\[[^\]]*\]\([^)]*\/chapters\/[^)]*\)[^\\]*/g, '<TOCLINE>'],
   // and the same for the defused product token (enricher inputs): runs across
   // NEWLINES too — the dump shows spaces only because normalization ate them
   [/(?:⟦injected-context⟧[ \t\n]*){2,}/g, '⟦injected-context⟧ '],

@@ -147,3 +147,20 @@ test('the chapter-count in the checkpoint notice cannot break a tape match', () 
   const prose = normalizeSingle({ role: 'user', content: 'We shipped 8 chapters last sprint, and 2 this one.' })
   assert.ok(!prose.includes('<COUNT>'), 'prose is not folded')
 })
+
+/**
+ * TOC-LINE collapse: how many chapters the session had written is a derived count.
+ *
+ * `heavy`'s first miss survived the archive-count fold for the same reason the fanout run needed CH-ORDINAL:
+ * the notice lists one line per chapter, so a session that tips one more split sends an extra line and the
+ * message lengths diverge — `…— <MSGCOUNT> (<N> est tokens) 3. [Earlier history](…)…` live against
+ * `…est tokens)</compacted-summary>` recorded. Collapsing only lines that cite a chapter path keeps ordinary
+ * numbered prose untouched; the count is the same family as `<CH>`, `est tokens`, `MSGCOUNT`.
+ */
+test('the chapter list in a checkpoint notice matches regardless of how many entries it has', () => {
+  const two = normalizeSingle({ role: 'user', content: 'Chapter archive:\n1. [Alpha](/tmp/x/chapters/<CH>-alpha.md) — <MSGCOUNT> (<N> est tokens)\n2. [Earlier history](/tmp/x/chapters/<CH>-earlier-history.md) — <MSGCOUNT> (<N> est tokens)\n</compacted-summary>' })
+  const three = normalizeSingle({ role: 'user', content: 'Chapter archive:\n1. [Alpha](/tmp/x/chapters/<CH>-alpha.md) — <MSGCOUNT> (<N> est tokens)\n2. [Earlier history](/tmp/x/chapters/<CH>-earlier-history.md) — <MSGCOUNT> (<N> est tokens)\n3. [Earlier history](/tmp/x/chapters/<CH>-earlier-history.md) — <MSGCOUNT> (<N> est tokens)\n</compacted-summary>' })
+  assert.equal(two, three, `list length must not decide a match:\n two=${two.slice(0, 90)}\nthree=${three.slice(0, 90)}`)
+  const prose = normalizeSingle({ role: 'user', content: 'Fix these:\n1. [login](src/login.ts) is broken\n2. [nav](src/nav.ts) is slow' })
+  assert.ok(prose.includes('src/login.ts'), 'ordinary numbered prose is untouched')
+})
