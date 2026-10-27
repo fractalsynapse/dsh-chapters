@@ -172,3 +172,23 @@ test('the chapter list in a checkpoint notice matches regardless of how many ent
 // paths — without first running that text through `substituteAll`, which folds it. A fold that already exists is
 // not a missing fold, and a second predicate for one decision is the failure mode this repo has now named four
 // times. The lesson is procedural: normalize, THEN diff.
+
+/**
+ * TZ-BLIND: the runtime context's time-zone token is machine identity (#56, measured on CI 2026-10-27).
+ *
+ * The first CI divergence that was NOT the tool surface: `MISS tape=plans … commonPrefix=3 divergeAt=msg3`, where
+ * got was `… turn 1, step 1: <DATE>[UTC] Browser time zone …` and expected was the same line with
+ * `<DATE>[America/New_York]`. The DATE fold already covers the timestamp; the zone is the remaining fact about the
+ * machine that recorded it, and no behavior of ours depends on it — the sentence literally tells the model the
+ * zone may be unavailable and to ask. Blinding it is the same class as HOSTPORT-BLIND and WORKSPACE-BLIND, not a
+ * widening: without it, every capture is keyed to one laptop's timezone.
+ */
+test('the runtime-context time zone cannot break a tape match', () => {
+  const utc = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-27T21:35:32Z[UTC] Browser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.' })
+  const local = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-27T17:35:32-04:00[America/New_York] Browser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times.' })
+  assert.equal(utc, local, `two machines, one line:\n  utc:   ${utc.slice(0, 100)}\n  local: ${local.slice(0, 100)}`)
+  assert.match(utc, /\[<TZ>\] Browser time zone/, 'the zone folds to a token, and the sentence survives')
+  // Narrow: a timezone mentioned anywhere else in ordinary prose is content and stays.
+  const prose = normalizeSingle({ role: 'user', content: 'Deploy at [America/New_York] peak hours, not [UTC] midnight.' })
+  assert.ok(prose.includes('[America/New_York]'), 'prose is not folded')
+})

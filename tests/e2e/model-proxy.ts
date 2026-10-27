@@ -50,6 +50,10 @@ const VOLATILE: Array<[RegExp, string]> = [
   [/Chapter archive: \d+ chapter\(s\)/g, 'Chapter archive: <COUNT> chapter(s)'],
   // human dates measured crossing midnight: 'Sep 19' recorded, 'Sep 20' replayed
   [/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}(,? \d{4})?\b/g, '<DATE>'],
+  // TZ-BLIND (#56, measured on CI 2026-10-27): the runtime-context line carries the machine's zone — a captured
+  // `[America/New_York]` replayed on a runner that reports `[UTC]`, which made CI miss at msg3 with messages 0-2
+  // matching. Scoped by the sentence that follows it, so a timezone written anywhere else in prose stays content.
+  [/\[(?:[A-Za-z]+(?:\/[A-Za-z_]+)+|UTC)\](?= Browser time zone)/g, '[<TZ>]'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
   // the system head embeds the GUI URL `http://127.0.0.1:<port>` and the e2e
   // home path carries `var/e2e-home-<port>` — run-scheduling facts of the
