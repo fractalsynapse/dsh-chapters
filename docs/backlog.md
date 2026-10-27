@@ -880,3 +880,33 @@ Therefore the right question is product-side and narrow: should the checkpoint n
 byte-stable for a given session state (fixed cap, stable ordinals), or is `heavy` asking for determinism the
 notice never promised? Answer with a red row that measures two runs' surface sizes from the same session state,
 not by adding another blind.
+
+### Ties are the disease, not the cure: `heavy` now ties FIVE entries and still misses (2026-10-27)
+
+After re-distilling cleanly on the current build (`suite` 33, `heavy` 27, `arrival` 18, `enrich` 3 — the first
+batch had been contaminated by strays I killed too late), the strict chain gives:
+
+    MISS tape=heavy entries=27 messages=7 closest=0003.json tied=[0003,0004,0005,0006,0007,…]
+
+`suite` passes. `heavy` sits exactly on the compaction boundary, so its surface contains a checkpoint notice
+whose chapter list grows with every extra compaction. My two folds (archive count, TOC line count) make those
+surfaces **equal as match keys**, which is what produced five tied candidates — and when several tape entries
+tie, the proxy may serve bytes recorded against a different surface size, so the following request diverges.
+The pair run passed only because that capture happened to be small (4 entries) and unambiguous.
+
+Conclusion, stated as the constraint it is: more masking makes matching weaker and replays less faithful, and
+`heavy` cannot be made deterministic by blinding its way through. Two real options remain, both needing a red
+row first:
+
+1. **Byte-stability in the notice itself** — render the chapter list from a deterministic cap and stable
+   ordinals so identical session state yields identical bytes on any machine. This reduces ties at the source
+   instead of papering over them, and it is a product property users get too (a notice that changes for no
+   reason is a cache-cost bug, not a cosmetic one).
+2. **Move `heavy`'s reads off the boundary** so the journey's surfaces are not decision-sensitive. The leg's
+   three claims (compaction happened, surface recovered, session stayed healthy) survive unchanged; only the
+   placement of the oversized reads moves. This is NOT deleting, skipping, or widening the assertion — if any
+   variant of it would let a real compaction failure pass, it is the wrong fix and must be refused.
+
+Also recorded because it was my error and it cost a batch: strays from an aborted chain were still holding the
+per-leg ports while the first four legs re-distilled, which is why `suite` produced a 6-entry tape that missed
+its own replay. Check `pgrep -f "playwright test"` is empty BEFORE starting a distill, not after.
