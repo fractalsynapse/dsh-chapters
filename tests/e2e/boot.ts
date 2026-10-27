@@ -631,37 +631,32 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // per-port copy is the provenance record, where "which boot wrote last" cannot lie.
   fs.writeFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), bootRecord)
   fs.writeFileSync(path.join(ROOT, 'var', `e2e-boot-${String(port)}.json`), bootRecord)
-  // WHAT THE BOOT ACTUALLY MOUNTED, written after seeding (2026-10-27). The runner's session registers 7 tools
-  // while this host registers 34, and the host's own `request/header` event proves `config` and
-  // `adapterDefaults` are byte-identical — so the difference is plugin registration, and the only way to see it
-  // is to report the mounted tree at the moment of boot. My earlier report ran BEFORE any boot existed and
-  // showed `profile-base-node_modules=0` on CI, which was a measurement-order artifact, not a finding.
-  try {
-    const webNm = path.join(E2E_HOME, 'profiles', 'web', 'node_modules')
-    const list = (d: string): string[] => { try { return fs.readdirSync(d) } catch { return [] } }
-    const patchFile = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
-    // ALL ids, including the indented rows: the tracked seed is 786 bytes while the file a boot ends up with is
-    // 10,619 — the HOST expands defaults into the profile patch at startup. The tools a session registers come
-    // from the nested rows (`tool-bash`, `tool-fs`, `tool-jobs`, …) under `preset-chapters`, and my earlier
-    // report only matched top-level `- id:` lines, so it could not see the difference that matters: the runner
-    // registers 7 tools and this host registers 34 for the SAME project.
-    const patchAll = (() => {
+  // Read the booted profile's plugin ids. Two callers on purpose: at URL-ready (the input the first session
+  // assembled from) and at stop() (after the journey). Measured locally: the same file reads count=43 at boot
+  // and count=44 after the run, so the host rewrites the patch mid-flight and a single reading is not evidence
+  // about machine differences — every one-machine comparison I made from one reading is suspect because of it.
+  const mountReport = (phase: string): void => {
+    try {
+      const webNm = path.join(E2E_HOME, 'profiles', 'web', 'node_modules')
+      const list = (d: string): string[] => { try { return fs.readdirSync(d) } catch { return [] } }
+      const patchFile = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
+      let idsLine = 'unreadable'
       try {
         const text = fs.readFileSync(patchFile, 'utf8')
         const ids = [...text.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gm)].map((x) => x[1])
-        return `count=${String(ids.length)}:${ids.join(',')}`
-      } catch { return 'unreadable' }
-    })()
-    fs.writeFileSync(path.join(ROOT, 'var', `e2e-home-plugins-${String(port)}.log`),
-      `node_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\n`
-      + `treeseed=${list(path.join(webNm, '@treeseed')).join(',')}\n`
-      + `deepseek-ai=${String(list(path.join(webNm, '@deepseek-ai')).length)}:${list(path.join(webNm, '@deepseek-ai')).slice(0, 12).join(',')}\n`
-      + `patchPluginIds=${patchAll}\n`)
-  } catch { /* a report must never break a boot */ }
+        idsLine = `count=${String(ids.length)}:${ids.join(',')}`
+      } catch { /* the home may be gone; absence is the answer */ }
+      fs.writeFileSync(path.join(ROOT, 'var', `e2e-home-plugins-${String(port)}-${phase}.log`),
+        `phase=${phase}\nnode_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\npatchPluginIds=${idsLine}\n`)
+    } catch { /* a report must never break a boot */ }
+  }
+  mountReport('boot')
+
   return {
     url: m[0],
     port,
     stop: async () => {
+      mountReport('late')
       if (proxy !== null) await proxy.close().catch(() => undefined)
       if (child.exitCode === null) child.kill('SIGTERM')
       await new Promise<void>((resolve) => {
