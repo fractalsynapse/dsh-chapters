@@ -1489,3 +1489,26 @@ a signal about what the view is showing, and a longer wait converts a real findi
 at that moment (dump `role=treeitem` texts plus `dsh.sessions.current` under `E2E_COVERAGE=1`), which will say
 whether the row is unlabeled, labeled with a stale title, or absent because the title response served under
 coverage belongs to a different session.
+
+### The `prompt`/coverage stall is an actionability wait, with a suspicious aux-title volume behind it (#56, #129)
+
+Read from the artifact rather than assumed:
+
+- the row is **found and visible**; the 300s goes to `own.click()` at `tests/e2e/session.ts:945`, and Playwright's
+  only line is `waiting for locator('[role="treeitem"]').filter({ hasText: 'Reply with exactly: OK' })` — the
+  classic never-becomes-stable signature, i.e. the sidebar is re-rendering under the click.
+- the leg's proxy journal holds **2,966** lines, of which **190** are single-message requests served in 1–2 ms
+  each — the shape of an auxiliary title call repeating over and over. If the tree's labels are being rewritten
+  continuously, that is what makes the row unactionable, and it would explain why the leg passes under plain
+  per-journey replay (`prompt` ok in both `K1` and `K2`) and fails only while V8 coverage is instrumenting the
+  boot, where timing and render cadence change.
+
+Not yet claimed: the 190 figure is a correlation, not a diagnosis. The confirming measurement is small and
+specific — count single-message requests per leg for one passing (no-coverage) `prompt` run and one coverage run,
+and dump `session/title` events from the run's session log with their timestamps. If the passing run shows a
+handful and the coverage run shows ~190, the title loop is the mechanism and the fix belongs to how the rig
+stabilizes the view before clicking (or how the title call is deduplicated), not to the timeout. If both show
+~190, the loop is normal and the real problem is elsewhere in the render path.
+
+What is deliberately not done: raising the click's timeout until the leg passes. That would convert a render
+instability that a real user could hit into a green row.
