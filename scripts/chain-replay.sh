@@ -34,7 +34,7 @@ for leg in $LEGS; do
   PORT=$(node --experimental-strip-types -e "
     import('./tests/e2e/rig-pins.ts').then((m) => process.stdout.write(String(m.RIG_PINS['$leg']?.port ?? '')));
   " 2>/dev/null)
-  if LEG=$leg MODE=replay timeout 1200 bash scripts/e2e-one.sh > "var/chain-replay-$leg.log" 2>&1; then
+  if LEG=$leg MODE=replay E2E_MODEL=replay timeout 1200 bash scripts/e2e-one.sh > "var/chain-replay-$leg.log" 2>&1; then
     echo "ok (boot port ${PORT:-?})"
   else
     echo "FAILED (boot port ${PORT:-?}) — var/chain-replay-$leg.log"

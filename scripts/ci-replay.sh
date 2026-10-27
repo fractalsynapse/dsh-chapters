@@ -97,7 +97,12 @@ echo "host-dep report: $(wc -l < var/ci-host-deps.txt 2>/dev/null || echo 0) lin
 # The miss journal truncates `got=` to 110 chars, and three rounds of reasoning about a 7,276-vs-2,783
 # header could not be settled by inference; the runner's own bytes can be diffed offline.
 export E2E_DUMP_HEADER=1
-E2E_MODEL=replay npm run test:e2e 2>&1 | tee var/ci-replay.log || STATUS=${PIPESTATUS[0]}
+# One boot per journey, not one boot for ten projects (#129): `globalSetup` boots a single server from the
+# SETUP process's environment while Playwright applies each project's env only to workers, so a shared run replays
+# a leg against another project's realm and home. That produced flaky results no capture could fix — `arrival`
+# passed alone and failed in the batch. `scripts/chain-replay.sh` runs the same projects, same assertions, same
+# authority table, one boot each, which is also how the tapes are recorded.
+bash scripts/chain-replay.sh 2>&1 | tee var/ci-replay.log || STATUS=${PIPESTATUS[0]}
 if [[ "$STATUS" -ne 0 ]]; then
   # ONE annotation, not twenty. GitHub truncates a check run to 10 annotations, and
   # the 97bd603 run proved what that costs: the boot-pin lines and the ✘ consumed
