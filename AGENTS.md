@@ -422,10 +422,17 @@ missing assistant row was failing because the tape proxy joined its upstream bas
 doubled `/v1/v1` — no model answer, so no door, no plan card, no markers. Fixed, and `rules`, `explore-dev`,
 `fork`, `arrival`, `fanout`, `enrich`, `plans`, `suite` and `heavy` then recorded green; the Suggested Next Step
 bar has its own legs (`prompt`, and `prompt-off` for the switch's other half) and **passes in Chromium in both
-record and replay**. Still open: the whole-chain strict replay must be green as one run, `CORPUS_HOST` re-stamped
-with it, `coverage:e2e` refreshed, and one requirement is blocked on the host, not here — a dock cannot write
-the composer on 0.2.0-rc.2 (`insertText` raises `draftRev`, `setDraft` mirrors only at mount), so click-to-draft
-shows an explanation and Run submits instead; tracked as #126.
+record and replay**. **Measured 2026-10-27:** the whole-chain strict replay is green as one run (Playwright's own project order,
+no provider, no credential) and **green twice consecutively**, `CORPUS_HOST` is re-stamped with it
+(`lib=fcd1e375bab82d3d`, `distilledAt = 2026-10-27`), and `coverage:e2e` was re-taken against that corpus
+(All files 77.94%). CI's deterministic job (typecheck · build · unit + integration, branch gate 85%) is green;
+CI's **acceptance** job is red with a named cause — a GitHub runner assembles a session with only our seven
+`chapters_*` tools where a development host assembles 34, so message 0 (the tape key) cannot match a
+locally recorded corpus; the rig aborts with `MOUNT FAULT` rather than mask it (evidence and the eliminated
+classes: docs/backlog.md). Still open there: a dock cannot write the composer on 0.2.0-rc.2 (`insertText` raises
+`draftRev`, `setDraft` mirrors only at mount), so click-to-draft shows an explanation and Run submits instead;
+tracked as #126. And the Autorun **displaces the goal's continuation** pixel is still unobserved in a browser —
+arm-ability is observed (`suite`/`prompt` legs, 4 passed), displacement is not, so it is not claimed.
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.
