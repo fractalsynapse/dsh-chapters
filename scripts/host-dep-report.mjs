@@ -32,6 +32,37 @@ for (const name of declared) {
   if (!fs.existsSync(path.join(installRoot, name))) { missing += 1; console.log(`MISSING ${name}`) }
 }
 console.log(`declared=${String(declared.length)} missing=${String(missing)}`)
+
+// The lock install being identical does NOT settle it: the dev profile links plugins from the REPOSITORY's own
+// node_modules, so extra packages I installed there (not in package-lock) would mount tools a runner cannot
+// mount. Measure that level too — it is the last place the 34-vs-7 gap can hide.
+try {
+  const repoNm = path.join(root, 'node_modules', '@deepseek-ai')
+  const names = fs.readdirSync(repoNm)
+  console.log(`repo-root-deepseek-ai=${String(names.length)}`)
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+  const wanted = Object.keys({ ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) })
+    .filter((k) => k.startsWith('@deepseek-ai/'))
+  const extra = names.filter((n) => !wanted.includes(`@deepseek-ai/${n}`))
+  console.log(`declared-in-package.json=${String(wanted.length)} extra-on-disk=${String(extra.length)}`)
+  if (extra.length > 0) console.log(`EXTRA ${extra.slice(0, 40).join(',')}`)
+try {
+  // The level that decides mounted tools: what the dev profile's plugin tree actually contains. The boot builds
+  // this with the SAME script CI runs, so a difference here is a real environment fact, not a stale-cache story.
+  const base = path.join(root, 'var', 'e2e-profile-base', 'profiles', 'web', 'node_modules')
+  const treeseed = path.join(base, '@treeseed')
+  const ds = path.join(base, '@deepseek-ai')
+  const list = (d) => { try { return fs.readdirSync(d).length } catch { return 0 } }
+  console.log(`profile-base-node_modules=${String(list(base))} profile-base-deepseek-ai=${String(list(ds))} profile-base-treeseed=${String(list(treeseed))}`)
+  const home = path.join(root, '.dshdev-local', 'profiles', 'web', 'node_modules')
+  console.log(`devhome-node_modules=${String(list(home))} devhome-deepseek-ai=${String(list(path.join(home, '@deepseek-ai')))}`)
+} catch (e) {
+  console.log(`profile-base scan failed: ${String((e && e.message) ? e.message : e)}`)
+}
+
+} catch (e) {
+  console.log(`repo-root scan failed: ${String((e && e.message) ? e.message : e)}`)
+}
 try {
   console.log(`installed-top-level=${String(fs.readdirSync(installRoot).length)}`)
   console.log(`deepseek-ai-packages=${String(fs.readdirSync(path.join(installRoot, '@deepseek-ai')).length)}`)

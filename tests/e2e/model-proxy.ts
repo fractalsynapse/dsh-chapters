@@ -589,11 +589,16 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // chars. The artifact CI already uploads can carry the whole text, so the diff is byte-exact and offline.
   // No secrets: this is the composed prompt, and the bearer header never reaches this path.
   let headerDumped = false
+  // Up to THREE requests, not just the first: if the runner's tools grow between requests, the 34-vs-7 gap is a
+  // mount-TIMING race (the preset finishing after turn one) and not a capability difference — and that distinction
+  // decides whether the fix is a boot-readiness gate or a profile change. One dump cannot tell those apart.
+  let dumpQuota = 3
   const dumpHeader = (messages: string[], tools?: unknown): void => {
-    if (headerDumped || process.env.E2E_DUMP_HEADER !== '1') return
+    if (headerDumped || dumpQuota <= 0 || process.env.E2E_DUMP_HEADER !== '1') return
+    dumpQuota -= 1
     const sys = messages.find((m) => m.includes(String.fromCharCode(34) + "role" + String.fromCharCode(34) + ":" + String.fromCharCode(34) + "system" + String.fromCharCode(34)))
     if (sys === undefined) return
-    headerDumped = true
+    headerDumped = dumpQuota <= 0
     try {
       // Derived, not hardcoded: model-proxy has no ROOT of its own, and re-typing the repo path is how the
       // #89 class of drift is born. The tape dir is `<repo>/tests/fixtures/model-tape/<name>`.
@@ -610,7 +615,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
             return String(fn?.name ?? t?.name ?? '?')
           }).sort().join(',')
         : 'none-reported'
-      fs.writeFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\ntools=${String(Array.isArray(tools) ? tools.length : 0)}\nnames=${names}\n${sys}\n`)
+      fs.appendFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\ntools=${String(Array.isArray(tools) ? tools.length : 0)}\nnames=${names}\n${sys}\n`)
     } catch { /* diagnostics never break a leg */ }
   }
 
