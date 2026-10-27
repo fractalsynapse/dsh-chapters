@@ -1512,3 +1512,23 @@ stabilizes the view before clicking (or how the title call is deduplicated), not
 
 What is deliberately not done: raising the click's timeout until the leg passes. That would convert a render
 instability that a real user could hit into a green row.
+
+### Correction: there is no title loop — I counted a cumulative journal as if it were one run (#56, 2026-10-27)
+
+The 190 single-message requests came from grepping `var/e2e-upstream.log` for `tape=prompt`, and that file
+**accumulates across every run of every leg**. Measured properly, with the journal length captured before and
+after one run:
+
+- `prompt` replay, no coverage: **14** new journal lines, **5** single-message requests. Leg green.
+- `prompt` replay, `E2E_COVERAGE=1`, same single-leg invocation: **14** new lines, **5** single-message. Leg green.
+
+So the aux-call volume is identical with and without instrumentation, and the title-loop hypothesis is dead — it
+was never a diagnosis, it was a correlation I read out of the wrong denominator, and the record said "not yet
+claimed" for good reason. What survives is the failure itself: in the full ten-leg coverage run `prompt` timed out
+on `own.click()` waiting for the sidebar row to become stable, while the same leg passes both plain per-journey
+replay and single-leg replay under coverage. That points at load/timing when ten boots run back to back with V8
+instrumentation writing coverage for each — not at the plugin's title path.
+
+Useful rule for whoever picks this up: the journal is shared and cumulative; measure a delta, not a grep. The next
+step is to reproduce the whole coverage run and dump the row's actual state at the timeout (its text and whether
+it is re-rendering), rather than raising the timeout.
