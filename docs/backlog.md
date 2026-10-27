@@ -1323,3 +1323,24 @@ and the honest reading is two separate items, not one mystery:
 So the sequence is: fix the `plans` stub path, get one clean ten-leg pass where every leg distills green, then
 the chain twice locally, then stamp and commit as one change. The runner-side blocker (7 registered tools) is
 separate and unchanged.
+
+### RETRACTION: `heavy` is NOT fixed by the 0.9 trigger — a fresh capture misses again (2026-10-27)
+
+I wrote earlier this session that moving `heavy` to `threshold 0.9` fixed it, "pair-verified twice". The clean
+ten-leg pass disproves that: `heavy: exit=0 tapeEntries=7` distilled green, and the strict chain immediately
+after reports `MISS tape=heavy entries=7 messages=6 tied=[0003…0006]`. The two earlier passes were real but they
+were two samples of a journey whose compaction boundary is not fixed by construction — exactly the same failure
+shape I documented for `arrival` (model never found the buried token) and `fanout` (a 36-request interleave),
+just with a boundary instead of a retrieval.
+
+So the honest position:
+
+- `threshold: '0.9'` stays (it aligns heavy with every other leg and the pins/drift rows argue for it), but it
+  is NOT a determinism fix and I will not describe it as one.
+- The committed corpus is unchanged: this pass's captures were discarded (`git checkout` + `git clean` on
+  `tests/fixtures/model-tape`), because `fanout` also failed its capture (`exit=1`), so a commit now would
+  record a mixed tree a second time.
+- What heavy actually needs is a boundary fixed by construction: assert the compaction INDEX at distill time and
+  require it at replay (or place the oversized reads strictly between boundaries). Either is a real design
+  change with a red row. Guessing at a threshold and calling a green pair "fixed" is the failure mode this file
+  keeps catching me doing.
