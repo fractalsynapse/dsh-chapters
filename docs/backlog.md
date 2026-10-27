@@ -1532,3 +1532,27 @@ instrumentation writing coverage for each — not at the plugin's title path.
 Useful rule for whoever picks this up: the journal is shared and cumulative; measure a delta, not a grep. The next
 step is to reproduce the whole coverage run and dump the row's actual state at the timeout (its text and whether
 it is re-rendering), rather than raising the timeout.
+
+### What the armed diagnostic saw when `prompt` fails under full coverage: the view had **zero** rows (#56, #129)
+
+Second full `coverage:e2e` run with the new failure diagnostic in place: `suite heavy arrival enrich fanout rules
+fork plans` ok, **`prompt` FAILED**, `prompt-off` ok (`COVPJ4=1`). The diagnostic printed:
+
+    e2e: tree-row click failed for "Reply with exact…" — locator.click: Test timeout of 300000ms exceeded.
+      current session: null
+      rows (0):
+
+That is not a flaky click and not a re-render race: at that moment the sidebar offered **no session rows at all**
+and `dsh.sessions.current` was unset, so the row the `isVisible()` check had just accepted was gone by the time the
+click resolved. The failing test also moved — this time it was the third prompt test
+(`clicking the expanded prompt puts the WHOLE prompt in the composer for editing`, 5.0m), not the first — and no
+browser crash, `pageerror`, `Target closed`, or out-of-memory line appears in the leg log or the server log for that
+boot. A three-leg instrumented run (`suite fork prompt`) passed everything, so the condition needs the long
+sequence; what it looks like is the view losing its session list partway through a nine-boot run, not the bar's own
+behavior.
+
+Next read, deliberately narrow: extend the same diagnostic to print the page's URL, title, and body length plus
+`JSON.stringify(window.dsh && Object.keys(window.dsh))` at the failure — if the app is still there but the list is
+empty, that is a store/restore problem under instrumentation; if the document itself is gone, it is the boot dying
+under memory pressure, and the fix belongs to how coverage is collected per boot rather than to the spec. Still
+not doing: raising the click timeout.
