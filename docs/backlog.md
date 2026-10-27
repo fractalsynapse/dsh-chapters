@@ -525,3 +525,16 @@ Therefore, in order:
    the bug and the fix is to register where the working doors register.
 3. If armed but no claim, instrument `promptRunner`'s three early returns (`ev.type`, `enabled`, `eligible`)
    with the reason each one took, delivered to the diagnostics sink, and re-read.
+
+### Where the corpus work stands (2026-10-26, end of session)
+
+Recorded green against the maintainer's route: `rules` `explore-dev` `fork` `arrival` `fanout` `enrich`
+`plans` `suite` `heavy` `prompt` `prompt-off`. Bar leg passes 4/4 in record AND in replay; OFF leg 1/1 in both.
+Open, in order:
+1. one whole-chain `MODE=replay` green run (CI's gate) — in progress;
+2. `npm run corpus.stamp` + `corpus.check` so `CORPUS_HOST.distilledAt` matches the tapes (it still says
+   2026-10-23 while every tape is from 2026-10-26);
+3. `coverage:e2e` refresh on the new plane;
+4. #126 (host: no composer draft API for docks) — until it lands, the bar explains the refusal and Run
+   submits through `/chapters-prompt run`;
+5. then cut `0.2.2-dev.1` and hand the maintainer the install/restart.

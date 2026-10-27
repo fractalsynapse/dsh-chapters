@@ -416,9 +416,16 @@ not a plugin bug.
 ## Where we are — state lives in docs, not here
 
 **Shipped and CI-green on the real model:** the engine, tools, preset, all seven archive moments, the
-knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), still unverified in a browser. **Still unverified:
-the browser plane** — the tape corpus is not re-anchored to the pinned host, so replay refuses by name
-and no e2e claim is current (issues #56/#57). Do not quote an e2e result as fresh until that lands.
+knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), verified in a browser on 2026-10-26 — see the next paragraph. **Browser plane — re-anchored and partly
+verified (2026-10-26, host 0.2.0-rc.2 on the maintainer's provider route):** every leg that was failing at a
+missing assistant row was failing because the tape proxy joined its upstream base and the request path into a
+doubled `/v1/v1` — no model answer, so no door, no plan card, no markers. Fixed, and `rules`, `explore-dev`,
+`fork`, `arrival`, `fanout`, `enrich`, `plans`, `suite` and `heavy` then recorded green; the Suggested Next Step
+bar has its own legs (`prompt`, and `prompt-off` for the switch's other half) and **passes in Chromium in both
+record and replay**. Still open: the whole-chain strict replay must be green as one run, `CORPUS_HOST` re-stamped
+with it, `coverage:e2e` refreshed, and one requirement is blocked on the host, not here — a dock cannot write
+the composer on 0.2.0-rc.2 (`insertText` raises `draftRev`, `setDraft` mirrors only at mount), so click-to-draft
+shows an explanation and Run submits instead; tracked as #126.
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.
