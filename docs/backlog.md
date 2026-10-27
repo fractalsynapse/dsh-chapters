@@ -562,3 +562,26 @@ Fix, rows first: extend `orphanBootPids` to take a port set (host port AND proxy
 proxy's own command line, keep every existing constraint (repo-root in argv, never self, never an ancestor),
 and have the boot reap before `startModelProxy` binds, reporting which pid it signalled. A row must fail
 against the current code to prove the gap: a holder of the proxy port is not reaped today.
+
+### CI acceptance is red where the local chain is green — and its annotation is empty (2026-10-27)
+
+Local: `E2E_MODEL=replay npm run test:e2e` → **10 projects, EXIT=0**, including `prompt` 4 passed and
+`prompt-off`. CI on the same commit: deterministic + preset-rows **success**, acceptance **failure**, and the
+annotation says only `ci-replay: tape replay exited 1` with **none** of the detail lines the script is written
+to attach (`✘|Error:|expect(|Received:|Expected:|[0-9]+ failed`, plus the `error-context.md` heads).
+
+That emptiness is itself the clue: `scripts/ci-replay.sh` tees the chain into `var/ci-replay.log` and greps it,
+so "no matches" means the log contained no test verdicts at all — a failure at boot/setup, not an assertion.
+Prime candidates, in the order to test:
+1. run `bash scripts/ci-replay.sh` locally with its CI env (`E2E_HOME_ROOT=/tmp/dsh-e2e`,
+   `E2E_TAPE_DIFF=$PWD/var/e2e-tape-diffs`) and read the real stop;
+2. the store tripwire: `assert-store-untouched.mjs snapshot`/`verify`. On my machine `.dsh-chapters/` already
+   exists (this session's own store), so the pair cannot fail here — only a pristine checkout can show whether
+   the rig writes into the repo root;
+3. host install in CI: the script installs the pinned `@deepseek-ai/dsh` project-scoped in its own prefix and
+   `dsh --version` must match `tests/e2e/rig-pins.json`; a mismatch throws before any test runs, which fits
+   "no verdicts in the log" exactly.
+4. the new fatal-on-miss guard: it aborts a leg on a `MISS` written after install. Locally green means no miss
+   for my `$HOME`; CI's `/home/runner` paths could produce one if WORKSPACE-BLIND does not cover a new field.
+
+Do not "fix" any of these by loosening a gate. Reproduce, read the line, fix that.
