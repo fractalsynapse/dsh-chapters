@@ -1303,3 +1303,23 @@ it — restating the leg's claim only as "compaction happened, surface recovered
 is what it already asserts, with the reads placed between boundaries. Either outcome is decided by the
 assertion, not by another fold, and no blind over `msg2` is acceptable: it is the only message that still carries
 information about where the boundary fell.
+
+### Where the corpus stands after the 0.9 change (2026-10-27)
+
+`heavy` is fixed and pair-verified twice under the new trigger (4 entries, replay 1 passed 29.0s), and its
+capture is committed with the pins that produced it. The uniform ten-leg pass that followed did NOT converge,
+and the honest reading is two separate items, not one mystery:
+
+- `plans` failed its distill (`exit=1` at `tests/e2e/plans-approved-plan…`), the leg that runs against the
+  scripted stub — so the stub path needs its own look before any batch is trusted.
+- `suite` missed against a tape distilled MINUTES earlier in the same pass: `MISS tape=suite entries=8
+  messages=5 commonPrefix=2 divergeAt=msg2 got="{\"role\":\"assistant\",\"content\":null,…`. A `content: null`
+  assistant turn (tool-calls-only) where the capture had content is live-model variation inside the recorded
+  journey, the same class as `arrival`'s "never found the buried token" and `fanout`'s interleave. That means
+  the chain is not green yet and **the corpus stays unstamped** — I am not committing a second mixed set, and I
+  am not re-rolling `suite` until green either: if it needs more than one attempt, that is a flake finding to
+  file with both logs, per the rule I wrote after `arrival`.
+
+So the sequence is: fix the `plans` stub path, get one clean ten-leg pass where every leg distills green, then
+the chain twice locally, then stamp and commit as one change. The runner-side blocker (7 registered tools) is
+separate and unchanged.
