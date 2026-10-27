@@ -478,12 +478,12 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
         // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
         p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
-        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n` + (process.env.E2E_HOST_RETRIES === '1' ? '' :
-        // Deterministic by default: retry suppression keeps a leg's request count meaningful. Without it,
-        // `arrival` recorded 11 requests into 122 while I watched (2026-10-27) — a tape that no longer
-        // describes the journey it claims. `heavy` is the one leg whose assertions need the host's own retry
-        // behavior, so it opts in by pin (RIG_PINS.heavy.hostRetries) rather than the regime flipping globally.
-        `        retryPolicy:\n          mode: normal\n          maxRetries: 0\n`) + p
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
+        // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
+        // readiness outright (`LEG=fork MODE=replay E2E_HOST_RETRIES=1` died at 120s with the host's log holding
+        // one plugin line and no URL, against ~21s for the same leg otherwise). The YAML parses either way, so
+        // the host needs the field present. A regime is therefore a NUMBER inside a block that is always there,
+        // not a toggle that deletes a required field.
       }
       p = p.replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`).replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
@@ -609,6 +609,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // `e2e boot failed within 60s (port 41737)` twice while the SAME leg passed in 26.3s once the window allowed
   // the boot to finish. A ceiling that intermittently kills healthy boots is a false-red generator; no product
   // claim moves at 120s, and CI's own shape (replay, no provider) never needed more than seconds.
+  const bootWaitedFrom = Date.now()
   const deadline = Date.now() + Math.max(120_000, Number(process.env.E2E_BOOT_TIMEOUT_MS ?? '120000'))
   while (!/http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.test(log) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500))
@@ -616,7 +617,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   const m = /http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.exec(log)
   if (m === null) {
     child.kill('SIGKILL')
-    throw new Error(`e2e boot failed within ${String(Math.round(deadline - Date.now()))}ms of waiting (port ${port}) — the ceiling is E2E_BOOT_TIMEOUT_MS, default 120000\n${log.slice(-1500)}`)
+    throw new Error(`e2e boot failed within ${String(Date.now() - bootWaitedFrom)}ms waited (port ${port}) — the ceiling is E2E_BOOT_TIMEOUT_MS, default 120000\n${log.slice(-1500)}`)
   }
   const bootRecord = JSON.stringify({
     url: m[0], port,

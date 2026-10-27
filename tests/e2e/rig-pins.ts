@@ -19,10 +19,10 @@ export interface RigPin {
   floor?: string
   enrich?: boolean
   noAuxModel?: boolean
-  /** Opt in to the HOST's default retry policy instead of the rig's deterministic suppression. Only a leg
-   * whose own assertions depend on a re-issued request should set this; every other leg keeps the suppressed
-   * default so its tape's request count means something (#56). */
-  hostRetries?: boolean
+  /** The provider's `maxRetries` for this leg. Absent means the rig's deterministic 0. Set only where a leg's
+   * own assertions depend on the host re-issuing a refused request — and as a NUMBER, never by deleting the
+   * `retryPolicy` block, which the host requires present (measured: deleting it broke boot readiness, #56). */
+  maxRetries?: number
   /** The Suggested Next Step bar exists ONLY where a defining model is configured. This
    * leg's boot turns that switch on; every other leg leaves it off, so `OFF` is the default realm and
    * no unrelated leg can acquire a bar and start asserting on pixels nobody asked for (#113). */
@@ -33,7 +33,7 @@ export const RIG_PINS: Record<string, RigPin> = {
   suite: { port: 41731, threshold: '0.75' },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
-  heavy: { port: 41733, threshold: '0.5', floor: '1000000', hostRetries: true },
+  heavy: { port: 41733, threshold: '0.5', floor: '1000000', maxRetries: 3 },
   arrival: { port: 41732, threshold: '0.9', floor: '500' },
   enrich: { port: 41734, threshold: '0.9', enrich: true },
   fanout: { port: 41736, threshold: '0.75' },
@@ -58,7 +58,7 @@ export function rigEnv(project: string): Record<string, string> {
   if (p.prompt === true) env.E2E_PROMPT = '1'
   if (p.enrich === true) env.E2E_ENRICH = '1'
   if (p.noAuxModel === true) env.E2E_NO_AUX_MODEL = '1'
-  if (p.hostRetries === true) env.E2E_HOST_RETRIES = '1'
+  if (p.maxRetries !== undefined) env.E2E_MAX_RETRIES = String(p.maxRetries)
   return env
 }
 
