@@ -24,6 +24,7 @@ import { createElement as h, useCallback, useEffect, useReducer, useRef, useStat
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   BAR_RUN_COMMAND,
+  deriveRunning,
   BAR_STATE_COMMAND,
   barLabel,
   barVisible,
@@ -261,7 +262,16 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // So the gate keeps its original, correct behavior: with no signal, `running` is undefined, Autorun is
   // visibly unavailable and says why, and `deriveRunning` (9 rows) stands ready for whichever shape the host
   // does publish. A loop that starts turns the human cannot foresee is the one failure mode not on offer.
-  const running = props.running
+  // `useSessionStatus` is `SnapshotSelectorHook<SessionStatusSnapshot>` — a SELECTOR hook (declared in
+  // dsh-client-ui-session's client types), which is why calling it with a session id threw
+  // `TypeError: l is not a function`: the host used my string as the selector. An identity selector takes
+  // whatever the snapshot's shape happens to be, and `deriveRunning` folds it, so this code does not bet on
+  // field names I have not read. Still hoisted above the early return: hook count must not change per render.
+  const statusSelector = props.useSessionStatus
+  const statusSnapshot = typeof statusSelector === 'function'
+    ? (statusSelector as unknown as (sel: (snap: unknown) => unknown) => unknown)((snap) => snap)
+    : undefined
+  const running = props.running ?? deriveRunning(statusSnapshot)
   const autorunDisabled = running === undefined
 
   if (sessionId === undefined || !barVisible(state as PromptBarState)) return null
