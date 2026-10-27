@@ -427,10 +427,12 @@ chain's shape was itself a defect — `globalSetup` boots ONE server from the se
 Playwright gives a project's `env` only to workers, so nine legs replayed in the first leg's realm and home (#129);
 `npm run test:e2e:replay` now runs **one boot per journey** (`scripts/chain-replay.sh`), the shape the corpus is
 recorded in, and against that runner the current corpus captured ten-for-ten (`D2=0`) and replayed **green twice**
-(`K1=0`, `K2=0`), with `CORPUS_HOST` re-stamped (`lib=b5e15a0de600f6dd`). (2) `coverage:e2e` is **not** green on
-that corpus: nine legs pass and `prompt` times out inside the full instrumented run on a sidebar row that never
-becomes actionable, while the same leg passes alone with and without instrumentation — open, and deliberately not
-fixed by raising a timeout. The 77.94% figure belongs to the earlier corpus. (3) CI's **acceptance** job no longer
+(`K1=0`, `K2=0`), with `CORPUS_HOST` re-stamped (`lib=b5e15a0de600f6dd`). (2) `coverage:e2e` is **green on this corpus** —
+ten legs, `COVPJ5=0`, All files **77.97%** — after two runs where `prompt` instead timed out on a sidebar row that
+never became actionable. The armed diagnostic settled what that looked like (`rows (0)`, `current session: null`,
+no browser crash, `MemAvailable` flat at ~66.8 GB across all ten boots), and a third consecutive full run passed
+without the diagnostic ever firing: so it is an intermittent view failure under instrumentation, filed as such, and
+deliberately not treated by raising a timeout. The older 77.94% belongs to the previous corpus. (3) CI's **acceptance** job no longer
 fails on `MOUNT FAULT`: the 7-vs-34 tool asymmetry was root-caused (the preset's rows name 28 `@deepseek-ai/*`
 packages, **none a dependency of this repo**, so a runner resolved nothing and our preset silently pruned them) and
 closed by `linkPinnedToolPackages()` running **before** the spawn; the runner now assembles 34 tools and gets far
