@@ -942,8 +942,21 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     const rowText = question.slice(0, 24)
     const own = page.locator('[role="treeitem"]', { hasText: rowText }).first()
     if (await own.isVisible().catch(() => false)) {
-      await own.click()
-      await page.waitForTimeout(1200)
+      try {
+        await own.click()
+        await page.waitForTimeout(1200)
+      } catch (error) {
+        // A detected failure is a delivered failure (#61). `locator.click: Test timeout of 300000ms exceeded`
+        // with a single "waiting for locator" line tells the next reader nothing about WHY the row never became
+        // actionable — measured on `prompt` under the full coverage run, where the same leg passes alone. So the
+        // state that the click depends on is printed before the failure is re-raised unchanged: the rows the
+        // sidebar actually offers, and the session the view believes is current.
+        const rows = await page.locator('[role="treeitem"]').allInnerTexts().catch(() => [])
+        const cur = await currentSessionId(page).catch(() => null)
+        console.error(`e2e: tree-row click failed for "${rowText}" — ${String((error as Error)?.message ?? error).slice(0, 90)}\n`
+          + `  current session: ${String(cur)}\n  rows (${String(rows.length)}): ${rows.slice(0, 8).map((r) => JSON.stringify(r.slice(0, 46))).join(' | ')}`)
+        throw error
+      }
     } else {
       console.warn(`e2e: no tree row matching "${rowText}" — asserting on whatever view is open`)
     }
