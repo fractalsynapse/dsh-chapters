@@ -585,3 +585,28 @@ Prime candidates, in the order to test:
    for my `$HOME`; CI's `/home/runner` paths could produce one if WORKSPACE-BLIND does not cover a new field.
 
 Do not "fix" any of these by loosening a gate. Reproduce, read the line, fix that.
+
+### `heavy` cannot replay because its record run never completed (2026-10-27, measured)
+
+CI-shaped chain: `suite` **4 passed (37.2s)** — the header fix is confirmed — then `heavy` aborts at
+`MISS tape=heavy entries=23 messages=4 closest=0009.json commonPrefix=2 divergeAt=msg2`.
+
+That is not a matcher bug and not the header. `heavy`'s re-distill **failed its own leg** (step 4,
+`oversized-turn.spec.ts:161`: post-compaction session answers `STILL-HERE` within 300s) after three
+`OVERFLOW refused … est=145382–163026 tokens window=32000 — rig-enforced` lines, and its tape froze at 23
+entries from +300s onward. A tape distilled by a failing journey is not a recording of the journey; replaying
+it and calling the miss the tape's fault would be backwards.
+
+Order of work:
+1. make `heavy`'s **record** run green again on the current build (it was green under the harness-profile
+   shape this morning, and the leg's own design expects the rig to refuse over-window requests, so the
+   difference to chase is what the synthesized `local` row does *not* carry that the ambient row did —
+   `retryPolicy.maxRetries: 0` is the first candidate, and `E2E_HARNESS_PROFILE=1` is the toggle that isolates
+   it in one run);
+2. only then re-distill `heavy` and expect replay to pass;
+3. if step 1 shows the refusal really is the product's problem (post-compaction surface still over window),
+   that is a product fix with a red row, not a distillation retry.
+
+Also true now and worth keeping: `prompt-off` distills (1 passed, 20.5s) and is in the distiller's `ORDER`;
+the `prompt` tape is 14 entries where it had been 546, because `distill-tapes.sh` clears each project's tape
+directory first and my ad-hoc `MODE=record` loops had been accumulating instead.
