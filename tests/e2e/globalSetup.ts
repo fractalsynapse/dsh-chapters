@@ -45,7 +45,12 @@ function promptModelForBoot(): string {
     + "provider's real model, because the host LLM service has no adapter for that provider directly")
   return 'local/qwen3.8-flash-next'
 }
-import { installRigFaultGuard } from './rig-fault.ts'
+import { installRigFaultGuard, RIG_FAULT_PATTERN, REPLAY_MISS_PATTERN } from './rig-fault.ts'
+
+/** Is this invocation replay (strict) rather than record/heal? The mode is decided by the runner, not guessed. */
+function modeIsReplay(): boolean {
+  return (process.env.E2E_MODEL ?? '') === 'replay' && process.env.E2E_TAPE_FALLBACK !== '1'
+}
 
 /**
  * One server per CONFIG LOAD (proven lifecycle: project setupFiles die with
@@ -115,6 +120,11 @@ export default async function setup(fullConfig?: {
     journal,
     getStopBoot: () => bootStop,
     exit: (code) => { process.exit(code) },
+    // In replay a miss means the journey left the recording, so it is fatal for THIS leg — the tape was
+    // supposed to answer everything. In record and heal a miss is the mechanism working (forward live, append),
+    // so the pattern is added only for replay, and `heavy` can never again pass the chain with two misses in
+    // the journal the way it did on 2026-10-26.
+    ...(modeIsReplay() ? { pattern: new RegExp(`${RIG_FAULT_PATTERN.source}|${REPLAY_MISS_PATTERN.source}`) } : {}),
     log: (m) => { console.error(`\n${m}\n  journal: ${journal}`) },
   })
 
