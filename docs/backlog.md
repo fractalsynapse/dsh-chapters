@@ -758,3 +758,23 @@ hide that the acceptance run and the corpus were produced by different repositor
    a test.
 
 Until then the corpus in `HEAD` is unreplayable on CI, and the local chain's green is not the same claim.
+
+### Narrowed: the section is contributed at boot with no rules on disk in either home (2026-10-27)
+
+Two more measurements, both cheap and both local:
+
+- **Present from the first request.** All 14 conversation-header entries in the `suite` tape carry the section
+  (one aux entry at 1,692 chars is the only header without it). So it is composed at boot, not mined mid-run —
+  enrichment timing is ruled out.
+- **No rules exist to read.** The suite boot's home (`/tmp/dsh-e2e/e2e-home-41731`) has no `knowledge/` mirror
+  and no `rules/` directory at all. The only rules file anywhere under the rig roots is
+  `e2e-home-41735/chapters/rules/dev2/001-security-…md`, which is the **rules leg's own fixture** on its own
+  port — exactly where it belongs, and unrelated to `suite`.
+
+So: locally the plugin contributes its rules/chapters instruction section when there is nothing on disk to
+back it; a CI boot contributes no such section. That is either (a) the section's gate ignoring the empty-store
+case and emitting the boilerplate anyway, or (b) a genuine per-boot difference in which plugin rows mount. Both
+are answerable by the plugin's own report — `/chapters-status` prints the store root, the mirror root and the
+rule counts in every state, including unlinked — so the next probe is to run that command inside a rig boot on
+each machine and compare its output, then write a red row against whichever side is wrong. No blind, no
+matcher change, until the gate is understood.
