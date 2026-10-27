@@ -1268,3 +1268,38 @@ it is the version of "a detected failure is a delivered failure" that this incid
 Until that gap is closed, no corpus recorded here is replayable by the runner, so item (2) of the objective
 cannot be satisfied by re-distilling harder. Local-only items that ARE still actionable: `heavy`'s ties,
 `coverage:e2e`, and the Autorun-displaces-goal pixel.
+
+### `heavy`'s divergence, profiled: same notice at msg1, different turn AFTER it (2026-10-27)
+
+Captured with `E2E_TAPE_DIFF` (message counts equal, so the pairing is valid this time):
+
+```
+LIVE  (5 msgs): system 7276 | notice 1005 | assistant 77   | user 104 | user 314
+TAPE0 (5 msgs): system 7276 | notice 1005 | assistant 300  | tool 15  | user 314
+TAPE1 (5 msgs): system 7276 | notice 1005 | assistant 300  | tool 15  | user 314
+TAPE2 (5 msgs): system 7276 | notice 1005 | assistant 300  | tool 15  | user 314(?)
+```
+
+What that says, and what it rules out:
+
+- **msg0 and msg1 are byte-identical across all candidates** — the header and the checkpoint notice match exactly,
+  so this is not the header, not a volatile count, not the TOC fold, and not the ordering race I closed last
+  round (that race was real; it was not this).
+- The divergence is **one turn later**: the tape's surface continues with the reading assistant turn plus its
+  tool result; the live surface continues with the final `STILL-HERE` turn. Same notice, so both runs DID compact
+  — but at different message indices, i.e. the compaction boundary sits one assistant/tool round apart between
+  record and replay even with served bytes identical.
+- Therefore the remaining mechanism is in **when the engine decides to compact**, given an identical surface: the
+  only inputs left are est-token drift (which depends on bytes that already match) and the bounded-loop/relief
+  path (`relief declined … surface over trigger`, then a later `context-overflow` compaction — the sink shows the
+  same two surface sizes in both modes, so a *later* decision point is plausible while the decline itself is
+  identical).
+
+Next instrument, and it is small: assert the compaction index directly. During distill, record the message index
+at which each `compaction/summary` event lands for this session; during replay, assert the same indices before
+the journey proceeds. If replay can be made to compact at the recorded index, the leg is deterministic and the
+tape matches; if it cannot, the boundary is genuinely non-replayable and `heavy`'s oversized reads must move off
+it — restating the leg's claim only as "compaction happened, surface recovered, session stayed healthy", which
+is what it already asserts, with the reads placed between boundaries. Either outcome is decided by the
+assertion, not by another fold, and no blind over `msg2` is acceptable: it is the only message that still carries
+information about where the boundary fell.
