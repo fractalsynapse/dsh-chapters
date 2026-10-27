@@ -154,6 +154,14 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   // --- 4: graceful aftermath — the session takes the NEXT turn normally
   // (own-log turn/end count — immune to other sessions' flushes — then the
   // polled reply text, log flush lag absorbed by the poll).
+  // PRECONDITION (#56, the sequencing this leg was missing): the oversized turn must have ENDED before the
+  // follow-up is typed. Without it the leg races its own journey — in record, live latency meant turn 1 had
+  // always settled; in replay every answer is served instantly, so the follow-up could be typed while turn 1
+  // was still open, and the surface then held a checkpoint plus the final answer where the tape held the reading
+  // turns. Byte diffs proved it: msg0 and msg1 identical, msg2 diverging into `STILL-HERE`. This asserts the
+  // order; the >= 2 assertion below is unchanged, so nothing is widened and nothing is skipped.
+  await expect.poll(() => eventTypes(sessionLogTextById(sid), 'turn/end').length >= 1,
+    { timeout: 900_000, intervals: [5000], message: 'the oversized turn ended before the follow-up was typed' }).toBe(true)
   await typeComposer(page, 'Reply with exactly the single word: STILL-HERE. Do not read or run anything.', deliveredFor(sid, 'Reply with exactly the single word: STILL-HERE. Do not read or run anything.'))
   await expect.poll(() => eventTypes(sessionLogTextById(sid), 'turn/end').length >= 2,
     { timeout: 900_000, intervals: [5000] }, 'second turn completes in this session\u2019s own log').toBe(true)
