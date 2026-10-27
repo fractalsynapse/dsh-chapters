@@ -33,6 +33,14 @@ function readInstalled(pkg: string, rel = 'lib/index.js'): { text: string } | { 
       return { text: fs.readFileSync(file, 'utf8') }
     } catch { /* try the next candidate / next resolution root */ }
   }
+  // The pinned hermetic install before any home-directory guess: both CI jobs install it, so the gate either
+  // runs everywhere the pin exists or says so loudly — it must not silently abstain on a runner while a
+  // developer's ~/node_modules keeps it green locally (measured: 19 CI-only skips, and an 85% branch gate
+  // missed at 84.99% because those skipped rows took their branches out of the denominator).
+  try {
+    const pinned = require_('path').join(process.cwd(), 'dev/dsh-host-lock/node_modules', pkg, rel)
+    if (fs.existsSync(pinned)) return { text: fs.readFileSync(pinned, 'utf8') }
+  } catch { /* fall through to the profile-global tree */ }
   // Node resolution walked parents already; last try: the profile-global tree.
   try {
     const dir = process.env.HOME + '/node_modules/' + pkg + '/' + rel
