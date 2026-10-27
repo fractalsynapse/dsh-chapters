@@ -291,9 +291,16 @@ test('session discovery finds dirs under a workspace slug that is not the repo p
 
     const found = sessDirsIn(base, path.basename(mine))
     assert.ok(found.every((d) => path.isAbsolute(d)), `paths must be absolute, got ${String(found[0])}`)
-    assert.equal(found.length, 2, `both workspaces belong to this boot: ${found.join(' , ')}`)
-    assert.ok(found[0].endsWith('session-bbb22222-2222-2222-2222-222222222222'), 'preferred slug sorts first')
-    assert.ok(found.some((d) => d.includes('session-aaa11111')), 'the other workspace is NOT ignored')
+    // Preferred wins ALONE. Widening the scan to every workspace directory in the home made a `prompt` leg throw
+    // `identity mismatch` by adopting a session its spec never opened (#129 follow-up). The wider scan still exists
+    // as a FALLBACK for when the repo-slug directory is genuinely empty — a fallback, not a licence to mix homes.
+    assert.equal(found.length, 1, `only the preferred workspace is read: ${found.join(' , ')}`)
+    assert.ok(found[0]?.endsWith('session-bbb22222-2222-2222-2222-222222222222'),
+      'and it is the preferred slug’s session, never a foreign workspace’s')
+    assert.equal(sessDirsIn(base, 'no-such-workspace').length, 2,
+      'with the preferred slug absent, EVERY other workspace is found — the fallback is deliberately broad, '
+      + 'because a disposable home belongs to this boot and an empty preferred directory means the boot ran in a '
+      + 'different workspace than the spec assumed')
     assert.equal(sessDirsIn(path.join(home, 'absent'), 'anything').length, 0, 'a missing home is empty, not a throw')
   } finally { fs.rmSync(home, { recursive: true, force: true }) }
 })

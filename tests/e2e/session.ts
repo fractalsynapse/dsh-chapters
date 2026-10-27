@@ -588,9 +588,13 @@ export function sessionLogFileFor(dir: string): string | null {
 export function sessDirsIn(base: string, preferred: string): string[] {
   let wsDirs: string[] = []
   try { wsDirs = fs.readdirSync(base) } catch { return [] }
-  const ordered = [preferred, ...wsDirs.filter((w) => w !== preferred)]
-  const out: string[] = []
-  for (const w of ordered) {
+  // Preferred FIRST, and ONLY if it yields nothing do we look further. The wider union I introduced today made
+  // a `prompt` leg throw `identity mismatch: dir claims session X, spec holds Y`: discovery could now see a
+  // DIFFERENT workspace's transcripts inside the same disposable home, so adoption could hand back a session the
+  // spec never opened. A fallback is not a licence to mix homes (AGENTS.md: one journey, one boot).
+  const scan = (dirNames: string[]): string[] => {
+    const out: string[] = []
+    for (const w of dirNames) {
     const wsPath = path.join(base, w)
     let names: string[] = []
     try { names = fs.readdirSync(wsPath) } catch { continue }
@@ -599,8 +603,12 @@ export function sessDirsIn(base: string, preferred: string): string[] {
       const full = path.join(wsPath, n)
       try { if (fs.statSync(full).isDirectory()) out.push(full) } catch { /* vanished between readdir and stat */ }
     }
+    }
+    return out
   }
-  return out
+  const own = scan([preferred])
+  if (own.length > 0) return own
+  return scan(wsDirs.filter((w) => w !== preferred))
 }
 
 const sessDirs = (): string[] =>
