@@ -1117,3 +1117,41 @@ CI-shaped — but my working tree is NOT, because the pinned host the boot spawn
   whose ancestors are clean.
 - Interim honesty: until that lands, "chain green" must name its location. A local green and a CI green are
   currently different measurements, and I will not call them the same result.
+
+### The runner mounts 7 tools and it is STABLE — not a race (2026-10-27, three-request dump from CI itself)
+
+CI's artifact `var/e2e-header-suite.log` now contains more than one request:
+
+    chars=2893 tools=7      ← the conversation request (its aux sibling is `chars=396 tools=0`)
+    chars=396  tools=0
+
+and locally the same two lines read `chars=7396 tools=34` / `chars=396 tools=0`. **The aux header is identical on
+both machines**, so the host and its prompt machinery agree; only the agent assembly differs, and it differs
+consistently rather than drifting — which rules out the mount-timing race I raised as the leading alternative.
+
+Every environment level I can measure is equal, with numbers, not narrative:
+
+| level | this host | CI runner |
+|---|---|---|
+| host lock deps | `declared=79 missing=0` | `declared=79 missing=0` |
+| installed at lock root | `deepseek-ai-packages=289`, `installed-top-level=179` | same |
+| repo-root `@deepseek-ai` | 34 dirs (18 undeclared by package.json) | report uploaded (same script) |
+| profile base tree | `node_modules=2 deepseek-ai=0 @treeseed=1` | built by the same `bootstrap-dev-profile.sh` |
+| host provenance | lock resolves to `registry.npmjs.org/…/dsh-0.2.0-rc.2.tgz`, integrity matches `npm view` | same tarball |
+| pinned host install | `npm ci --prefix dev/dsh-host-lock` (CI's own command) | same |
+
+Refuted as causes, each in one run: ancestor `node_modules` walk (a clean clone at `/var/tmp`, with zero set
+difference in installed packages, composes the LONG header), `$HOME` state (reran with `HOME=/var/tmp/clean-home`
+— unchanged), external host install location (`E2E_HOST_DIR`, 2 rows, unchanged), header prose or section
+headings (zero CI-only sentences: CI is a strict subset), and the "profile plugins decide it" story once the
+profile-base counts came back equal.
+
+**What this means for the objective, stated without softening:** a corpus recorded on any machine that mounts 34
+tools cannot be replayed by a runner that mounts 7, because message 0 is the tape key. So either (a) the
+assembly difference is found and the rig mounts identically everywhere — the remaining candidates are the
+session's `permission/preset` / `sandbox/mode` / `approval/policy` kernel events and anything the profile's
+`settings.yaml` seeds differently, which is a code read of the host's assembly path rather than another
+environment A/B; or (b) the corpus is recorded BY the runner, which needs the route credential as a repository
+secret — a maintainer action and the exact blocker issue #56 records ("no credential for the runner"), so I am
+naming it as your decision rather than working around it. I have not added a blind to mask the header, and I do
+not intend to: masking it would certify a corpus recorded by different software than the one that replays it.
