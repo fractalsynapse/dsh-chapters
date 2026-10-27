@@ -955,6 +955,16 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
         const cur = await currentSessionId(page).catch(() => null)
         console.error(`e2e: tree-row click failed for "${rowText}" — ${String((error as Error)?.message ?? error).slice(0, 90)}\n`
           + `  current session: ${String(cur)}\n  rows (${String(rows.length)}): ${rows.slice(0, 8).map((r) => JSON.stringify(r.slice(0, 46))).join(' | ')}`)
+        // The row count alone did not settle it: `rows (0)` with `current session: null` is either "the app is
+        // alive and its session list is empty" (a store/restore problem) or "the document is gone" (a boot dying
+        // under memory pressure), and the fix belongs to different places. So the same failure reports the
+        // document's own state.
+        const doc = await page.evaluate(() => ({
+          keys: Object.keys((window as unknown as { dsh?: Record<string, unknown> }).dsh ?? {}),
+          body: (document.body?.innerText ?? '').length,
+        })).catch(() => ({ keys: [], body: -1 }))
+        console.error(`  document: url=${String(page.url())} title=${JSON.stringify(await page.title().catch(() => ''))}`
+          + ` bodyChars=${String(doc.body)} dshKeys=${doc.keys.slice(0, 10).join(',') || '-'}`)
         throw error
       }
     } else {

@@ -30,7 +30,11 @@ fi
 echo "[chain-replay] projects (one boot each): $LEGS"
 FAILED=()
 for leg in $LEGS; do
-  printf '%s: ' "$leg"
+  # Memory available at each boot, logged unconditionally: a leg that fails deep in a nine-boot sequence needs to
+  # be distinguishable from a machine that simply ran out of room, and "rows (0), current session: null" reads
+  # differently at 6 GB free than at 200 MB.
+  MEM=$(awk '/MemAvailable/ {printf "%.1fGB", $2/1048576}' /proc/meminfo 2>/dev/null || echo '?')
+  printf '%s [mem %s]: ' "$leg" "$MEM"
   PORT=$(node --experimental-strip-types -e "
     import('./tests/e2e/rig-pins.ts').then((m) => process.stdout.write(String(m.RIG_PINS['$leg']?.port ?? '')));
   " 2>/dev/null)
