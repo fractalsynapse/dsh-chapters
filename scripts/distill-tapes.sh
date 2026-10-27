@@ -45,7 +45,8 @@ declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fa
 # them at 0.75/0.9/0.75 — a different realm than the tape, so the surface diverged and replay
 # MISSed. PORTS below is display-only; a row asserts it still agrees with the config's env.
 trap 'stop_stub' EXIT
-ORDER=(suite heavy arrival enrich fanout rules fork plans prompt)
+# prompt-off is the switch's OFF half (#113): it has its own port, boot, and tape, so it distills like any leg.
+ORDER=(suite heavy arrival enrich fanout rules fork plans prompt prompt-off)
 
 # #56, measured: `plans` and `prompt` MUST be recorded through the scripted stub
 # (tests/e2e/stub-model.ts, :8081). Their PROVENANCE.md files say so, and the reason is the
