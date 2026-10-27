@@ -812,3 +812,30 @@ credential, run twice, and then on CI.
   `incoming[2]` against the **same-kind** stored candidate (the previous diff pairing was useless because
   `storedCandidates` selects by message count, so a conversation request was matched against a title request —
   that selection should be filtered by role/kind before comparison, which is itself a small rig fix).
+
+### `heavy`'s replay divergence is compaction TIMING, and the mechanism line is in the sink (2026-10-27)
+
+`var/e2e-engine-errors-41733.log` around the replay:
+
+    [realm:engine:decline] relief declined while the surface is over the trigger (surface=47256 trigger=16000 window=32000 …)
+    [realm:engine:compactIfNeeded] decided: compaction … (trigger="context-overflow")
+
+So relief was declined at the pressure check and the overflow path compacted a request later than the recorded
+run did — the surface then carries a checkpoint notice where the tape carries reading turns, and the request
+diverges at message 2 of 5. `heavy` is the leg deliberately parked ON the compaction boundary (threshold 0.5,
+arrival floor pinned to 1M so arrival cannot relieve it), which is why it is the only leg where timing is
+visible at all; every other leg replays fine.
+
+This is NOT a blinding job: masking a compaction that fired at a different step would let the tape certify a
+conversation that did not happen. Two honest options, in order of preference:
+
+1. **Make the boundary deterministic in the rig.** The record and replay paths must reach the pressure check at
+   the same request index. Whatever makes replay arrive at a different surface size — instant tape answers
+   skipping wall-clock gaps, the decline branch, or an aux call ordering — should be pinned by a row asserting
+   "the heavy session compacts at request N in both modes", measured from the sink, not argued.
+2. **Re-scope the leg's boundary** so it sits between two compaction points instead of on one, with the claim it
+   makes restated to match (compaction happened, surface recovered, session stayed healthy). The current
+   assertions already claim exactly those three things; the brittleness is in where the reads are placed.
+
+Option 1 is the right one if achievable, because it preserves what the leg proves. Either way the corpus stays
+unstamped and `heavy` stays red in the chain until it is fixed — no skip, no widening.
