@@ -901,3 +901,23 @@ length of the two checkout paths — and produced a duplicate blind for a fold t
 (`<DSH-CHECKOUT>`, `model-proxy.ts:159`). The #89 ordering row caught the collision the moment it shipped; the
 procedure error was mine and is the one to remember: run the text through `substituteAll` before concluding a
 fold is missing. One predicate per semantic decision, and a fold that already exists is not a missing fold.
+
+## A recorded journey must not depend on when the host compacts
+
+**Symptom that gives it away:** the acceptance run misses a *different set of legs* each time, while message 0 keeps
+matching. That is not an unblinded identity token and not a matcher bug. It means the two machines ran the same
+journey and both compacted — at different moments. A checkpoint rewrites the surface, so the same assistant turn
+lands at message index 6 here and index 2 there, and the surface is the tape key.
+
+**The rule:** every leg pins `noAuxModel` — it disables automatic compaction and plot elicitation, so the request
+sequence in the tape is the whole story regardless of how large a runner's header happens to be. The one exception is
+`heavy`, whose journey *is* the pressure one: pinning it would make the leg measure a boot where nothing is wrong,
+which is the same mistake as setting the arrival floor below the chunk size. The drift row
+(`only the pressure journeys leave model-involving machinery enabled`, `tests/unit/rig-pins.test.ts`) names offenders
+in its failure message, and asserts `heavy` stays unpinned, so neither half can rot quietly.
+
+**Why the transcript has to travel with the artifact:** this took three runs to see because the workspace-only
+artifact never contained the booted home's session logs. `scripts/chain-replay.sh` now copies each leg's
+`session.v4.jsonl.zstd` files and registry into `var/e2e-session-logs/<leg>-<port>` (six files, under 4 MB each) so
+the runner's own history sits next to the tape diffs and the misses. When a miss claims "the conversation had
+already taken a different shape", the answer is in that transcript — read it, don't theorize about it.
