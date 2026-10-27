@@ -633,3 +633,11 @@ Two traps here worth naming: committing a mixed tree would make CI red in a way 
 `commonPrefix=0` signature again), and "it passed when I changed the toggle" is not evidence that the rig's
 default is right — it is evidence that the two shapes differ, which is the thing to eliminate rather than route
 around.
+
+### CI's acceptance red is expected while the committed corpus is mixed — do not debug it (2026-10-27)
+
+The tree in `HEAD` was distilled across two header shapes (eight legs under provider `local`, `heavy` under
+the harness row), and CI replays whatever is committed. So its `acceptance — ten tape-replay legs` job fails
+for a reason already diagnosed, and its annotation cannot tell me anything new. The sequence that resolves it
+is fixed by the diagnosis, not by urgency: uniform re-distill (running) → one coherent corpus commit → CI-shaped
+chain green locally → read CI again. A red job that was predicted from known state is a checkpoint, not a bug.

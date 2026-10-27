@@ -642,6 +642,16 @@ accepted and the composer still reads empty, and the goal bar's own `setDraft` i
 composer write. A plugin's only dependable wire to its own server plane is the command — which is why the bar is
 push-shaped and pull-fed.
 
+**The dock's status hook is a SELECTOR hook (measured, 2026-10-27).** `useSessionStatus` is declared
+`SnapshotSelectorHook<SessionStatusSnapshot>` in `dsh-client-ui-session`'s client types, so it is called as
+`useSessionStatus(selector)` — passing a session id hands the host a string where it wants a function and it
+fails `TypeError: l is not a function`. Two consequences for anyone wiring the bar: the call must be hoisted
+above the component's early `return null` (a hook below that guard changes the hook count and React aborts the
+whole slot, `#310`), and the snapshot's field names are not ours to assume — the dock folds it through
+`deriveRunning`, which maps `boolean`, status words, `{status|state|phase}`, and `{running}`, and returns
+**`undefined` for anything unrecognized**, because `undefined` (unknown) and `false` (idle) are different
+safety answers: unknown must never start a turn.
+
 **State vocabulary (interface lock, #113).** `/chapters-prompt state` reports one of:
 `off` — switched off by the human (a stored override), or no defining model is configured, so the bar renders
 nothing; `idle` — **enabled and awaiting its first recommendation** (no completed turn yet); `analyzing` — a
