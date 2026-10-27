@@ -124,7 +124,11 @@ export default async function setup(fullConfig?: {
     // supposed to answer everything. In record and heal a miss is the mechanism working (forward live, append),
     // so the pattern is added only for replay, and `heavy` can never again pass the chain with two misses in
     // the journal the way it did on 2026-10-26.
-    ...(modeIsReplay() ? { pattern: new RegExp(`${RIG_FAULT_PATTERN.source}|${REPLAY_MISS_PATTERN.source}`) } : {}),
+    // `E2E_MISS_FATAL=0` is a DIAGNOSTIC switch only: the guard's default stays fatal in replay, because a leg
+  // that passes while its tape missed requests is the false green this rig was built to refuse. It exists so a
+  // run can reach the SECOND miss and dump it — without it, the abort kills the process before the request
+  // that actually matters is written out, and I cannot read bytes I never captured.
+  ...(modeIsReplay() && process.env.E2E_MISS_FATAL !== '0' ? { pattern: new RegExp(`${RIG_FAULT_PATTERN.source}|${REPLAY_MISS_PATTERN.source}`) } : {}),
     log: (m) => { console.error(`\n${m}\n  journal: ${journal}`) },
   })
 

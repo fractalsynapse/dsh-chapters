@@ -43,6 +43,11 @@ const VOLATILE: Array<[RegExp, string]> = [
   // one-character difference between a request and a tape recorded minutes apart, and enough to fail the
   // whole leg. Fold the form, not a guess at its value's punctuation.
   [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[^\n"]+/g, '$1: <ELAPSED>'],
+  // CHAPTER-COUNT-BLIND (#56, measured 2026-10-27): the checkpoint notice states how many chapters exist in
+  // THIS session's archive, which auto-save timing decides — 8 on one run, 2 on the next, for the same
+  // journey. The byte diff proved `heavy`'s replay died on exactly that count at char 729 while its system
+  // header matched byte for byte. Same family as the est-token and char-count collapses already here.
+  [/Chapter archive: \d+ chapter\(s\)/g, 'Chapter archive: <COUNT> chapter(s)'],
   // human dates measured crossing midnight: 'Sep 19' recorded, 'Sep 20' replayed
   [/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}(,? \d{4})?\b/g, '<DATE>'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):

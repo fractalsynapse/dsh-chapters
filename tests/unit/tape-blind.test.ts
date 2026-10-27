@@ -127,3 +127,23 @@ test('the same header written under either workspace path folds to one identity'
   const local = normalizeSingle({ role: 'user', content: 'Working directory: /home/adrian/Projects/dsh-chapters. Plan file: /home/adrian/Projects/dsh-chapters/.dsh-chapters/notes.md' })
   assert.equal(ci, local, 'a tape distilled on one machine must be replayable on another')
 })
+
+/**
+ * CHAPTER-COUNT-BLIND (measured 2026-10-27, the real cause of `heavy`'s replay miss).
+ *
+ * The byte diff came from `E2E_TAPE_DIFF`, not from reasoning: `msg0` — the system header, 7,276 chars —
+ * compared IDENTICAL between the replay request and the tape, and the divergence was at char 729 of the
+ * checkpoint notice: `Chapter archive: 8 chapter(s) under …` live against `2 chapter(s)` recorded. That
+ * number is derived state, produced by auto-save timing inside the rig session, so no two runs can agree on
+ * it — exactly the class the existing est-token and char-count collapses already handle. Blinding it is not
+ * widening a match: the count is never the thing a leg claims about the product.
+ */
+test('the chapter-count in the checkpoint notice cannot break a tape match', () => {
+  const many = normalizeSingle({ role: 'user', content: '(revise it in your next reply.) Chapter archive: 8 chapter(s) under /tmp/dsh-e2e/e2e-home-41733/chapters/ — verbatim text; reload any with the read tool.' })
+  const few = normalizeSingle({ role: 'user', content: '(revise it in your next reply.) Chapter archive: 2 chapter(s) under /tmp/dsh-e2e/e2e-home-41733/chapters/ — verbatim text; reload any with the read tool.' })
+  assert.equal(many, few, `two counts of the same notice must be one identity: …${many.slice(-70)}`)
+  assert.match(many, /<COUNT> chapter\(s\)/, 'the count folds to a token, not to nothing')
+  // Narrow: a sentence a human typed about chapter counts stays conversation.
+  const prose = normalizeSingle({ role: 'user', content: 'We shipped 8 chapters last sprint, and 2 this one.' })
+  assert.ok(!prose.includes('<COUNT>'), 'prose is not folded')
+})
