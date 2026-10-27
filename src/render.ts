@@ -541,6 +541,25 @@ export function renderChapter(
  * The cumulative index that replaces compacted history. Built from registry records, never from an LLM —
  * which is the entire latency argument: no summarization call, no tokens, no paraphrase.
  */
+/** One line of a checkpoint notice's chapter index. */
+export interface NoticeBullet { path: string, title: string, summary: string }
+
+/**
+ * The chapter index inside a continuation notice, capped at `cap` lines (0 = list everything).
+ *
+ * The cap is the difference between a notice whose size tracks history and one that settles. Each line costs
+ * ~120 characters, so an uncapped index moves the surface across the compaction trigger depending on how many
+ * chapters a run happened to write — which makes a leg parked on that boundary undistillable as a tape (measured
+ * on `heavy`: identical served bytes, boundary one assistant/tool round apart between two runs). Past the cap the
+ * text is byte-identical, and the omission is STATED rather than silent, because a model that cannot see the
+ * list must still know to search for it.
+ */
+export function noticeIndexSection(entries: readonly NoticeBullet[], cap: number): string {
+  if (cap <= 0 || entries.length <= cap) return renderIndex(entries)
+  return renderIndex(entries.slice(0, cap))
+    + '\n… and older chapters are not listed here — use chapters_search to reach them.'
+}
+
 export function renderIndex(entries: readonly { path: string; title: string; summary: string }[]): string {
   return entries
     .map((e, i) => `${i + 1}. [${e.title}](${e.path}) — ${e.summary}`)

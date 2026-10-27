@@ -213,6 +213,10 @@ export const Config = Schema.object({
   artifactStoreRoot: Schema.string().default('.dsh-chapters'),
   // #85: pool-mirror root for rules/knowledge reads that produce model-visible text.
   knowledgeMirrorDir: Schema.string().default('.dsh-knowledge'),
+  // Lines of the chapter index a continuation notice lists. 0 = list every chapter (the historical behavior).
+  // A small cap keeps the notice's SIZE settled, which is what makes a leg parked on the compaction boundary
+  // reproducible as a tape; the omission is stated in the notice itself, never silent (#56).
+  noticeIndexCap: Schema.number().step(1).min(0).default(6),
   // #87: the newest human turn carried verbatim into a relief summary, capped.
   openRequestCarryMaxChars: Schema.number().step(1).min(200).default(4000),
   // #78 A: survivability switch, default on (docs/host-compaction-seam.md).

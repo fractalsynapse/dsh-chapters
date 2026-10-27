@@ -54,6 +54,9 @@ import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
 export interface ChaptersRowConfig extends BasicCompactionConfig {
+  /** Lines of the chapter index a continuation notice lists (0 = all). A fixed-size notice is what lets a
+   * boundary-sitting leg be captured and replayed at all (#56). */
+  noticeIndexCap?: number | undefined
   artifactStoreRoot?: string
   /** #85: pool-mirror root for rules/knowledge reads that produce model-visible text. */
   knowledgeMirrorDir?: string
@@ -373,7 +376,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, lastResortArtifact, diagnosticsMaxBytes, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, noticeIndexCap, openRequestCarryMaxChars, lastResortArtifact, diagnosticsMaxBytes, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
@@ -399,6 +402,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.chaptersConfig = {
       artifactStoreRoot: artifactStoreRoot ?? '.dsh-chapters',
       knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
+      // Capped notice index (#56): a fixed-size notice is what makes a boundary-sitting leg capturable at all.
+      noticeIndexCap: noticeIndexCap ?? 6,
       openRequestCarryMaxChars: openRequestCarryMaxChars ?? 4000,
       lastResortArtifact: lastResortArtifact ?? true,
       diagnosticsMaxBytes: diagnosticsMaxBytes ?? 8388608,
