@@ -1066,3 +1066,32 @@ against the http-git remote, or a `read` on a path that exists in the working co
 engine is waiting on the declined relief. My suspicion, stated as suspicion and not as a finding: the journey's
 later steps use workspace paths, and a clone at `/var/tmp/dsh-rig` has a different absolute root, so a step that
 resolves a path against the ORIGINAL working copy would block. That is testable in one preserved-home run.
+
+### The clone's knowledge loop DID complete — the stall is in the rig's own session adoption, not the product (2026-10-27)
+
+Read directly from the surviving throwaway home (`/tmp/dsh-e2e/e2e-home-41731`, 44 events, `session-57b99de0…`,
+the same id the engine sink named during the stalled run):
+
+    user/message seq 10: "Which file defines the chapter composer merge rule? …"   ← the needle, present
+    … tool/result seq 37 …
+    turn/end   seq 43: {"turn":1,"reason":{"kind":"completed"}}                    ← the turn, completed
+
+And the assertion still reported `Expected: true / Received: false` after `Timeout 720000ms exceeded` at
+`tests/e2e/session.ts:841` (`turnSeen`). Two sessions exist in that home: the journey above, and a 6-event one
+whose last events are a `chapters-prompt … state` command run. `turnSeen` needs
+`user/message` with `seq > preSeq` carrying the needle **in the log it is reading**, so the predicate was pointed
+at the wrong session (or read an empty log) for twelve minutes while the work finished elsewhere.
+
+Why this matters more than the clone question: `newSessionWithTurn` is the rig's shared entry helper, used by
+almost every leg. A poll that can silently watch the wrong session is a false-red generator — and the #77
+comment in that same function records it happening before, on cold homes, with a passing run nobody could see.
+The fix is rig-side and testable: when the poll gives up, the diagnostic must print the ids it tried, what
+`listRecentSessionIds()` returned, and the byte length of `sessionLogTextById` for each — the four-facts message
+that #61a promised exists for exactly this situation, and which did NOT appear in this run's output. Finding out
+why the diagnostic was swallowed is the first step; it is the instrument this repo's own rule demands ("a
+detected failure is a delivered failure").
+
+Sequence I will follow: (1) restore/extend that failure diagnostic so it always prints the per-id evidence;
+(2) add a row for the two-session case (needle in session B, spec holding session A ⇒ helper adopts B);
+(3) then re-run the clone's `suite` — a CI-shaped corpus is the goal, and the clone is not CI-shaped-broken, it
+is being mis-read by my own harness code.
