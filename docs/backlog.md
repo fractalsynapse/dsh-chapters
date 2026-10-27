@@ -778,3 +778,23 @@ are answerable by the plugin's own report — `/chapters-status` prints the stor
 rule counts in every state, including unlinked — so the next probe is to run that command inside a rig boot on
 each machine and compare its output, then write a red row against whichever side is wrong. No blind, no
 matcher change, until the gate is understood.
+
+### CONFIRMED with a positive control: the repo rules tier was the header divergence, and the store-root fix removed it (2026-10-27)
+
+The `diagnostic('rules-section', …counts…)` line I added after the empty-guard is the measurement, and the
+batch supplied both halves of it:
+
+    port 41735 (rules leg)  contributing: project=1 session=0 categories=1 projectKey=b08a5d89-…
+    port 41731 (suite)      (no line)
+    port 41739 (prompt)     (no line)
+
+The control proves the instrument fires when the section is contributed, so its absence on `suite` and `prompt`
+means those boots genuinely do not compose the section any more — which is the effect of the resolver fix:
+`mined-rule capture` and `/chapters-repair` were doing `join(cwd, artifactStoreRoot)`, so the rig's **absolute**
+per-port root became a path *inside the repository under test*, and the rules tier sitting in this repo was
+being read into message 0 of every request. A GitHub checkout has no such tier, hence 2,783 chars there against
+7,276 here, hence every CI replay miss with a locally green chain.
+
+All ten legs then re-distilled green under the frozen regimes (`FROZEN_EXIT=0`), and the claim being tested now
+is the only one that matters: the same corpus replaying under `npm run test:e2e:replay` with no provider and no
+credential, run twice, and then on CI.
