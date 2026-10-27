@@ -1367,3 +1367,28 @@ Two things worth holding onto:
    `@deepseek-ai/dsh-tool-*` (host-side, outside this repo), or distill on the runner with the route credential
    as a repository secret (a maintainer action). #127 therefore stays unmerged: agents may merge to `staging`
    only after the acceptance job passes.
+
+### Sandbox provisioning did NOT explain the tool gap — both hypotheses refuted in one run (2026-10-27)
+
+I theorized the runner's 7 tools came from missing bubblewrap (bash/fs/pwsh mount through `dsh-bash-sandbox`,
+`dsh-fs-sandbox`, `dsh-pwsh-sandbox`). The job installed `bubblewrap`, then lifted Ubuntu's AppArmor restriction
+on unprivileged user namespaces, and the same artifact that proved the problem now disproves the theory:
+
+    before: bwrap version=not-installed userNamespaceTest=failed: spawnSync bwrap ENOENT
+    after:  bwrap version=bubblewrap 0.9.0 userNamespaceTest=ok
+    both:   chars=2893  tools=7  names=chapters_artifact,chapters_continue,chapters_fork,…(ours only)
+
+So bubblewrap is present and functional, and the session still registers only our plugin's tools. Provisioning
+stays in the workflow — a runner that can't sandbox is a worse test bed regardless, and the probe is worth
+keeping — but it is NOT the cause, and I am not going to describe it as one because it was my hypothesis.
+
+That closes the environment class: installed bytes (integrity-verified), profile ids (two-phase mount report),
+`config`/`adapterDefaults` (0 differing keys), aux header (identical), variable environment (`env -i` boot),
+`$HOME`/ancestor `node_modules` (clean clone composes the long header), AppArmor/userns (now `ok`), and CI flags.
+What remains is inside the host's own preset/tool assembly — which package registers `read`/`bash` and under
+what condition — and that is a host-code question, not a rig or provisioning one. The next person to look at it
+should start from `dsh-agent-preset` and the `agent-preset-registry` row, not from my environment again.
+
+Meanwhile the facts that are settled and useful: CI's deterministic job is **green** (branch gate 85.0%,
+1,257+ rows, 0 fail) and the corpus is committed as one change with the strict chain green twice locally. The
+acceptance job stays red with a named cause, and #127 stays open because acceptance must pass before a merge.
