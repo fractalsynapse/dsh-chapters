@@ -1155,3 +1155,42 @@ environment A/B; or (b) the corpus is recorded BY the runner, which needs the ro
 secret — a maintainer action and the exact blocker issue #56 records ("no credential for the runner"), so I am
 naming it as your decision rather than working around it. I have not added a blind to mask the header, and I do
 not intend to: masking it would certify a corpus recorded by different software than the one that replays it.
+
+### The two machines do NOT mount the same plugin list — and the id that differs is untracked (2026-10-27)
+
+The boot now reports its own mounted tree (`var/e2e-home-plugins-<port>.log`), so this is read from artifacts,
+not inferred:
+
+    CI:    patchPluginIds=preset-chapters,agent-preset-registry,'@treeseed/dsh-chapters',llm-pi-ai,
+           agent-default-model,llm-gate,fetch-timeouts,ui-settings-general
+    local: patchPluginIds=preset-chapters,agent-preset-registry,'@treeseed/dsh-chapters',llm-pi-ai,
+           agent-default-model,llm-gate,fetch-timeouts
+
+`ui-settings-general` appears in **no tracked file**: `tests/e2e/fixtures/dev-profile-cordis.patch.yml` (0),
+`.dshdev-local/profiles/web/cordis.patch.yml` (0), and it is present in the AMBIENT `~/.dsh/profiles/web/
+cordis.patch.yml` (2 occurrences). So a booted home's plugin list can be inherited from developer state, and the
+two machines' assemblies are not the same input — which is precisely the class that has produced every
+local-green/CI-red result in this session.
+
+Everything else is now eliminated with numbers rather than argument:
+
+- installed bytes: `topVersion=0.2.0-rc.2`, `checked=289 mismatched=0 allIntegrityMatch=true` — on BOTH machines
+  (each installed package's embedded dist integrity equals its lockfile entry).
+- host's own `request/header`: `config` and `adapterDefaults` differ in **0 keys**; the aux header is `chars=396
+  tools=0` on both; the conversation header is `chars=7396 tools=34` here vs `chars=2893 tools=7` there, and it is
+  STABLE across requests, so it is not a mount race.
+- theories killed by a run this round: `CI=true`/`GITHUB_ACTIONS` (no effect), `NODE_PATH` (not set locally at
+  all), undeclared repo-root packages (34 on both, and they are hoisted transitives), the pre-boot
+  `profile-base-node_modules=0` reading (an order artifact — the boot reports its own tree now instead).
+
+Next step, and it is a rig fix with a row, not another A/B: make a booted home's plugin list derive ONLY from the
+tracked seed — assert in a row that `patchPluginIds` equals a fixed expected list, so a machine that injects an
+extra ambient id fails instead of quietly recording a corpus no runner can replay. Then re-check the tool count
+from the header dump: if registering `ui-settings-general` (or any ambient id) is what moves 34 to 7, the
+asymmetry is closed by construction and the corpus becomes portable.
+
+One honest process note: the previous commit claimed an integrity scan that had NOT been applied (a silent
+python-heredoc failure I read past). The scan exists now, verified with `checked=289 mismatched=0`, and the
+correction is in that commit's message. The probe run with `env -u NODE_PATH` also failed at boot
+(`e2e boot failed within 60s (port 41737)`), which was a port/env transient and is NOT evidence about tools —
+recorded so nobody reads a failed run as a result.
