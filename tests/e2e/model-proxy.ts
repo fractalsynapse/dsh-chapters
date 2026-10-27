@@ -274,6 +274,8 @@ export interface TapeEntry { key: string; prefix: unknown[]; status: number; con
 export interface ProxyOpts {
   mode: 'record' | 'replay'
   tapeDir: string
+  /** The boot's throwaway home; when present the proxy checks declared-vs-registered tools once. */
+  homeDir?: string
   /**
    * #78: the context window the rig ENFORCES. A hosted upstream accepts a 33K prompt happily, so
    * a context-pressure journey distilled against it never produces the `context-overflow` trigger
@@ -566,6 +568,42 @@ async function pumpUpstream(o: PumpOpts): Promise<void> {
 }
 
 
+/**
+ * A declared tool row that produced no registered tool is a FAULT, not a pass — and it must be said out loud.
+ *
+ * Measured on 2026-10-27: the runner boots a host whose installed bytes are provably identical to this machine's
+ * (79/79 declared deps present, 289 packages, `allIntegrityMatch=true`), with the SAME 44-id profile including
+ * 21 `tool-*` rows — and registers only our seven plugin tools, while this host registers 34. The boot's own log
+ * says nothing (CI's server log is 292 bytes), so every mismatch that follows arrives disguised as a corrupt
+ * tape. AGENTS.md: a detected failure is a delivered failure. This is the delivery.
+ *
+ * The map is deliberately narrow — one representative tool per declared row family, the tools every leg needs —
+ * rather than an attempt to mirror the host's whole surface, which would drift the moment the host renames one.
+ */
+export const MOUNT_REQUIREMENTS: Record<string, string> = {
+  'tool-bash': 'bash',
+  'tool-fs': 'read',
+  'tool-goal': 'create_goal',
+  'tool-jobs': 'job_list',
+  'tool-todo': 'todo_write',
+  'tool-web': 'web_fetch',
+}
+
+/** Module scope on purpose: inside the request handler `path` is a LOCAL string (`const path = req.url!`), so a
+`path.join` written there silently becomes string concatenation and fails to compile — which is exactly what my
+first version of the mount check did (TS2448/TS2339). */
+export function rigProfilePatchPath(homeDir: string): string { return path.join(homeDir, 'profiles', 'web', 'cordis.patch.yml') }
+
+export function mountFault(declaredIds: string[], registeredNames: string[]): string | null {
+  const missing = Object.entries(MOUNT_REQUIREMENTS)
+    .filter(([row, tool]) => declaredIds.includes(row) && !registeredNames.includes(tool))
+    .map(([, tool]) => tool)
+  if (missing.length === 0) return null
+  return `MOUNT FAULT: the profile declares tool rows the host never registered — missing: `
+    + `${missing.join(', ')} (declared=${String(declaredIds.length)} registered=${String(registeredNames.length)})`
+    + ` — this boot cannot produce a tape any other machine will replay, so it is refused rather than recorded`
+}
+
 export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // Which project's tape this is — a miss must name itself (see the journal line).
   const tapeName = path.basename(opts.tapeDir)
@@ -593,6 +631,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // mount-TIMING race (the preset finishing after turn one) and not a capability difference — and that distinction
   // decides whether the fix is a boot-readiness gate or a profile change. One dump cannot tell those apart.
   let dumpQuota = 3
+  let mountChecked = false
   const dumpHeader = (messages: string[], tools?: unknown): void => {
     if (headerDumped || dumpQuota <= 0 || process.env.E2E_DUMP_HEADER !== '1') return
     dumpQuota -= 1
@@ -640,6 +679,25 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         // Serialize the way the matcher does: `messagesOf()` yields parsed objects, and String(object) would
         // silently never match.
         dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")), (body as Record<string, unknown>).tools)
+        // Once per boot: does every tool the profile DECLARES actually appear in the registered list? The
+        // runner's silent 7-against-44 is the case this exists for; without it the gap surfaces only as a
+        // corpus that no other machine can replay.
+        if (opts.homeDir !== undefined && !mountChecked) {
+          mountChecked = true
+          try {
+            const patchText = fs.readFileSync(rigProfilePatchPath(opts.homeDir), 'utf8')
+            const declared: string[] = [...patchText.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gm)].map((x) => x[1] ?? '')
+            const rawTools = (body as Record<string, unknown>).tools
+            const names = Array.isArray(rawTools)
+              ? (rawTools as Array<Record<string, unknown>>).map((t) => {
+                  const fnm = t?.function as Record<string, unknown> | undefined
+                  return String(fnm?.name ?? t?.name ?? '')
+                })
+              : []
+            const fault = mountFault(declared, names)
+            if (fault !== null) journal(fault)
+          } catch { /* an unreadable profile is not this check's business; the boot itself reports that */ }
+        }
         // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape
         // records — a distill that saw a refusal and retried after relief must see the same refusal
         // on replay, or the request sequence diverges and the chain fails for a reason that looks

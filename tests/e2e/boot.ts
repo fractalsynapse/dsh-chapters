@@ -422,6 +422,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // per-project tapes: a failed capture's entries must never resurrect as
       // another pin's replay continuation (prefix collisions across pins are
       // otherwise invisible and land the session in someone else's transcript)
+      homeDir: E2E_HOME,
       tapeDir: path.join(ROOT, 'tests', 'fixtures', 'model-tape', process.env.E2E_TAPE ?? 'default'),
       journalPath: path.join(ROOT, 'var', 'e2e-tape-misses.log'),
       // #78: enforced in record AND replay. The window is part of the regime the tape was

@@ -68,3 +68,21 @@ test('a fault line that predates the guard is not this leg’s fault', async () 
     stop()
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+/**
+ * A MOUNT FAULT is fatal in EVERY mode, not just replay (#56).
+ *
+ * Reason, stated as the difference from a tape miss: a miss means the journey stopped matching the recording,
+ * while a mount fault means the machine cannot produce a faithful recording at all — the profile declares tool
+ * rows the host never registers, so any tape written here keys message 0 on a capability surface no other
+ * machine has. Recording under that condition produces exactly the corpus that replayed green for me and
+ * `commonPrefix=0` for CI. Letting it continue in record mode would be the rig cooperating in its own
+ * mis-anchoring.
+ */
+test('the mount fault line is recognized as a rig fault', () => {
+  const line = '2026-10-27T09:00:00.000Z MOUNT FAULT: the profile declares tool rows the host never registered — '
+    + 'missing: bash, read, create_goal (declared=44 registered=7) — this boot cannot produce a tape any other '
+    + 'machine will replay, so it is refused rather than recorded'
+  assert.ok(RIG_FAULT_PATTERN.test(line), 'MOUNT FAULT must join the fault patterns that abort a leg in all modes')
+  assert.equal(REPLAY_MISS_PATTERN.test(line), false, 'the fault is its own class, not a tape miss — it precedes any tape')
+})

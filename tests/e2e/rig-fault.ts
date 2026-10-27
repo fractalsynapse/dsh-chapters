@@ -11,7 +11,12 @@
  */
 import fs from 'node:fs'
 
-export const RIG_FAULT_PATTERN = /RIG-CAPABILITIES|PERSONA-MISMATCH|PERSONA-RECORD-REFUSED/
+// `MOUNT FAULT` is added because it is a different class from a tape miss: it means this machine's registered
+// capability surface does not match its own declared profile, so any tape written here keys message 0 on tools
+// no other machine has. It aborts in every mode, including record — refusing to cooperate in its own
+// mis-anchoring (measured 2026-10-27: the runner registers 7 tools against a 44-id profile that declares 21
+// `tool-*` rows, silently).
+export const RIG_FAULT_PATTERN = /RIG-CAPABILITIES|PERSONA-MISMATCH|PERSONA-RECORD-REFUSED|MOUNT FAULT/
 
 /**
  * In replay, a miss IS a rig fault: the tape is supposed to answer every request the journey makes, so a miss

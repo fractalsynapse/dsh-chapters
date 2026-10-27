@@ -17,7 +17,7 @@ const script = readFileSync(path.join(ROOT, 'scripts', 'ci-replay.sh'), 'utf8')
 test('the replay diagnostics cover rig-fault aborts, not only test verdicts', () => {
   const line = script.split('\n').find((l) => l.includes('var/ci-replay.log | head'))
   assert.ok(line !== undefined, 'the diagnostic grep exists at all')
-  for (const needle of ['RIG FAULT', 'MISS tape=', 'reaped orphan', 'falling back to an ephemeral']) {
+  for (const needle of ['RIG FAULT', 'MISS tape=', 'reaped orphan', 'falling back to an ephemeral', 'MOUNT FAULT']) {
     assert.ok(line.includes(needle), `the grep must catch "${needle}" — it aborted a leg on CI and the annotation said only "exited 1"`)
   }
   assert.ok(/head -1[0-9]/.test(line), 'and it keeps a bounded but wider budget than 12 lines')
