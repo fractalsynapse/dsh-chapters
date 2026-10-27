@@ -78,3 +78,36 @@ test('the e2e home root is outside the repo, so no ancestor node_modules can lea
   // hermeticity claim is false and the test says so with the path rather than silently agreeing.
   assert.deepEqual(leaks, [], `an ancestor of ${home} carries @deepseek-ai packages: ${leaks.join(' , ')}`)
 })
+
+/**
+ * The rig's host may be installed OUTSIDE the repository, and that location wins when it exists (#56).
+ *
+ * Why this is not cosmetic: the boot spawns the pinned `dsh` at `ROOT/dev/dsh-host-lock/node_modules/.bin/dsh`,
+ * and Node resolves that binary's bare specifiers by walking ancestors of ITS install dir — which from inside the
+ * repository climbs to `/home/<dev>/node_modules`, where a developer's linked harness build lives. A CI runner
+ * has no such directory. Mounted bundles differ, so the composed SYSTEM HEADER differs (measured 7,276 chars in
+ * the working copy against 2,783 in a clean clone), and the header is message 0: the key every tape matches on.
+ * A corpus recorded inside the repo is therefore replayable only inside that repo, which is the same fault #89
+ * closed for the binary's identity and #85 named for the home directory.
+ */
+test('an external pinned install is preferred over the in-repo lock', async () => {
+  const { resolveHostBinary } = await import('../../tests/e2e/boot.ts')
+  const external = '/tmp/dsh-e2e/host'
+  const seen = new Set<string>([
+    `${external}/node_modules/.bin/dsh`,
+    '/repo/dev/dsh-host-lock/node_modules/.bin/dsh',
+  ])
+  const got = resolveHostBinary('/repo', (p) => seen.has(p), { E2E_HOST_DIR: external })
+  assert.equal(got.binary, `${external}/node_modules/.bin/dsh`, 'the CI-shaped location wins: its ancestors cannot see the developer tree')
+  assert.equal(got.pinned, true, 'an external pinned install is still pinned — this is not the PATH fallback')
+})
+
+test('the in-repo lock is still the default when no external install is configured', async () => {
+  const { resolveHostBinary } = await import('../../tests/e2e/boot.ts')
+  const seen = new Set<string>(['/repo/dev/dsh-host-lock/node_modules/.bin/dsh'])
+  const got = resolveHostBinary('/repo', (p) => seen.has(p), {})
+  assert.equal(got.binary, '/repo/dev/dsh-host-lock/node_modules/.bin/dsh', 'nothing changes for a run that did not ask')
+  const absent = resolveHostBinary('/repo', () => false, { E2E_HOST_DIR: '/tmp/nowhere' })
+  assert.equal(absent.pinned, false, 'a configured-but-missing external dir is not silently pinned')
+  assert.equal(absent.binary, 'dsh', 'and it falls back to PATH exactly as before, reporting so')
+})

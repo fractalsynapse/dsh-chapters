@@ -96,7 +96,17 @@ export const rigMirrorRoot = (port: number): string => path.join(e2eHome(port), 
 export function resolveHostBinary(
   rootDir: string,
   exists: (p: string) => boolean = (p) => fs.existsSync(p),
+  env: NodeJS.ProcessEnv = process.env,
 ): { binary: string, pinned: boolean } {
+  // E2E_HOST_DIR points at a pinned install OUTSIDE the repository. It wins when present because Node resolves
+  // that binary's bare specifiers by walking ITS ancestors, and from inside the repo the walk climbs to
+  // `/home/<dev>/node_modules` — a developer's linked harness build that a CI runner does not have. Different
+  // mounted bundles mean a different composed system header (7,276 chars in the working copy against 2,783 in a
+  // clean clone, measured 2026-10-27), and the header is message 0: the key every tape matches on. Same fault
+  // #89 closed for binary identity; this is the resolution half it never covered.
+  const external = env.E2E_HOST_DIR
+  const externalBin = external === undefined || external === '' ? null : path.join(external, 'node_modules', '.bin', 'dsh')
+  if (externalBin !== null && exists(externalBin)) return { binary: externalBin, pinned: true }
   const pinned = path.join(rootDir, 'dev', 'dsh-host-lock', 'node_modules', '.bin', 'dsh')
   if (exists(pinned)) return { binary: pinned, pinned: true }
   return { binary: 'dsh', pinned: false }
