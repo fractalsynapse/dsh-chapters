@@ -1447,3 +1447,25 @@ at the pin, which is what I attempted and reverted when 15 existing `0.1.5-rc.x`
 conflict). (a) is the honest path and (b) is the clean one; doing (b) properly means aligning the repo's harness
 devDependencies to the single pin, which is a larger, riskier change that deserves its own issue and CI cycle
 rather than being folded into this branch.
+
+### Correction: replay already refuses to serve on a partial prefix (#56, 2026-10-27)
+
+Last round I named "replay serves nearest-prefix entries" as the acceptance blocker and queued a fix for it.
+Reading `findReplay` before writing that fix disproved it: it skips any entry whose `prefix.length !== inc.length`
+and then requires every element to be equal, ties resolved by newest `recordedAt`. There is no nearest-prefix
+serving to refuse — the hypothesis was wrong, and it was written into the plan as though it were established.
+
+What CI's artifact actually shows for `suite`: a 4-message request whose `msg0`/`msg1` match the capture and whose
+`msg2` carries `{"name":"glob","arguments":"{\"pattern\":\"src/**/*.ts\"}"}` where the capture has
+`{"name":"read","arguments":"{\"file_path\":\"src/compose.ts\",\"limit\":120}"}`. Since serving is exact-match,
+the only readings left are (a) the assistant turn the runner *recorded into its own history* came from a different
+tie-resolved entry than this machine's run did, or (b) the two machines' requests differ at an earlier position
+than the journal's "first miss" implies, because an earlier 503 was absorbed. (a) is checkable: the tie-break is
+newest `recordedAt`, so two entries that both match a 2-message prefix can serve differently — and `suite`'s
+capture has 6 entries where more than one shares a 2-message prefix.
+
+Next read, in order, and no matcher change until one of them lands: (1) for the runner's first request, list the
+tape entries whose prefix matches it exactly and show their `recordedAt` — if more than one, the tie-break is the
+mechanism and the fix is a deterministic tie (path/length, then newest) with a row, not a stricter gate; (2) if
+exactly one matched, then the divergence is upstream of msg2 and the diff dump needs to be taken at request one,
+not at the first miss.
