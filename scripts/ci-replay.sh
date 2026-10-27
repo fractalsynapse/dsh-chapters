@@ -76,6 +76,10 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromiu
 # completed with exit code 1" is not a bug report. The proxy journals every miss with
 # the prefixes it compared — that journal is the thing a maintainer needs.
 STATUS=0
+# Dump the composed system header once per leg into var/e2e-header-*.log, which the failure artifact uploads.
+# The miss journal truncates `got=` to 110 chars, and three rounds of reasoning about a 7,276-vs-2,783
+# header could not be settled by inference; the runner's own bytes can be diffed offline.
+export E2E_DUMP_HEADER=1
 E2E_MODEL=replay npm run test:e2e 2>&1 | tee var/ci-replay.log || STATUS=${PIPESTATUS[0]}
 if [[ "$STATUS" -ne 0 ]]; then
   # ONE annotation, not twenty. GitHub truncates a check run to 10 annotations, and

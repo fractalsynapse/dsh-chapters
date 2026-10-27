@@ -583,6 +583,25 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? Number(process.env.E2E_UPSTREAM_TIMEOUT_MS ?? 600_000)
   const stallWarnMs = opts.stallWarnMs ?? Number(process.env.E2E_UPSTREAM_STALL_MS ?? 60_000)
   let inFlight = 0
+  // E2E_DUMP_HEADER=1 writes the first system header this boot composes, once, to var/e2e-header-<tape>.log.
+  // Motivation is measurement hygiene, not logging: three rounds of reasoning about a 7,276-char header here
+  // against 2,783 on a runner could not be settled by inference, and the miss journal truncates `got=` to 110
+  // chars. The artifact CI already uploads can carry the whole text, so the diff is byte-exact and offline.
+  // No secrets: this is the composed prompt, and the bearer header never reaches this path.
+  let headerDumped = false
+  const dumpHeader = (messages: string[]): void => {
+    if (headerDumped || process.env.E2E_DUMP_HEADER !== '1') return
+    const sys = messages.find((m) => m.includes(String.fromCharCode(34) + "role" + String.fromCharCode(34) + ":" + String.fromCharCode(34) + "system" + String.fromCharCode(34)))
+    if (sys === undefined) return
+    headerDumped = true
+    try {
+      // Derived, not hardcoded: model-proxy has no ROOT of its own, and re-typing the repo path is how the
+      // #89 class of drift is born. The tape dir is `<repo>/tests/fixtures/model-tape/<name>`.
+      const repoRoot = path.resolve(opts.tapeDir, '..', '..', '..', '..')
+      fs.writeFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\n${sys}\n`)
+    } catch { /* diagnostics never break a leg */ }
+  }
+
   const journal = (line: string): void => {
     try { fs.appendFileSync(activityLog, `${new Date().toISOString()} tape=${tapeName} ${line}\n`) } catch { /* visibility never breaks the run */ }
   }
@@ -679,6 +698,9 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let sawBytes = 0
         let firstByteMs = -1
         journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
+        // messagesOf() yields parsed objects; String(object) is "[object Object]" and would silently never
+        // match. Serialize the way the matcher and the miss journal already do.
+        dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")))
         // watchdogs live in pumpUpstream now, PER ATTEMPT — arming them here too would
         // double-answer the client and keep the process alive after the run (#54).
         // Buffered pump with bounded throttle-retry (#54). The only behavioral difference
