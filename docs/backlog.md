@@ -1469,3 +1469,23 @@ tape entries whose prefix matches it exactly and show their `recordedAt` — if 
 mechanism and the fix is a deterministic tie (path/length, then newest) with a row, not a stricter gate; (2) if
 exactly one matched, then the divergence is upstream of msg2 and the diff dump needs to be taken at request one,
 not at the first miss.
+
+### `coverage:e2e` under one-boot-per-journey now fails in `prompt` on a sidebar wait (#56, #129, 2026-10-27)
+
+With `test:e2e:replay` routed through `scripts/chain-replay.sh`, the coverage run gets nine legs green and then
+`prompt` times out in the rig's own view-adoption step:
+
+    Test timeout of 300000ms exceeded — locator.click waiting for
+    locator('[role="treeitem"]').filter({ hasText: 'Reply with exactly: OK' }).first()      at session.ts:945
+
+The earlier failure mode there was `identity mismatch: dir claims session session-2ba8…, spec targets 2ba8…`, and
+that was a real bug — one session, two spellings (the durable log keeps the `session-` prefix, the view does
+not) — now fixed by `sameSessionId()` with a red-first row. What remains is different: the session's tree row
+never carries the question text while V8 coverage is instrumenting the boot.
+
+Deliberately NOT done: raising the timeout until it passes. A click that waits for a label that never appears is
+a signal about what the view is showing, and a longer wait converts a real finding into a green row — the exact
+"green tests, dead product" failure this branch exists to refuse. The next read is the sidebar's actual contents
+at that moment (dump `role=treeitem` texts plus `dsh.sessions.current` under `E2E_COVERAGE=1`), which will say
+whether the row is unlabeled, labeled with a stale title, or absent because the title response served under
+coverage belongs to a different session.
