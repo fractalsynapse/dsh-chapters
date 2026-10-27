@@ -640,12 +640,23 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const webNm = path.join(E2E_HOME, 'profiles', 'web', 'node_modules')
     const list = (d: string): string[] => { try { return fs.readdirSync(d) } catch { return [] } }
     const patchFile = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
-    const patchIds = (() => { try { return [...fs.readFileSync(patchFile, 'utf8').matchAll(/^-\s+id:\s*(\S+)\s*$/gm)].map((x) => x[1]).join(',') } catch { return 'unreadable' } })()
+    // ALL ids, including the indented rows: the tracked seed is 786 bytes while the file a boot ends up with is
+    // 10,619 — the HOST expands defaults into the profile patch at startup. The tools a session registers come
+    // from the nested rows (`tool-bash`, `tool-fs`, `tool-jobs`, …) under `preset-chapters`, and my earlier
+    // report only matched top-level `- id:` lines, so it could not see the difference that matters: the runner
+    // registers 7 tools and this host registers 34 for the SAME project.
+    const patchAll = (() => {
+      try {
+        const text = fs.readFileSync(patchFile, 'utf8')
+        const ids = [...text.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gm)].map((x) => x[1])
+        return `count=${String(ids.length)}:${ids.join(',')}`
+      } catch { return 'unreadable' }
+    })()
     fs.writeFileSync(path.join(ROOT, 'var', `e2e-home-plugins-${String(port)}.log`),
       `node_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\n`
       + `treeseed=${list(path.join(webNm, '@treeseed')).join(',')}\n`
       + `deepseek-ai=${String(list(path.join(webNm, '@deepseek-ai')).length)}:${list(path.join(webNm, '@deepseek-ai')).slice(0, 12).join(',')}\n`
-      + `patchPluginIds=${patchIds}\n`)
+      + `patchPluginIds=${patchAll}\n`)
   } catch { /* a report must never break a boot */ }
   return {
     url: m[0],
