@@ -30,23 +30,23 @@ export interface RigPin {
 }
 
 export const RIG_PINS: Record<string, RigPin> = {
-  suite: { port: 41731, threshold: '0.75' },
+  suite: { port: 41731, threshold: '0.75' , noAuxModel: true },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
   heavy: { port: 41733, threshold: '0.9', floor: '1000000', maxRetries: 3 },
-  arrival: { port: 41732, threshold: '0.9', floor: '500' },
-  enrich: { port: 41734, threshold: '0.9', enrich: true },
-  fanout: { port: 41736, threshold: '0.75' },
-  rules: { port: 41735, threshold: '0.9' },
-  fork: { port: 41737, threshold: '0.75' },
+  arrival: { port: 41732, threshold: '0.9', floor: '500' , noAuxModel: true },
+  enrich: { port: 41734, threshold: '0.9', enrich: true , noAuxModel: true },
+  fanout: { port: 41736, threshold: '0.75' , noAuxModel: true },
+  rules: { port: 41735, threshold: '0.9' , noAuxModel: true },
+  fork: { port: 41737, threshold: '0.75' , noAuxModel: true },
   plans: { port: 41738, threshold: '0.99', noAuxModel: true },
   // The bar's own leg: its own port (one journey, one boot) and a 32K-friendly threshold like
   // its neighbours. Nothing about it is special beyond `prompt: true`.
-  prompt: { port: 41739, threshold: '0.9', prompt: true },
+  prompt: { port: 41739, threshold: '0.9', prompt: true , noAuxModel: true },
   // The OFF half of the same switch, on its own port. Without it the negative assertion could only ever skip
   // (it lived in the project that turns the feature ON), which is a test that cannot fail — the exact shape of
   // vacuous green this repo keeps being bitten by (#113, and #54 before it).
-  'prompt-off': { port: 41740, threshold: '0.9' },
+  'prompt-off': { port: 41740, threshold: '0.9', noAuxModel: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
