@@ -839,3 +839,23 @@ conversation that did not happen. Two honest options, in order of preference:
 
 Option 1 is the right one if achievable, because it preserves what the leg proves. Either way the corpus stays
 unstamped and `heavy` stays red in the chain until it is fixed — no skip, no widening.
+
+### Autorun's idle edge: measured to the edge of what the host exposes (2026-10-27)
+
+Props the dock actually receives (printed once, then the probe was removed):
+`usePanelInfo, useSessions, useSessionStatus, useWorkspaces, useResource, useSessionRetainInfo, sessionId,
+inputActions, useSession, useConversation, useInput, useTrajectory, useChat, useProjection,
+renderFactorySlot, exec, session, input`.
+
+So `useSessionStatus` IS provided — my first two guesses (scalar prop, absent hook) were both wrong. But
+calling it with an identity selector yields an object with **no enumerable keys** (`statusKeys=` empty), so
+`deriveRunning` has nothing to fold and `running` stays `undefined`, which keeps Autorun disabled. The leg now
+asserts arm-ability and stays red on that assertion: the honest state is "not shipped, and the reason is
+measured", not "works" and not "removed because inconvenient".
+
+Next attempts, cheapest first: (1) `useSession` / `useChat` / `useConversation` are alternates carrying status
+in this host family — try the same identity-selector read on each and print key counts once; (2) if all are
+opaque, the dock hook contract needs a selector the host understands (a projection name, like the goal bar's
+`useProjection("goal")`), and `docs/contract.md` § "What a dock component is handed" should record which;
+(3) only if none work, `#126` grows a second paragraph: the dock cannot observe idle or write the composer, so
+Autorun is not arm-able on 0.2.0-rc.2 and the bar ships with that stated.

@@ -97,6 +97,13 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     await expect(bar.locator('button[aria-label="Run the suggested next step"]'), 'Run').toBeVisible({ timeout: 30_000 })
     await expect(bar.locator('button[aria-label="Autorun"], button:has-text("Autorun")').first(), 'Autorun').toBeVisible()
     await expect(bar.locator('button[aria-label="Turn prompt suggestions off for this session"], button:has-text("Off")').first(), 'Off').toBeVisible()
+
+    // Autorun must be ARM-ABLE, not merely present. The gate reads the host's idle signal; the leg asserts the
+    // button is enabled so "we wired the hook correctly" is something the browser can refute. If this fails, the
+    // dock prop is not the hook we assumed and the claim stays unshipped. (#113)
+    const autorun = bar.locator('button[aria-label="Autorun"], button:has-text("Autorun")').first()
+    await expect(autorun, 'Autorun is offered').toBeVisible()
+    await expect(autorun, 'Autorun is arm-able: the host published an idle signal').toBeEnabled({ timeout: 15_000 })
   })
 
   test('clicking the expanded prompt puts the WHOLE prompt in the composer for editing', async ({ page }) => {
