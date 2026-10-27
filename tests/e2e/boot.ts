@@ -176,6 +176,45 @@ export function rigChildEnv(base: NodeJS.ProcessEnv, opts: { home: string; port:
   return { ...env, ...(opts.extra ?? {}) }
 }
 
+/**
+ * Which entries of the untracked developer home may enter a rig boot (#89 LAYER FOUR, pinned here so the rules
+ * are testable instead of commented).
+ *
+ * The throwaway home is authoritative for nothing except the TRACKED seeds written by `seedRigHomeFromUntrackedDevCopy`
+ * below, so almost everything from `.dshdev-local` is refused: `settings.yaml` and `profiles/web/cordis.patch.yml`
+ * are replaced by their tracked seeds, the whole `profiles/` tree (18 MB of whatever node_modules the last dev run
+ * installed — and WHICH plugins a profile mounts decides WHICH instruction paragraphs the host composes, measured
+ * as 2,783 header chars on a runner against 7,276 here), and the `sessions/` plus `storages/<domain>` state of the
+ * developer's own work.
+ */
+export function shouldCopyIntoRigHome(rel: string): boolean {
+  if (rel === 'settings.yaml') return false
+  if (rel === path.join('profiles', 'web', 'cordis.patch.yml')) return false
+  if (rel.startsWith('profiles')) return false
+  if (rel === '') return true
+  if (rel === 'storages') return true
+  if (rel === path.join('storages', 'workspace.json')) return true
+  if (rel.startsWith('sessions')) return false
+  if (rel.startsWith('storages' + path.sep)) return false
+  if (rel.startsWith('dsh-c')) return false // the plugin's own storage domain, never the developer's
+  return true
+}
+
+/**
+ * Copy what is allowed from the untracked dev home, and treat its ABSENCE as normal.
+ *
+ * A fresh clone (CI's runner, or any developer's first checkout) has no `.dshdev-local` — it is gitignored — and
+ * the boot used to throw there, which meant the rig could only ever be run by a machine that had previously run
+ * the dev profile. That is the same fault this file keeps correcting: a test bed that works only where it was
+ * first built. The tracked seeds are written regardless, so an absent dev home yields a complete, if emptier, boot.
+ */
+export function seedRigHomeFromUntrackedDevCopy(root: string, home: string): { copied: boolean, reason: string } {
+  const src = path.join(root, '.dshdev-local')
+  if (!fs.existsSync(src)) return { copied: false, reason: 'no untracked dev home in this checkout; tracked seeds are authoritative' }
+  fs.cpSync(src, home, { recursive: true, filter: (p) => shouldCopyIntoRigHome(path.relative(src, p)) })
+  return { copied: true, reason: 'filtered copy of the untracked dev home' }
+}
+
 export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandle> {
   // proxy port derived from the boot port (+1000): per-project and per-rerun
   // collision-free (a hard-coded proxy port turned one killed run's orphan
@@ -234,22 +273,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // like: 6 messages here, 2 on CI, after settings.yaml was already made tracked. Both seeds now come
   // from git; the untracked profile copy is excluded. (#89)
   const PROFILE_SEED = path.join(ROOT, 'tests', 'e2e', 'fixtures', 'dev-profile-cordis.patch.yml')
-  fs.cpSync(path.join(ROOT, '.dshdev-local'), E2E_HOME, { recursive: true, filter: (src) => {
-    const rel = path.relative(path.join(ROOT, '.dshdev-local'), src)
-    if (rel === 'settings.yaml') return false // the tracked seed is written below, always
-    if (rel === path.join('profiles', 'web', 'cordis.patch.yml')) return false // ditto (#89)
-    // LAYER FOUR (#89, and the one the enumeration predicted rather than stumbled into): the whole
-    // `profiles/` tree — 18 MB of node_modules installed by whoever last ran the dev profile — was
-    // copied into every throwaway home. Which plugins a profile has mounted decides which
-    // instruction paragraphs the host composes, and the CI tape diff proved that is what differed:
-    // 2,783 header chars there against 7,276 recorded here, diverging at char 141, mid-sentence,
-    // because the recorded boot had paragraphs (tool guidance rows) the runner's profile never had.
-    // Profiles now come from a base built by the SAME script CI runs, below.
-    if (rel.startsWith('profiles')) return false
-    return rel === ''
-      || rel === 'storages' || rel === 'storages/workspace.json'
-      || (!rel.startsWith('sessions') && !rel.startsWith('storages' + path.sep) && !rel.startsWith('dsh-chapters') && !rel.startsWith('.dsh-chapters'))
-  } })
+  seedRigHomeFromUntrackedDevCopy(ROOT, E2E_HOME)
   {
     const seeded = fs.existsSync(SETTING_SEED)
     if (!seeded) throw new Error(`e2e boot: the tracked profile seed is missing (${path.relative(ROOT, SETTING_SEED)}). `
