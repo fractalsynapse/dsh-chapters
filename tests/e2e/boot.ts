@@ -6,6 +6,7 @@ import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:chil
 import { describeRoute, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { reapOrphanBoots } from './boot-reap.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -445,7 +446,20 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     s.once('connect', () => { s.destroy(); resolve(true) })
     s.once('error', () => { s.destroy(); resolve(false) })
   })
-  if (busy) {
+  // The port is OURS to reclaim when the holder is this repo's own orphaned boot for this port: a crashed or
+  // Ctrl-C'd run leaves one behind forever, and telling a human to `pkill -f "dsh web --port <n>""` is advice
+  // whose pattern also matches the shell that runs it (measured: my own pkill killed my own check) and can
+  // match the live harness (`node …/dsh web --no-open` is this session's parent). So reap by parsed ps rows
+  // with the repo-root and port constraints, and say which pids were signalled.
+  const reaped = busy ? await reapOrphanBoots(port, ROOT, (line) => console.log(line)) : []
+  const stillBusy = busy && reaped.length > 0
+    ? await new Promise<boolean>((resolve) => {
+        const s = net.connect(port, '127.0.0.1')
+        s.once('connect', () => { s.destroy(); resolve(true) })
+        s.once('error', () => { s.destroy(); resolve(false) })
+      })
+    : busy
+  if (stillBusy || (busy && reaped.length === 0)) {
     throw new Error(`e2e boot: port ${port} is already in use — an earlier run's server survived teardown; kill it (pkill -f "dsh web --port ${port}") or pick another E2E_PORT`)
   }
 
