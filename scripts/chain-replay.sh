@@ -45,6 +45,23 @@ for leg in $LEGS; do
     FAILED+=("$leg")
     tail -4 "var/chain-replay-$leg.log" | sed 's/^/    /' | cut -c1-140
   fi
+  # Carry the throwaway home's durable logs into the workspace so they reach the CI artifact. E2E_HOME lives under
+  # /tmp, OUTSIDE the repo, so every diagnostic uploaded so far has been blind to the one thing that settles
+  # "did this session already contain a tool turn": the runner's own session log. Measured need: CI reported a
+  # 4-message request whose msg2 held a `glob` call while the capture's first request has no call at that index,
+  # and `findReplay` requires equal prefix length, so prefix collision is impossible — the remaining explanation
+  # is state in the booted session, which is exactly what these files can prove or kill. Bounded per leg.
+  for src_home in /tmp/dsh-e2e/e2e-home-417[0-9][0-9]; do
+    [[ -d "$src_home/sessions" ]] || continue
+    port_part=$(basename "$src_home" | sed 's/e2e-home-//')
+    [[ "$port_part" == "${PORT:-}" ]] || continue
+    dest="var/e2e-session-logs/$leg-$port_part"
+    mkdir -p "$dest" 2>/dev/null || continue
+    find "$src_home/sessions" -name 'session.v4.jsonl.zstd' -size -4M 2>/dev/null | head -6 |
+      while read -r f; do cp "$f" "$dest/$(basename "$(dirname "$f")").zstd" 2>/dev/null || true; done
+    cp "$src_home/sessions"/*/registry.json "$dest/registry.json" 2>/dev/null || true
+  done
+
   # Strays from a killed leg hold the next leg's ports, which turns one failure into a cascade of meaningless
   # ones (measured repeatedly on this branch): clear by cwd so only this rig's processes are touched.
   for p in $(pgrep -f "dsh web --port 4173" 2>/dev/null); do
