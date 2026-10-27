@@ -38,7 +38,7 @@ if [[ -z "${E2E_UPSTREAM:-}" ]]; then
 fi
 
 # project:port — DISPLAY ONLY (the boot port comes from the project env in playwright.config.ts)
-declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739)
+declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739 [prompt-off]=41740)
 # #56: THRESHOLD/EXTRA tables DELETED. The regime lives in `playwright.config.ts` as
 # per-project `env`, because three copies (this file, `npm run test:e2e`, boot defaults) had
 # silently diverged: replay booted suite/rules/fork with no threshold while distill had recorded
