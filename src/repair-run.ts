@@ -25,6 +25,7 @@ import { appendChapters, releaseReservation, type SessionState } from './registr
 import { parseFrontmatter } from './indexing.ts'
 import type { ChapterRecord } from './archive.ts'
 import { resolveStoredPath } from './archive.ts'
+import { resolveStoreRoot } from './store.ts'
 import type { RegistryStore } from './store.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import type { SessionEventLike } from './types.ts'
@@ -143,7 +144,7 @@ export function fileSetFromDisk(cwd: string, storeRoot: string, rootSession: str
     // starts, both measured on the first real run: `listDir` returns FILES, so every chapter became a
     // "second root" (36,000 findings), and then every OTHER SESSION's legitimate tree did (634). One
     // directory per root session is the normal shape of this store — litter is a directory nothing owns.
-    roots: subdirs(path.join(cwd, storeRoot)).filter((d) => !knownRoots.includes(path.basename(d))),
+    roots: subdirs(resolveStoreRoot(cwd, storeRoot)).filter((d) => !knownRoots.includes(path.basename(d))),
     // the #58 signature is a fact about the BYTES, so read it from the bytes
     looksLikeShell: (p) => {
       try {

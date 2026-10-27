@@ -27,7 +27,7 @@ import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
 import { appendChapters, reserve } from './registry.ts'
-import { acquireChapterStore, makeDomainStore } from './store.ts'
+import { acquireChapterStore, makeDomainStore, resolveStoreRoot} from './store.ts'
 import type { ChapterRecord } from './archive.ts'
 import { registerChaptersTools } from './tools.ts'
 import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLike } from './preset.ts'
@@ -388,7 +388,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       // armed on the scheduler, because session rules never travel (§7.5).
       onMinedRules: async ({ cwd, sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
         const res = captureMinedRules({
-          storeDir: join(cwd, config.artifactStoreRoot),
+          storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot),
           harnessId: config.harnessId,
           sessionId,
           records: store.rules(),
