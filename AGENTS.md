@@ -422,14 +422,24 @@ missing assistant row was failing because the tape proxy joined its upstream bas
 doubled `/v1/v1` — no model answer, so no door, no plan card, no markers. Fixed, and `rules`, `explore-dev`,
 `fork`, `arrival`, `fanout`, `enrich`, `plans`, `suite` and `heavy` then recorded green; the Suggested Next Step
 bar has its own legs (`prompt`, and `prompt-off` for the switch's other half) and **passes in Chromium in both
-record and replay**. **Measured 2026-10-27:** the whole-chain strict replay is green as one run (Playwright's own project order,
-no provider, no credential) and **green twice consecutively**, `CORPUS_HOST` is re-stamped with it
-(`lib=fcd1e375bab82d3d`, `distilledAt = 2026-10-27`), and `coverage:e2e` was re-taken against that corpus
-(All files 77.94%). CI's deterministic job (typecheck · build · unit + integration, branch gate 85%) is green;
-CI's **acceptance** job is red with a named cause — a GitHub runner assembles a session with only our seven
-`chapters_*` tools where a development host assembles 34, so message 0 (the tape key) cannot match a
-locally recorded corpus; the rig aborts with `MOUNT FAULT` rather than mask it (evidence and the eliminated
-classes: docs/backlog.md). Still open there: a dock cannot write the composer on 0.2.0-rc.2 (`insertText` raises
+record and replay**. **Measured later on 2026-10-27, superseding the paragraph above on three points:** (1) the
+chain's shape was itself a defect — `globalSetup` boots ONE server from the setup process's environment while
+Playwright gives a project's `env` only to workers, so nine legs replayed in the first leg's realm and home (#129);
+`npm run test:e2e:replay` now runs **one boot per journey** (`scripts/chain-replay.sh`), the shape the corpus is
+recorded in, and against that runner the current corpus captured ten-for-ten (`D2=0`) and replayed **green twice**
+(`K1=0`, `K2=0`), with `CORPUS_HOST` re-stamped (`lib=b5e15a0de600f6dd`). (2) `coverage:e2e` is **not** green on
+that corpus: nine legs pass and `prompt` times out inside the full instrumented run on a sidebar row that never
+becomes actionable, while the same leg passes alone with and without instrumentation — open, and deliberately not
+fixed by raising a timeout. The 77.94% figure belongs to the earlier corpus. (3) CI's **acceptance** job no longer
+fails on `MOUNT FAULT`: the 7-vs-34 tool asymmetry was root-caused (the preset's rows name 28 `@deepseek-ai/*`
+packages, **none a dependency of this repo**, so a runner resolved nothing and our preset silently pruned them) and
+closed by `linkPinnedToolPackages()` running **before** the spawn; the runner now assembles 34 tools and gets far
+deeper, failing on conversation content (its first assistant turn carries a different tool call than the capture,
+`glob` where the tape has `read`) after two machine-identity folds (the harness checkout path, already blind via
+`<DSH-CHECKOUT>`, and both spellings of the runtime time zone). Acceptance is therefore **still red**, for a
+different and narrower reason; evidence and eliminated classes: docs/backlog.md. CI's deterministic job
+(typecheck · build · unit + integration, branch gate 85%) remains green on this branch. Still open there: a dock cannot
+write the composer on 0.2.0-rc.2 (`insertText` raises
 `draftRev`, `setDraft` mirrors only at mount), so click-to-draft shows an explanation and Run submits instead;
 tracked as #126. And the Autorun **displaces the goal's continuation** pixel is still unobserved in a browser —
 arm-ability is observed (`suite`/`prompt` legs, 4 passed), displacement is not, so it is not claimed.
