@@ -602,7 +602,13 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
       // subset of ours (2,847 chars / 26 sentences against 7,276 / 64, zero CI-only sentences), which means the
       // runner EXPOSES FEWER TOOLS rather than composing different prose. Names only, never descriptions.
       const names = Array.isArray(tools)
-        ? (tools as Array<Record<string, unknown>>).map((t) => String(t?.name ?? '?')).sort().join(',')
+        // OpenAI-wire shape: `{ type:'function', function:{ name } }`. Reading only `t.name` printed seven
+        // question marks on CI — a probe whose output is unknowable is worse than no probe (AGENTS.md: measure
+        // the payload SHAPE, not its presence).
+        ? (tools as Array<Record<string, unknown>>).map((t) => {
+            const fn = t?.function as Record<string, unknown> | undefined
+            return String(fn?.name ?? t?.name ?? '?')
+          }).sort().join(',')
         : 'none-reported'
       fs.writeFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\ntools=${String(Array.isArray(tools) ? tools.length : 0)}\nnames=${names}\n${sys}\n`)
     } catch { /* diagnostics never break a leg */ }
