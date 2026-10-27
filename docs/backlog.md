@@ -1392,3 +1392,31 @@ should start from `dsh-agent-preset` and the `agent-preset-registry` row, not fr
 Meanwhile the facts that are settled and useful: CI's deterministic job is **green** (branch gate 85.0%,
 1,257+ rows, 0 fail) and the corpus is committed as one change with the strict chain green twice locally. The
 acceptance job stays red with a named cause, and #127 stays open because acceptance must pass before a merge.
+
+### The tool gap, narrowed to the host's assembly, with the last two local explanations closed (2026-10-27)
+
+After bubblewrap was provisioned and namespaces verified (`userNamespaceTest=ok`), the runner still composes
+`tools=7 / chars=2893` against `tools=34 / chars=7396` here. Two more classes now have evidence against them:
+
+- **Our preset pruned rows on CI.** `buildPresetRows()` returns `dropped[]` and `src/preset.ts:274` logs
+  `preset "<id>" registered — dropped N row(s)`. That line is absent from CI's per-port server log — and also
+  absent locally, because the local log holds the same two `[chapters-prompt]` lines and nothing more, so the
+  absence proves nothing either way. The drop path is therefore **not evidenced**, only unfalsified; treat it as
+  a hypothesis, not a finding.
+- **Our plugin is not mounted on the runner.** Refuted: CI's server log carries our own runtime lines
+  (`[chapters-prompt] turn/end sighted session=session-23f5877b…`, `prompt: not enabled (no defining model) —
+  round skipped`), so our plugin is alive there and contributes exactly the seven `chapters_*` tools.
+
+So the remaining question is squarely host-side: what makes a session assembled from the `chapters` preset
+expose the standard tool surface on this machine and not on a GitHub runner, given identical packages,
+identical profile rows (44 ids, the same 21 `tool-*` rows), identical `config`/`adapterDefaults`, working
+sandboxing, and no logged pruning. Two ways forward, both cheap to the person who can run them:
+
+1. run the acceptance chain on a machine with an interactive host install (the maintainer's laptop) and compare
+   the header dump — this reproduces the 34-tool case and can be bisected with `preset`/`agentPresets`
+   introspection the host already owns;
+2. or make acceptance able to distill on the runner (route credential as a repository secret), which sidesteps
+   the asymmetry entirely: the corpus is then recorded by whatever the runner assembles.
+
+I am not adding a header blind to make CI green, and I am not claiming the cause. Everything else in the
+objective's pipeline is measured and stated above.
