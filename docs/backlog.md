@@ -1012,3 +1012,28 @@ seeded profile rather than ambient state, so clone and working copy compose the 
 class as everything else today, authority in tracked seeds; (2) confirm with `suite` alone that the fork door
 appears in the clone; (3) only then run the full ten legs there, then the strict chain there, then stamp and
 commit. Do not assume a stall means "slow": the journal said the last request finished 11 minutes earlier.
+
+### Clone stall: located to `a-knowledge-loop.spec.ts:41`, but NOT yet explained (2026-10-27)
+
+Established by measurement, including two of my own wrong inferences corrected in place:
+
+- The clone's `suite` leg stalls at `a-knowledge-loop.spec.ts:41` after 5 tape entries; the last model traffic is
+  `DONE status=200` and the server's last line is `turn/end sighted seq=35`, so the turn completed and the journey
+  moved past it. Silence then lasts 10+ minutes with no further requests.
+- **Wrong inference #1 (mine, from an hour ago):** `[chapters-prompt] prompt: not enabled (no defining model)` is
+  printed by BOTH the local and the clone boot, so `promptModel` is not the clone difference. I had written it up
+  as the next fix; it is not, and that correction is in the commit that followed.
+- **Wrong inference #2 (partly):** I expected my new bounded door assertion to fail fast and name the door. It has
+  not produced a failure, so the stall is not obviously the door click — it is somewhere later in the journey
+  (the pool push/search steps are the remaining candidates with long polls), or the assertion is being satisfied
+  and the wait is downstream.
+
+What would settle it, and is the next action: run the clone's suite leg with Playwright's reporter verbose plus a
+shorter per-test timeout (or split the spec's steps), and read which `expect.poll` is live when it hangs — the
+sink and journal already show there is no model traffic, so it is a browser-side wait. Do NOT re-run the full
+ten-leg scratch distill until that is answered; a batch that stalls on leg 1 for 5,400s produces nothing and the
+sync-back guard (correctly) refuses to copy anything.
+
+Also true and worth keeping: the guard worked as designed — the earlier scratch failure synced nothing back and
+the committed corpus is intact at 33 suite files, because I restored it with `git checkout` after the first
+destructive version of the script.
