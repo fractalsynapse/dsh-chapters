@@ -709,7 +709,18 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
                 })
               : []
             const fault = mountFault(declared, names)
-            if (fault !== null) journal(fault)
+            if (fault !== null) {
+              // Delivery is the point, and `journal()` alone was not enough: it writes the ACTIVITY log
+              // (`var/e2e-upstream.log`), while the rig-fault guard aborts on the misses journal and the CI
+              // annotation reads stdout. My first version therefore printed a fault on CI that nothing watched
+              // and nothing showed — a detected failure delivered to a file no one reads is the same bug as not
+              // detecting it (AGENTS.md). So: activity log, the watched journal, and stderr.
+              journal(fault)
+              try {
+                if (opts.journalPath !== undefined) fs.appendFileSync(opts.journalPath, `${new Date().toISOString()} tape=${tapeName} ${fault}\n`)
+              } catch { /* delivery is best effort, never a second failure */ }
+              console.error(fault)
+            }
           } catch { /* an unreadable profile is not this check's business; the boot itself reports that */ }
         }
         // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape

@@ -616,7 +616,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   const m = /http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.exec(log)
   if (m === null) {
     child.kill('SIGKILL')
-    throw new Error(`e2e boot failed within 60s (port ${port})\n${log.slice(-1500)}`)
+    throw new Error(`e2e boot failed within ${String(Math.round(deadline - Date.now()))}ms of waiting (port ${port}) — the ceiling is E2E_BOOT_TIMEOUT_MS, default 120000\n${log.slice(-1500)}`)
   }
   const bootRecord = JSON.stringify({
     url: m[0], port,
