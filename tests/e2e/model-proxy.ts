@@ -594,7 +594,21 @@ export const MOUNT_REQUIREMENTS: Record<string, string> = {
 first version of the mount check did (TS2448/TS2339). */
 export function rigProfilePatchPath(homeDir: string): string { return path.join(homeDir, 'profiles', 'web', 'cordis.patch.yml') }
 
+// The minimum surface every e2e journey actually uses — `read`/`bash`/`edit`/`write` appear in the prompts of
+// the legs, so a session without them cannot reproduce any recorded conversation. Expressed as a fixed core
+// rather than derived from the profile because I measured that the profile's `tool-*` rows are NOT a reliable
+// signal at request time: the host rewrites the patch mid-run, so the file can read 43 ids when the first
+// request is already in flight and carry the rows only later.
+export const RIG_CORE_TOOLS = ['bash', 'read', 'edit', 'write'] as const
+
 export function mountFault(declaredIds: string[], registeredNames: string[]): string | null {
+  const missingCore = RIG_CORE_TOOLS.filter((t) => !registeredNames.includes(t))
+  if (missingCore.length > 0) {
+    return `MOUNT FAULT: the session registered none of the core tools every journey needs — missing: `
+      + `${missingCore.join(', ')} (declared=${String(declaredIds.length)} registered=${String(registeredNames.length)} `
+      + `registered=${registeredNames.slice(0, 8).join('|')}) — this boot cannot produce a tape any other machine `
+      + `will replay, so it is refused rather than recorded`
+  }
   const missing = Object.entries(MOUNT_REQUIREMENTS)
     .filter(([row, tool]) => declaredIds.includes(row) && !registeredNames.includes(tool))
     .map(([, tool]) => tool)

@@ -29,13 +29,26 @@ test('the runner-shaped registration is refused loudly, naming what is missing',
   const fault = mountFault(DECLARED, chaptersOnly)
   assert.notEqual(fault, null, 'seven plugin tools against a profile that declares tool-bash is a FAULT, not a pass')
   const text = String(fault)
-  for (const needle of ['bash', 'read', 'create_goal', 'todo_write', 'web_fetch']) {
-    assert.ok(text.includes(needle), `the message must name ${needle} so a reader knows which row went unregistered: ${text}`)
+  // The contract changed with the implementation, and this is the honest place to say so: the guard keys on the
+  // REGISTERED core surface (bash/read/edit/write — what every leg's journey actually calls), because I measured
+  // that the profile's declared `tool-*` rows are not a reliable signal at request time (the host rewrites the
+  // patch mid-run, so 43 ids can be on disk while the first request is already in flight). Plugin-only
+  // registration is refused on the core four; the message still names the family representatives so a reader
+  // sees the shape of what fell off.
+  for (const needle of ['bash', 'read', 'edit', 'write']) {
+    assert.ok(text.includes(needle), `the message must name the missing core tool ${needle}: ${text}`)
   }
   assert.match(text, /declared=\d+ registered=\d+/, 'it carries the counts, not just prose')
+  assert.match(text, /registered=/, 'it echoes what WAS registered, so the reader sees the 7-tool surface')
+  assert.ok(text.includes('chapters_rules'), 'the registered list is named in the fault: ' + text)
 })
 
-test('a profile that declares no tool rows is not held to a tool surface', () => {
-  assert.equal(mountFault(['preset-chapters', 'llm-gate'], FULL), null, 'no declared tools → nothing to require')
-  assert.equal(mountFault([], []), null, 'an empty profile and empty surface is not this check\'s business')
+test('the requirement is the core surface, not the profile text', () => {
+  // A profile that declares nothing but a session that registers the core is fine: the check is about what the
+  // model can actually call, so the declared list is context in the message, not the predicate.
+  assert.equal(mountFault(['preset-chapters', 'llm-gate'], FULL), null, 'core present → no fault, declared rows irrelevant')
+  // And a session with NO tools at all is the loudest possible fault — that boot cannot run any journey.
+  const fault = mountFault([], [])
+  assert.notEqual(fault, null, 'an empty registered surface must be refused, not skipped')
+  assert.match(String(fault), /registered=0/, 'it says the surface is empty: ' + String(fault))
 })
