@@ -641,3 +641,21 @@ the harness row), and CI replays whatever is committed. So its `acceptance — t
 for a reason already diagnosed, and its annotation cannot tell me anything new. The sequence that resolves it
 is fixed by the diagnosis, not by urgency: uniform re-distill (running) → one coherent corpus commit → CI-shaped
 chain green locally → read CI again. A red job that was predicted from known state is a checkpoint, not a bug.
+
+### A re-distill must be one pass over a FROZEN regime (learned the hard way, 2026-10-27)
+
+What happened, in order: I committed a global change to the rig's retry regime, launched the uniform distill
+under it, discovered the change was wrong for `arrival`, reverted it to a per-leg pin mid-flight, and then
+expected the half-distilled corpus to replay. It could not. `suite` recorded 7 entries **with retries on** and
+replayed **with retries off**, so it missed at `msg3` — a corpus whose legs were distilled under three different
+regimes, and every failure downstream of that looks like a matcher bug or a product bug.
+
+The rule, plainly: the regime set (ports, thresholds, floors, retry policy, provider identity, and now
+`hostRetries`) is frozen *before* the corpus is distilled, in one uninterrupted pass, and the pass is what gets
+committed together with `CORPUS_HOST`/`BUILD_STAMP`. A regime change discovered mid-distill means the distill is
+restarted, not patched leg-by-leg — mixing tapes from different regimes is precisely the "mixed tree" failure I
+documented an hour earlier, and I walked into it anyway because the temptation was to fix one leg at a time.
+
+Current state after this lesson: heavy passes with its declared `hostRetries: true` (distill exit=0, 19
+entries), arrival's 122-entry junk tape was discarded and restored from git, and one uniform pass over the final
+regimes is running.
