@@ -610,3 +610,26 @@ Order of work:
 Also true now and worth keeping: `prompt-off` distills (1 passed, 20.5s) and is in the distiller's `ORDER`;
 the `prompt` tape is 14 entries where it had been 546, because `distill-tapes.sh` clears each project's tape
 directory first and my ad-hoc `MODE=record` loops had been accumulating instead.
+
+### The corpus tree is currently MIXED across header shapes — do not commit it as the re-anchor (2026-10-27)
+
+Where each leg's tape stands after the placement fix, and what it implies:
+
+| leg | distilled under | state |
+|---|---|---|
+| `suite`, `arrival`, `enrich`, `fanout`, `rules`, `fork`, `prompt`, `prompt-off` | CI shape (provider `local`) | re-distilled green; replays green for `suite` (4 passed, 37.2s) |
+| `heavy` | **harness profile** (`E2E_HARNESS_PROFILE=1`) | passes only in that shape (1 passed, 53.5s); its tape is therefore NOT CI-replayable |
+
+So `heavy` is the last leg to land, and it needs a **row fix, not a re-run**: the synthesized `local` provider
+row in `boot.ts` sets `retryPolicy: { mode: normal, maxRetries: 0 }`, which the ambient row does not set, and
+that difference alone flips heavy from pass to fail. The decision, in order:
+
+1. remove the `maxRetries: 0` override from the synthesized row (host default) and re-distill **heavy alone**;
+2. if the leg then passes in CI shape, re-distill any leg whose behavior depended on that retry suppression —
+   the honest default is to re-distill the whole set once, in one command, so the tree has exactly one shape;
+3. only then `corpus:stamp` + `corpus:check`, and commit the corpus as one coherent change with the chain green.
+
+Two traps here worth naming: committing a mixed tree would make CI red in a way that looks like flaky tapes (the
+`commonPrefix=0` signature again), and "it passed when I changed the toggle" is not evidence that the rig's
+default is right — it is evidence that the two shapes differ, which is the thing to eliminate rather than route
+around.
