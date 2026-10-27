@@ -35,6 +35,10 @@ export interface ProxyHandle { url: string; close: () => Promise<void> }
 
 const VOLATILE: Array<[RegExp, string]> = [
   [/\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?/g, '<DATE>'],
+  // ELAPSED-BLIND (#56, measured 2026-10-26): the host's per-turn time snapshot states how long the previous
+  // span was — minutes when the model is answering live, seconds when the tape answers. Keyed on the injected
+  // form's colon so prose that merely mentions an elapsed duration stays conversation identity.
+  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[^.\n]*\.?/g, '$1: <ELAPSED>'],
   // human dates measured crossing midnight: 'Sep 19' recorded, 'Sep 20' replayed
   [/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}(,? \d{4})?\b/g, '<DATE>'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):

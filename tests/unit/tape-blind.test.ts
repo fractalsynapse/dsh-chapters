@@ -68,3 +68,26 @@ test('empty-normalizing messages are treated identically on both sides of a matc
     `both sides must apply the same empties policy (incoming drops=${String(incomingDrops)}, stored drops=${String(storedDrops)})`)
   assert.equal(typeof normalizeSingle(''), 'string', 'and an empty message is still a message, not a hole in the array')
 })
+
+/**
+ * ELAPSED-BLIND (#56, measured 2026-10-26 at msg3 of the suite journey).
+ *
+ * The host injects a time-context message every turn whose text carries a wall-clock fact:
+ * `Elapsed since the preceding model-visible message: 12m 4s.` — and `…: unavailable.` when the
+ * span is unknown. A record run answers from a live model minutes apart; a replay run answers from the
+ * tape in seconds. So the same conversation produces DIFFERENT request arrays, `findReplay` finds no
+ * candidate of that length at all (`storedCandidates: []` in the E2E_TAPE_DIFF dump), strict replay
+ * refuses, no assistant message renders, and the leg dies at the fork door after 25 minutes — the same
+ * ending as four unrelated causes today, from a fifth. The date inside that line was already masked;
+ * the duration was not, and the duration is the volatile half.
+ */
+test('the injected time-context snapshot cannot break a tape match (elapsed duration)', () => {
+  const slow = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-26T21:00:00-04:00[America/New_York] Browser time zone for this request: America/New_York. Interpret otherwise-unqualified dates and times in this zone. Elapsed since the preceding model-visible message: 12m 4s.' })
+  const fast = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-26T21:20:00-04:00[America/New_York] Browser time zone for this request: America/New_York. Interpret otherwise-unqualified dates and times in this zone. Elapsed since the preceding model-visible message: unavailable.' })
+  assert.equal(slow, fast, `two spacings of the same injected snapshot must be one identity: …${String(slow).slice(-60)}`)
+  // The blind must be narrow: real conversation text that merely mentions an elapsed time is signal,
+  // and masking it would let a genuine prompt change replay against a stale answer (#69's lesson).
+  const human = normalizeSingle({ role: 'user', content: 'The build took 12m 4s. Elapsed since the preceding model-visible message is a red herring here.' })
+  assert.ok(!human.includes('<ELAPSED>'), 'prose about elapsed time is NOT folded')
+  assert.notEqual(human, slow)
+})
