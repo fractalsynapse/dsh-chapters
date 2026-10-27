@@ -80,6 +80,17 @@ STATUS=0
 # session mounts ONLY our seven plugin tools while a local boot mounts 34, and the header (message 0) is a strict
 # subset of ours as a result. Before reasoning further, ask the machine. Written to a file the artifact uploads.
 node scripts/host-dep-report.mjs "$PWD" > var/ci-host-deps.txt 2>&1 || true
+# Script policy, because a runner that refuses postinstall scripts can silently drop the generated files a tool
+# plugin needs to mount — and 27 host tools vanish with no error anywhere in the boot log. Names and settings
+# only, never values.
+{
+  echo "== npm script policy =="
+  echo "ignore-scripts=$(npm config get ignore-scripts 2>&1 || echo unknown)"
+  echo "allow-scripts=$(npm config get allow-scripts 2>&1 || echo unknown)"
+  npm install-scripts ls 2>&1 | head -30
+  echo "== tool plugin packages present in the pinned install =="
+  ls dev/dsh-host-lock/node_modules/@deepseek-ai 2>/dev/null | grep -cE "^dsh-(tool|tools)" || echo 0
+} >> var/ci-host-deps.txt 2>&1 || true
 echo "host-dep report: $(wc -l < var/ci-host-deps.txt 2>/dev/null || echo 0) lines"
 
 # Dump the composed system header once per leg into var/e2e-header-*.log, which the failure artifact uploads.
