@@ -83,13 +83,23 @@ if [[ "$STATUS" -ne 0 ]]; then
   # the budget, and the actual `Error:` text — the only thing I was chasing — was
   # silently dropped. A single multi-line message (newlines %-encoded) cannot be
   # truncated into meaninglessness.
+  # Order matters because GitHub truncates an oversized annotation to its FIRST line: the 97bd603 run proved
+  # that the details I most needed were the ones dropped. So the header states what happened, the rig-fault and
+  # MISS lines come next (the tape key is the thing being chased), then assertion text, then the bulkier
+  # artifacts last — and the whole message is capped so a long tail cannot cost the head.
   DIAG="ci-replay: tape replay exited $STATUS"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     DIAG+=$'\n'"${line:0:280}"
   done < <(
+    grep -E "RIG FAULT|MISS tape=|No tests found|[0-9]+ failed" var/ci-replay.log | tail -6
+    # Unconditional tail: every targeted grep above can legitimately match nothing (a failure that died in the
+    # boot, a spec timeout whose summary line differs, a grep I have not thought of yet). A header-only
+    # annotation teaches nothing, so the last lines of the run always ride along.
+    echo "— raw tail of var/ci-replay.log"
+    tail -12 var/ci-replay.log
     grep -E "^\[e2e\] boot pins" var/ci-replay.log | tail -2
-    grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found|RIG FAULT|MISS tape=|falling back to an ephemeral|reaped orphan" var/ci-replay.log | head -14
+    grep -E "✘|Error:|expect\(|Received:|Expected:|falling back to an ephemeral|reaped orphan" var/ci-replay.log | head -14
     # playwright's own saved context: the snippet plus the page snapshot, i.e. the
     # difference between "an assertion failed" and why it failed.
     for f in $(ls -1 test-results/*/error-context.md 2>/dev/null | head -2); do
