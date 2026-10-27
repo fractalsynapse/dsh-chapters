@@ -967,3 +967,24 @@ browser path — CI installs browsers into the workspace cache and the rig's `e2
 then rerun the clone's `suite` replay and read whether `msg0` diverges. The claim on the table stays exactly as
 recorded above: same pinned host, different available bundles, different composed header — a hypothesis with
 strong code-level support and no A/B yet, so no committed tape set may be called CI-replayable on its strength.
+
+### CONFIRMED by A/B: the same tape replays green here and misses in a CI-shaped clone (2026-10-27)
+
+Same commit, same 33-entry `suite` tape, two locations:
+
+- `/home/adrian/Projects/dsh-chapters` (ancestors include `/home/adrian/node_modules`, 289 `@deepseek-ai/*`
+  packages): `LEG=suite MODE=replay` → **4 passed**.
+- `/var/tmp/dsh-probe` (a clean clone; no `node_modules` at any ancestor level; same pinned host installed with
+  CI's own `npm ci` commands, same `npm run build`, same Playwright browser build copied into `var/ms-playwright`):
+  `LEG=suite MODE=replay` → **`MISS tape=suite entries=33 … tied=[every entry]`** — which is precisely CI's
+  signature, reproduced locally without a push.
+
+So the ancestor walk is not a hypothesis any more: the machine that records a corpus changes message 0, and a
+tape recorded here is unreplayable where the runner has no developer tree. Two practical consequences, both
+already paid for elsewhere in this repo: the rig's `WORKSPACE-BLIND` fold is what lets tapes from either path
+compare at all, and the distill must therefore run in a CI-shaped location, not in the working copy.
+
+Also worth keeping: my first two probe runs failed for reasons that had nothing to do with the theory — no
+browsers in the clone (`var/ms-playwright` is gitignored and the workspace cache is per-checkout) and a `cp -a`
+whose error I had hidden behind `2>/dev/null`. Both looked like "the experiment refutes the theory" until I read
+the error text. An inconclusive run and a refutation are different results, and only one of them is interesting.
