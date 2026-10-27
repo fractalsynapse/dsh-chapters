@@ -111,3 +111,23 @@ test('a parsed payload drives the same reducer the component uses', () => {
   assert.equal(s.text, 'Go on.')
   assert.equal(s.turnSeq, 7)
 })
+
+/**
+ * Autorun's idle edge, derived from the hook shape the dock actually receives (#113).
+ *
+ * The gate must fail SAFE: `unknown` means "do not start a turn the human did not ask for", and conflating
+ * unknown with idle would let the loop fire blind. These rows exist because my first implementation waited for
+ * a scalar `props.running` that no host supplies, so the feature reported itself unavailable forever.
+ */
+test('deriveRunning folds every host shape, and keeps unknown unknown', async () => {
+  const { deriveRunning } = await import('../../src/client/prompt-bar.ts')
+  assert.equal(deriveRunning('running'), true)
+  assert.equal(deriveRunning('idle'), false)
+  assert.equal(deriveRunning({ status: 'streaming' }), true)
+  assert.equal(deriveRunning({ state: 'waiting' }), false)
+  assert.equal(deriveRunning({ running: true }), true)
+  assert.equal(deriveRunning(undefined), undefined, 'absent hook result is unknown, never idle')
+  assert.equal(deriveRunning(null), undefined)
+  assert.equal(deriveRunning('something else entirely'), undefined, 'an unrecognized word is not evidence of idle')
+  assert.equal(deriveRunning({}), undefined)
+})

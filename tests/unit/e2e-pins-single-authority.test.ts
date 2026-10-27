@@ -159,3 +159,24 @@ test('applyRigEnv derives the SAME map as rigEnv — one table, one reader', () 
     Object.assign(process.env, saved)
   }
 })
+
+/**
+ * Every tape-backed leg must be in the chain, or CI silently stops covering it.
+ *
+ * This is how #113 nearly shipped unverified: the bar's legs passed by hand, and `npm run test:e2e` still
+ * named eight projects — neither `prompt` nor `prompt-off` was in it, so "CI green" would have meant nothing
+ * about the feature CI was supposed to protect. The tape directories are the ground truth of what exists.
+ */
+test('the e2e chain covers every leg that has a tape', () => {
+  const chain = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).scripts['test:e2e'] as string
+  const taped = fs.readdirSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape'))
+    .filter((d) => fs.statSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape', d)).isDirectory())
+    .filter((d) => fs.readdirSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape', d)).some((f) => f.endsWith('.json')))
+  // `default` is the explore-dev leg, which deliberately has no pin (no regime of its own to assert).
+  const excluded = ['default']
+  // Whole tokens, not substrings: `--project=prompt-off` CONTAINS `--project=prompt`, so `includes` would
+  // report the bar's own leg as covered by its negative twin. Caught by mutation-testing the gate below.
+  const named = new Set(chain.split(/\s+/).filter((t) => t.startsWith('--project=')).map((t) => t.slice('--project='.length)))
+  const missing = taped.filter((d) => !excluded.includes(d) && !named.has(d))
+  assert.deepEqual(missing, [], `legs with tapes but absent from the chain: ${missing.join(', ') || 'none'}`)
+})
