@@ -1216,3 +1216,20 @@ seed wrote or what the host rewrote, and correspondingly whether tools grow or s
 patch, the rig must pin it (write, verify by re-read, and refuse to boot if the ids differ from the tracked
 list) — that is the row this whole investigation has been driving at: **a booted home's plugin list is a rig
 fact, not ambient state.**
+
+### The profile patch is rewritten DURING the run — so single-reading comparisons were unreliable (2026-10-27)
+
+Same file, same boot, two moments: `count=43` at URL-ready, `count=44` after the journey. The host expands or
+repairs `profiles/web/cordis.patch.yml` mid-flight.
+
+Therefore, correcting myself again: my claim that "the runner mounts `ui-settings-general` and this host does
+not" was drawn from a single boot-time reading on each side and is **not** a reliable machine comparison —
+locally that id appears only after the run. The genuine, still-unexplained asymmetry is unchanged and remains
+the thing to chase: for the same project, `tools=34 / chars=7396` here against `tools=7 / chars=2893` on the
+runner, with the same 21 `tool-*` rows present in both boot-time patches and `config`/`adapterDefaults`
+identical.
+
+Next read, from CI's own two-phase artifact: does the runner's patch also grow mid-run, and does its tool count
+at request 1 match its boot-time id set or the later one? If the runner's id set is stable at 43 and tools stay
+7, the failure is runtime mounting (silent), and the rig must surface it — e.g. by having the plugin print the
+registered tool names at boot into the per-port diagnostics, which the artifact already uploads.
