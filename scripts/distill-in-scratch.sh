@@ -32,7 +32,10 @@ esac
 
 # Guard 2: assert the ancestor chain is actually clean. If a future host puts node_modules at / or /var/tmp,
 # this script's premise is void and it should say so instead of producing a corpus that only replays here.
-probe="$SCRATCH"; while [[ "$probe" != "/" ]]; do
+# Start at the PARENT: the clone's own node_modules is legitimate — CI installs it — and my first version
+# refused the scratch path because of it, which is a guard that rejects its own premise. What must be clean is
+# every ancestor above the checkout.
+probe="$(dirname "$SCRATCH")"; while [[ "$probe" != "/" ]]; do
   if [[ -d "$probe/node_modules/@deepseek-ai" ]]; then
     die "ancestor $probe/node_modules/@deepseek-ai exists — this path is NOT CI-shaped; choose another SCRATCH"
   fi
