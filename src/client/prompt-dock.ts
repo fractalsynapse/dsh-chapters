@@ -44,7 +44,9 @@ export interface DockProps {
   inputActions?: { insertText?: (text: string) => void; setDraft?: (text: string) => void; submit?: () => void }
   /** The host's session-status hook, when this build hands docks one (`useSessionStatus` is in the dock's
    * documented prop list). Folded through `deriveRunning` because its shape is not ours to assume. */
-  useSessionStatus?: (sessionId?: string) => unknown
+  useSessionStatus?: (selector?: unknown) => unknown
+  /** The session snapshot hook; its snapshot carries `running`, which is Autorun's idle edge. */
+  useSession?: (selector?: unknown) => unknown
   /** The host publishes running/idle through the composer kit on some builds; if it is absent, autorun
    *  refuses to fire rather than guessing that the session is idle. Fail-safe, not fail-open. */
   running?: boolean
@@ -267,11 +269,15 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // `TypeError: l is not a function`: the host used my string as the selector. An identity selector takes
   // whatever the snapshot's shape happens to be, and `deriveRunning` folds it, so this code does not bet on
   // field names I have not read. Still hoisted above the early return: hook count must not change per render.
-  const statusSelector = props.useSessionStatus
-  const statusSnapshot = typeof statusSelector === 'function'
-    ? (statusSelector as unknown as (sel: (snap: unknown) => unknown) => unknown)((snap) => snap)
-    : undefined
-  const running = props.running ?? deriveRunning(statusSnapshot)
+  // The idle signal IS published — on `useSession`, whose snapshot carries `running` (measured by printing the
+  // hook surfaces once: `useSession=sessionId|pendingSubmissions|running|subagent|removed|openState`). My
+  // first two attempts were wrong in different ways: a scalar `props.running` that no host supplies, then
+  // `useSessionStatus`, which is provided but yields no readable keys under an identity selector. `deriveRunning`
+  // folds `{running}`, so this is the last mile, and the hook is called unconditionally through a stable
+  // fallback because hook order must not change between renders.
+  const useSessionHook = props.useSession ?? (() => undefined)
+  const sessionSnapshot = useSessionHook((snapshot: unknown) => snapshot)
+  const running = props.running ?? deriveRunning(sessionSnapshot)
   const autorunDisabled = running === undefined
 
   if (sessionId === undefined || !barVisible(state as PromptBarState)) return null
