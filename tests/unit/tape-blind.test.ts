@@ -90,4 +90,26 @@ test('the injected time-context snapshot cannot break a tape match (elapsed dura
   const human = normalizeSingle({ role: 'user', content: 'The build took 12m 4s. Elapsed since the preceding model-visible message is a red herring here.' })
   assert.ok(!human.includes('<ELAPSED>'), 'prose about elapsed time is NOT folded')
   assert.notEqual(human, slow)
+
+  // The exact shapes seen in one hour of logs, recorded with and without the sentence's final period. The
+  // first version of my fold consumed the period only sometimes, which left a ONE-CHARACTER difference
+  // between an incoming request and the tape recorded minutes earlier — enough to fail the match, enough
+  // to spend 25 minutes at a fork door. Variants are the unit of this kind of bug.
+  const t = (elapsed: string): string => normalizeSingle({ role: 'user', content: `Time sampled while preparing turn 1, step 1: 2026-10-26T21:00:00-04:00[America/New_York] Browser time zone for this request: America/New_York. Interpret otherwise-unqualified dates and times in this zone. ${elapsed}` })
+  const forms = [
+    'Elapsed since the preceding model-visible message: 12m 4s.',
+    'Elapsed since the preceding model-visible message: 12m 4s',
+    'Elapsed since the preceding model-visible message: unavailable.',
+    'Elapsed since the preceding model-visible message: unavailable',
+    'Elapsed since the preceding step context: 11m 36s.',
+  ].map(t)
+  // Two LINES, not one: the host injects `…preceding model-visible message…` in one snapshot position and
+  // `…preceding step context…` in another, and they are different sentences in different messages, so they
+  // are not required to fold to the same token. What MUST hold is that each line folds every VALUE shape to
+  // one identity — the assertion I wrote first was overstated, and the failing row is what caught that.
+  const messageForms = forms.slice(0, 4)
+  assert.ok(messageForms.every((f) => f === messageForms[0]),
+    `all elapsed values of the model-visible line must fold together; got ${new Set(messageForms).size} distinct`)
+  assert.ok(forms[4].includes('step context: <ELAPSED>'), 'the step-context line folds its value too')
+  assert.ok(!forms[4].includes('11m'), 'and the duration itself is gone')
 })

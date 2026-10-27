@@ -38,7 +38,11 @@ const VOLATILE: Array<[RegExp, string]> = [
   // ELAPSED-BLIND (#56, measured 2026-10-26): the host's per-turn time snapshot states how long the previous
   // span was — minutes when the model is answering live, seconds when the tape answers. Keyed on the injected
   // form's colon so prose that merely mentions an elapsed duration stays conversation identity.
-  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[^.\n]*\.?/g, '$1: <ELAPSED>'],
+  // Consume to the end of the line, trailing period included: the first version matched up to the first
+  // period, so `…: 12m 4s.` folded to `<ELAPSED>` while `…: unavailable` kept a different length — a
+  // one-character difference between a request and a tape recorded minutes apart, and enough to fail the
+  // whole leg. Fold the form, not a guess at its value's punctuation.
+  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[^\n"]+/g, '$1: <ELAPSED>'],
   // human dates measured crossing midnight: 'Sep 19' recorded, 'Sep 20' replayed
   [/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}(,? \d{4})?\b/g, '<DATE>'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
