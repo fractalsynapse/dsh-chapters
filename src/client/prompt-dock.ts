@@ -62,7 +62,9 @@ const CSS = [
   '.dsh-chapters_promptText{min-width:0;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;line-height:20px;cursor:pointer;border:0;background:0 0;padding:0;text-align:left;flex:1}',
   '.dsh-chapters_promptEllipsis{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;display:block}',
   '.dsh-chapters_promptFull{white-space:pre-wrap;overflow:auto;max-height:9rem;display:block}',
-  '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',
+  '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',
+  '.dsh-chapters_promptIntent{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}',
+
   '.dsh-chapters_promptActions{flex:none;align-items:center;gap:10px;display:flex}',
   '.dsh-chapters_promptBtn{corner-shape:round;width:28px;height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:999px;justify-content:center;align-items:center;padding:0;display:inline-flex;font-size:13px}',
   '.dsh-chapters_promptBtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
@@ -280,11 +282,26 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // `Cannot read properties of undefined (reading 'draftRev')`, and the kit's other verb (`setDraft`) writes
       // a store the editor mirrors only at mount. Neither reaches the composer. A silent no-op is what cost the
       // last six runs, so the refusal now appears on the bar and points at Run, which does work.
+      const refuse = (why: string): void => {
+        console.warn(`[client:prompt] click-to-draft refused: ${why}`)
+        dispatch({ t: 'note', note: 'This host does not let a plugin write the composer, so the prompt cannot be edited before sending — Run submits it as your turn' })
+      }
       try {
         inputActions.insertText(state.text)
+        // Throwing is the easy case. The harder one is the verb that returns successfully and changes nothing,
+        // which is what `setDraft` does on 0.2.0-rc.2 and what a silent button looks like forever. Verify the
+        // editor actually holds the words; if it does not, say so on the bar.
+        const box = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
+        const head = state.text.slice(0, 24)
+        if ((box?.innerText ?? '').indexOf(head) === -1) {
+          // One animation frame: the host may write the DOM after its own microtask.
+          setTimeout(() => {
+            const b2 = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
+            if ((b2?.innerText ?? '').indexOf(head) === -1) refuse('insertText reported success and left the editor empty')
+          }, 400)
+        }
       } catch (error) {
-        console.warn(`[client:prompt] insertText threw: ${String((error as Error)?.message ?? error).slice(0, 160)}`)
-        dispatch({ t: 'note', note: 'This host does not let a plugin write the composer, so the prompt cannot be edited before sending — Run submits it as your turn' })
+        refuse(String((error as Error)?.message ?? error).slice(0, 160))
       }
       // Read the editor back from inside the component, so "insertText is a no-op on this host" is a fact with
       // a number next to it rather than a conclusion the test reaches after the fact.
@@ -311,7 +328,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // A goal re-cut is held for the human's keystroke: the host reserves goal edits for a turn containing a
       // direct human message, and an autorun message is not one. The bar says so on its face rather than
       // letting Run appear to be a normal button that silently fails in the tool.
-      ...(state.intent === 'goal-edit' ? [h('span', { key: 'intent', className: 'dsh-chapters_promptError', 'aria-label': 'This step edits the goal' }, 'edits the goal · run it yourself')] : []),
+      ...(state.intent === 'goal-edit' ? [h('span', { key: 'intent', className: 'dsh-chapters_promptIntent', 'aria-label': 'This step edits the goal' }, 'edits the goal · run it yourself')] : []),
       h('button', {
         type: 'button', className: 'dsh-chapters_promptText',
         'aria-label': state.expanded ? 'Put this suggested prompt in the input box' : 'Show the full suggested prompt',
@@ -319,7 +336,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
       }, state.expanded
         ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
         : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
-      ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptError' }, state.note)]),
+      ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptNote', role: 'status' }, state.note)]),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },
         h(Action, {

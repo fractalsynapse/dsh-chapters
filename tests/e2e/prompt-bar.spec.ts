@@ -142,7 +142,7 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     const outcome = await expect.poll(async () => {
       const text = (await composer.evaluate((el) => (el as HTMLElement).innerText ?? '')).trim()
       if (text.length > 0) return 'drafted'
-      const note = await bar.locator('.dsh-chapters_promptError').first().innerText().catch(() => '')
+      const note = await bar.locator('.dsh-chapters_promptNote').first().innerText().catch(() => '')
       return note.includes('composer') ? 'explained' : `neither (composer=${String(text.length)}, note=${note.slice(0, 40)})`
     }, { timeout: 30_000, intervals: [2_000] }).toMatch(/drafted|explained/)
     void outcome
