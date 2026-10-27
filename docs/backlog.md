@@ -859,3 +859,24 @@ opaque, the dock hook contract needs a selector the host understands (a projecti
 `useProjection("goal")`), and `docs/contract.md` § "What a dock component is handed" should record which;
 (3) only if none work, `#126` grows a second paragraph: the dock cannot observe idle or write the composer, so
 Autorun is not arm-able on 0.2.0-rc.2 and the bar ships with that stated.
+
+### Correction: `heavy`'s compaction boundary IS deterministic; the suspect is notice content (2026-10-27)
+
+I wrote that replay "compacted one request later than the recorded run". The sink says otherwise — record at
+08:43:45 and replay at 08:46:02 log the **same** surfaces in the same order:
+
+    relief declined … (surface=33900 trigger=16000 window=32000 ratio=0.5): no safe…
+    relief declined … (surface=47256 trigger=16000 window=32000 ratio=0.5): no safe…
+
+Identical numbers mean the engine reached the same decisions in both modes, so a timing/boundary theory was
+wrong and option 1 ("pin the boundary") is not the fix. What remains, consistent with every byte diff so far,
+is that the **checkpoint notice text itself** differs run to run (how many chapters are listed, the archive
+count) — and that notice is part of the surface, so it changes est tokens for everything after it and the
+request sequence stops matching the tape's, even though each individual volatile piece is now folded for
+*MATCHING*. Matching and surface-size are different consumers of the same bytes: blinding the count lets a
+request match; it does not make the surface the same length.
+
+Therefore the right question is product-side and narrow: should the checkpoint notice's chapter list be
+byte-stable for a given session state (fixed cap, stable ordinals), or is `heavy` asking for determinism the
+notice never promised? Answer with a red row that measures two runs' surface sizes from the same session state,
+not by adding another blind.
