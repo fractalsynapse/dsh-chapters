@@ -229,7 +229,7 @@ export async function focusComposer(page: Page): Promise<void> {
 export function durableLogExists(sessionId: string): boolean {
   for (const dir of sessDirs()) {
     if (!dir.includes(sessionId)) continue
-    return sessionLogFileFor(path.join(SESS_DIR, dir)) !== null
+    return sessionLogFileFor(dir) !== null
   }
   return false
 }
@@ -562,13 +562,55 @@ export function sessionLogFileFor(dir: string): string | null {
   return best === null ? null : best.file
 }
 
-const sessDirs = (): string[] => { try { return fs.readdirSync(SESS_DIR) } catch { return [] } }
+/**
+ * Every session directory this boot owns — FULL paths.
+ *
+ * Two bugs, both measured today, both of the "silent empty read" family this file has been written to refuse:
+ * (1) the old version returned `fs.readdirSync(SESS_DIR)` — BARE NAMES — while its callers did
+ * `fs.statSync(dir)` and `path.basename(dir)`, resolving those names against the process cwd. Discovery was
+ * therefore empty everywhere, and the give-up diagnostic printed `home=[]` even in runs whose assertions were
+ * passing;
+ * (2) `SESS_DIR` is `sessSlug(ROOT)`, but the app slugs the SESSION's workspace, and on a throwaway home that
+ * is the host's default workspace directory, not the repository. In the working copy the two coincide often
+ * enough to hide it; from a clone at any other path every durable-log read returns '' — which is exactly how a
+ * completed turn (`needle` at seq 10, `turn/end` at seq 43) polled blind for 720 seconds.
+ *
+ * The home is per-port and disposable, so EVERY workspace directory inside it belongs to this boot: prefer the
+ * ROOT slug for determinism, and union the rest instead of assuming the slug matches.
+ */
+/**
+ * Pure core of `sessDirs`, exported so the two failure modes it fixes are TESTED rather than asserted in a
+ * comment: bare-name returns (which callers `statSync` against the process cwd, so discovery is silently empty)
+ * and a workspace slug that cannot match because the app slugs the SESSION's workspace, not the repository root.
+ * A home is per-port and disposable, so every workspace directory inside it belongs to this boot: `preferred`
+ * sorts first for determinism, the rest are unioned rather than ignored.
+ */
+export function sessDirsIn(base: string, preferred: string): string[] {
+  let wsDirs: string[] = []
+  try { wsDirs = fs.readdirSync(base) } catch { return [] }
+  const ordered = [preferred, ...wsDirs.filter((w) => w !== preferred)]
+  const out: string[] = []
+  for (const w of ordered) {
+    const wsPath = path.join(base, w)
+    let names: string[] = []
+    try { names = fs.readdirSync(wsPath) } catch { continue }
+    for (const n of names) {
+      if (!/^(session|ch|sub)-/.test(n)) continue
+      const full = path.join(wsPath, n)
+      try { if (fs.statSync(full).isDirectory()) out.push(full) } catch { /* vanished between readdir and stat */ }
+    }
+  }
+  return out
+}
+
+const sessDirs = (): string[] =>
+  sessDirsIn(path.join(E2E_HOME, 'sessions'), path.basename(SESS_DIR))
 
 /** full decoded session log for a session id ('' until the file exists). */
 export function sessionLogTextById(id: string): string {
   for (const dir of sessDirs()) {
     if (!dir.includes(id)) continue
-    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    const f = sessionLogFileFor(dir)
     if (f === null) return '' // no durable log yet — an empty answer is honest here, a guess is not
     try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
       if (!zstdWarned) { zstdWarned = true; console.error(`e2e: zstd failed reading session log ${dir}: ${String((e as Error)?.message ?? e).slice(0, 160)}`) }
