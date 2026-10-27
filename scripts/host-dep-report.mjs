@@ -114,3 +114,19 @@ try {
   console.log(`installed-top-level=${String(fs.readdirSync(installRoot).length)}`)
   console.log(`deepseek-ai-packages=${String(fs.readdirSync(path.join(installRoot, '@deepseek-ai')).length)}`)
 } catch { console.log('installed-top-level=0') }
+
+// Sandbox capability probe. The bash/fs/pwsh tool plugins arrive through `dsh-*-sandbox` packages, so a runner
+// where bwrap exists but cannot create a user namespace could drop those tool plugins silently — which is the
+// shape of "34 tools on this host, 7 on CI" while every installed byte is provably identical (integrity
+// matched, profile ids matched, config and adapterDefaults identical). Exit codes and short messages only.
+try {
+  const { execFileSync } = await import('node:child_process')
+  let ver = 'not-installed'
+  try { ver = execFileSync('bwrap', ['--version'], { encoding: 'utf8' }).trim() } catch { /* absent */ }
+  let run = 'unknown'
+  try { execFileSync('bwrap', ['--ro-bind', '/', '/', '/bin/true'], { encoding: 'utf8', stdio: 'pipe' }); run = 'ok' }
+  catch (e) { run = `failed: ${String((e && e.message) ? e.message : e).replace(/\s+/g, ' ').slice(0, 90)}` }
+  console.log(`bwrap version=${ver} userNamespaceTest=${run}`)
+} catch (e) {
+  console.log(`bwrap probe error: ${String((e && e.message) ? e.message : e)}`)
+}
