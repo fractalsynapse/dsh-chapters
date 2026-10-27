@@ -97,11 +97,6 @@ echo "host-dep report: $(wc -l < var/ci-host-deps.txt 2>/dev/null || echo 0) lin
 # The miss journal truncates `got=` to 110 chars, and three rounds of reasoning about a 7,276-vs-2,783
 # header could not be settled by inference; the runner's own bytes can be diffed offline.
 export E2E_DUMP_HEADER=1
-# DIAGNOSTIC, to be reverted: let replay continue past the first miss so the header dump captures the SECOND and
-# THIRD conversation requests. The question this answers is whether the runner's 7-tool surface is permanent or a
-# race at the first request — and the difference decides the fix (a boot-readiness gate vs a mount investigation).
-# The rig-fault guard's default stays fatal; only this one workflow run opts out.
-export E2E_MISS_FATAL=0
 E2E_MODEL=replay npm run test:e2e 2>&1 | tee var/ci-replay.log || STATUS=${PIPESTATUS[0]}
 if [[ "$STATUS" -ne 0 ]]; then
   # ONE annotation, not twenty. GitHub truncates a check run to 10 annotations, and
