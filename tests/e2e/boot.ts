@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
@@ -648,8 +649,22 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
         const ids = [...text.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gm)].map((x) => x[1])
         idsLine = `count=${String(ids.length)}:${ids.join(',')}`
       } catch { /* the home may be gone; absence is the answer */ }
+      // Where do the host's tool packages resolve FROM, in the environment that mounts presets? Our preset
+      // prunes child rows it cannot resolve, and the repository's own node_modules contains exactly ONE
+      // `dsh-tool*` package — so a developer home tree can satisfy what a checkout-only runner cannot, which
+      // is the remaining candidate for "34 tools here, 7 there" while every installed byte matches. Paths
+      // shortened to <home>/<root>/~ and nothing but the path is ever written: no contents, no secrets.
+      const probeFrom = (from: string, pkg: string): string => {
+        try {
+          const resolved = createRequire(path.join(from, 'noop.js')).resolve(pkg) as string
+          return resolved.replace(E2E_HOME, '<home>').replace(ROOT, '<root>').replace(os.homedir(), '~')
+        } catch { return 'no' }
+      }
+      const toolProbe = ['@deepseek-ai/dsh-tool-fs', '@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tools']
+        .map((pkg) => `${pkg.replace('@deepseek-ai/', '')}={${probeFrom(path.join(E2E_HOME, 'profiles', 'web'), `${pkg}/package.json`)},${probeFrom(ROOT, `${pkg}/package.json`)}}`)
+        .join(' ')
       fs.writeFileSync(path.join(ROOT, 'var', `e2e-home-plugins-${String(port)}-${phase}.log`),
-        `phase=${phase}\nnode_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\npatchPluginIds=${idsLine}\n`)
+        `phase=${phase}\nnode_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\npatchPluginIds=${idsLine}\ntoolProbe=${toolProbe}\n`)
     } catch { /* a report must never break a boot */ }
   }
   mountReport('boot')
