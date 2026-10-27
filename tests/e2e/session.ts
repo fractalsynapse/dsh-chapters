@@ -627,16 +627,28 @@ export function sessionLogTextById(id: string): string {
  * (e.g. 'ch-' for continuation children).
  */
 /** Session ids currently on disk with a given prefix — for "exactly one new child" checks. */
+/**
+ * The session id a directory represents. Parents are `session-<uuid>` and their id is the uuid; children keep
+ * their own prefix (`ch-`, `sub-`) because specs filter on it. Deriving this from a BASENAME matters: `sessDirs()`
+ * returns absolute paths, so testing a raw path for a `ch-` start is never true and a created child becomes invisible
+ * to the rig (measured 2026-10-27: the plans leg polled 240s for a continuation whose seed was on disk and
+ * carried the plan — a false red about the product, caused by our own read).
+ */
+export function sessionIdFromDir(dir: string): string {
+  const name = path.basename(dir)
+  return name.startsWith('session-') ? name.slice('session-'.length) : name
+}
+
 export function sessIdsWithPrefix(prefix: string): string[] {
   return sessDirs()
-    .map((d) => (d.startsWith('ch-') ? d : d.replace(/^session-/, '')))
+    .map(sessionIdFromDir)
     .filter((id) => id.startsWith(prefix))
 }
 
 export function findSessionIdWhoseLogContains(fragment: string, prefix = ''): string | null {
   for (const dir of sessDirs()) {
     // dirs are `session-<uuid>` (parent) or `ch-<uuid>` (a created child)
-    const id = dir.startsWith('ch-') ? dir : dir.replace(/^session-/, '')
+    const id = sessionIdFromDir(dir)
     if (prefix !== '' && !id.startsWith(prefix)) continue
     if (sessionLogTextById(id).includes(fragment)) return id
   }
