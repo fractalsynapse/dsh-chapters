@@ -617,6 +617,12 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let body: Record<string, unknown> = {}
         try { body = JSON.parse(raw.toString('utf8')) as Record<string, unknown> } catch { /* non-json passthrough below */ }
         const inc = messagesOf(body)
+        // DUMP AT THE REQUEST-RECEIVED POINT, not inside the forwarding branch: replay answers from the tape and
+        // never reaches the upstream path, and my first version therefore produced a header file locally (record)
+        // and NOTHING on CI (replay) — a probe that only fires in the mode I already understand is not a probe.
+        // Serialize the way the matcher does: `messagesOf()` yields parsed objects, and String(object) would
+        // silently never match.
+        dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")))
         // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape
         // records — a distill that saw a refusal and retried after relief must see the same refusal
         // on replay, or the request sequence diverges and the chain fails for a reason that looks
@@ -698,9 +704,6 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let sawBytes = 0
         let firstByteMs = -1
         journal(`START path=${upstreamUrl.pathname} msgs=${inc.length} reqBytes=${raw.length} inflight=${inFlight} timeoutMs=${upstreamTimeoutMs}`)
-        // messagesOf() yields parsed objects; String(object) is "[object Object]" and would silently never
-        // match. Serialize the way the matcher and the miss journal already do.
-        dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")))
         // watchdogs live in pumpUpstream now, PER ATTEMPT — arming them here too would
         // double-answer the client and keep the process alive after the run (#54).
         // Buffered pump with bounded throttle-retry (#54). The only behavioral difference
