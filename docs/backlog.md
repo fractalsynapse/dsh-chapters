@@ -1344,3 +1344,26 @@ So the honest position:
   require it at replay (or place the oversized reads strictly between boundaries). Either is a real design
   change with a red row. Guessing at a threshold and calling a green pair "fixed" is the failure mode this file
   keeps catching me doing.
+
+### CI state after the mount-fault work (2026-10-27): deterministic green at zero margin, acceptance red by name
+
+Run `40554042382` on `fix/token-plan-provider-row`:
+
+    typecheck · build · unit + integration (coverage gate 85/85/85)   success   Branches 85% (5007/5890)
+    does the pinned host support preset declaration rows?              success
+    acceptance — ten tape-replay legs, no LLM                          failure   MOUNT FAULT
+
+Two things worth holding onto:
+
+1. **The gate is at exactly 85%, with zero margin.** It passed because nine host-fact rows that used to
+   *abstain* on the runner now run (they looked only in `$HOME/node_modules`; they try `dev/dsh-host-lock`
+   first), and one real contract row covers the pool-miss → local-store fallback. That is the honest kind of
+   coverage gain, but a future contributor can flip the gate by adding a single uncovered branch. If it fails
+   for someone: the fix is another real branch row, not a threshold edit.
+2. **Acceptance fails for the named reason, not a mystery.** The runner composes a 7-tool session where this
+   host composes 34 with identical installs, identical profile ids, identical `config`/`adapterDefaults`, so the
+   corpus recorded here cannot key-match there. The rig refuses loudly (`MOUNT FAULT`) instead of writing tapes
+   nobody else can replay. The two exits stay open and both are named on #56: fix headless preset mounting of
+   `@deepseek-ai/dsh-tool-*` (host-side, outside this repo), or distill on the runner with the route credential
+   as a repository secret (a maintainer action). #127 therefore stays unmerged: agents may merge to `staging`
+   only after the acceptance job passes.
