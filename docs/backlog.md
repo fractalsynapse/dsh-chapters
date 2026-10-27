@@ -988,3 +988,27 @@ Also worth keeping: my first two probe runs failed for reasons that had nothing 
 browsers in the clone (`var/ms-playwright` is gitignored and the workspace cache is per-checkout) and a `cp -a`
 whose error I had hidden behind `2>/dev/null`. Both looked like "the experiment refutes the theory" until I read
 the error text. An inconclusive run and a refutation are different results, and only one of them is interesting.
+
+### The scratch distiller reaches the model but `suite` stalls in the clone — next thing to diagnose (2026-10-27)
+
+What the CI-shaped run proved and what it did not:
+
+- **Proved:** the ancestor walk is the header cause (green here / `MISS … tied=[every entry]` there for one
+  33-entry tape), the credential chain works once `.dshdev-local/e2e.env` is placed in the clone, and the
+  sync-back guard did its job: the distill never exited 0, so nothing was copied over the working corpus and the
+  committed tapes are intact at 33 files.
+- **Did not:** produce a corpus. `suite` recorded 5 entries in ~3 minutes with clean `status=200` responses, then
+  went silent — no model traffic for 11 minutes while Playwright sat inside test 1. The clone's server log shows
+  the last turn ending normally and this line from the bar:
+
+      [chapters-prompt] prompt: not enabled (no defining model) — round skipped
+
+  which is a *different* machine-local difference: the working copy has a `promptModel` row in its ambient
+  profile, the clone composes without one. So the clone is not yet a faithful recording environment for legs
+  whose journey touches the suggestion bar, and I stopped the run rather than let it burn a timeout.
+
+Order for the next attempt, cheapest first: (1) make the route/prompt-model configuration part of the rig's
+seeded profile rather than ambient state, so clone and working copy compose the same thing — this is the same
+class as everything else today, authority in tracked seeds; (2) confirm with `suite` alone that the fork door
+appears in the clone; (3) only then run the full ten legs there, then the strict chain there, then stamp and
+commit. Do not assume a stall means "slow": the journal said the last request finished 11 minutes earlier.
