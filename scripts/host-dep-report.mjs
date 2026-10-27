@@ -33,9 +33,56 @@ for (const name of declared) {
 }
 console.log(`declared=${String(declared.length)} missing=${String(missing)}`)
 
-// The lock install being identical does NOT settle it: the dev profile links plugins from the REPOSITORY's own
-// node_modules, so extra packages I installed there (not in package-lock) would mount tools a runner cannot
-// mount. Measure that level too — it is the last place the 34-vs-7 gap can hide.
+// Version and dist integrity per hoisted @deepseek-ai package, plus the LOCKFILE entry that decided it.
+// Why: the pinned host declares 79 deps, both trees install 289 of them, the booted profile mounts exactly one
+// plugin (`@treeseed/dsh-chapters`), and yet the host's own `request/header` event reports 34 tools here against
+// 7 on the runner with `config` and `adapterDefaults` byte-identical. So the difference must be in WHICH host
+// code is actually running. `dsh`'s own integrity matching the registry proves only the top package; the
+// transitive tool-providers need their own number. npm computes `dist.integrity` at pack time for every
+// tarball — including git/hosted deps — so an installed package always has one to compare.
+try {
+  const scopeDir = path.join(installRoot, '@deepseek-ai')
+  const names = fs.readdirSync(scopeDir)
+  const topPkg = JSON.parse(fs.readFileSync(path.join(scopeDir, 'dsh', 'package.json'), 'utf8'))
+  console.log(`topVersion=${String(topPkg.version)} topTarball=${String(topPkg._resolved ?? 'unknown')}`)
+
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'dev', 'dsh-host-lock', 'package-lock.json'), 'utf8'))
+  // npm v7+ keys are paths with the package name as the last segment, but nothing in the format guarantees
+  // that; locate the entry by its final segment and verify the recorded name, rather than slicing on a guess.
+  const lockEntry = (name) => {
+    const suffix = `node_modules/${name}`
+    for (const [k, v] of Object.entries(lock.packages ?? {})) {
+      if (k === suffix || k.endsWith(`/${suffix}`)) {
+        if (v?.name !== undefined && v.name !== name) continue
+        return { key: k, integrity: v?.integrity, resolved: v?.resolved }
+      }
+    }
+    return { key: null, integrity: undefined, resolved: undefined }
+  }
+
+  let mismatches = 0
+  for (const n of names) {
+    const full = `@deepseek-ai/${n}`
+    let cur
+    try { cur = JSON.parse(fs.readFileSync(path.join(scopeDir, n, 'package.json'), 'utf8')) } catch { continue }
+    const lk = lockEntry(full)
+    const curHead = String(cur.dist?.integrity ?? '').slice(0, 22)
+    const lockHead = String(lk.integrity ?? '').slice(0, 22)
+    if (lk.key === null) { console.log(`NOLOCKENTRY ${full} version=${String(cur.version)}`); continue }
+    if (lockHead !== '' && curHead !== '' && curHead !== lockHead) {
+      mismatches += 1
+      console.log(`MISMATCH ${full} installed=${curHead || 'none'} lock=${lockHead || 'none'} version=${String(cur.version)}`)
+    }
+  }
+  console.log(`checked=${String(names.length)} mismatched=${String(mismatches)} allIntegrityMatch=${String(mismatches === 0)}`)
+} catch (e) {
+  console.log(`integrity scan failed: ${String((e && e.message) ? e.message : e)}`)
+}
+
+// Earlier I attributed the tool gap to undeclared packages at the repo root. That was wrong and is corrected
+// here: both trees show `repo-root-deepseek-ai=34` with 18 undeclared by package.json, and those are hoisted
+// transitive deps of the pinned host, not things I installed. The profile-base count printed by the pre-boot
+// report was likewise a measurement-order artifact, which is why the boot now reports its own mounted tree.
 try {
   const repoNm = path.join(root, 'node_modules', '@deepseek-ai')
   const names = fs.readdirSync(repoNm)
