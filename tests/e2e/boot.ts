@@ -153,6 +153,29 @@ export interface BootHandle {
   stop: () => Promise<void>
 }
 
+/**
+ * The environment a rig boot may see: everything the leg needs, and NONE of the ambient harness identity.
+ *
+ * `DSH_PROFILE_DIR` is the one that cost a day. It is exported into every session of the harness a developer
+ * is working inside, and it names that developer's LIVE profile — the plugins they happen to have mounted.
+ * Overriding `DSH_HOME` alone left the boot composing the developer's plugin set, so the system header (message
+ * 0 of every request, and thus the key every tape matches on) was 7,276 characters locally against 2,783 on a
+ * runner with no such variable. Local chains went green while CI failed, and four regime hypotheses were
+ * examined before this one was. #89 fixed exactly this class for the host BINARY; the profile was the twin it
+ * never closed.
+ */
+export function rigChildEnv(base: NodeJS.ProcessEnv, opts: { home: string; port: number; extra?: NodeJS.ProcessEnv }): NodeJS.ProcessEnv {
+  const AMBIENT_SESSION_KEYS = ['DSH_PROFILE', 'DSH_PROFILE_DIR', 'DSH_SESSION_ID', 'DSH_WEB_URL', 'DSH_SHELL']
+  const env: NodeJS.ProcessEnv = { ...base }
+  for (const key of AMBIENT_SESSION_KEYS) delete env[key]
+  env.DSH_HOME = opts.home
+  // Port-keyed like everything else about a boot: one shared file made a red chain ambiguous — the tail
+  // belonged to whichever project wrote last.
+  env.DSH_CHAPTERS_ENGINE_ERRORS = path.join(ROOT, 'var', `e2e-engine-errors-${String(opts.port)}.log`)
+  if (base.E2E_COVERAGE === '1') env.NODE_V8_COVERAGE = path.join(ROOT, 'var', 'e2e-cov', String(opts.port))
+  return { ...env, ...(opts.extra ?? {}) }
+}
+
 export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandle> {
   // proxy port derived from the boot port (+1000): per-project and per-rerun
   // collision-free (a hard-coded proxy port turned one killed run's orphan
@@ -520,34 +543,18 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   console.log(`[e2e] host binary: ${host.binary} (pinned=${host.pinned})`)
   const child: ChildProcessWithoutNullStreams = spawn(host.binary, ['web', '--port', String(port), '--no-open'], {
     cwd: ROOT,
-    env: {
-      ...process.env,
-      DSH_HOME: E2E_HOME,
-      // Port-keyed like everything else about a boot: one shared file made a red
-      // chain ambiguous — the tail belonged to whichever project wrote last.
-      DSH_CHAPTERS_ENGINE_ERRORS: path.join(ROOT, 'var', `e2e-engine-errors-${port}.log`),
-      ...(process.env.E2E_COVERAGE === '1' ? { NODE_V8_COVERAGE: covDir } : {}),
-      // dev/settings.yaml pins the local provider's key via apiKeyEnv, and a
-      // CI box has no ~/.dsh credentials to fall back on (measured 2026-09-23:
-      // a credential-less .dshdev-local boots, but every session then dies
-      // composing the provider). Tape replay ignores auth entirely (the proxy
-      // answers), so the dummy fills only when neither the environment NOR
-      // the home's .credentials.yaml carries a real key — a machine distilling
-      // tapes against a key-guarded llama must keep using its real one.
-      // #54: forward the diagnostics sink. The boot hands the server an EXPLICIT env
-      // object, so a variable set in the invoking shell never reached the process that
-      // actually refused the child — which is how a browser-path refusal with a full
-      // stack in hand still produced an empty log file. Traceability that stops at the
-      // process boundary is not traceability.
-      ...(process.env.DSH_CHAPTERS_ENGINE_ERRORS !== undefined && process.env.DSH_CHAPTERS_ENGINE_ERRORS !== ''
-        ? { DSH_CHAPTERS_ENGINE_ERRORS: process.env.DSH_CHAPTERS_ENGINE_ERRORS }
-        : {}),
-      ...(harnessRoute !== null ? { [harnessRoute.route.apiKeyEnv]: harnessRoute.key } : {}),
-      ...(proxy !== null && process.env.LOCAL_API_KEY === undefined
-        && !fs.existsSync(path.join(E2E_HOME, '.credentials.yaml'))
-        ? { LOCAL_API_KEY: 'e2e-tape-proxy-dummy' }
-        : {}),
-    },
+    env: rigChildEnv(process.env, {
+      home: E2E_HOME, port,
+      // Credentials ride the same sanitized object, so nothing can re-introduce the ambient-profile leak by
+      // adding a key to a raw spread again.
+      extra: {
+        ...(harnessRoute !== null ? { [harnessRoute.route.apiKeyEnv]: harnessRoute.key } : {}),
+        ...(proxy !== null && process.env.LOCAL_API_KEY === undefined
+          && !fs.existsSync(path.join(E2E_HOME, '.credentials.yaml'))
+          ? { LOCAL_API_KEY: 'e2e-tape-proxy-dummy' }
+          : {}),
+      },
+    }),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let log = ''

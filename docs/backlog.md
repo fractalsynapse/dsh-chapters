@@ -727,3 +727,34 @@ machines. If it is `~/node_modules/…` locally, the fix is to make the rig reso
 Until that is measured, do NOT re-distill again hoping for a shorter header, and do not add a blind to mask it —
 masking a header that differs by build would hide the fact that the acceptance run and the recorded corpus were
 produced by different software, which is the one thing the tape system exists to prevent.
+
+### ROOT CAUSE of local-vs-CI header divergence: the plugin reads this repository's rules tier at boot (2026-10-27)
+
+The local header carries a `## Chapters memory and rules` section at offset 6,389 of 7,276 chars:
+
+> "Before starting a task, run `chapters_rules` … project rules your team approved, plus session rules…"
+
+CI's 2,783-char header contains **no such section**, and the words `rules`/`chapters` do not appear in it. The
+section is contributed because `.dsh-chapters/` exists **in the repository under test** — it holds the approved
+project rules for this project. A GitHub runner checks out a repo with no rules tier (the CI workflow even
+asserts the directory never appears), so the host composes a shorter system header, message 0 of every request
+differs, and every tape fails to match. `verify-committed.sh` reported `.dsh-chapters` as PRESENT locally while
+I was still hunting the cause.
+
+Five hypotheses were eliminated to get here, all of them plausible, none measured first: host-install drift
+(re-ran CI's exact `npm ci --prefix dev/dsh-host-lock`; still 7,276), copied `storages/` (edited the filter,
+re-distilled, reverted the change as unverified), header sections (none differ), the once-per-repo
+`var/e2e-profile-base` (deleted and rebuilt; still 7,276), and inherited `DSH_PROFILE_DIR` (real leak-surface,
+fixed as `rigChildEnv` with two rows, but not the cause).
+
+The fix is isolation, not normalization, and it must NOT be a blind that masks the section — masking it would
+hide that the acceptance run and the corpus were produced by different repository state:
+1. decide what the rig's workspace must be for the plugin's own store/rules domain. `#61` pinned
+   `artifactStoreRoot` per port, but the rules tier still resolves to the workspace's `.dsh-chapters/`;
+2. either run each leg in a pristine workspace (no rules tier, no chapters) — matching CI and what a real user
+   gets on a fresh project — or seed an identical rules fixture into the rig workspace so local and CI compose
+   the same header. Either way the choice is made once, in the rig, before the corpus is re-distilled;
+3. then one frozen-regime distill, then the CI-shaped chain, then CI is expected to match without any change to
+   a test.
+
+Until then the corpus in `HEAD` is unreplayable on CI, and the local chain's green is not the same claim.
