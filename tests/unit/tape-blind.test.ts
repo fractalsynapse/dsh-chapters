@@ -165,22 +165,10 @@ test('the chapter list in a checkpoint notice matches regardless of how many ent
   assert.ok(prose.includes('src/login.ts'), 'ordinary numbered prose is untouched')
 })
 
-/**
- * CHECKOUT-BLIND: the harness implementation path in the system header is machine identity, not content (#56).
- *
- * With the tool-mount gap closed (the boot now links the preset's tool rows from the pinned install BEFORE the
- * host spawns), a CI-shaped clone finally registered the same 34 tools as this host — and the replay still
- * failed by 18 characters, precisely the difference between `/home/adrian/Projects/dsh-chapters/dev/dsh-host-lock`
- * and `/var/tmp/dsh-rig/dev/dsh-host-lock`. The header says "The DeepSeek Harness implementation checkout is at
- * <path>"; that path is where the code lives on this machine, exactly like the workspace path WORKSPACE-BLIND
- * already folds. Leaving it unblinded is what makes message 0 — the tape key — unportable.
- */
-test('the harness checkout path cannot break a tape match', () => {
-  const clone = normalizeSingle({ role: 'system', content: 'The DeepSeek Harness implementation checkout is at /var/tmp/dsh-rig/dev/dsh-host-lock/. The checkout location and current working directory are separate values.' })
-  const laptop = normalizeSingle({ role: 'system', content: 'The DeepSeek Harness implementation checkout is at /home/adrian/Projects/dsh-chapters/dev/dsh-host-lock/. The checkout location and current working directory are separate values.' })
-  assert.equal(clone, laptop, `two machines, one identity: …${clone.slice(0, 90)}`)
-  assert.match(clone, /<DSH_CHECKOUT>/, 'the path folds to a token rather than vanishing')
-  // Narrow: ordinary prose that merely mentions a checkout stays conversation.
-  const prose = normalizeSingle({ role: 'user', content: 'Our checkout is at ~/src/thing and tests fail there.' })
-  assert.ok(prose.includes('~/src/thing'), 'prose is not folded')
-})
+// NOTE, recorded rather than deleted silently: a CHECKOUT-BLIND rule was added here on 2026-10-27 and then
+// removed the same day. It duplicated an existing `<DSH-CHECKOUT>` fold (model-proxy.ts:159), which already
+// matches any absolute path after "implementation checkout is at". The duplicate was written because I compared
+// the RAW header dumps from two machines and read an 18-character gap — exactly the length of the two checkout
+// paths — without first running that text through `substituteAll`, which folds it. A fold that already exists is
+// not a missing fold, and a second predicate for one decision is the failure mode this repo has now named four
+// times. The lesson is procedural: normalize, THEN diff.
