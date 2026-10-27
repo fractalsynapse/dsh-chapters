@@ -621,6 +621,19 @@ for the hollow-payload supersede).
 
 ## Suggested Next Step bar
 
+**What a dock component is handed (measured from the host's own contract table,
+`dsh-cordis-client-runner/lib/client.js`, entry `key: "conversation.input.dock"`).** It is a `list` region,
+`scope: session`. Register options are `id` (required), `order` (optional, ascending, default 0), and `label`.
+The component's props are **hooks**, not scalars: `useSessions`, `useSessionStatus`, `useSessionRetainInfo`,
+`useWorkspaces`, `useChat`, `useConversation`, `useInput`, `inputActions`, `useSession`, `sessionId`,
+`useProjection`, `useTrajectory`. Shipped occupants: `todo` (order 0), `goal` (10), `queue` (20).
+
+Why this is written down: the bar's Autorun gate was written against a **scalar** `props.running` that no host
+version supplies, so Autorun reported itself unavailable on a host that exposes the very signal through
+`useSessionStatus`/`useChat`. Reading the contract table beats remembering a prop name. `inputActions` here is
+`{ captureInsertion, insertText, setDraft, addAttachments, removeAttachment, pruneAttachments, submit }`, and
+the composer-write limitation in #126 is measured against that same kit.
+
 **Verbs (interface lock, #113).** `/chapters-prompt` accepts `model …|clear`, `off`, `on`, `state`, `autorun on|off`,
 and **`run`** — submit the offer currently on screen as a **human-authored user turn**, through the same follow-up
 path autorun uses (`agent.followup(suggestPromptMessage(…))`). Run goes through the command plane rather than the
