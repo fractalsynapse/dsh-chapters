@@ -185,3 +185,29 @@ export function parseBarAutorun(text: string): 'armed' | 'disarmed' | null {
   const m = /^ {2}autorun: (armed|disarmed)\b/m.exec(text)
   return m === null ? null : (m[1] as 'armed' | 'disarmed')
 }
+
+/**
+ * Does the host say this session is busy right now?
+ *
+ * The dock's props are HOOKS (`useSessionStatus`, `useChat`, `useInput`, …) — documented in
+ * docs/contract.md § "What a dock component is handed" — so a component that waits for a scalar
+ * `props.running` waits forever, which is precisely why Autorun declared itself unavailable while the host
+ * was publishing the signal one field away. Shapes differ across hosts and versions, so every form is folded
+ * here, in one pure function, with `undefined` (unknown) kept distinct from `false` (idle): the loop refuses
+ * to start a turn on an unknown, and that distinction is the whole safety property.
+ */
+export function deriveRunning(status: unknown): boolean | undefined {
+  if (status === undefined || status === null) return undefined
+  if (typeof status === 'boolean') return status
+  if (typeof status === 'string') {
+    if (/^(running|streaming|busy|active)$/i.test(status)) return true
+    if (/^(idle|done|stopped|finished|ready|waiting)$/i.test(status)) return false
+    return undefined
+  }
+  if (typeof status === 'object') {
+    const s = status as { status?: unknown, state?: unknown, running?: unknown, phase?: unknown }
+    if (s.running !== undefined) return typeof s.running === 'boolean' ? s.running : undefined
+    return deriveRunning(s.status ?? s.state ?? s.phase)
+  }
+  return undefined
+}

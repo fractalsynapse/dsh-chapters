@@ -30,6 +30,7 @@ import {
   initialBarState,
   parseBarAutorun,
   parseBarState,
+  deriveRunning,
   promptBarReducer,
   shouldAutoFire,
   type PromptBarEvent,
@@ -41,6 +42,9 @@ import {
 export interface DockProps {
   sessionId?: string
   inputActions?: { insertText?: (text: string) => void; setDraft?: (text: string) => void; submit?: () => void }
+  /** The host's session-status hook, when this build hands docks one (`useSessionStatus` is in the dock's
+   * documented prop list). Folded through `deriveRunning` because its shape is not ours to assume. */
+  useSessionStatus?: (sessionId?: string) => unknown
   /** The host publishes running/idle through the composer kit on some builds; if it is absent, autorun
    *  refuses to fire rather than guessing that the session is idle. Fail-safe, not fail-open. */
   running?: boolean
@@ -157,6 +161,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
   const alive = useRef(true)
   useEffect(() => () => { alive.current = false }, [])
   const [busy, setBusy] = useState(false)
+  void 0
   const answered = useRef(false)
   const replyStatus = useRef<string>('unknown')
   const stateRef = useRef<PromptBarState>(initialBarState())
@@ -320,7 +325,12 @@ export function PromptDock(props: DockProps): ReactElement | null {
     console.warn('[client:prompt] click-to-draft refused: this host exposes neither insertText nor setDraft')
   }
 
-  const autorunDisabled = props.running === undefined
+  // Called unconditionally through a stable fallback, so the hook order cannot change between renders.
+  const useSessionStatus = props.useSessionStatus ?? (() => undefined)
+  const liveRunning = deriveRunning(sessionId === undefined ? undefined : useSessionStatus(sessionId))
+  // Either source may answer; `undefined` from both means unknown, and unknown must never start a turn.
+  const running = props.running ?? liveRunning
+  const autorunDisabled = running === undefined
   return h('div', { className: 'dsh-chapters_promptDock', 'data-prompt-bar': 'true' },
     h('div', { className: `dsh-chapters_promptBar${state.expanded ? ' dsh-chapters_promptExpanded' : ''}` },
       h('span', { className: 'dsh-chapters_promptGlyph' }, h(Glyph)),
