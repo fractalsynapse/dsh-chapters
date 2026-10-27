@@ -1095,3 +1095,25 @@ Sequence I will follow: (1) restore/extend that failure diagnostic so it always 
 (2) add a row for the two-session case (needle in session B, spec holding session A ⇒ helper adopts B);
 (3) then re-run the clone's `suite` — a CI-shaped corpus is the goal, and the clone is not CI-shaped-broken, it
 is being mis-read by my own harness code.
+
+### Confirmed: the session-scan fix makes the clone's `suite` pass (4 passed, 1.7m, 38 entries) — and it exposes the next decision (2026-10-27)
+
+Same clone, same command, one change (`sessDirs` returning absolute paths and unioning every workspace dir in
+the boot's home): the journey that had completed unseen for 720 seconds now finishes in 1.7 minutes. So the
+stall was the rig's own blind read, exactly as the preserved home showed.
+
+**The consequence to decide before the next big run.** A corpus recorded in the clone replays there, and CI is
+CI-shaped — but my working tree is NOT, because the pinned host the boot spawns lives at
+`ROOT/dev/dsh-host-lock/node_modules/.bin/dsh`, and Node's ancestor walk from inside the repository reaches
+`/home/adrian/node_modules` (289 `@deepseek-ai` packages). That is what made the header 7,276 chars here and
+2,783 in a clone. So:
+
+- If I record in the clone and sync back, **CI goes green and `npm run test:e2e:replay` in the working copy
+  goes red** — a corpus that only replays where it was not recorded.
+- The right fix is to remove the asymmetry, not choose a side: put the rig's host install OUTSIDE the repository
+  (e.g. install the pinned lock under `/tmp/dsh-e2e/host-<pin>` and spawn that binary), so the working copy and a
+  CI runner resolve the same bundles and compose the same header. `resolveHostBinary` already reports which
+  binary it used and whether it is pinned (#89), so the authority exists; what is missing is an install location
+  whose ancestors are clean.
+- Interim honesty: until that lands, "chain green" must name its location. A local green and a CI green are
+  currently different measurements, and I will not call them the same result.
