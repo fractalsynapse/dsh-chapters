@@ -162,7 +162,12 @@ jobs:
       # turn-complete poll shells out to it — ubuntu-latest doesn't ship the
       # binary, and session.ts's honest catch made the silence indistinguishable
       # from a hung model for three 20-minute CI runs (measured 2026-09-24).
-      - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd
+      # bubblewrap: the host mounts bash/fs/pwsh tools through the dsh-*-sandbox packages, which need a
+      # user namespace. Measured on the runner: `bwrap version=not-installed userNamespaceTest=failed: spawnSync
+      # bwrap ENOENT`, against `bubblewrap 0.11.1 / ok` on this host — that is why a CI session registered 7 tools
+      # and a local one 34, so message 0 (the tape key) could never match. Provisioning the runtime dependency is
+      # the fix; masking the header would hide a corpus recorded by different software than the one replaying it.
+      - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd bubblewrap
       # Self-checking chain: pins the host version, builds, bootstraps the
       # scratch home, installs chromium into var/ms-playwright, and runs
       # E2E_MODEL=replay npm run test:e2e (suite/fork/heavy/arrival/enrich/fanout/
