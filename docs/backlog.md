@@ -910,3 +910,41 @@ row first:
 Also recorded because it was my error and it cost a batch: strays from an aborted chain were still holding the
 per-leg ports while the first four legs re-distilled, which is why `suite` produced a 6-entry tape that missed
 its own replay. Check `pgrep -f "playwright test"` is empty BEFORE starting a distill, not after.
+
+### The header divergence is Node's ANCESTOR WALK, and `HOME` cannot fix it (2026-10-27)
+
+Measured, in order:
+
+- The boot spawns `dsh web` with `cwd: ROOT` (the repository under development). Node resolves bare
+  specifiers by walking ancestors of the importing file, and the walk from `/home/adrian/Projects/dsh-chapters`
+  passes `/home/adrian/node_modules` — **289 `@deepseek-ai/*` packages, including a linked `dsh` dev build**
+  (home `dsh-agent` = `0.2.0-rc.2`, repo root `dsh-agent` = `0.1.5-rc.2`, lock = `0.2.0-rc.2`).
+- A CI checkout walks `/home/runner/work/dsh-chapters/dsh-chapters` → `/home/runner/work` → `/home/runner` →
+  `/home` → `/` and finds no `node_modules` at any of those levels. Same pin, same version string, different
+  available bundles → different mounted plugin set → different system header: 7,276 chars here against 2,783
+  there, diverging 141 characters in (right after the identity/model line), with **no section headings
+  differing at all** — prose in the same slots.
+- Two fixes I already ruled out by measurement: re-running CI's exact `npm ci --prefix dev/dsh-host-lock`
+  (unchanged, still 7,276), and `npm ci` at the repo root (unchanged, still 7,276). Setting `HOME` to a scratch
+  directory would also do nothing: the walk is over the **path**, not the environment variable.
+- This is the same class #85 described for a home under `var/` — "a linked dev build wearing the pin's version
+  string" — and that fix moved the *home* to `/tmp` but left `cwd: ROOT`, so the walk still reaches the
+  developer's tree. #89 fixed the **binary**; the **module resolution path** was never closed.
+
+Two honest ways to close it, both needing a red row that pins the composed header length (or better: pins the
+mounted-plugin list) so a drift fails loudly instead of producing a machine-local corpus:
+
+1. **Distill in a CI-shaped location.** Run the rig from a scratch clone whose ancestors contain no
+   `node_modules` (e.g. under `/tmp`, with the same `npm ci` steps `scripts/ci-replay.sh` runs). The corpus then
+   has the header every replay environment can reproduce. Cost: distilling outside the working copy, which my
+   per-port absolute store roots already support (#69) — and the workspace-relative `read` paths a leg uses
+   must still resolve, which they do for a clone of the same commit.
+2. **Cut the walk at the repo.** Give the boot an isolated module root — e.g. spawn with `cwd` set to a scratch
+   workspace and pass the repo path to the leg explicitly — so no ancestor above the repo can supply a bundle.
+   This is the cleaner long-term rig property (the boot should never be able to see `~/node_modules`), but it
+   changes what `cwd` means for every leg and so needs the leg-side workspaces audited first.
+
+Until one of them lands, **no corpus committed from this machine is CI-replayable**, and the honest status is:
+local strict chain is what a local machine can prove (nine legs green, `heavy` red on ties), while CI fails at
+`suite` with `commonPrefix=0` — the same number, a different meaning from the earlier proxy fault: the header,
+not the endpoint.
