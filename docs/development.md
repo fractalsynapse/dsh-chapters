@@ -856,3 +856,28 @@ from inside an agent session needs the `.dshdev-local/e2e.env` path, or the oper
 out of the parent process's environment is technically possible for the same user and is deliberately **not**
 done: the withholding looks intentional, and reaching around it to move a credential into a tool shell would be
 exactly the kind of quiet workaround this project documents itself out of.
+
+## The provider identity is part of the tape key
+
+A tape is matched on the **request**, and the request's first message is the composed system header — which
+states the provider and model. So a corpus distilled with one provider row cannot replay under another, and the
+failure does not look like configuration: it looks like a corrupt tape, because matching dies at
+`commonPrefix=0` and every leg then reports its own downstream symptom (no assistant message, no fork door, no
+plan card, a post-compaction turn that never answers).
+
+Measured the hard way on 2026-10-27: re-distilling the corpus with `E2E_PROVIDER=harness` while hosted CI
+replays in the tracked-local shape produced `MISS tape=suite … tied=[every entry]` on CI and a green chain
+locally — the same command, two different headers. The fix is placement, not normalization:
+
+- **the host profile stays on the fixture provider** (`local/qwen3.8-flash-next`) in record and replay, so the
+  header is identical on every machine and in CI;
+- **the real endpoint lives in the tape proxy** — `E2E_UPSTREAM` derived from the installed provider module and
+  `E2E_UPSTREAM_MODEL` translating the fixture name — so the model answering is the maintainer's while the
+  bytes being recorded are the rig's;
+- `E2E_HARNESS_PROFILE=1` restores the profile rewrite for **live** runs, where there is no tape to stay
+  identical with and the point is genuinely to exercise the ambient provider.
+
+Two consequences worth holding onto: the `reasoning`/`retryPolicy` fields of the synthesized row change product
+behavior (`maxRetries: 0` versus the host default), so "same model, different row" is not a neutral edit; and
+a re-distill must run the leg to **green** — a tape distilled by a failing journey is an incomplete capture, and
+replaying it back as a miss blames the artifact for a run that never finished.
