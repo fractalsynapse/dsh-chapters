@@ -538,3 +538,21 @@ Open, in order:
 4. #126 (host: no composer draft API for docks) — until it lands, the bar explains the refusal and Run
    submits through `/chapters-prompt run`;
 5. then cut `0.2.2-dev.1` and hand the maintainer the install/restart.
+
+### The orphan reaper covers the host port but not the tape-proxy port (2026-10-26, measured twice)
+
+`tests/e2e/boot-reap.ts` reaps repo-owned `dsh web --port <n>` holders before a boot. The proxy binds
+`<rig port> + 1000` (`42731`-`42740`) and is covered by nothing, so a leg killed mid-boot leaves a proxy
+holding that port and the **next** chain dies at once:
+
+    Error: listen EADDRINUSE: address already in use 127.0.0.1:42733
+    (earlier today, the same fault on 42739)
+
+Both were mine — a 250s `timeout` on a leg whose teardown then never ran. Manual reaping works (kill the
+repo-owned holder), but a rig that manufactures its own next failure is the #108 class: the run that got
+killed already knew the port was its own.
+
+Fix, rows first: extend `orphanBootPids` to take a port set (host port AND proxy port) and a matcher for the
+proxy's own command line, keep every existing constraint (repo-root in argv, never self, never an ancestor),
+and have the boot reap before `startModelProxy` binds, reporting which pid it signalled. A row must fail
+against the current code to prove the gap: a holder of the proxy port is not reaped today.
