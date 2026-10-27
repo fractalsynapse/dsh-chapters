@@ -349,3 +349,34 @@ Measured, in the order the evidence arrived:
   is documented in the dock's prop list but calling it failed twice, so the gate keeps `running` undefined and
   Autorun says it is unavailable, which means objective item 3's "Autorun displaces the goal" pixel is not yet
   shown and item 4 remains unit-covered only; and the `prompt` tape is 546 entries / 12 MB, needing a cap.
+
+### 2026-10-27 — the three bullets above are now superseded, item by item
+
+- **Autorun's idle edge is wired, and the browser says so.** The dock was being handed `useSessionStatus` — a
+  `SnapshotSelectorHook`, so calling it with a session id made the host use a string as a selector and it threw
+  `TypeError: l is not a function`. The signal the legs needed was on a different prop all along: `useSession`'s
+  snapshot carries `running`. Wired through an identity selector folded by `deriveRunning` (unknown ≠ idle), the
+  leg now asserts arm-ability and passes: `prompt` 4 passed in Chromium, model-free replay, twice (distill and
+  replay). **What is still not shown is the displacement pixel** — Autorun superseding a goal's continuation — so
+  objective item 3 remains partly open and item 4 is still unit-covered only.
+- **CI's acceptance annotation carries its verdict now,** and the failure it names is not a tape fault:
+  `MOUNT FAULT: the session registered none of the core tools every journey needs — missing: bash, read, edit,
+  write (declared=44 registered=7 …)`. Root cause found by measurement, not argument: the booted profile's preset
+  names 28 `@deepseek-ai/*` plugin packages, none of which is a dependency of this repository, so a development
+  host resolved them out of `~/node_modules` and a CI runner resolved nothing and our preset silently pruned 21
+  tool rows — 34 tools here against 7 there, and message 0 is the tape key. `linkPinnedToolPackages()` now links
+  the pinned install into `node_modules/@deepseek-ai` **before** the host spawns (never replacing what the repo
+  already installs), and the CI-shaped clone measured `tools=7 / chars=2880` → `tools=34 / chars=7378`. Provisioning
+  bubblewrap and lifting the AppArmor userns restriction were tried first and are recorded as NOT the cause, each
+  refuted by the runner's own artifact.
+- **The `prompt` tape is 14 entries, not 546.** The bloat was repeated distills accumulating in a directory the
+  ad-hoc loops never cleared; `distill-tapes.sh` clears per project, and the corpus is re-anchored on the capped
+  build with `CORPUS_HOST` stamped (`lib=fcd1e375bab82d3d`, `distilledAt = 2026-10-27`), strict chain green twice
+  locally at that point. Later the same day the pin-link change invalidated those captures and the corpus was
+  restored to the stamped state rather than left mixed — recorded here because "green" has to name the build it
+  belongs to.
+- **New, still open, and named:** #128 (our typecheck passes against harness types a release line behind the pin —
+  four sites pass `source.kind: 'plugin'`, which 0.2.0-rc.2 rejects; and `package.json` 0.2.0 vs lock 0.1.22), and
+  #129 (`globalSetup` boots one server from the setup process's env while Playwright applies project env to
+  workers, so a multi-project run shares a boot and a home; `scripts/chain-replay.sh` now runs one boot per
+  journey, and tightening session discovery to the preferred workspace fixed `prompt`'s `identity mismatch`).
