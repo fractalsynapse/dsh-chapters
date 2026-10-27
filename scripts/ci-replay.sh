@@ -76,6 +76,12 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromiu
 # completed with exit code 1" is not a bug report. The proxy journals every miss with
 # the prefixes it compared — that journal is the thing a maintainer needs.
 STATUS=0
+# Report what the pinned host declares as dependencies and which of them exist on disk. Motivation: the runner's
+# session mounts ONLY our seven plugin tools while a local boot mounts 34, and the header (message 0) is a strict
+# subset of ours as a result. Before reasoning further, ask the machine. Written to a file the artifact uploads.
+node scripts/host-dep-report.mjs "$PWD" > var/ci-host-deps.txt 2>&1 || true
+echo "host-dep report: $(wc -l < var/ci-host-deps.txt 2>/dev/null || echo 0) lines"
+
 # Dump the composed system header once per leg into var/e2e-header-*.log, which the failure artifact uploads.
 # The miss journal truncates `got=` to 110 chars, and three rounds of reasoning about a 7,276-vs-2,783
 # header could not be settled by inference; the runner's own bytes can be diffed offline.

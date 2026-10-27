@@ -202,6 +202,7 @@ jobs:
             var/e2e-boot.json
             var/e2e-tape-misses.log
             var/e2e-header-*.log
+            var/ci-host-deps.txt
             var/e2e-tape-diffs/
             var/e2e-server-*.log
             var/e2e-engine-errors.log
