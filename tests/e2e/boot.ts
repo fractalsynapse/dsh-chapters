@@ -622,6 +622,22 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // per-port copy is the provenance record, where "which boot wrote last" cannot lie.
   fs.writeFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), bootRecord)
   fs.writeFileSync(path.join(ROOT, 'var', `e2e-boot-${String(port)}.json`), bootRecord)
+  // WHAT THE BOOT ACTUALLY MOUNTED, written after seeding (2026-10-27). The runner's session registers 7 tools
+  // while this host registers 34, and the host's own `request/header` event proves `config` and
+  // `adapterDefaults` are byte-identical — so the difference is plugin registration, and the only way to see it
+  // is to report the mounted tree at the moment of boot. My earlier report ran BEFORE any boot existed and
+  // showed `profile-base-node_modules=0` on CI, which was a measurement-order artifact, not a finding.
+  try {
+    const webNm = path.join(E2E_HOME, 'profiles', 'web', 'node_modules')
+    const list = (d: string): string[] => { try { return fs.readdirSync(d) } catch { return [] } }
+    const patchFile = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
+    const patchIds = (() => { try { return [...fs.readFileSync(patchFile, 'utf8').matchAll(/^-\s+id:\s*(\S+)\s*$/gm)].map((x) => x[1]).join(',') } catch { return 'unreadable' } })()
+    fs.writeFileSync(path.join(ROOT, 'var', `e2e-home-plugins-${String(port)}.log`),
+      `node_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\n`
+      + `treeseed=${list(path.join(webNm, '@treeseed')).join(',')}\n`
+      + `deepseek-ai=${String(list(path.join(webNm, '@deepseek-ai')).length)}:${list(path.join(webNm, '@deepseek-ai')).slice(0, 12).join(',')}\n`
+      + `patchPluginIds=${patchIds}\n`)
+  } catch { /* a report must never break a boot */ }
   return {
     url: m[0],
     port,
