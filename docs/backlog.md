@@ -1420,3 +1420,30 @@ sandboxing, and no logged pruning. Two ways forward, both cheap to the person wh
 
 I am not adding a header blind to make CI green, and I am not claiming the cause. Everything else in the
 objective's pipeline is measured and stated above.
+
+### The pin-linking fix works for CI and invalidates the local corpus — stated plainly (2026-10-27)
+
+`linkPinnedToolPackages()` (pre-spawn) was verified to do what it claims: a CI-shaped clone went from `tools=7 /
+chars=2880` to `tools=34 / chars=7378`, which is the mount asymmetry closed. But the same change alters what a
+DEVELOPMENT host resolves — 24 rows now come from the pinned bundle instead of the developer's home tree, and
+those builds are not byte-identical in their prompt contributions. Consequences, measured today rather than
+argued:
+
+- The committed corpus (which was chain-green twice earlier today, pre-link) now fails locally: `suite` ✓
+  `heavy` ✓, then `arrival` ✗ with `model never found the buried token via the artifact tool` — a retrieval that
+  reached its assertion but not its result, i.e. the capture no longer describes what this composition does.
+- A fresh ten-leg capture on the linked build was attempted: nine legs distill green, `fork` failed once with
+  boot-readiness (`e2e boot failed within 120077ms`, retried → exit=0, 2 entries), and the resulting corpus
+  failed at `suite` with the door never rendering — a capture in which the model simply did not take the
+  continuation path, the same nondeterminism already filed for `arrival` and `fanout`.
+- The tapes are therefore RESTORED to `HEAD` and nothing was committed from these runs. No stamp move, no mixed
+  tree, no claim.
+
+The decision this leaves, and it is a real one rather than a preference: either (a) accept a longer capture
+campaign on the linked build — re-distilling per leg until each capture is faithful, filing any leg that needs
+more than two attempts as the flake it is — or (b) make the rig's composition independent of which bundle copy
+resolves by pinning the *prompt-relevant* surface (e.g. declaring the preset's plugin rows as repo devDependencies
+at the pin, which is what I attempted and reverted when 15 existing `0.1.5-rc.x` devDeps made the peer graph
+conflict). (a) is the honest path and (b) is the clean one; doing (b) properly means aligning the repo's harness
+devDependencies to the single pin, which is a larger, riskier change that deserves its own issue and CI cycle
+rather than being folded into this branch.
