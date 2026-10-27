@@ -948,3 +948,22 @@ Until one of them lands, **no corpus committed from this machine is CI-replayabl
 local strict chain is what a local machine can prove (nine legs green, `heavy` red on ties), while CI fails at
 `suite` with `commonPrefix=0` — the same number, a different meaning from the earlier proxy fault: the header,
 not the endpoint.
+
+### The CI-shaped probe was inconclusive — recorded as inconclusive (2026-10-27)
+
+Ran `suite` replay from a clean clone at `/var/tmp/dsh-probe` (no `node_modules` in its ancestor path, the
+property CI has). Outcome: **4 failed**, but the failures were `example.spec.ts` ("has title", "get started
+link") and `discovery.spec.ts` — the page-load scaffolding — and there was **no `MISS tape=` line at all**. So
+the clone's browser/app environment was broken before the tape matcher could say anything, and the run neither
+confirms nor refutes the ancestor-walk theory. Two facts it did establish:
+
+- A fresh clone could not boot at all until `4b66a29` (the `.dshdev-local` ENOENT stack trace is the red
+  evidence for that fix), so this experiment was not runnable before it.
+- `E2E_PROVIDER=harness` in a clean clone refuses correctly (no ambient profile → no route), which is the
+  intended guard, and CI's shape needs no provider because replay never authenticates.
+
+What would settle it, cheaply and in one run: reproduce the page-load failure first (most likely the Playwright
+browser path — CI installs browsers into the workspace cache and the rig's `e2e-one.sh` may expect them there),
+then rerun the clone's `suite` replay and read whether `msg0` diverges. The claim on the table stays exactly as
+recorded above: same pinned host, different available bundles, different composed header — a hypothesis with
+strong code-level support and no A/B yet, so no committed tape set may be called CI-replayable on its strength.
