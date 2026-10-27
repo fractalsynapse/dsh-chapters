@@ -420,7 +420,12 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
         // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
         p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
-        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n` + p
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n` + (process.env.E2E_HOST_RETRIES === '1' ? '' :
+        // Deterministic by default: retry suppression keeps a leg's request count meaningful. Without it,
+        // `arrival` recorded 11 requests into 122 while I watched (2026-10-27) — a tape that no longer
+        // describes the journey it claims. `heavy` is the one leg whose assertions need the host's own retry
+        // behavior, so it opts in by pin (RIG_PINS.heavy.hostRetries) rather than the regime flipping globally.
+        `        retryPolicy:\n          mode: normal\n          maxRetries: 0\n`) + p
       }
       p = p.replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`).replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
