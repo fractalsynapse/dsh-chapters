@@ -1037,3 +1037,32 @@ sync-back guard (correctly) refuses to copy anything.
 Also true and worth keeping: the guard worked as designed — the earlier scratch failure synced nothing back and
 the committed corpus is intact at 33 suite files, because I restored it with `git checkout` after the first
 destructive version of the script.
+
+### Clone stall, labeled: the knowledge loop's FIRST turn never ends; 3 of 4 suite tests pass there (2026-10-27)
+
+Running the clone's `suite` with a short per-test timeout and the line reporter produced the label the hang
+never would:
+
+    Error: expect(received).toBe(expected)   > 841 | await expect.poll(turnSeen, { timeout: turnMs, … },
+        'this session's own log shows turn/end')
+      1 failed · 3 passed (12.3m)
+
+So in the CI-shaped clone the other three suite specs pass, and the knowledge loop dies waiting for `turn/end`
+on its FIRST turn. Supporting measurements, all from the clone's own artifacts:
+
+- Model traffic is healthy up to a point: `DONE status=200` for requests growing `msgs=7 → 10 → 13` (the read
+  loop), last response 47,568 bytes at 11:56:59, then **no further requests for ~11 minutes** while the test
+  waited. So the stall is not a slow endpoint and not a refused overflow.
+- The engine sink's last lines are `compactIfNeeded entered (trigger="pressure")` followed by
+  `decided: none` — pressure was seen and relief declined, then silence.
+- Ruled out since: `promptModel` (both boots print the same `not enabled` line), port collision between the
+  clone and the working copy (`ss -ltn` shows nothing on 417xx now, and the legs use per-project ports), and
+  "the door click hangs" (the bounded door assertion I added never fired — the journey does not reach it).
+
+Next probe, which is the only thing that can answer this: run the clone leg with the throwaway home PRESERVED
+(the boot deletes `E2E_HOME` at teardown — that is why every diagnosis so far has been second-hand), then read
+that session's own log for the last event before the silence: whether a tool call is mid-flight (a `git push`
+against the http-git remote, or a `read` on a path that exists in the working copy but not in the clone) or the
+engine is waiting on the declined relief. My suspicion, stated as suspicion and not as a finding: the journey's
+later steps use workspace paths, and a clone at `/var/tmp/dsh-rig` has a different absolute root, so a step that
+resolves a path against the ORIGINAL working copy would block. That is testable in one preserved-home run.
