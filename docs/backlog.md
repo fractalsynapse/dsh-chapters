@@ -1194,3 +1194,25 @@ python-heredoc failure I read past). The scan exists now, verified with `checked
 correction is in that commit's message. The probe run with `env -u NODE_PATH` also failed at boot
 (`e2e boot failed within 60s (port 41737)`), which was a port/env transient and is NOT evidence about tools —
 recorded so nobody reads a failed run as a result.
+
+### Like-for-like at last: same project, two machines, different mounts (2026-10-27)
+
+Correcting my own earlier comparison (CI's `suite` against my `fork` — not the same project, so the plugin-id
+difference I announced was not yet proven):
+
+| `suite` booted on | header | tools | plugin ids |
+|---|---|---|---|
+| this host | `chars=7396` | 34 | `preset-chapters, agent-preset-registry, @treeseed/dsh-chapters, llm-pi-ai, agent-default-model, llm-gate, fetch-timeouts` |
+| the runner | `chars=2893` | 7 | same **plus `ui-settings-general`** |
+
+So for the same project the runner mounts one MORE plugin and gets 27 FEWER tools. `ui-settings-general` is in no
+tracked file (seed 0, dev-home 0, ambient `~/.dsh` 2) — so the file the boot ends up with is being modified by
+something other than our seeds, most plausibly the host writing its own defaults into
+`profiles/web/cordis.patch.yml` at startup when the home lacks them.
+
+Consequence and next measurement, in that order: the boot's mount report should be taken TWICE — once at the
+moment the URL appears and once after the journey's first turn — so we can see whether the id list is what the
+seed wrote or what the host rewrote, and correspondingly whether tools grow or shrink. If the host rewrites the
+patch, the rig must pin it (write, verify by re-read, and refuse to boot if the ids differ from the tracked
+list) — that is the row this whole investigation has been driving at: **a booted home's plugin list is a rig
+fact, not ambient state.**
