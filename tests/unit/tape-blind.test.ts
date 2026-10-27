@@ -113,3 +113,17 @@ test('the injected time-context snapshot cannot break a tape match (elapsed dura
   assert.ok(forms[4].includes('step context: <ELAPSED>'), 'the step-context line folds its value too')
   assert.ok(!forms[4].includes('11m'), 'and the duration itself is gone')
 })
+
+/**
+ * WORKSPACE-BLIND across machines (measured 2026-10-27, from CI's own artifact).
+ *
+ * The CI checkout lives at `/home/runner/work/dsh-chapters/dsh-chapters` — note the doubled directory — while
+ * every tape on this machine was distilled under `/home/adrian/Projects/dsh-chapters`. A miss in
+ * `tape=suite messages=3` on CI with a green chain here can only mean something in the first three messages
+ * still carries the distillation machine. This row asks the normalizer the question directly.
+ */
+test('the same header written under either workspace path folds to one identity', () => {
+  const ci = normalizeSingle({ role: 'user', content: 'Working directory: /home/runner/work/dsh-chapters/dsh-chapters. Plan file: /home/runner/work/dsh-chapters/dsh-chapters/.dsh-chapters/notes.md' })
+  const local = normalizeSingle({ role: 'user', content: 'Working directory: /home/adrian/Projects/dsh-chapters. Plan file: /home/adrian/Projects/dsh-chapters/.dsh-chapters/notes.md' })
+  assert.equal(ci, local, 'a tape distilled on one machine must be replayable on another')
+})
