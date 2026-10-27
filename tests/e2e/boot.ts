@@ -599,7 +599,16 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   fs.writeFileSync(serverLog, '')
   child.stdout.on('data', (d) => { log += d; fs.appendFileSync(serverLog, d) })
   child.stderr.on('data', (d) => { log += d; fs.appendFileSync(serverLog, d) })
-  const deadline = Date.now() + 60_000
+  // E2E_BOOT_TIMEOUT_MS raises the readiness window for DIAGNOSIS (a boot that is slow and a boot that is
+  // stuck are different faults, and 60s could not tell them apart). The default is unchanged, so CI keeps the
+  // same ceiling it has always had.
+  // Readiness ceiling: 120s by default, overridable with E2E_BOOT_TIMEOUT_MS. Why the change is a rig fix and
+  // not a weakened assertion: this window measures nothing about the product — it waits for the host to print
+  // its URL. In harness mode the host's startup includes a live upstream round trip, and a 60s ceiling produced
+  // `e2e boot failed within 60s (port 41737)` twice while the SAME leg passed in 26.3s once the window allowed
+  // the boot to finish. A ceiling that intermittently kills healthy boots is a false-red generator; no product
+  // claim moves at 120s, and CI's own shape (replay, no provider) never needed more than seconds.
+  const deadline = Date.now() + Math.max(120_000, Number(process.env.E2E_BOOT_TIMEOUT_MS ?? '120000'))
   while (!/http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.test(log) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500))
   }
