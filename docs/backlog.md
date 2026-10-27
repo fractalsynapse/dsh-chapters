@@ -698,3 +698,32 @@ the same pin but the header can still carry a machine-specific token the blinds 
 skill/tool catalog on a pristine home differs from this machine's installed plugins — which would be a
 normalization gap of the same family as AGENTS-BLIND and the workspace/path blinds, and the right fix is a
 narrow blind with a red row, never a widened matcher.
+
+### The local-vs-CI header gap is a **build identity** difference, not a config leak (2026-10-27, three hypotheses killed)
+
+Evidence, in the order it arrived:
+
+1. `ls -l dev/dsh-host-lock/node_modules/@deepseek-ai/dsh` was a real directory, and CI's install command was
+   run verbatim here (`npm ci --prefix dev/dsh-host-lock --no-save`, then `dsh --version` → `0.2.0-rc.2`).
+   Re-distilling `suite` after that still records a **7,276-char** header. So "my host install drifted from
+   CI's" is dead.
+2. The copy filter in `boot.ts` was allowing `rel === 'storages'` and `storages/workspace.json` from the
+   developer's `.dshdev-local`. Excluding them was edited, re-distilled, and measured: still 7,276. **The edit
+   was reverted** rather than left in the tree as an unverified "fix" — a change kept because it seemed
+   plausible is how a rig accumulates cargo cult.
+3. Section-by-section comparison of the two headers: **no heading differs at all**. The divergence is prose
+   inside the same sections — CI says `…Prefer showing the primary results within your final response…`, the
+   local header at the same offset says `…Tokens prefixed with @ are paths the user explicitly referenced…`.
+   Same document structure, different text: that is two **builds** of the client UI packages, not two
+   configurations.
+
+So the machine-specific input is which `@deepseek-ai/*` bundle the boot actually resolves. Both
+`~/node_modules/@deepseek-ai/` and the lock hold 289 packages, and the home dir additionally contains a linked
+`dsh` dev build — the exact shape #89's note describes as "a linked dev build wearing the pin's version string".
+The next probe is therefore resolution, not regime: have the boot print, once, the **resolved file path** of the
+package that contributes the header (the conversation/client-ui module), and compare that path on the two
+machines. If it is `~/node_modules/…` locally, the fix is to make the rig resolve strictly inside
+`dev/dsh-host-lock` (an explicit loader path or a barrier directory), and the corpus re-distills once after that.
+Until that is measured, do NOT re-distill again hoping for a shorter header, and do not add a blind to mask it —
+masking a header that differs by build would hide the fact that the acceptance run and the recorded corpus were
+produced by different software, which is the one thing the tape system exists to prevent.
