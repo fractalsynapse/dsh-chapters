@@ -698,7 +698,22 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // process. `boot.ts` still sets E2E_PROXY_PORT (port+1000) because the profile patch must
   // name the proxy URL before the proxy exists — that requirement is preserved exactly.
   const wantPort = process.env.E2E_PROXY_PORT !== undefined ? Number(process.env.E2E_PROXY_PORT) : 0
-  await new Promise<void>((resolve) => server.listen(wantPort, '127.0.0.1', resolve))
+  // Bind the derived port when it is free and ANY port when it is not. The derivation prevents collisions
+  // between CONCURRENT legs; it cannot prevent an orphan from a run that was killed mid-boot, and two chain
+  // runs today died on `listen EADDRINUSE … 42733` reading like a product failure. Falling back is safe here
+  // specifically because tape matching is HOSTPORT-BLIND and the profile receives the proxy's real bound URL
+  // (below), so no behavior depends on the number being predictable.
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: NodeJS.ErrnoException): void => {
+      if (error.code !== 'EADDRINUSE' || wantPort === 0) { reject(error); return }
+      console.warn(`[tape-proxy] port ${String(wantPort)} is held (likely an orphaned boot); falling back to an ephemeral port`)
+      server.removeListener('error', onError)
+      server.once('error', (e) => { reject(e) })
+      server.listen(0, '127.0.0.1', () => { resolve() })
+    }
+    server.once('error', onError)
+    server.listen(wantPort, '127.0.0.1', () => { server.removeListener('error', onError); resolve() })
+  })
   const bound = server.address() as { port: number } | null
   if (bound === null) throw new Error('tape proxy: listen reported no address — the URL cannot be built')
   return {
