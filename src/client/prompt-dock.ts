@@ -30,7 +30,6 @@ import {
   initialBarState,
   parseBarAutorun,
   parseBarState,
-  deriveRunning,
   promptBarReducer,
   shouldAutoFire,
   type PromptBarEvent,
@@ -255,6 +254,16 @@ export function PromptDock(props: DockProps): ReactElement | null {
     run()
   }, [state, run])
 
+  // Autorun's idle edge stays UNWIRED on this host, and that is now a measured fact rather than a guess:
+  // `useSessionStatus` is in the dock's documented prop list, but calling it here threw twice — first a React
+  // hook-order abort (#310, because it sat below the early return), then `TypeError: l is not a function` once
+  // hoisted. Two blind attempts is the limit; the contract says which hooks exist, not their arity or context.
+  // So the gate keeps its original, correct behavior: with no signal, `running` is undefined, Autorun is
+  // visibly unavailable and says why, and `deriveRunning` (9 rows) stands ready for whichever shape the host
+  // does publish. A loop that starts turns the human cannot foresee is the one failure mode not on offer.
+  const running = props.running
+  const autorunDisabled = running === undefined
+
   if (sessionId === undefined || !barVisible(state as PromptBarState)) return null
 
   const populate = (): void => {
@@ -326,11 +335,6 @@ export function PromptDock(props: DockProps): ReactElement | null {
   }
 
   // Called unconditionally through a stable fallback, so the hook order cannot change between renders.
-  const useSessionStatus = props.useSessionStatus ?? (() => undefined)
-  const liveRunning = deriveRunning(sessionId === undefined ? undefined : useSessionStatus(sessionId))
-  // Either source may answer; `undefined` from both means unknown, and unknown must never start a turn.
-  const running = props.running ?? liveRunning
-  const autorunDisabled = running === undefined
   return h('div', { className: 'dsh-chapters_promptDock', 'data-prompt-bar': 'true' },
     h('div', { className: `dsh-chapters_promptBar${state.expanded ? ' dsh-chapters_promptExpanded' : ''}` },
       h('span', { className: 'dsh-chapters_promptGlyph' }, h(Glyph)),
