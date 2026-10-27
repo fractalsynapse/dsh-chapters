@@ -73,24 +73,21 @@ fi
 # E2E_PROVIDER=harness makes the tape proxy dial the maintainer's route for RECORD. Provider identity is NOT
 # changed (that was the bug that produced a machine-local corpus): the header still says the fixture provider,
 # so a CI runner replays what was recorded here.
-# RECORD needs the maintainer's route key; replay never does (that asymmetry is the point of #121). The scratch
-# clone has no ambient profile of its own, so the key is passed in from the developer's credential store — and
-# NEVER printed: the project rule is that raw tokens must not appear in command output anywhere.
-if [[ -z "${QWEN_TOKEN_PLAN_API_KEY:-}" ]]; then
-  KEYFILE="${HOME}/.dsh/.credentials.yaml"
-  if [[ -f "$KEYFILE" ]]; then
-    # The extraction lives in scripts/read-credential.mjs: one narrow job, no shell quoting (an embedded JS
-    # regex here produced a bash syntax error I then committed), and nothing but the single value ever
-    # reaches stdout, so a token cannot leak into a log line by accident.
-    QWEN_TOKEN_PLAN_API_KEY="$(node "$SRC/scripts/read-credential.mjs" "$KEYFILE" QWEN_TOKEN_PLAN_API_KEY)" || true
-    if [[ -z "$QWEN_TOKEN_PLAN_API_KEY" ]]; then
-      die "the credential file exists but did not yield the route key — record cannot reach a model"
-    fi
-    export QWEN_TOKEN_PLAN_API_KEY
-    log "route key loaded from the credential store (value not printed)"
-  else
-    log "no $KEYFILE — RECORD cannot reach a model; replay still works without one"
-  fi
+# Credentials: reuse the rig's OWN chain, invent nothing. `boot.ts` resolves the route key in a documented order
+# — (1) the parent environment, (2) `.dshdev-local/e2e.env` — and that file is excluded from the rsync because
+# the rest of `.dshdev-local` is developer plugin state. So it is placed into the clone verbatim, and nothing is
+# parsed, printed, or guessed (project rule dev2/001: raw tokens never appear in command output).
+#
+# Why this line exists: the first version of this block parsed `~/.dsh/.credentials.yaml` with a regex and
+# exported the result. The endpoint answered 401 to every request and `suite` recorded ZERO tape entries across
+# ten minutes, while the working copy distills the same leg in 40 seconds. A self-invented credential path is
+# worse than no credential path, because the rig refuses loudly when the chain finds nothing.
+mkdir -p "$SCRATCH/.dshdev-local"
+if [[ -f "$SRC/.dshdev-local/e2e.env" ]]; then
+  cp "$SRC/.dshdev-local/e2e.env" "$SCRATCH/.dshdev-local/e2e.env"
+  log "the rig's own credential file placed in the clone (contents not printed)"
+else
+  log "no .dshdev-local/e2e.env in the working copy — RECORD will refuse without a route key; replay is unaffected"
 fi
 
 log "distilling legs: ${*:-(full ORDER)}"
