@@ -589,7 +589,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // chars. The artifact CI already uploads can carry the whole text, so the diff is byte-exact and offline.
   // No secrets: this is the composed prompt, and the bearer header never reaches this path.
   let headerDumped = false
-  const dumpHeader = (messages: string[]): void => {
+  const dumpHeader = (messages: string[], tools?: unknown): void => {
     if (headerDumped || process.env.E2E_DUMP_HEADER !== '1') return
     const sys = messages.find((m) => m.includes(String.fromCharCode(34) + "role" + String.fromCharCode(34) + ":" + String.fromCharCode(34) + "system" + String.fromCharCode(34)))
     if (sys === undefined) return
@@ -598,7 +598,13 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
       // Derived, not hardcoded: model-proxy has no ROOT of its own, and re-typing the repo path is how the
       // #89 class of drift is born. The tape dir is `<repo>/tests/fixtures/model-tape/<name>`.
       const repoRoot = path.resolve(opts.tapeDir, '..', '..', '..', '..')
-      fs.writeFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\n${sys}\n`)
+      // Tools ride along, because every sentence a runner was missing was tool guidance: the header is a strict
+      // subset of ours (2,847 chars / 26 sentences against 7,276 / 64, zero CI-only sentences), which means the
+      // runner EXPOSES FEWER TOOLS rather than composing different prose. Names only, never descriptions.
+      const names = Array.isArray(tools)
+        ? (tools as Array<Record<string, unknown>>).map((t) => String(t?.name ?? '?')).sort().join(',')
+        : 'none-reported'
+      fs.writeFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\ntools=${String(Array.isArray(tools) ? tools.length : 0)}\nnames=${names}\n${sys}\n`)
     } catch { /* diagnostics never break a leg */ }
   }
 
@@ -622,7 +628,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         // and NOTHING on CI (replay) — a probe that only fires in the mode I already understand is not a probe.
         // Serialize the way the matcher does: `messagesOf()` yields parsed objects, and String(object) would
         // silently never match.
-        dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")))
+        dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")), (body as Record<string, unknown>).tools)
         // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape
         // records — a distill that saw a refusal and retried after relief must see the same refusal
         // on replay, or the request sequence diverges and the chain fails for a reason that looks
