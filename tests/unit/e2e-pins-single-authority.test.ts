@@ -23,7 +23,11 @@ const ROOT = path.resolve(import.meta.dirname, '..', '..')
 
 const EXPECTED: Record<string, Record<string, string>> = {
   suite: { E2E_PORT: '41731', E2E_THRESHOLD: '0.75' },
-  heavy: { E2E_PORT: '41733', E2E_THRESHOLD: '0.5', E2E_FLOOR: '1000000' },
+  // heavy: trigger 0.5 → 0.9 (#56, 2026-10-27) so its compaction boundary lands at the same message index under
+  // record and replay; `maxRetries: 3` because its post-compaction turn needs the host to re-issue a refused
+  // request. Both are declared here as an INDEPENDENT restatement of the table — that is this block's purpose:
+  // a one-sided edit to `rig-pins.ts` fails, so a regime change has to be argued for twice.
+  heavy: { E2E_PORT: '41733', E2E_THRESHOLD: '0.9', E2E_FLOOR: '1000000', E2E_MAX_RETRIES: '3' },
   arrival: { E2E_PORT: '41732', E2E_THRESHOLD: '0.9', E2E_FLOOR: '500' },
   enrich: { E2E_PORT: '41734', E2E_THRESHOLD: '0.9', E2E_ENRICH: '1' },
   fanout: { E2E_PORT: '41736', E2E_THRESHOLD: '0.75' },
@@ -59,7 +63,11 @@ test('the boot selects the project from argv and applies the table (the half the
     for (const k of ['E2E_TAPE', 'E2E_PORT', 'E2E_THRESHOLD', 'E2E_FLOOR']) delete process.env[k]
     process.env.E2E_THRESHOLD = '0.1'
     const pin = applyRigEnv('heavy')
-    assert.equal(pin?.threshold, '0.5', 'the table knows heavy')
+    // heavy's trigger moved 0.5 → 0.9 (#56): at 0.5 the compaction boundary sat one assistant/tool round apart
+    // between record and replay on byte-identical surfaces, so the capture could not be matched. Read from the
+    // EXPECTED block instead of a fresh literal — this file already restates the table once, deliberately, and a
+    // third copy of the number was a fourth place for it to drift.
+    assert.equal(pin?.threshold, EXPECTED.heavy?.E2E_THRESHOLD, 'the table knows heavy')
     assert.equal(process.env.E2E_THRESHOLD, '0.1',
       'an explicit command-line pin must win — re-tuning one leg cannot require editing the table')
     assert.equal(process.env.E2E_PORT, '41733', 'and everything unset still comes from the table')
