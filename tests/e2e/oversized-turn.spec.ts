@@ -117,7 +117,7 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   // event. Assistant TEXT is not a reliable signal on this box (measured: a
   // full turn of reasoning + tool calls with zero text blocks). With the
   // arrival floor off, one landed chunk (~10K tokens on a 13.3K header)
-  // crosses the 16K heavy trigger by arithmetic.
+  // crosses the 28.8K heavy trigger (RIG_PINS.heavy.threshold 0.9 of the pinned 32K window) by arithmetic.
   await expect.poll(() => {
     const raw = sessionLogTextById(sid)
     return raw.includes('MARKER-ALPHA-7731') || raw.includes('MARKER-MIDDLE-5588') || raw.includes('MARKER-OMEGA-4207')

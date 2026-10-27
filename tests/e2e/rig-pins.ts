@@ -33,7 +33,7 @@ export const RIG_PINS: Record<string, RigPin> = {
   suite: { port: 41731, threshold: '0.75' },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
-  heavy: { port: 41733, threshold: '0.5', floor: '1000000', maxRetries: 3 },
+  heavy: { port: 41733, threshold: '0.9', floor: '1000000', maxRetries: 3 },
   arrival: { port: 41732, threshold: '0.9', floor: '500' },
   enrich: { port: 41734, threshold: '0.9', enrich: true },
   fanout: { port: 41736, threshold: '0.75' },
