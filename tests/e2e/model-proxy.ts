@@ -48,6 +48,12 @@ const VOLATILE: Array<[RegExp, string]> = [
   // journey. The byte diff proved `heavy`'s replay died on exactly that count at char 729 while its system
   // header matched byte for byte. Same family as the est-token and char-count collapses already here.
   [/Chapter archive: \d+ chapter\(s\)/g, 'Chapter archive: <COUNT> chapter(s)'],
+  // CHECKOUT-BLIND (#56, measured): the system header states where the harness implementation checkout lives.
+  // That is machine identity, the same class as the workspace path folded above — and with the tool-mount gap
+  // closed it became the LAST difference between a CI-shaped clone and a development host: 18 characters,
+  // exactly the two checkout paths. Message 0 is the tape key, so an unblinded path makes every corpus
+  // unportable. Narrow on purpose: the sentence is required, so prose that merely mentions a checkout stays.
+  [/(implementation checkout is at )[^\s"]+/g, '$1<DSH_CHECKOUT>'],
   // human dates measured crossing midnight: 'Sep 19' recorded, 'Sep 20' replayed
   [/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}(,? \d{4})?\b/g, '<DATE>'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):

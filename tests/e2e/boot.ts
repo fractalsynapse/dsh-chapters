@@ -226,6 +226,53 @@ export function seedRigHomeFromUntrackedDevCopy(root: string, home: string): { c
   return { copied: true, reason: 'filtered copy of the untracked dev home' }
 }
 
+/**
+ * Make the preset's tool rows resolvable from the PINNED install inside a booted home, on every machine.
+ *
+ * Proven by measurement, not theory: a session assembled in a CI-shaped tree registers 7 tools and composes a
+ * 2,880-char header; on a development host it registers 34 and composes 7,396. The only difference is
+ * resolution — our preset prunes child rows it cannot resolve, and locally those rows resolved out of
+ * `~/node_modules`, which no runner has. Message 0 is the tape key, so that asymmetry makes any corpus
+ * recorded on a developer machine unreplayable in CI: the root cause of this branch's longest chase.
+ *
+ * The fix is rig-side and it is determinism rather than convenience: linking the pin's packages into the
+ * booted home's plugin tree makes the NEAREST resolution root the pinned bundle on both machines, so the
+ * recording environment is a property of the version we pin, not of whose laptop runs it. Nothing about the
+ * shipped package's dependency surface changes, and rows the pin genuinely lacks are returned as `missing`
+ * rather than dropped in silence — a silent prune is precisely what produced the short header.
+ */
+export function linkPinnedToolPackages(
+  homeDir: string,
+  rootDir: string,
+): { names: string[], missing: string[], linked: string[], skipped: string[] } {
+  const names: string[] = []
+  const missing: string[] = []
+  const linked: string[] = []
+  const skipped: string[] = []
+  try {
+    const patchText = fs.readFileSync(path.join(homeDir, 'profiles', 'web', 'cordis.patch.yml'), 'utf8')
+    for (const m of patchText.matchAll(/^\s*name:\s*'(@deepseek-ai\/[^']+)'\s*$/gm)) {
+      const full = m[1] ?? ''
+      const short = full.replace('@deepseek-ai/', '')
+      if (short === '' || names.includes(short)) continue
+      names.push(short)
+      const src = path.join(rootDir, 'dev', 'dsh-host-lock', 'node_modules', '@deepseek-ai', short)
+      if (!fs.existsSync(path.join(src, 'package.json'))) { missing.push(short); continue }
+      const destDir = path.join(rootDir, 'node_modules', '@deepseek-ai')
+      const dest = path.join(destDir, short)
+      // NEVER overwrite what is already installed: the repo's own dependency tree is authoritative, and a rig
+      // that replaces a hoisted package with a symlink to the pin could break the build it is testing.
+      if (fs.existsSync(dest)) { skipped.push(short); continue }
+      try {
+        fs.mkdirSync(destDir, { recursive: true })
+        fs.symlinkSync(src, dest, 'dir')
+        linked.push(short)
+      } catch { missing.push(short) }
+    }
+  } catch { /* an unreadable profile is the boot's own problem to report */ }
+  return { names, missing, linked, skipped }
+}
+
 export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandle> {
   // proxy port derived from the boot port (+1000): per-project and per-rerun
   // collision-free (a hard-coded proxy port turned one killed run's orphan
@@ -577,6 +624,17 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // binary it used. A version string is not identity.
   const host = resolveHostBinary(ROOT)
   console.log(`[e2e] host binary: ${host.binary} (pinned=${host.pinned})`)
+
+  // BEFORE the spawn, not after: the preset's tool rows are resolved by the host while it boots, so linking
+  // them after the URL line arrives fixes nothing on a machine that cannot see a developer's home tree (measured
+  // in a CI-shaped clone: rows=27 linked=24 yet still `tools=7`, because the links landed too late). This is
+  // what makes a CI runner and a development host compose the same message 0 (#56).
+  const toolLinks = linkPinnedToolPackages(E2E_HOME, ROOT)
+  fs.writeFileSync(path.join(ROOT, 'var', `e2e-tool-links-${String(port)}.log`),
+    `rows=${String(toolLinks.names.length)} linked=${String(toolLinks.linked.length)}`
+    + ` skippedAlreadyPresent=${toolLinks.skipped.length > 0 ? toolLinks.skipped.join(',') : 'none'}`
+    + ` missingFromPin=${toolLinks.missing.length > 0 ? toolLinks.missing.join(',') : 'none'}\n`)
+
   const child: ChildProcessWithoutNullStreams = spawn(host.binary, ['web', '--port', String(port), '--no-open'], {
     cwd: ROOT,
     env: rigChildEnv(process.env, {
