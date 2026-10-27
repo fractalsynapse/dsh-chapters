@@ -92,14 +92,17 @@ if [[ "$STATUS" -ne 0 ]]; then
     [[ -n "$line" ]] || continue
     DIAG+=$'\n'"${line:0:280}"
   done < <(
-    grep -E "RIG FAULT|MISS tape=|No tests found|[0-9]+ failed" var/ci-replay.log | tail -6
+    # Tape-key failures first: they are the class that aborts a leg before Playwright prints a verdict, and the
+    # annotation loses everything after its first line, so the most decisive bytes lead. This is a `head`-free
+    # filter — the single wide grep below is the one the annotations row pins.
+    grep -E "RIG FAULT|MISS tape=|No tests found|[0-9]+ failed" var/ci-replay.log | tail -6 | sed 's/^/[rig] /'
     # Unconditional tail: every targeted grep above can legitimately match nothing (a failure that died in the
     # boot, a spec timeout whose summary line differs, a grep I have not thought of yet). A header-only
     # annotation teaches nothing, so the last lines of the run always ride along.
     echo "— raw tail of var/ci-replay.log"
     tail -12 var/ci-replay.log
     grep -E "^\[e2e\] boot pins" var/ci-replay.log | tail -2
-    grep -E "✘|Error:|expect\(|Received:|Expected:|falling back to an ephemeral|reaped orphan" var/ci-replay.log | head -14
+    grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found|RIG FAULT|MISS tape=|reaped orphan|falling back to an ephemeral" var/ci-replay.log | head -16
     # playwright's own saved context: the snippet plus the page snapshot, i.e. the
     # difference between "an assertion failed" and why it failed.
     for f in $(ls -1 test-results/*/error-context.md 2>/dev/null | head -2); do
