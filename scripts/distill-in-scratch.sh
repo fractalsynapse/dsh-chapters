@@ -76,16 +76,17 @@ fi
 if [[ -z "${QWEN_TOKEN_PLAN_API_KEY:-}" ]]; then
   KEYFILE="${HOME}/.dsh/.credentials.yaml"
   if [[ -f "$KEYFILE" ]]; then
-    QWEN_TOKEN_PLAN_API_KEY="$(node -e '
-      const fs = require("fs");
-      const m = /QWEN_TOKEN_PLAN_API_KEY:\s*["''']?([^"'\'']+)/.exec(fs.readFileSync(process.argv[1], "utf8"));
-      process.stdout.write(m ? m[1].trim() : "");
-    ' "$KEYFILE")"
+    # The extraction lives in scripts/read-credential.mjs: one narrow job, no shell quoting (an embedded JS
+    # regex here produced a bash syntax error I then committed), and nothing but the single value ever
+    # reaches stdout, so a token cannot leak into a log line by accident.
+    QWEN_TOKEN_PLAN_API_KEY="$(node "$SRC/scripts/read-credential.mjs" "$KEYFILE" QWEN_TOKEN_PLAN_API_KEY)" || true
+    if [[ -z "$QWEN_TOKEN_PLAN_API_KEY" ]]; then
+      die "the credential file exists but did not yield the route key — record cannot reach a model"
+    fi
     export QWEN_TOKEN_PLAN_API_KEY
-    [[ -n "$QWEN_TOKEN_PLAN_API_KEY" ]] && log "route key loaded from the credential store (value not printed)" \
-      || die "credential file present but the route key was not found in it"
+    log "route key loaded from the credential store (value not printed)"
   else
-    log "no $KEYFILE — RECORD cannot reach a model; replay would still work"
+    log "no $KEYFILE — RECORD cannot reach a model; replay still works without one"
   fi
 fi
 
