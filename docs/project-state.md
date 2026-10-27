@@ -321,3 +321,31 @@ being edited from is solved — see [docs/development.md](docs/development.md).
 
 Then [docs/contract.md](docs/contract.md) for how to declare things, and
 [docs/verify.md](docs/verify.md) before claiming any step passes.
+
+## Round: the bar renders, and the chain went green locally (2026-10-26/27, host 0.2.0-rc.2)
+
+Measured, in the order the evidence arrived:
+
+- **`prompt` and `prompt-off` pass in Chromium**, in record and in strict replay: the docked row mounts above
+  the composer at order 30, shows `Analyzing`/the offer, expands, drafts-or-explains, and Run reaches the
+  durable log as a user-role message. 10-project chain `E2E_MODEL=replay npm run test:e2e` → **EXIT=0**
+  (`suite` 4 passed 39.8s, `heavy` 1.8m, `arrival`, `enrich`, `fanout`, `rules`, `fork`, `plans`, `prompt`
+  4 passed, `prompt-off`). `coverage:e2e` → **EXIT=0** on the same build.
+- **Four causes, all found by measurement after a wrong theory each time.** (1) The tape proxy joined
+  `…/compatible-mode/v1` + `/v1/chat/completions` into `/v1/v1/…`, so nine legs had no assistant row at all.
+  (2) `off` meant disabled, empty, and broken at once; `idle` split them apart. (3) A per-turn
+  `Elapsed since the preceding model-visible message: …` line was unmasked, so replay diverged from record by
+  one character of punctuation. (4) `prompt`'s failure was a React **#310 hook-order crash** — a hook I added
+  sat below the component's early `return null` — and it *looked* credential-dependent because the credential
+  changed when the row's visibility transitioned. The journal's silence (zero `MISS tape=prompt`) is what killed
+  that theory in front of the evidence.
+- **Rig honesty landed too:** a strict-replay `MISS` is now fatal for the leg that produced it, with a byte
+  baseline so it cannot blame another leg's history; the proxy falls back to an ephemeral port rather than
+  dying on an orphan; `applyRigEnv` and `rigEnv` became one derivation (mutation-proven); a missing profile
+  patch throws instead of being skipped; the chain-coverage row is mutation-proven and caught
+  `--project=prompt-off` substring-matching `--project=prompt`.
+- **Still open, named not smoothed:** CI's acceptance job is red while the local chain is green and its
+  annotation carries no verdict lines (repro running); Autorun's idle edge is **unwired** — `useSessionStatus`
+  is documented in the dock's prop list but calling it failed twice, so the gate keeps `running` undefined and
+  Autorun says it is unavailable, which means objective item 3's "Autorun displaces the goal" pixel is not yet
+  shown and item 4 remains unit-covered only; and the `prompt` tape is 546 entries / 12 MB, needing a cap.
