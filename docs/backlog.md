@@ -659,3 +659,42 @@ documented an hour earlier, and I walked into it anyway because the temptation w
 Current state after this lesson: heavy passes with its declared `hostRetries: true` (distill exit=0, 19
 entries), arrival's 122-entry junk tape was discarded and restored from git, and one uniform pass over the final
 regimes is running.
+
+### `arrival` needed a second distill pass — live-model nondeterminism, recorded (2026-10-27)
+
+First pass under the frozen regimes: `arrival: exit=1`, 41 recorded requests, failing its own assertion with
+`model never found the buried token via the artifact tool` (`Expected substring: "EMBED-CENTER-4417"`). Second
+pass, same build, same regime: `exit=0`, 10 entries. Nothing in the rig changed between them.
+
+So the leg's outcome depends on the model actually choosing `chapters_artifact` and reading the right offset —
+which is the thing the leg exists to test, and also why one capture is not a guarantee. Handling, deliberately:
+the corpus now carries a tape distilled from a **passing** run (the rule), and this note is the record that the
+leg needed two attempts — not a claim that it is stable. If it fails a third time, that is a product/leg issue to
+file with both logs, and re-rolling until green stops being an acceptable answer.
+
+Also from the same pass: `prompt-off` was in the distiller's `ORDER` but its commit landed after the batch had
+started reading the script, so its tape is being re-distilled separately rather than left stale — a mixed-regime
+corpus is the failure mode I already documented and then still managed to create.
+
+### CI still fails at the knowledge loop while the identical local chain is green (2026-10-27)
+
+State of evidence, so the next round starts from facts:
+
+- Local, in CI's exact shape (`E2E_MODEL=replay npm run test:e2e`, no provider, no credential): **all ten legs
+  green, `CHAIN_EXIT=0`**, and the corpus is committed as one change (`2df6704`) with `corpus:stamp`/`check`
+  agreeing at `lib=8bb44fc2`.
+- CI run `40465462766`: step 8 (`tape replay`) fails, step 7/9 (store snapshot/verify) pass, and the uploaded
+  artifact shows the failure is in `suite`'s knowledge loop: `test-results/a-knowledge-loop-…`, plus
+  `var/e2e-tape-misses.log` and a `var/e2e-tape-diffs/000.json`.
+- The annotation carries no detail lines even after widening the grep, so nothing matched — the grep needs the
+  `2026-…` journal form and the `distill:`-style lines too, which is a diagnostics gap to close, not a mystery.
+- The artifact's diff pairs a 2-message incoming against a *title* candidate, because `storedCandidates` selects
+  by equal message count, not by kind. So it cannot show the divergence: the next probe must compare CI's
+  `incoming[0]` against the committed **conversation** tape entry's `prefix[0]` directly, character by
+  character, and print the type of each element first (my attempt died on exactly that assumption).
+
+Leading possibilities, none yet evidenced: the runner's model adapter defaults differ (CI's `dsh --version` is
+the same pin but the header can still carry a machine-specific token the blinds do not cover), or the header's
+skill/tool catalog on a pristine home differs from this machine's installed plugins — which would be a
+normalization gap of the same family as AGENTS-BLIND and the workspace/path blinds, and the right fix is a
+narrow blind with a red row, never a widened matcher.
