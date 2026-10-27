@@ -89,7 +89,7 @@ if [[ "$STATUS" -ne 0 ]]; then
     DIAG+=$'\n'"${line:0:280}"
   done < <(
     grep -E "^\[e2e\] boot pins" var/ci-replay.log | tail -2
-    grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found" var/ci-replay.log | head -12
+    grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found|RIG FAULT|MISS tape=|falling back to an ephemeral|reaped orphan" var/ci-replay.log | head -14
     # playwright's own saved context: the snippet plus the page snapshot, i.e. the
     # difference between "an assertion failed" and why it failed.
     for f in $(ls -1 test-results/*/error-context.md 2>/dev/null | head -2); do
