@@ -124,7 +124,7 @@ jobs:
           fi
 
   e2e-replay:
-    name: acceptance — nine tape-replay segments, no LLM
+    name: acceptance — ten tape-replay legs, no LLM
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
