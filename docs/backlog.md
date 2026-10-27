@@ -798,3 +798,17 @@ being read into message 0 of every request. A GitHub checkout has no such tier, 
 All ten legs then re-distilled green under the frozen regimes (`FROZEN_EXIT=0`), and the claim being tested now
 is the only one that matters: the same corpus replaying under `npm run test:e2e:replay` with no provider and no
 credential, run twice, and then on CI.
+
+### Current truth of the pipeline (2026-10-27, after the confirmed header fix)
+
+- All ten legs **distill** green under the frozen regimes (`FROZEN_EXIT=0`).
+- `npm run test:e2e:replay` locally: **suite green, heavy reproducibly red** — `MISS tape=heavy entries=25
+  messages=3 closest=0001.json tied=[0001,0003,0004,…]`, identical in two consecutive runs. The chain uses
+  `&&`, so nothing past `heavy` has a replay verdict at all; no claim is made about them.
+- Therefore the corpus is **not** committed and `CORPUS_HOST` is **not** stamped. The earlier commit
+  `2df6704` is stale against current code (it predates the store-root and selector-hook fixes) and I am leaving
+  it in history with this note rather than amending it.
+- Next measurement, not another theory: run `LEG=heavy MODE=replay` with `E2E_TAPE_DIFF` and compare
+  `incoming[2]` against the **same-kind** stored candidate (the previous diff pairing was useless because
+  `storedCandidates` selects by message count, so a conversation request was matched against a title request —
+  that selection should be filtered by role/kind before comparison, which is itself a small rig fix).
