@@ -415,12 +415,12 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // host stays on the fixture route, the proxy translates it, and CI, the distill run, and the replay run
       // all compose the same bytes. `E2E_HARNESS_PROFILE=1` restores the rewrite for the live-model `live`
       // mode, where there is no tape to stay byte-identical with.
-      if (harnessRoute !== null && process.env.E2E_HARNESS_PROFILE === '1') {
+      if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
         // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host
         // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
         p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
-        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: 0\n` + p
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n` + p
       }
       p = p.replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`).replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
