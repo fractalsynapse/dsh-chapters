@@ -125,7 +125,7 @@ try {
   try { ver = execFileSync('bwrap', ['--version'], { encoding: 'utf8' }).trim() } catch { /* absent */ }
   let run = 'unknown'
   try { execFileSync('bwrap', ['--ro-bind', '/', '/', '/bin/true'], { encoding: 'utf8', stdio: 'pipe' }); run = 'ok' }
-  catch (e) { run = `failed: ${String((e && e.message) ? e.message : e).replace(/\s+/g, ' ').slice(0, 90)}` }
+  catch (e) { run = `failed: ${String((e && e.message) ? e.message : e).replace(/\s+/g, ' ').slice(0, 240)}` }
   console.log(`bwrap version=${ver} userNamespaceTest=${run}`)
 } catch (e) {
   console.log(`bwrap probe error: ${String((e && e.message) ? e.message : e)}`)

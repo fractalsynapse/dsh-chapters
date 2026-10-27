@@ -168,6 +168,15 @@ jobs:
       # and a local one 34, so message 0 (the tape key) could never match. Provisioning the runtime dependency is
       # the fix; masking the header would hide a corpus recorded by different software than the one replaying it.
       - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd bubblewrap
+      # Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor, so installing bwrap is not enough:
+      # the runner reported `bwrap version=bubblewrap 0.9.0 userNamespaceTest=failed: ... setting up uid map`.
+      # Lift the restriction for this job only, and re-probe; if it still fails, the probe in ci-host-deps.txt
+      # says so and the acceptance job stays honest about a runner that cannot host a developer's tool surface.
+      - name: allow unprivileged user namespaces (bubblewrap needs them)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>&1 || echo "sysctl: not available on this image"
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>&1 || echo "sysctl: setting not present on this image"
+          bwrap --ro-bind / / /bin/true && echo "bwrap probe: OK after sysctl" || echo "bwrap probe: still failing"
       # Self-checking chain: pins the host version, builds, bootstraps the
       # scratch home, installs chromium into var/ms-playwright, and runs
       # E2E_MODEL=replay npm run test:e2e (suite/fork/heavy/arrival/enrich/fanout/
