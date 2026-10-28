@@ -553,6 +553,11 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port), rigMirrorRoot(port)))
       // #132: the workspace-instruction injection is development context whose presence/position varies
       // by machine; with the legs now bounded, removing the row is the principled determinism fix.
+      // #138: mount the rig's bounded-goal fixture under its OWN row id. Addressing a base row from a profile patch is
+      // not supported (measured: it changes the mounted set and breaks /goal), but a new id with a path `name` is the
+      // form the host's own tests use. Without this, goal-bearing legs race the round driver and the tape carries
+      // machine latency — two docs-only CI runs proved it.
+      p = `${p.replace(/\n+$/, '')}\n- id: rig-goal\n  name: '${path.resolve(import.meta.dirname, '..', '..', 'tests', 'e2e', 'fixtures', 'rig-goal-plugin.js')}'\n`
       p = dropInstructionRow(p)
       fs.writeFileSync(patchPath, p)
     }
