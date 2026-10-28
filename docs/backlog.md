@@ -1896,3 +1896,35 @@ argument on `/goal`. So today the only way to set a bounded budget is the model 
 Decision: the claim stays **unit-covered**, §28 keeps not claiming the pixel, and the leg stays **unwritten, not
 skipped** (the distinction matters). To ever show it in a browser the change belongs upstream — a rounds argument on
 `/goal`, or a plugin seam to open a bounded goal. Filed as such on #135 with the greps that establish it.
+
+### #135 follow-up — a rig-reachable round budget does not exist, and staging's displacement leg is timing-fragile
+
+The obvious knob is real: `@deepseek-ai/dsh-goal` ships `config = z.object({ defaultMaxGoalRounds: z.number().default(256) })`,
+and `resolveCreateGoal(request, defaultMaxGoalRounds)` uses `request.maxGoalRounds ?? defaultMaxGoalRounds`. But
+overriding it from a boot's profile patch **disables the feature the leg needs**: inserting
+
+    - id: goal
+      name: '@deepseek-ai/dsh-goal'
+      config:
+        defaultMaxGoalRounds: 1
+
+makes `/goal` stop creating a goal, and the leg fails at `the host goal bar appears once a goal exists`. Attribution was
+by experiment, not by reading: staging's own spec with staging's own 23-entry tape, **pin active → 1 failed / 4
+passed**; **pin removed → 5 passed**. Nothing was committed; the transform, its wiring and both rows that pinned it are
+gone, and the tree is staging-equal with `corpus:check` agreeing.
+
+Two collateral facts worth keeping, because they are how I got here:
+
+- The first pinned capture reached **326 tape entries in ten minutes**, which is what made me stop and inspect a real
+  boot patch instead of trusting a green unit row. My rows had fed the transform a synthetic patch that *contained* a
+  `goal` row; a real boot's patch contains none (measured: `preset-chapters`, `agent-preset-registry`, `llm-pi-ai`,
+  `agent-default-model`, `llm-gate`, `fetch-timeouts`). Stub-of-the-fictional-shape again, this time mine.
+- **The merged `prompt` leg is portable by luck.** A docs-only PR (#137, zero non-docs delta) turned acceptance red with
+  `MISS tape=prompt entries=23 … storedCandidates: []` while the runner's history held `<goal_round> … Round: 1/256`
+  through `Round: 4/256` in a window my capture recorded with none. Run 40676609079 was green because the runner's
+  latency happened to reproduce my machine's round count. The displacement *behavior* is real and was observed; the
+  leg that carries it cannot currently be replayed dependably.
+
+What that leaves: making the goal legs portable needs a **host** capability — a rounds argument on `/goal`, or a
+plugin-facing seam to open a bounded goal — which is #138. Not a weaker assertion, and not a deleted test: the leg
+stays as merged, with its fragility named instead of hidden.
