@@ -27,8 +27,10 @@ test.describe.configure({ timeout: 420_000 })
 
 test.beforeEach(async () => {
   // Loud, not silent: a tape cannot answer a goal cascade, so a replay of this spec must never look like a pass.
-  test.skip(process.env.E2E_TAPE === 'replay',
-    'prompt-goal-live is a LIVE-provider leg: an armed goal\'s round count is machine latency, so no tape can match it (#138)')
+  // `E2E_MODEL === 'replay'` is the rig's replay signal (globalSetup.ts:52). `E2E_TAPE` is the PROJECT name —
+  // my first guard compared it to 'replay', so it never fired and the spec ran against a tape it cannot match.
+  test.skip(process.env.E2E_MODEL !== 'replay',
+    'prompt-goal-live needs the live provider (E2E_MODEL!=replay): an armed goal\'s round count is machine latency, so no tape can match it (#138)')
 })
 
 test('arming the bar\'s Autorun takes the continuation away from an active goal', async ({ page }) => {
