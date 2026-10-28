@@ -103,7 +103,15 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   await openApp(page)
   const sid = await newSessionWithTurn(
     page,
-    'Read the file var/e2e-bigfile.md COMPLETELY using the read tool with ranges of EXACTLY 900 lines (offset 1, then 901, 1801, and so on to the end) (do NOT read the whole file in one call, and do NOT use grep or bash). Three unique marker tokens are embedded in the file: one near the top, one near line 3102, one at the very end — find and report all three (their exact names). Finish with one short answer containing all three tokens.',
+    // #132: exactly THREE read calls with their offsets named, instead of "900 lines and so on to the end".
+    // The old instruction asked for an unbounded number of turns (six to seven reads) on a leg whose tape then
+    // spread 36 requests and whose turn count decided whether it replayed anywhere else — the same disease as
+    // `arrival` and `fanout`. Three calls at the host's maximum range (2,000 lines ≈ 10K tokens each) cover all
+    // 6,000 lines, so every marker stays reachable and the claim "report all three" is undiminished; the surface
+    // still crosses the trigger by arithmetic after the second one, which is the mechanism under test. heavy's
+    // arrival floor is 1,000,000 tokens on purpose (relief, not deferral, is its subject), so these results land
+    // inline exactly as before.
+    'Read the file var/e2e-bigfile.md using the read tool in EXACTLY THREE calls, no more and no fewer: offset 1 limit 2000, then offset 2001 limit 2000, then offset 4001 limit 2000. Do NOT read any other range, do NOT read the whole file in one call, and do NOT use grep or bash. Three unique marker tokens are embedded in the file: one near the top, one near line 3102, one at the very end — find and report all three (their exact names). Finish with one short answer containing all three tokens, then stop.',
     3_600_000, // 60-min turn budget: measured patterns span 6 to >45 minutes
     false, // the row-action probe belongs to fork-button.spec on heavy transcripts
   )
