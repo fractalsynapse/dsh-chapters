@@ -475,6 +475,12 @@ which is why the #140 realm key and the #128 alignment must ship as one change. 
 inverted — `test.skip(process.env.E2E_MODEL !== 'replay', …)` runs a live spec only against a tape — corrected to
 `=== 'replay'` and proven by `2 skipped` plus exit 0 on a replay invocation.
 
+**Live-class does not mean live-green, and here it is red.** The `heavy` leg's live run failed on its own bound —
+`expect(summaries.length).toBeLessThanOrEqual(30)` (`var/heavy-live.log`, exit 1) — so NO browser-level claim about relief
+converging on the pinned 32K window is being made: what is proven is that relief neither throws nor crashes there (#140's rows),
+and the nine model-free legs are green on CI. The convergence failure is its own issue (#143) and its first criterion is
+per-pass numbers, not a raised bound.
+
 So both goal claims are verified **live**, in a class that can say so honestly. `tests/e2e/prompt-goal-live.spec.ts`
 runs them against the real provider under a 420 s ceiling and both passed (**2 passed**): arming Autorun takes the
 continuation from an active goal (`Pause goal` → `Resume goal`, Pause gone — after the inert-control fix in

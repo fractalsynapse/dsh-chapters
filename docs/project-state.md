@@ -580,3 +580,10 @@ said `test.skip(process.env.E2E_MODEL !== 'replay', …)` — i.e. it ran only i
 its comment and of the intent. My "fix" for the earlier `E2E_TAPE` confusion had flipped the predicate. Proved the way it
 should be proved: after correcting it to `=== 'replay'`, a replay invocation returns `2 skipped` with the reason and exit
 0. Two guards in the tree now share one spelling, and the copy of the predicate is why the fix went to both files at once.
+
+**Correction to the paragraph above, same day, and it is the more important fact.** `heavy`'s live run did **not** pass: `1 failed` on
+the leg's own bound — `expect(summaries.length).toBeLessThanOrEqual(30)` — run `LEG=heavy MODE=record E2E_PROVIDER=harness`, exit 1,
+`var/heavy-live.log`. So the browser-level claim "relief converges in bounded passes on the rig's pinned 32K window" is **not
+currently demonstrated**, and this file does not claim it. What *is* demonstrated: the plugin does not crash and does not throw on a
+32K window (#140's rows, 1,287/1,287 deterministic), and the model-free acceptance set (nine legs) is green on CI. The many-pass
+behaviour is filed as its own bug with per-pass numbers as the first acceptance criterion, and the bound is not being raised.
