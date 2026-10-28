@@ -1970,3 +1970,9 @@ Methodological note that cost me a wasted attempt: an adapter stub that **never 
 host's own base engine calls the same stub and hangs with it. **Slow but eventual** (8 s) is the shape that separates
 our awaits from the host's. Same lesson family as the fictional-shape stubs AGENTS warns about — caught before it became
 a commit this time.
+- **A question in a reply is not a question when a goal is running (#141-era lesson, maintainer's instruction).** With
+  `create_goal` active the session continues past my prose, so asking "a or b?" in a result message means nobody is
+  asked and I proceed on a guess — which is how a release-blocking decision sat unanswered while I kept reporting it.
+  The rule is now in `AGENTS.md` (Hard Rules, above "Never end a turn asking for permission to continue"): use the
+  harness's `ask_user_question` tool for decisions and unreadable facts, because it suspends execution until the human
+  answers; keep the no-permission-asking rule intact, since that is about clearance, not about missing information.
