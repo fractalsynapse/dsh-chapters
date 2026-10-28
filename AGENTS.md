@@ -443,8 +443,12 @@ different and narrower reason; evidence and eliminated classes: docs/backlog.md.
 (typecheck · build · unit + integration, branch gate 85%) remains green on this branch. Still open there: a dock cannot
 write the composer on 0.2.0-rc.2 (`insertText` raises
 `draftRev`, `setDraft` mirrors only at mount), so click-to-draft shows an explanation and Run submits instead;
-tracked as #126. And the Autorun **displaces the goal's continuation** pixel is still unobserved in a browser —
-arm-ability is observed (`suite`/`prompt` legs, 4 passed), displacement is not, so it is not claimed.
+tracked as #126. **Autorun displacing a goal's continuation is now observed in Chromium** (2026-10-28): with a goal armed the host
+offers `Pause goal`; clicking the bar's Autorun leaves `Autorun off` in place after the server round-trip, the host
+flips to `Resume goal`, and `Pause goal` disappears. Recorded alone under the real provider and replayed model-free
+twice (5 passed each). It required a product fix first — the control dispatched local state only and `refresh()`
+flipped it back, so the click refused itself (see `prompt-dock-autorun-write.test.ts`). The **goal-off restores normal
+suggestion** half of item 4 remains unit-covered and is not claimed from a browser.
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.

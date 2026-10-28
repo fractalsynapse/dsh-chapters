@@ -82,8 +82,9 @@ different purpose, and they are built to run together:
   conversation slice, with the instruction that the recommended step must *advance* it — and
   that if the objective is already met, the right recommendation is to close the goal out
   rather than take another round;
-- autorun runs alongside the goal and **disarms itself when the goal completes**, because the
-  loop existed to serve that purpose;
+- arming the loop takes the next turn away from the goal's own auto-continuation: the goal stays the objective, its
+  driver pauses (the bar reads `Autorun off`, the goal control reads `Resume goal`), and autorun **disarms itself when
+  the goal completes**, because the loop existed to serve that purpose;
 - a prompt you send yourself disarms autorun immediately. Generation keeps going on later
   turn boundaries — suspending the loop is not disabling the feature — and re-arming is
   always your action.
