@@ -504,3 +504,86 @@ selector audit in the comment. (b) My skip guard compared `E2E_TAPE` — the *pr
 fired; the rig's signal is `E2E_MODEL === 'replay'` (`globalSetup.ts:52`). (c) The `e2e-typecheck-ratchet` then refused
 my +1 error, and instead of raising the ceiling I fixed the cause: one documented cast at the projects boundary replaced
 eleven identical `TS2769`s and the baseline **fell 68 → 59**, which is the direction the ratchet asks for.
+
+### 2026-10-28 (late) — a dependency alignment found a live product failure: 32K hosts had no relief at all (#140, #128)
+
+Aligning this repo's `@deepseek-ai/*` compile deps to the host the rig actually boots (`0.2.0-rc.2`) made seven
+`engine-lifecycle` rows throw:
+
+```
+compaction-basic: local/qwen-test reserves 0 completion tokens and 65536 headroom tokens
+of its 32000-token context window …        → TargetPressureConfigError
+```
+
+That is not a test artifact. `dsh-compaction-basic@0.2.0-rc.2` validates
+`contextWindow − reservedCompletionTokens − headroomTokens` per routed target and **throws** when it is ≤ 0, its default
+`headroomTokens` is **65,536**, and that reservation exists to bound a routed summarize call — which this engine does
+not make, because `summarize()` is overridden and deterministic (`src/engine.ts:664`). So on any model under 65,536
+tokens — including 32K, which is this project's own stated target hardware — the plugin's central feature raised an
+exception instead of compacting, and had done so silently for two host minors because the compiler was reading older
+types. The e2e legs cannot see it: the token-plan model reports a window well above the default.
+
+Two changes, deliberately different in kind. The realm's engine row now bounds `headroomTokens: 8192` (inert at 128K —
+`min(window × 0.9, window − 8192)` keeps the ratio as the trigger — and positive at 32K), and the engine refuses to let
+a *configuration* problem escape as a crash: `isPressureConfigRejection()` identifies the class structurally (the
+error type is not re-exported in the bundle's types), logs the cause, and abstains. Provider failures still propagate
+after finalization, and a row pins that asymmetry — r19's distinction between "the user can fix this" and "the
+endpoint failed".
+
+Then the temptation, and why it was refused: after the first cut, the pre-existing `#78` row ("a declined relief while
+over the trigger is reported with its numbers") failed. Editing its expectation would have been the easy green. It was
+right, and my branch had dropped a fact — a config-impossible realm still DECLINED relief while over the trigger — so
+the branch now emits the cause *and* calls `#reportDecline()`. Two silences traded for one is not a fix.
+
+Red-first rows that keep the failure from returning: `host-dep-pinning.test.ts` (compile deps equal the lock's exact pin,
+and the installed copy matches — a caret here is how 32K hosts lost relief twice), `aux-message-kind.test.ts` (no shipped
+code carries the retired bare `source.kind: 'plugin'`; four one-off `llm.stream` sites now say `kind: 'user'`, which is
+what they are), and the drift row in `preset-declaration.test.ts` (realm carries the bound *and* `Config` declares it, so
+the next host bump cannot quietly drop the key).
+
+Measured on this branch: plane **1,287/1,287, 0 fail, 0 skipped**; `typecheck` 0; `typecheck:client` 0; e2e typecheck
+**59/59** (the ratchet fell when one boundary cast replaced eleven identical `TS2769`s); corpus fully re-anchored because
+the lib hash moved — every leg captured `exit=0`, one strict `npm run test:e2e:replay` **ten-for-ten (`CD=0`)**,
+`corpus:check` agreeing. A fresh `coverage:e2e` on this corpus is recorded in the PR body. One accuracy note: my previous
+commit claimed two stray `src/*.bak` files were removed; they were deleted in the tree but still tracked, and THIS commit
+is what removes them — the claim was right in intent and wrong about state, which is the failure this file exists to
+catch.
+
+### 2026-10-28 (night) — the release, a dead tag, and `heavy` moving to the live class (#140, #128, #141, #142)
+
+**Release state, exactly.** PR #139 (`0.2.2-dev.1`) was CI-green on all three jobs and merged to `main` as `f9943f9` on the
+maintainer's explicit authorization. The tag `0.2.2-dev.1` then **failed the publish blocker** for a reason that was mine:
+the bump commit edited `package.json` only, and `tests/unit/loudness.test.ts:123` asserts
+`PLUGIN_VERSION === package.json.version`, so `src/version.ts` (still `0.2.1`) tripped the gate — Release run
+40771258161, `tests 1282 / pass 1271 / fail 1`. A pushed tag is immutable, so **`0.2.2-dev.1` is a dead release** and stays
+in place with this note; `0.2.2-dev.2` bumps all three version-bearing files at once (`package.json`, `src/version.ts`,
+lock root). I also checked the old base engine directly — `@deepseek-ai/dsh-compaction-basic@0.1.5-rc.2`'s tarball has
+**zero** occurrences of `headroomTokens` — so #140's realm key and #128's dependency alignment are one delivery, not two:
+a realm setting a key the compiled-against base rejects would simply fail `validateKeys`.
+
+**`heavy` is a live-class leg now, chosen by the maintainer, on six captures' worth of evidence.** Four designs on one
+commit produced 5, 7, 12, 23 and 24 tape entries (three mandated reads; one read of a ~68K-token page; one read of a
+~17K-token page tuned to this realm's real 14,400 trigger; one read plus a tool-free report), and CI's own widened miss
+diff — which is why `tapeDiffPayload` was worth building — showed the mechanism: once relief auto-continues the session,
+the child's history is `[system, checkpoint-notice, …]` and at message 12 it was running
+`bash … head -30 tests/e2e/artifact-arrival.spec.ts && grep -rl 'E2E-D3-0731|E2E-PD-0731|…'`, marker-exploration work the
+spec never asked for. The request count belongs to the model, so no tape of that journey is portable. The leg skips under
+`E2E_MODEL === 'replay'` with the reason in the skip message, is absent from `scripts/chain-replay.sh`'s nine-leg list, and
+runs against the real provider under its 110-minute ceiling. **What makes this honest rather than a dodge:** every
+assertion still executes (relief passes shrink, nothing lost from the durable log, the read markers survive, the session
+takes its next turn), and relief timing is covered without a browser or a model by `tests/unit/engine-lifecycle.test.ts`,
+which is where #140's rows live.
+
+**A bug of mine that had to be caught before it could be trusted: I inverted the live-leg guard.** The goal leg passed
+**2/2** for real (`var/goallive-2.log` reads `prompt-goal-live mode=record provider=harness`), and the guard as it shipped
+said `test.skip(process.env.E2E_MODEL !== 'replay', …)` — i.e. it ran only in replay and skipped in live, the opposite of
+its comment and of the intent. My "fix" for the earlier `E2E_TAPE` confusion had flipped the predicate. Proved the way it
+should be proved: after correcting it to `=== 'replay'`, a replay invocation returns `2 skipped` with the reason and exit
+0. Two guards in the tree now share one spelling, and the copy of the predicate is why the fix went to both files at once.
+
+**Correction to the paragraph above, same day, and it is the more important fact.** `heavy`'s live run did **not** pass: `1 failed` on
+the leg's own bound — `expect(summaries.length).toBeLessThanOrEqual(30)` — run `LEG=heavy MODE=record E2E_PROVIDER=harness`, exit 1,
+`var/heavy-live.log`. So the browser-level claim "relief converges in bounded passes on the rig's pinned 32K window" is **not
+currently demonstrated**, and this file does not claim it. What *is* demonstrated: the plugin does not crash and does not throw on a
+32K window (#140's rows, 1,287/1,287 deterministic), and the model-free acceptance set (nine legs) is green on CI. The many-pass
+behaviour is filed as its own bug with per-pass numbers as the first acceptance criterion, and the bound is not being raised.

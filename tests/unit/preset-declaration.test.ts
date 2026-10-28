@@ -515,3 +515,27 @@ test('RUN — the preset persona tells every chapters session how to find rules 
     `persona variables outside { model } throw at assembly: ${vars.join(', ')}`)
   assert.match(persona, /PLOT:/, 'the plot discipline still ships in the same suffix — do not replace it')
 })
+
+/**
+ * The realm must BOUND the base engine's pressure headroom, and the schema must let it through (#140).
+ *
+ * `dsh-compaction-basic@0.2.0-rc.2` computes `contextWindow − reservedCompletionTokens − headroomTokens` per routed
+ * target and throws when that is ≤ 0; its default headroom is 65,536, so a 32K model — the hardware this plugin is
+ * written for — gets NO relief, only an exception. Our engine overrides `summarize()` and makes no routed call, so
+ * that reservation is not ours to pay in full. This row keeps the two halves from drifting apart again: the realm row
+ * must carry a bounded `headroomTokens`, and `ChaptersCompactionEngine.Config` must declare it, because a key the
+ * schema drops never reaches `super.resolveConfig` and the failure reappears silently at the next host bump.
+ */
+test('the realm bounds the pressure headroom and the engine schema carries it (#140)', () => {
+  const body = readFileSync(PATCH, 'utf8')
+  assert.match(body, /headroomTokens: \d+/, 'the engine row must bound headroomTokens, not inherit 65,536')
+
+  const engine = readFileSync(join(PKG_ROOT, 'src', 'engine.ts'), 'utf8')
+  const schema = engine.slice(engine.indexOf('static override Config = z.object({'), engine.indexOf('modelPolicies'))
+  assert.match(schema, /headroomTokens:\s*z\.number\(\)/,
+    'Config must declare headroomTokens or the Loader drops it before the base sees it')
+
+  const policy = engine.slice(engine.indexOf('modelPolicies: z.array(z.object({'))
+  assert.match(policy.slice(0, 1200), /headroomTokens:\s*z\.number\(\)/,
+    'per-model policies must carry it too — a narrow child schema strips what super would honour')
+})

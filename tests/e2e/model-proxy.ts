@@ -441,28 +441,61 @@ export function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | 
     if (ok && (best === null || e.recordedAt > best.recordedAt)) best = e
   }
   if (best === null && process.env.E2E_TAPE_DIFF) {
-    // instrumented: dump incoming + stored prefixes, BEST-MATCHING FIRST —
-    // a flat slice(0,3) showed only unrelated scenarios that merely share a
-    // normalized length, hiding the one candidate that diverged by one byte
-    // (measured 2026-09-24: three CI cycles burned re-guessing at it)
-    const shared = (p: unknown[]): number => {
-      let n = 0
-      while (n < p.length && n < inc.length && String(p[n]) === String(inc[n])) n++
-      return n
-    }
-    const sameLen = tape
-      .filter((e) => e.prefix.length === inc.length)
-      .sort((a, b) => shared(b.prefix) - shared(a.prefix))
-      .slice(0, 3)
+    // The payload is a function so a row can pin it, and so the shape that fooled us twice is
+    // now asserted rather than re-derived under pressure (see `tapeDiffPayload`).
     const dir = process.env.E2E_TAPE_DIFF
     fs.mkdirSync(dir, { recursive: true })
     const n = fs.readdirSync(dir).length
-    fs.writeFileSync(path.join(dir, `${String(n).padStart(3, '0')}.json`), JSON.stringify({
-      incoming: inc, storedCandidates: sameLen.map((e) => e.prefix),
-    }, null, 1).slice(0, 4_000_000))
+    fs.writeFileSync(path.join(dir, `${String(n).padStart(3, '0')}.json`),
+      JSON.stringify(tapeDiffPayload(inc, tape), null, 1).slice(0, 4_000_000))
   }
   return best
 }
+/**
+ * What a tape MISS writes to `E2E_TAPE_DIFF`, as a pure function so it can be tested (#132, #141).
+ *
+ * Two mistakes this closes, both of which cost CI cycles:
+ *  - a flat `slice(0, 3)` of same-length prefixes surfaced unrelated scenarios that merely shared a normalized
+ *    length, hiding the one candidate that diverged by a byte (measured 2026-09-24);
+ *  - filtering to SAME LENGTH ONLY meant that when the run produced a different REQUEST COUNT — exactly how
+ *    `heavy` failed on run 40763699443 (`messages=16`, `storedCandidates: []`) — the artifact held an incoming
+ *    history with nothing to compare it to, and every conclusion after that was reasoning about a diff that could
+ *    not show the byte.
+ *
+ * So: same-length candidates, best-sharing first, still the primary; when there are none, the near-length ones
+ * (±2) are offered too, plus a census of every recorded prefix length, so a count mismatch is READABLE — you can
+ * see the corpus recorded 12/13/20 and the run asked with 14, which is a different investigation than "no match".
+ */
+export function tapeDiffPayload(incoming: string[], tape: TapeEntry[]): {
+  incoming: string[]
+  storedCandidates: unknown[][]
+  nearLengthCandidates: unknown[][]
+  prefixLengthCensus: number[]
+} {
+  const shared = (prefix: unknown[]): number => {
+    let i = 0
+    while (i < prefix.length && i < incoming.length && String(prefix[i]) === String(incoming[i])) i++
+    return i
+  }
+  const sameLen = tape
+    .filter((e) => e.prefix.length === incoming.length)
+    .sort((a, b) => shared(b.prefix) - shared(a.prefix))
+    .slice(0, 3)
+    .map((e) => e.prefix)
+  const near = sameLen.length > 0 ? [] : tape
+    .map((e) => ({ prefix: e.prefix, delta: Math.abs(e.prefix.length - incoming.length), sharing: shared(e.prefix) }))
+    .filter((x) => x.delta <= 2)
+    .sort((a, b) => a.delta - b.delta || b.sharing - a.sharing)
+    .slice(0, 3)
+    .map((x) => x.prefix)
+  return {
+    incoming,
+    storedCandidates: sameLen,
+    nearLengthCandidates: near,
+    prefixLengthCensus: tape.map((e) => e.prefix.length).sort((a, b) => a - b),
+  }
+}
+
 export function normalizeSingle(m: unknown): string { return JSON.stringify(m) === '' ? '' : normalize(m) }
 
 /**
