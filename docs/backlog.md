@@ -1587,3 +1587,27 @@ which needs its own answer, not a re-wording.
 Measured facts that do hold: `suite` at `0.5` unpinned captures (5 entries) and replays green twice on this host; the
 same leg pinned does not boot at all (two attempts, one log line, no URL) — see #129. Tree restored to the working
 regime; plane 1,108/1,108.
+
+### Plot elicitation is load-bearing for multi-turn convergence — suppressing it makes small-model journeys loop (#130, two samples)
+
+I applied the `elicitedPlot: false` lever (the one that fixed `suite` on CI) to the other two aux-sensitive legs and
+watched both fail the same way **at record**:
+
+- `arrival` sample 1: exit=1, 13 entries, `model never found the buried token via the artifact tool`.
+- `arrival` sample 2: capture never finished — 42 → 63 → 68 → **72** requests in 20 minutes, the model re-reading and
+  re-searching instead of converging, killed at the 1500 s ceiling.
+- `fanout`: exit=1 after **61** entries, the same shape.
+
+So the aux plot turn is not cosmetic overhead for these journeys — it is the mechanism that carries the operative
+note forward and lets a small model keep its thread across many turns. Remove it and they thrash. `suite` is the
+exception because its journey is short and its assertion (fork door) does not need the loop to close.
+
+Consequence for acceptance, stated as a constraint rather than a to-do: for `heavy`, `arrival` and `fanout` the fix
+cannot be "suppress the aux turn so both machines match", because the turn is what makes those legs work. Either the
+corpus must **record** the plot turn on every machine (which means understanding why the runner elicits it and this
+host does not, at the same threshold and the same 32K window), or those legs' prompts must be reshaped to converge
+without it — and reshaping a leg's prompt changes what it exercises, so that has to be a deliberate decision with its
+own docs, not a quiet edit. Both `heavy` and `fanout` currently diverge at `commonPrefix=2` (the first assistant
+turn) with relief live, which is the checkpoint-shape family, and `arrival` diverges as a 1-message plot request.
+
+Reverted: both legs back to the committed regime, two samples each, no pin shipped around a loop.
