@@ -135,7 +135,7 @@ const VOLATILE: Array<[RegExp, string]> = [
   // demands the exact injected header. This is the LAST pipeline change: after
   // its one re-record, the corpus is stable against everything except product
   // prompts (persona, tools, notice).
-  [/(?:<system-reminder>\s*)?(?:The following workspace instructions may be relevant[\s\S]{0,900}?)?(?:updated |current |this is an automatically updated )?instructions from: AGENTS\.md[\s\S]*?(?:<\/system-reminder>|$)/gi, '<AGENTS-BLIND>'],
+  [/(?:updated |current |this is an automatically updated )?instructions from: AGENTS\.md[\s\S]*?(?=<\/system-reminder>|$)/gi, '<AGENTS-BLIND>'],
   // RUNTIME-BLIND: the harness re-injects its environment snapshot (file
   // policy, writable paths, approval policy — "Current runtime context. This
   // snapshot supersedes…") and its position/count in a conversation varies
