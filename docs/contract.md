@@ -619,7 +619,48 @@ load-bearing, not historical:
 `mutate(id, () => snapshot)` is a stale `put` with better branding (fixed once already in `repair-run.ts`
 for the hollow-payload supersede).
 
-## Suggested Next Step bar — interface lock (#113, builds on the measured goal-bar facts above)
+## Suggested Next Step bar
+
+**What a dock component is handed (measured from the host's own contract table,
+`dsh-cordis-client-runner/lib/client.js`, entry `key: "conversation.input.dock"`).** It is a `list` region,
+`scope: session`. Register options are `id` (required), `order` (optional, ascending, default 0), and `label`.
+The component's props are **hooks**, not scalars: `useSessions`, `useSessionStatus`, `useSessionRetainInfo`,
+`useWorkspaces`, `useChat`, `useConversation`, `useInput`, `inputActions`, `useSession`, `sessionId`,
+`useProjection`, `useTrajectory`. Shipped occupants: `todo` (order 0), `goal` (10), `queue` (20).
+
+Why this is written down: the bar's Autorun gate was written against a **scalar** `props.running` that no host
+version supplies, so Autorun reported itself unavailable on a host that exposes the very signal through
+`useSessionStatus`/`useChat`. Reading the contract table beats remembering a prop name. `inputActions` here is
+`{ captureInsertion, insertText, setDraft, addAttachments, removeAttachment, pruneAttachments, submit }`, and
+the composer-write limitation in #126 is measured against that same kit.
+
+**Verbs (interface lock, #113).** `/chapters-prompt` accepts `model …|clear`, `off`, `on`, `state`, `autorun on|off`,
+and **`run`** — submit the offer currently on screen as a **human-authored user turn**, through the same follow-up
+path autorun uses (`agent.followup(suggestPromptMessage(…))`). Run goes through the command plane rather than the
+composer's `inputActions.setDraft` because a dock cannot rely on writing the host editor: measured, `setDraft` is
+accepted and the composer still reads empty, and the goal bar's own `setDraft` is plain React state, not a
+composer write. A plugin's only dependable wire to its own server plane is the command — which is why the bar is
+push-shaped and pull-fed.
+
+**The dock's status hook is a SELECTOR hook (measured, 2026-10-27).** `useSessionStatus` is declared
+`SnapshotSelectorHook<SessionStatusSnapshot>` in `dsh-client-ui-session`'s client types, so it is called as
+`useSessionStatus(selector)` — passing a session id hands the host a string where it wants a function and it
+fails `TypeError: l is not a function`. Two consequences for anyone wiring the bar: the call must be hoisted
+above the component's early `return null` (a hook below that guard changes the hook count and React aborts the
+whole slot, `#310`), and the snapshot's field names are not ours to assume — the dock folds it through
+`deriveRunning`, which maps `boolean`, status words, `{status|state|phase}`, and `{running}`, and returns
+**`undefined` for anything unrecognized**, because `undefined` (unknown) and `false` (idle) are different
+safety answers: unknown must never start a turn.
+
+**State vocabulary (interface lock, #113).** `/chapters-prompt state` reports one of:
+`off` — switched off by the human (a stored override), or no defining model is configured, so the bar renders
+nothing; `idle` — **enabled and awaiting its first recommendation** (no completed turn yet); `analyzing` — a
+generation is in flight for the current turn; `ready` — an offer is on screen with `text`; `failed` — the
+generation could not run, with the reason. `idle` exists because collapsing "nothing yet" into `off` made a
+working feature indistinguishable from a disabled one: measured in the rig, the bar replied
+`suggested next step: off` while the profile row read `model: qwen-token-plan/qwen3.8-flash (config)`.
+The bar stays hidden on `off` only, and re-reads while the state is `idle`/`analyzing`/`ready`.
+ — interface lock (#113, builds on the measured goal-bar facts above)
 
 A composer dock row that, once per **completed turn**, generates a fresh prompt suggestion and offers
 **Run · Autorun · Off**. Modelled on the goal bar because the goal bar is tested and already fits — and the

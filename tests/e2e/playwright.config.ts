@@ -25,7 +25,7 @@ export default defineConfig({
     // tape was distilled under, the surface diverged (stubs appearing where none were
     // recorded), and the proxy MISSed. Playwright merges project `env` into every worker,
     // so record, replay, coverage and a manual run now boot the SAME world.
-    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts'] },
+    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts'] },
     // fork-button rides its OWN boot (2026-09-25, the fanout lesson applied
     // again): knowledge's fork child becomes the workspace's restore target,
     // so a shared boot records/replays whoever ran first's shape — the fork
@@ -69,5 +69,10 @@ export default defineConfig({
     { name: 'enrich', env: rigEnv('enrich'), testMatch: ['**/enrich.spec.ts'] },
     // rules: the P3 lifecycle in the browser over a local-path pool.
     { name: 'rules', env: rigEnv('rules'), testMatch: ['**/rules.spec.ts'] },
+    // The docked Suggested Next Step bar (#113). Its own boot, because the bar only exists when a defining
+    // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
+    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
+    // Same journey, switch off: the bar must be absent. See tests/e2e/prompt-off.spec.ts.
+    { name: 'prompt-off', env: rigEnv('prompt-off'), testMatch: ['**/prompt-off.spec.ts'] },
   ],
 })

@@ -11,7 +11,7 @@
  * justified it. Each has a row in `tests/unit/prompt-bar.test.ts`.
  */
 
-export type PromptBarStatus = 'off' | 'analyzing' | 'ready' | 'failed'
+export type PromptBarStatus = 'off' | 'idle' | 'analyzing' | 'ready' | 'failed'
 export type PromptBarAutorun = 'armed' | 'disarmed'
 /** Mirrors the host's `GoalPhase` vocabulary (`dsh-goal` types) so goal composition needs no translation. */
 export type GoalPhaseView = 'none' | 'active' | 'paused' | 'blocked' | 'complete'
@@ -27,6 +27,8 @@ export interface PromptBarState {
   turnSeq: number | null
   /** Set only with `status: 'failed'`; rendered as `role="alert"` (#61: delivered, not swallowed). */
   error: string | null
+  /** Why an action did not happen, on the bar's face (#113). Empty when there is nothing to explain. */
+  note: string
   autorun: PromptBarAutorun
   expanded: boolean
   running: boolean
@@ -40,6 +42,8 @@ export interface PromptBarState {
 export type PromptBarEvent =
   | { t: 'polled', status: PromptBarStatus, text?: string | null, turnSeq?: number | null, error?: string | null, intent?: 'worker-step' | 'goal-edit' }
   | { t: 'expand' } | { t: 'collapse' }
+  /** Why an action did not happen, on the bar's own face (#113). Cleared when a new offer lands. */
+  | { t: 'note'; note: string }
   | { t: 'autorun', on: boolean }
   | { t: 'human/prompt' }
   | { t: 'off' }
@@ -47,10 +51,19 @@ export type PromptBarEvent =
   | { t: 'running', running: boolean }
 
 export function initialBarState(autorun: PromptBarAutorun = 'disarmed'): PromptBarState {
-  return { status: 'off', text: null, turnSeq: null, error: null, intent: 'worker-step', goalPhase: 'none', goal: null, autorun, expanded: false, running: false, hiddenTurnSeq: null }
+  return { status: 'off', text: null, turnSeq: null, error: null, note: '', intent: 'worker-step', goalPhase: 'none', goal: null, autorun, expanded: false, running: false, hiddenTurnSeq: null }
 }
 
 export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarState {
+  if (ev.t === 'note') return { ...state, note: ev.note }
+  const next = baseBarReducer(state, ev)
+  // A note is about the gesture that just failed, so a NEW offer retires it. A poll that repeats the same
+  // offer (the bar re-reads every few seconds) does not — otherwise the explanation would blink out before
+  // the human could read it.
+  return ev.t === 'polled' && (next.turnSeq !== state.turnSeq || next.text !== state.text) ? { ...next, note: '' } : next
+}
+
+function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarState {
   switch (ev.t) {
     case 'polled': {
       if (ev.status === 'off') return { ...state, status: 'off', text: null, turnSeq: null, error: null, expanded: false, autorun: 'disarmed' }
@@ -80,6 +93,9 @@ export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): Pro
       // suggestion loop exists to serve the session's purpose, and stops when that purpose stops.
       return { ...state, goalPhase: ev.phase, autorun: ev.phase === 'complete' ? 'disarmed' : state.autorun }
   }
+  // Exhaustive fallback: a new event without a case must return the state unchanged rather than
+  // compile into `undefined` and blank the bar.
+  return state
 }
 
 /** The status label. `failed` keeps the ready label so the error span is the delta, not a mystery row. */
@@ -90,6 +106,8 @@ export function barLabel(s: PromptBarState): string | null {
 }
 
 export function barVisible(s: PromptBarState): boolean {
+  // Only `off` hides the row. `idle` is enabled-and-waiting, and showing it is the difference between
+  // "the feature is live, nothing to say yet" and silence that reads as disabled (#113).
   if (s.status === 'off') return false
   if (s.status === 'ready' && (s.text === null || s.text === '')) return false
   // The goal bar's `clearedGoalId` guard, in our terms: don't flicker back the offer just dismissed.
@@ -115,6 +133,8 @@ export function shouldAutoFire(s: PromptBarState): boolean {
 
 /** The command the bar pulls. One string, so the client and the command plane cannot drift silently. */
 export const BAR_STATE_COMMAND = '/chapters-prompt state'
+/** The bar's Run button: the server submits the on-screen offer as the human's own turn. */
+export const BAR_RUN_COMMAND = '/chapters-prompt run'
 
 /**
  * Parse the `state` verb's `k: v` lines into a pull event.
@@ -130,6 +150,7 @@ export function parseBarState(text: string): PromptBarEvent | null {
   const head = lines[0] ?? ''
   const statusWord = head.startsWith('suggested next step:') ? head.slice('suggested next step:'.length).trim() : ''
   const status = statusWord === 'off' ? 'off'
+    : statusWord === 'idle' ? 'idle'
     : statusWord === 'analyzing' ? 'analyzing'
     : statusWord === 'ready' ? 'ready'
     : statusWord === 'failed' ? 'failed'
@@ -163,4 +184,30 @@ export function parseBarState(text: string): PromptBarEvent | null {
 export function parseBarAutorun(text: string): 'armed' | 'disarmed' | null {
   const m = /^ {2}autorun: (armed|disarmed)\b/m.exec(text)
   return m === null ? null : (m[1] as 'armed' | 'disarmed')
+}
+
+/**
+ * Does the host say this session is busy right now?
+ *
+ * The dock's props are HOOKS (`useSessionStatus`, `useChat`, `useInput`, …) — documented in
+ * docs/contract.md § "What a dock component is handed" — so a component that waits for a scalar
+ * `props.running` waits forever, which is precisely why Autorun declared itself unavailable while the host
+ * was publishing the signal one field away. Shapes differ across hosts and versions, so every form is folded
+ * here, in one pure function, with `undefined` (unknown) kept distinct from `false` (idle): the loop refuses
+ * to start a turn on an unknown, and that distinction is the whole safety property.
+ */
+export function deriveRunning(status: unknown): boolean | undefined {
+  if (status === undefined || status === null) return undefined
+  if (typeof status === 'boolean') return status
+  if (typeof status === 'string') {
+    if (/^(running|streaming|busy|active)$/i.test(status)) return true
+    if (/^(idle|done|stopped|finished|ready|waiting)$/i.test(status)) return false
+    return undefined
+  }
+  if (typeof status === 'object') {
+    const s = status as { status?: unknown, state?: unknown, running?: unknown, phase?: unknown }
+    if (s.running !== undefined) return typeof s.running === 'boolean' ? s.running : undefined
+    return deriveRunning(s.status ?? s.state ?? s.phase)
+  }
+  return undefined
 }

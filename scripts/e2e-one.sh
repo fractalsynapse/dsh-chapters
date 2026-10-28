@@ -81,4 +81,10 @@ fi
 # caller's EXTRA arguments (a `--grep`, a worker count): my first cut exec'd from ARGS alone, so
 # `LEG=fork npm run corpus:heal` ran all 13 specs across every project and spent 25 minutes of the
 # maintainer's afternoon on work he did not ask for.
-exec npx playwright test -c tests/e2e/playwright.config.ts "${RUN[@]}"
+npx playwright test -c tests/e2e/playwright.config.ts "${RUN[@]}"
+PW=$?
+# Second reading of the SAME artifact, after the journey. `exec` is deliberately gone: without a post-run report
+# there is no way to tell "the profile the session assembled with" from "the profile the boot wrote at t0", and
+# that distinction is what separates a mount-time race from a runtime failure to register tools (#56).
+node scripts/home-plugins-report.mjs "${PORT:-41731}" late >/dev/null 2>&1 || true
+exit $PW

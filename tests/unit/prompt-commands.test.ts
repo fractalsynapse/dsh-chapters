@@ -246,3 +246,62 @@ test('`on` restores generation but cannot invent a model that was never set', as
   assert.match(yes.text ?? '', /the next completed turn offers/)
   assert.equal(setOn, 1, 'the stale `off` row is cleared so the door can claim the next turn')
 })
+
+/**
+ * `/chapters-prompt run` — the bar's Run button, exercised rather than grepped (#113).
+ *
+ * My first "coverage" of this verb was a row that searched the source for the string `verb === 'run'`.
+ * That asserts the shape of the file, not the behavior, and it is exactly why CI's branch gate slipped
+ * below 85%: the new branches had never been executed by anything. These three run the handler.
+ */
+test('run submits the offer through the shared follow-up path when the session scope exists', async () => {
+  const seen: string[] = []
+  const h = harness({
+    effective: () => ({ spec: 'local/qwen', source: 'config' }),
+    statusLine: () => 'prompt: ON',
+    bar: {
+      read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+      runNow: async (id: string) => { seen.push(id); return { ok: true, text: 'Land #114, then cut 0.2.2.' } },
+    },
+  })
+  const res = await h.run('run', AGENT)
+  assert.equal(res.kind, 'success', `the verb must succeed: ${res.text ?? ''}`)
+  assert.equal(seen.length, 1, 'and it delegated to the ONE submission path, with the session id')
+  assert.equal(seen[0], (AGENT as { session?: { id?: string } }).session?.id ?? (AGENT as { agent?: { session?: { id?: string } } }).agent?.session?.id)
+  assert.match(res.text ?? '', /running the suggested next step as your own turn/, 'the human is told what happened')
+  assert.match(res.text ?? '', /Land #114, then cut 0\.2\.2\./, 'and which words went out')
+})
+
+test('run refuses with the reason when there is nothing on screen to run', async () => {
+  const h = harness({
+    effective: () => ({ spec: 'local/qwen', source: 'config' }),
+    statusLine: () => 'prompt: ON',
+    bar: {
+      read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+      runNow: async () => ({ ok: false, reason: 'there is no offer on screen to run' }),
+    },
+  })
+  const res = await h.run('run', AGENT)
+  assert.equal(res.kind, 'error')
+  assert.match(res.text ?? '', /cannot run: there is no offer on screen/, 'the refusal keeps its reason, verbatim')
+})
+
+test('run needs a session scope and says so rather than guessing a session', async () => {
+  const h = harness({
+    effective: () => ({ spec: 'local/qwen', source: 'config' }),
+    statusLine: () => 'prompt: ON',
+    bar: {
+      read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+      runNow: async () => { throw new Error('must not be reached without a session') },
+    },
+  })
+  const res = await h.run('run', {})
+  assert.equal(res.kind, 'error')
+  assert.match(res.text ?? '', /run needs a session scope/)
+})

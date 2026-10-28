@@ -124,7 +124,7 @@ jobs:
           fi
 
   e2e-replay:
-    name: acceptance — nine tape-replay segments, no LLM
+    name: acceptance — ten tape-replay legs, no LLM
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
@@ -162,7 +162,21 @@ jobs:
       # turn-complete poll shells out to it — ubuntu-latest doesn't ship the
       # binary, and session.ts's honest catch made the silence indistinguishable
       # from a hung model for three 20-minute CI runs (measured 2026-09-24).
-      - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd
+      # bubblewrap: the host mounts bash/fs/pwsh tools through the dsh-*-sandbox packages, which need a
+      # user namespace. Measured on the runner: `bwrap version=not-installed userNamespaceTest=failed: spawnSync
+      # bwrap ENOENT`, against `bubblewrap 0.11.1 / ok` on this host — that is why a CI session registered 7 tools
+      # and a local one 34, so message 0 (the tape key) could never match. Provisioning the runtime dependency is
+      # the fix; masking the header would hide a corpus recorded by different software than the one replaying it.
+      - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd bubblewrap
+      # Ubuntu 24.04+ restricts unprivileged user namespaces via AppArmor, so installing bwrap is not enough:
+      # the runner reported `bwrap version=bubblewrap 0.9.0 userNamespaceTest=failed: ... setting up uid map`.
+      # Lift the restriction for this job only, and re-probe; if it still fails, the probe in ci-host-deps.txt
+      # says so and the acceptance job stays honest about a runner that cannot host a developer's tool surface.
+      - name: allow unprivileged user namespaces (bubblewrap needs them)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>&1 || echo "sysctl: not available on this image"
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>&1 || echo "sysctl: setting not present on this image"
+          bwrap --ro-bind / / /bin/true && echo "bwrap probe: OK after sysctl" || echo "bwrap probe: still failing"
       # Self-checking chain: pins the host version, builds, bootstraps the
       # scratch home, installs chromium into var/ms-playwright, and runs
       # E2E_MODEL=replay npm run test:e2e (suite/fork/heavy/arrival/enrich/fanout/
@@ -201,9 +215,17 @@ jobs:
             test-results/
             var/e2e-boot.json
             var/e2e-tape-misses.log
+            var/e2e-header-*.log
+            var/ci-host-deps.txt
+            var/e2e-home-plugins-*.log
             var/e2e-tape-diffs/
             var/e2e-server-*.log
+            var/chain-replay-*.log
+            var/e2e-session-logs/
             var/e2e-engine-errors.log
+            var/e2e-engine-errors-*.log
+            var/e2e-tool-links-*.log
+            var/e2e-home-plugins-*.log
             /tmp/dsh-e2e/e2e-home-*/sessions/
             /tmp/dsh-e2e/e2e-home-*/storages/
             /tmp/dsh-e2e/e2e-home-*/settings.yaml

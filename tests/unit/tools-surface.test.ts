@@ -318,3 +318,36 @@ test('registerChaptersTools registers every surface and disposes all of it', asy
     assert.deepEqual(registered, [], 'every registration has a disposer on the unload path')
   } finally { w.dispose() }
 })
+
+/**
+ * A pool mirror that answers nothing still falls back to this machine's store (#56 branch coverage with a real
+ * contract). The row above covers "no mirror at all"; this is the OTHER abstention — a mirror exists, is
+ * searched, and matches nothing. The user-facing claim must not be "you have no knowledge": it is "nothing in
+ * the pool, here is what this machine has", because a workspace that archived chapters before its team linked a
+ * pool is the common case, not the corner one. If this branch ever regresses to an empty result, the tool
+ * silently under-reports knowledge the caller already owns.
+ */
+test('search: a mirror with no match answers from the local store and names that it did', async () => {
+  const w = world()
+  try {
+    // The mirror has a chapter, but about something else entirely.
+    const mirror = path.join(w.tmp, '.dsh-knowledge', 'chapters', 'PKS', 'sess-x')
+    fs.mkdirSync(mirror, { recursive: true })
+    fs.writeFileSync(path.join(mirror, '010-deploy.md'), '---\ntitle: "Deploy topology"\ntopics: [deploy, k8s]\n---\n\nRolling restart across zones.\n')
+    // This machine's store has the thing the query asks for.
+    const local = path.join(w.tmp, '.dsh-chapters', 'sess-y', 'chapters')
+    fs.mkdirSync(local, { recursive: true })
+    fs.writeFileSync(path.join(local, '002-composer.md'), '---\ntitle: "Composer merge rule"\ntopics: [composer, merge]\n---\n\nThe composer merges by range contiguity.\n')
+
+    const r = await w.built.chaptersSearch.execute({ query: 'composer merge' } as never, w.exec as never)
+    assert.ok(r.total >= 1, 'the pool miss must not become a "no knowledge" answer')
+    assert.match(r.note ?? '', /no pool match/, 'the fallback is declared, never implied')
+    assert.match(r.note ?? '', /this machine.s store/, 'and it names where the answer came from')
+    assert.ok(r.results.some((x) => /composer/i.test(x.title)), 'the local chapter is what surfaces')
+
+    // And a pool hit does NOT claim the fallback, so the two paths stay distinguishable.
+    const hit = await w.built.chaptersSearch.execute({ query: 'deploy topology k8s' } as never, w.exec as never)
+    assert.ok(hit.total >= 1, 'the mirror answers its own content')
+    assert.doesNotMatch(hit.note ?? '', /no pool match/, 'a pool hit never reports a fallback')
+  } finally { w.dispose() }
+})

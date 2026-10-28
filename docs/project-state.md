@@ -321,3 +321,92 @@ being edited from is solved — see [docs/development.md](docs/development.md).
 
 Then [docs/contract.md](docs/contract.md) for how to declare things, and
 [docs/verify.md](docs/verify.md) before claiming any step passes.
+
+## Round: the bar renders, and the chain went green locally (2026-10-26/27, host 0.2.0-rc.2)
+
+Measured, in the order the evidence arrived:
+
+- **`prompt` and `prompt-off` pass in Chromium**, in record and in strict replay: the docked row mounts above
+  the composer at order 30, shows `Analyzing`/the offer, expands, drafts-or-explains, and Run reaches the
+  durable log as a user-role message. 10-project chain `E2E_MODEL=replay npm run test:e2e` → **EXIT=0**
+  (`suite` 4 passed 39.8s, `heavy` 1.8m, `arrival`, `enrich`, `fanout`, `rules`, `fork`, `plans`, `prompt`
+  4 passed, `prompt-off`). `coverage:e2e` → **EXIT=0** on the same build.
+- **Four causes, all found by measurement after a wrong theory each time.** (1) The tape proxy joined
+  `…/compatible-mode/v1` + `/v1/chat/completions` into `/v1/v1/…`, so nine legs had no assistant row at all.
+  (2) `off` meant disabled, empty, and broken at once; `idle` split them apart. (3) A per-turn
+  `Elapsed since the preceding model-visible message: …` line was unmasked, so replay diverged from record by
+  one character of punctuation. (4) `prompt`'s failure was a React **#310 hook-order crash** — a hook I added
+  sat below the component's early `return null` — and it *looked* credential-dependent because the credential
+  changed when the row's visibility transitioned. The journal's silence (zero `MISS tape=prompt`) is what killed
+  that theory in front of the evidence.
+- **Rig honesty landed too:** a strict-replay `MISS` is now fatal for the leg that produced it, with a byte
+  baseline so it cannot blame another leg's history; the proxy falls back to an ephemeral port rather than
+  dying on an orphan; `applyRigEnv` and `rigEnv` became one derivation (mutation-proven); a missing profile
+  patch throws instead of being skipped; the chain-coverage row is mutation-proven and caught
+  `--project=prompt-off` substring-matching `--project=prompt`.
+- **Still open, named not smoothed:** CI's acceptance job is red while the local chain is green and its
+  annotation carries no verdict lines (repro running); Autorun's idle edge is **unwired** — `useSessionStatus`
+  is documented in the dock's prop list but calling it failed twice, so the gate keeps `running` undefined and
+  Autorun says it is unavailable, which means objective item 3's "Autorun displaces the goal" pixel is not yet
+  shown and item 4 remains unit-covered only; and the `prompt` tape is 546 entries / 12 MB, needing a cap.
+
+### 2026-10-27 — the three bullets above are now superseded, item by item
+
+- **Autorun's idle edge is wired, and the browser says so.** The dock was being handed `useSessionStatus` — a
+  `SnapshotSelectorHook`, so calling it with a session id made the host use a string as a selector and it threw
+  `TypeError: l is not a function`. The signal the legs needed was on a different prop all along: `useSession`'s
+  snapshot carries `running`. Wired through an identity selector folded by `deriveRunning` (unknown ≠ idle), the
+  leg now asserts arm-ability and passes: `prompt` 4 passed in Chromium, model-free replay, twice (distill and
+  replay). **What is still not shown is the displacement pixel** — Autorun superseding a goal's continuation — so
+  objective item 3 remains partly open and item 4 is still unit-covered only.
+- **CI's acceptance annotation carries its verdict now,** and the failure it names is not a tape fault:
+  `MOUNT FAULT: the session registered none of the core tools every journey needs — missing: bash, read, edit,
+  write (declared=44 registered=7 …)`. Root cause found by measurement, not argument: the booted profile's preset
+  names 28 `@deepseek-ai/*` plugin packages, none of which is a dependency of this repository, so a development
+  host resolved them out of `~/node_modules` and a CI runner resolved nothing and our preset silently pruned 21
+  tool rows — 34 tools here against 7 there, and message 0 is the tape key. `linkPinnedToolPackages()` now links
+  the pinned install into `node_modules/@deepseek-ai` **before** the host spawns (never replacing what the repo
+  already installs), and the CI-shaped clone measured `tools=7 / chars=2880` → `tools=34 / chars=7378`. Provisioning
+  bubblewrap and lifting the AppArmor userns restriction were tried first and are recorded as NOT the cause, each
+  refuted by the runner's own artifact.
+- **The `prompt` tape is 14 entries, not 546.** The bloat was repeated distills accumulating in a directory the
+  ad-hoc loops never cleared; `distill-tapes.sh` clears per project, and the corpus is re-anchored on the capped
+  build with `CORPUS_HOST` stamped (`lib=fcd1e375bab82d3d`, `distilledAt = 2026-10-27`), strict chain green twice
+  locally at that point. Later the same day the pin-link change invalidated those captures and the corpus was
+  restored to the stamped state rather than left mixed — recorded here because "green" has to name the build it
+  belongs to.
+- **New, still open, and named:** #128 (our typecheck passes against harness types a release line behind the pin —
+  four sites pass `source.kind: 'plugin'`, which 0.2.0-rc.2 rejects; and `package.json` 0.2.0 vs lock 0.1.22), and
+  #129 (`globalSetup` boots one server from the setup process's env while Playwright applies project env to
+  workers, so a multi-project run shares a boot and a home; `scripts/chain-replay.sh` now runs one boot per
+  journey, and tightening session discovery to the preferred workspace fixed `prompt`'s `identity mismatch`).
+
+### 2026-10-28 — two product defects closed, and acceptance narrowed to one coupling
+
+- **#131 — artifacts were unreachable.** Arrival-time deferral was applied to `chapters_artifact`'s own output, so
+  asking to read a stored blob returned *another* pointer to another blob. Found in the leg's durable log (20 tool
+  calls, 17 erroring/looping) after three of my own wrong diagnoses (trigger margin, aux turn, haystack size).
+  Exempting artifact answers fixed two legs at once: `arrival` 8 entries and `fanout` 41 captured green, each
+  replaying green alone. Filed with repro; credit matters — both looked like model flakiness for a day.
+- **#113 — the Autorun button refused its own click.** The dock dispatched local state and then `refresh()` re-read
+  the server and flipped the label back; `off` two lines below sent its command correctly, which is how the
+  asymmetry showed. Fixed, guarded by `prompt-dock-autorun-write.test.ts` (red first; the property form survived
+  my `[^}]*` mistake). **Displacement is now observed in Chromium**: with a goal armed the host offers `Pause
+  goal`; clicking Autorun leaves `Autorun off` in place, the host flips to `Resume goal`, `Pause goal` disappears.
+  Recorded under the real provider, replayed model-free twice at 5 passed. That closes item (3)'s last sub-claim
+  and gives item (4) a browser-level half — goal-off restoring a suggestion is still unit-only and still unclaimed.
+- **#129's remaining acceptance gap is one coupling, named.** `#arrive` runs only at the head of the relief entry
+  points, so `auto: false` disables deferral with relief, and leaving it on makes deferral depend on when a
+  threshold crosses on that machine's header bytes. Every remaining CI divergence has the same fingerprint: a
+  checkpoint notice where the other machine has a plain message, or a history one message longer. `heavy` and
+  `fanout` are that, not separate mysteries. The clean fix conflicts with "no second automatic engine timing of our
+  own", so #132 carries four options with costs and a recommendation; the decision is the maintainer's.
+- **Numbers on this branch right now:** plane 1,114/1,114 with 0 skipped; `typecheck` and `typecheck:client` 0;
+  `typecheck:e2e` at its 68 baseline; full one-boot-per-journey chain green ten-for-ten twice (`AR=0`, `A2K=0`);
+  fresh `coverage:e2e` 78.31% (`CVA=0`), stamped `lib=081a726aca738d02`-era corpus. CI: deterministic job green,
+  acceptance red on `heavy`/`fanout` after `arrival` and `prompt` were fixed — four legs to two, both locally and on
+  the runner. #127 unmerged behind that gate; `0.2.2-dev.1` unpublished.
+- **Corrections I made to myself in the open** (each with its evidence in git): the `noAuxModel` "inert key" claim
+  (it is a rig alias for `auto`/`elicitedPlot`, which the host does read), the fold that broke a green leg, the
+  pin attribution that the pre-change logs disproved, and the `limit 5000` prompt that made a leg depend on a
+  rejected call — the last one was a real bug and its fix is what took `arrival` off CI's failing list.

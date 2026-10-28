@@ -17,22 +17,11 @@ import { openApp, newSessionWithTurn, localModelUp, sessionLogTextById, E2E_HOME
  *   - the model WORKS the artifact via chapters_artifact (toc + search) and
  *     returns facts that only exist inside the blob.
  */
+import { buildBook, CHAPTERS } from './arrival-book.ts'
+
 const BOOK = path.join(ROOT, 'var', 'e2e-book.md')
 const FINGERPRINT = 'BLOB-FINGERPRINT-9182736450-qzxv'
 const CENTER_TOKEN = 'EMBED-CENTER-4417'
-
-function generateBook(): void {
-  const lines: string[] = ['# The Big Reference Book', '', 'Structure probe target: 40 chapters.']
-  for (let c = 1; c <= 40; c++) {
-    lines.push('', `## Chapter ${c} of 40`, `Chapter ${c} discusses windowing, filing, and retrieval.`)
-    for (let l = 0; l < 96; l++) lines.push(`line ${c}-${l}: reference material regarding context economics and archival discipline number ${c * 100 + l}.`)
-    if (c === 21) {
-      lines.push(FINGERPRINT + ' ' + 'filler-'.repeat(600))
-      lines.push(`buried here: ${CENTER_TOKEN}`)
-    }
-  }
-  fs.writeFileSync(BOOK, lines.join('\n'))
-}
 
 function parseRows(text: string): { seq: number; type: string; raw: string }[] {
   const out: { seq: number; type: string; raw: string }[] = []
@@ -45,16 +34,20 @@ function parseRows(text: string): { seq: number; type: string; raw: string }[] {
 test('one oversized read is artifacted at arrival, never prefilled, and answered through chapters_artifact', async ({ page }) => {
   test.setTimeout(3_600_000) // 60 min ceiling (measured variance: 5–15 artifact calls depending on model curiosity)
   test.skip(!(await localModelUp()), 'Local model server not running')
-  generateBook()
+  fs.writeFileSync(BOOK, buildBook())
   const bookBytes = fs.statSync(BOOK).size
-  expect(bookBytes, 'book exceeds any plausible inline budget').toBeGreaterThan(250_000)
+  // Both bounds are the leg's own contract (#130): the read must exceed the deferral threshold or the stub pair
+  // never happens, and the artifact must stay queryable or the leg is measuring retrieval luck. The old fixture was
+  // 373,861 bytes with the token at chapter 21 — comfortably over the first bound and hopeless on the second.
+  expect(bookBytes, 'book must exceed the arrival deferral threshold').toBeGreaterThan(6_000)
+  expect(bookBytes, 'book must stay small enough that the artifact query is bounded').toBeLessThan(120_000)
 
   await openApp(page)
   const sid = await newSessionWithTurn(page,
-    'var/e2e-book.md is a large reference document. Step 1: fetch it ONCE with the read tool at offset 1, limit 5000 (one call — whatever comes back is handled by the system). '
-    + 'Step 2: answer using the chapters_artifact tool ONLY (never another whole-file read): (a) how many lines start with "## Chapter"; (b) the exact token beginning EMBED- that is buried near chapter 21 (use search). '
+    'var/e2e-book.md is a large reference document. Step 1: fetch it ONCE with the read tool at offset 1, limit 2000 — which is the maximum range this host accepts, so the call SUCCEEDS and its whole body arrives at once (one call; whatever comes back is handled by the system). '
+    + 'Step 2: answer with AT MOST TWO chapters_artifact calls and nothing else — first action toc for the chapter count, then action search with query "buried here" for the token. No further tool calls of any kind, and do not read the file again. '
     + 'Final answer: one short line "<count> chapters; <token>".',
-    2_400_000, false) // 40-min turn: the model may explore the book chapter by chapter — every range read is another pruned blob
+    2_400_000, false) // #132: bounded to one oversized read + at most two artifact queries — the ceiling is slack for the model, not room to wander
 
   const rows = parseRows(sessionLogTextById(sid))
 
@@ -76,7 +69,7 @@ test('one oversized read is artifacted at arrival, never prefilled, and answered
   // --- the model worked the artifact and surfaced facts that only exist inside it
   const finalText = rows.filter((r) => r.type === 'assistant/message').map((r) => r.raw).join('\n')
   expect(finalText, 'model never found the buried token via the artifact tool').toContain(CENTER_TOKEN)
-  expect(finalText).toContain('40')
+  expect(finalText, `the model must report ${String(CHAPTERS)} chapters`).toContain(String(CHAPTERS))
   const artifactCalls = rows.filter((r) => r.type === 'tool/call' && r.raw.includes('chapters_artifact'))
   expect(artifactCalls.length, 'chapters_artifact used to query, not re-read').toBeGreaterThanOrEqual(1)
 

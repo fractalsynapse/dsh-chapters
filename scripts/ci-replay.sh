@@ -76,20 +76,59 @@ PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromiu
 # completed with exit code 1" is not a bug report. The proxy journals every miss with
 # the prefixes it compared — that journal is the thing a maintainer needs.
 STATUS=0
-E2E_MODEL=replay npm run test:e2e 2>&1 | tee var/ci-replay.log || STATUS=${PIPESTATUS[0]}
+# Report what the pinned host declares as dependencies and which of them exist on disk. Motivation: the runner's
+# session mounts ONLY our seven plugin tools while a local boot mounts 34, and the header (message 0) is a strict
+# subset of ours as a result. Before reasoning further, ask the machine. Written to a file the artifact uploads.
+node scripts/host-dep-report.mjs "$PWD" > var/ci-host-deps.txt 2>&1 || true
+# Script policy, because a runner that refuses postinstall scripts can silently drop the generated files a tool
+# plugin needs to mount — and 27 host tools vanish with no error anywhere in the boot log. Names and settings
+# only, never values.
+{
+  echo "== npm script policy =="
+  echo "ignore-scripts=$(npm config get ignore-scripts 2>&1 || echo unknown)"
+  echo "allow-scripts=$(npm config get allow-scripts 2>&1 || echo unknown)"
+  npm install-scripts ls 2>&1 | head -30
+  echo "== tool plugin packages present in the pinned install =="
+  ls dev/dsh-host-lock/node_modules/@deepseek-ai 2>/dev/null | grep -cE "^dsh-(tool|tools)" || echo 0
+} >> var/ci-host-deps.txt 2>&1 || true
+echo "host-dep report: $(wc -l < var/ci-host-deps.txt 2>/dev/null || echo 0) lines"
+
+# Dump the composed system header once per leg into var/e2e-header-*.log, which the failure artifact uploads.
+# The miss journal truncates `got=` to 110 chars, and three rounds of reasoning about a 7,276-vs-2,783
+# header could not be settled by inference; the runner's own bytes can be diffed offline.
+export E2E_DUMP_HEADER=1
+# One boot per journey, not one boot for ten projects (#129): `globalSetup` boots a single server from the
+# SETUP process's environment while Playwright applies each project's env only to workers, so a shared run replays
+# a leg against another project's realm and home. That produced flaky results no capture could fix — `arrival`
+# passed alone and failed in the batch. `scripts/chain-replay.sh` runs the same projects, same assertions, same
+# authority table, one boot each, which is also how the tapes are recorded.
+bash scripts/chain-replay.sh 2>&1 | tee var/ci-replay.log || STATUS=${PIPESTATUS[0]}
 if [[ "$STATUS" -ne 0 ]]; then
   # ONE annotation, not twenty. GitHub truncates a check run to 10 annotations, and
   # the 97bd603 run proved what that costs: the boot-pin lines and the ✘ consumed
   # the budget, and the actual `Error:` text — the only thing I was chasing — was
   # silently dropped. A single multi-line message (newlines %-encoded) cannot be
   # truncated into meaninglessness.
+  # Order matters because GitHub truncates an oversized annotation to its FIRST line: the 97bd603 run proved
+  # that the details I most needed were the ones dropped. So the header states what happened, the rig-fault and
+  # MISS lines come next (the tape key is the thing being chased), then assertion text, then the bulkier
+  # artifacts last — and the whole message is capped so a long tail cannot cost the head.
   DIAG="ci-replay: tape replay exited $STATUS"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     DIAG+=$'\n'"${line:0:280}"
   done < <(
+    # Tape-key failures first: they are the class that aborts a leg before Playwright prints a verdict, and the
+    # annotation loses everything after its first line, so the most decisive bytes lead. This is a `head`-free
+    # filter — the single wide grep below is the one the annotations row pins.
+    grep -E "RIG FAULT|MISS tape=|No tests found|[0-9]+ failed" var/ci-replay.log | tail -6 | sed 's/^/[rig] /'
+    # Unconditional tail: every targeted grep above can legitimately match nothing (a failure that died in the
+    # boot, a spec timeout whose summary line differs, a grep I have not thought of yet). A header-only
+    # annotation teaches nothing, so the last lines of the run always ride along.
+    echo "— raw tail of var/ci-replay.log"
+    tail -12 var/ci-replay.log
     grep -E "^\[e2e\] boot pins" var/ci-replay.log | tail -2
-    grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found" var/ci-replay.log | head -12
+    grep -E "✘|Error:|expect\(|Received:|Expected:|[0-9]+ failed|No tests found|RIG FAULT|MISS tape=|reaped orphan|falling back to an ephemeral|MOUNT FAULT" var/ci-replay.log | head -16
     # playwright's own saved context: the snippet plus the page snapshot, i.e. the
     # difference between "an assertion failed" and why it failed.
     for f in $(ls -1 test-results/*/error-context.md 2>/dev/null | head -2); do

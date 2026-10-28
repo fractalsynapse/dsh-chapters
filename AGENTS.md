@@ -399,6 +399,12 @@ not a plugin bug.
   ledger, `chapters_segment`'s counts — and where no measurement exists, say the number is unknown and
   continue. "My context is nearly spent" with no reading behind it is a fabrication, and it is the class of
   wrong this repository exists to end.
+- **Never end a turn asking for permission to continue.** Uncertainty is not a blocker and a `PLOT:` line is
+  not a question. Report a blocker only when it is real and external: a missing credential you cannot read,
+  hardware that is not there, a decision that is the maintainer's by right (a release to `main`, a scope
+  change, a destructive act), or an error you have already tried to work around and cannot. Anything else:
+  act, verify, and report what happened. Stopping to ask "should I proceed?" several times in one session is
+  the failure mode this bullet exists to end — it makes the maintainer a gate on work they already asked for.
 - **Never repeat an identical tool call after its result is known.** A finished search, read, or probe
   with the same arguments returns the same bytes; re-running it adds nothing and buries the answer.
   When a question stalls, change something real: different arguments, a different tool, or state what is
@@ -410,9 +416,38 @@ not a plugin bug.
 ## Where we are — state lives in docs, not here
 
 **Shipped and CI-green on the real model:** the engine, tools, preset, all seven archive moments, the
-knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), still unverified in a browser. **Still unverified:
-the browser plane** — the tape corpus is not re-anchored to the pinned host, so replay refuses by name
-and no e2e claim is current (issues #56/#57). Do not quote an e2e result as fresh until that lands.
+knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), verified in a browser on 2026-10-26 — see the next paragraph. **Browser plane — re-anchored and partly
+verified (2026-10-26, host 0.2.0-rc.2 on the maintainer's provider route):** every leg that was failing at a
+missing assistant row was failing because the tape proxy joined its upstream base and the request path into a
+doubled `/v1/v1` — no model answer, so no door, no plan card, no markers. Fixed, and `rules`, `explore-dev`,
+`fork`, `arrival`, `fanout`, `enrich`, `plans`, `suite` and `heavy` then recorded green; the Suggested Next Step
+bar has its own legs (`prompt`, and `prompt-off` for the switch's other half) and **passes in Chromium in both
+record and replay**. **Measured later on 2026-10-27, superseding the paragraph above on three points:** (1) the
+chain's shape was itself a defect — `globalSetup` boots ONE server from the setup process's environment while
+Playwright gives a project's `env` only to workers, so nine legs replayed in the first leg's realm and home (#129);
+`npm run test:e2e:replay` now runs **one boot per journey** (`scripts/chain-replay.sh`), the shape the corpus is
+recorded in, and against that runner the current corpus captured ten-for-ten (`D2=0`) and replayed **green twice**
+(`K1=0`, `K2=0`), with `CORPUS_HOST` re-stamped (`lib=b5e15a0de600f6dd`). (2) `coverage:e2e` is **green on this corpus** —
+ten legs, `COVPJ5=0`, All files **77.97%** — after two runs where `prompt` instead timed out on a sidebar row that
+never became actionable. The armed diagnostic settled what that looked like (`rows (0)`, `current session: null`,
+no browser crash, `MemAvailable` flat at ~66.8 GB across all ten boots), and a third consecutive full run passed
+without the diagnostic ever firing: so it is an intermittent view failure under instrumentation, filed as such, and
+deliberately not treated by raising a timeout. The older 77.94% belongs to the previous corpus. (3) CI's **acceptance** job no longer
+fails on `MOUNT FAULT`: the 7-vs-34 tool asymmetry was root-caused (the preset's rows name 28 `@deepseek-ai/*`
+packages, **none a dependency of this repo**, so a runner resolved nothing and our preset silently pruned them) and
+closed by `linkPinnedToolPackages()` running **before** the spawn; the runner now assembles 34 tools and gets far
+deeper, failing on conversation content (its first assistant turn carries a different tool call than the capture,
+`glob` where the tape has `read`) after two machine-identity folds (the harness checkout path, already blind via
+`<DSH-CHECKOUT>`, and both spellings of the runtime time zone). Acceptance moved a full layer deeper that day and the cause is now **identified by outcome, not theory**: the remaining misses are legs whose **turn count is the model's choice** — a bounded journey (`fanout`: one decisive oversized read per child instead of six ranges sitting on the deferral floor; `arrival`: one read plus at most two artifact queries) **passed on the runner**, and the failing set shrank to `heavy` alone. That leg is bounded the same way (exactly three reads with named offsets; 36 → 9 requests), so the tape's shape is a property of the spec. Relief timing, the 7-vs-34 tool gap, and machine-identity bytes were all real and are all closed; none of them was the last story. Evidence and eliminated classes: docs/backlog.md, #129/#131/#132. CI's deterministic job
+(typecheck · build · unit + integration, branch gate 85%) remains green on this branch. Still open there: a dock cannot
+write the composer on 0.2.0-rc.2 (`insertText` raises
+`draftRev`, `setDraft` mirrors only at mount), so click-to-draft shows an explanation and Run submits instead;
+tracked as #126. **Autorun displacing a goal's continuation is now observed in Chromium** (2026-10-28): with a goal armed the host
+offers `Pause goal`; clicking the bar's Autorun leaves `Autorun off` in place after the server round-trip, the host
+flips to `Resume goal`, and `Pause goal` disappears. Recorded alone under the real provider and replayed model-free
+twice (5 passed each). It required a product fix first — the control dispatched local state only and `refresh()`
+flipped it back, so the click refused itself (see `prompt-dock-autorun-write.test.ts`). The **goal-off restores normal
+suggestion** half of item 4 remains unit-covered and is not claimed from a browser.
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.
@@ -440,6 +475,31 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
 - **Proving a failure predates your diff is a step, not an answer.** Two flaky rows were blamed on the
   environment and diagnosed as pre-existing; pre-existing was true and irrelevant — the flake was real
   (an unhandled async EPIPE). Reproduce, then fix.
+- **Test the failure in isolation first; never re-run a suite that is already passing to feel better about
+  it (maintainer directive, 2026-10-27).** Order is: reproduce the broken thing alone (one leg, one spec, one
+  command), fix it, verify it alone; only then run the whole set ONCE, as confirmation — not as a search. Measured
+  cost of ignoring this on one day of the #56/#129 chase: three full ten-leg replay runs (~36 min each of model
+  traffic) were spent re-confirming six legs that had already passed locally *and* on CI, while the four that failed
+  could only be diagnosed from logs the artifact did not carry. `scripts/chain-replay.sh suite` /
+  `scripts/e2e-one.sh` with `LEG=… MODE=replay` exist for exactly this; use them, and prefer `var/chain-replay-<leg>.log`
+  and `var/e2e-tape-diffs/` over another roll. Related: when a measurement matters, capture a BEFORE count — a
+  cumulative log grepped after the fact is not evidence (this session misread one as a 38× signal).
+- **Prefer synthetic bulk over model-authored bulk — Lorem ipsum is fine, and cheaper.** The legs that keep failing
+  are the ones whose journeys wait for the live model to take turns (`suite`, `heavy`, `arrival`, `fanout`), and turn
+  count is what makes capture slow AND nondeterministic. Fixture content is already synthetic
+  (`tests/e2e/subagent-fanout.spec.ts` repeats a word list; `artifact-arrival.spec.ts` reads a generated
+  `var/e2e-book.md`) — extend that: any bytes a test needs in bulk (files, papers, oversized tool output, expected
+  summaries) should be generated deterministically, not elicited, and a leg's prompt should ask for the SHORTEST
+  faithful answer that still exercises the mechanism. Never synthetic an *assertion* — what a leg claims must still be
+  something a browser or the durable log really produced (see `docs/verify.md`).
+- **A change that alters prefix LENGTH is a corpus change, not a matcher change.** Folds that substitute
+  length-preservingly (dates, ports, workspace paths, reasoning, zone tokens) may ship without a re-record —
+  that is what "stored prefixes re-substitute at load" buys. A change that ADDS or REMOVES elements does not:
+  `normalizeStoredPrefix()` both substitutes and drops empty elements, and dropping changes the key's shape, so
+  the corpus has to be re-taken with it. Measured the hard way (run 40664455803): I shipped the symmetry fix on the
+  reasoning that "matching only, served bytes untouched, no re-record needed", and CI answered that the runner's
+  first main request now normalizes shorter than the recorded entry expects, so a legitimate later turn was served
+  early — the probe landing at index 3 where the tape had it later. That was my own claim failing, not the model's.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 

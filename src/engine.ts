@@ -54,6 +54,9 @@ import type { RegistryStore } from './store.ts'
 
 /** Row config: the base's keys (so realm rows validate) plus the archive's own. */
 export interface ChaptersRowConfig extends BasicCompactionConfig {
+  /** Lines of the chapter index a continuation notice lists (0 = all). A fixed-size notice is what lets a
+   * boundary-sitting leg be captured and replayed at all (#56). */
+  noticeIndexCap?: number | undefined
   artifactStoreRoot?: string
   /** #85: pool-mirror root for rules/knowledge reads that produce model-visible text. */
   knowledgeMirrorDir?: string
@@ -164,7 +167,12 @@ export function makeSignatureListener(deps: {
       // zero trace because the sink had to be configured before it existed. Resolve it from the session
       // that is compacting, first one wins.
       if (cwd !== undefined && deps.storeRoot !== undefined) {
-        ensureDiagnosticsDefault(path.join(cwd, deps.storeRoot, 'diagnostics.log'))
+        // Absolute stays absolute. `path.join(cwd, artifactStoreRoot)` silently nested an ABSOLUTE store root
+        // under the workspace (`/wsp/var/e2e-home-41739/chapters/…`), so on the rig — where #61 pins
+        // `artifactStoreRoot` to an absolute per-port path to keep test chapters out of the repo's store — the
+        // diagnostics file was written to a path nobody looked at. The failure this repo exists to end: a
+        // mechanism that detects and then loses the evidence. Same dialect rule as `toStoredPath` (#69).
+        ensureDiagnosticsDefault(path.join(path.isAbsolute(deps.storeRoot) ? deps.storeRoot : path.join(cwd, deps.storeRoot), 'diagnostics.log'))
       }
       const enrichPromise = cwd !== undefined
         ? enrichSignatureWithCodegraph(sig, span, deps.subprocess, cwd).catch(() => {})
@@ -368,7 +376,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // own keys are peeled off and held here; the base receives exactly its
     // documented shape. (The loader does not strip them for us either.)
     const {
-      artifactStoreRoot, knowledgeMirrorDir, openRequestCarryMaxChars, lastResortArtifact, diagnosticsMaxBytes, chapterTokenTarget, toolResultDeferFloorTokens,
+      artifactStoreRoot, knowledgeMirrorDir, noticeIndexCap, openRequestCarryMaxChars, lastResortArtifact, diagnosticsMaxBytes, chapterTokenTarget, toolResultDeferFloorTokens,
       mergeThreshold, chapterLimit, syncDebounceMs, toolResultArtifactTokens, elicitedPlot,
       childAutoArchive, childAutoArchiveMinTurns,
       planInlineChars, callArgArtifactTokens, plansInCheckpoint, planCheckpointChars,
@@ -394,6 +402,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.chaptersConfig = {
       artifactStoreRoot: artifactStoreRoot ?? '.dsh-chapters',
       knowledgeMirrorDir: knowledgeMirrorDir ?? DEFAULT_CLONE_DIR,
+      // Capped notice index (#56): a fixed-size notice is what makes a boundary-sitting leg capturable at all.
+      noticeIndexCap: noticeIndexCap ?? 6,
       openRequestCarryMaxChars: openRequestCarryMaxChars ?? 4000,
       lastResortArtifact: lastResortArtifact ?? true,
       diagnosticsMaxBytes: diagnosticsMaxBytes ?? 8388608,
@@ -833,6 +843,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   }
 
   async #arrive(agent: Agent): Promise<void> {
+    // #129: this path decides whether an oversized tool result becomes an artifact, and three separate
+    // investigations today (arrival's stub-pair failure pinned and unpinned, fanout's lost synthesis, the CI
+    // misses at the first assistant turn) all needed the same fact and none of them could get it: whether
+    // #arrive RAN AT ALL for a given turn. It logged only its two skip branches, so silence was ambiguous
+    // between "not called" and "called, deferred nothing" — the #61 rule applies: entry is a fact worth
+    // delivering, with the numbers that decide the outcome.
+    {
+      const session = agent.session as unknown as ArrivalSessionShim & { header?: { cwd?: string } }
+      diagnosticNote(this.ctx.logger, 'realm:engine:arrive',
+        `entered: nodes=${String(session.surface?.nodes?.length ?? -1)}`
+        + ` cwd=${session.header?.cwd === undefined || session.header.cwd === '' ? 'NONE' : 'set'}`
+        + ` floor=${String(this.chaptersConfig.toolResultArtifactTokens)}`
+        + ` lastResort=${String(this.chaptersConfig.lastResortArtifact === true)}`)
+    }
     const session = agent.session as unknown as ArrivalSessionShim & { header?: { cwd?: string } }
     const cwd = session.header?.cwd
     if (cwd === undefined || cwd === '') {

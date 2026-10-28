@@ -144,3 +144,34 @@ test('a result with no text carrier at all is left alone, quietly and correctly'
   assert.equal(appended.length, 0, 'no carriers means no prune and no replacement, not a stub of nothing')
   fs.rmSync(cwd, { recursive: true, force: true })
 })
+
+/**
+ * A `chapters_artifact` result is the ANSWER to a query, not a tool result to economize (#131).
+ *
+ * Measured in the `arrival` leg's own durable log: reading a stored blob returned ANOTHER arrival stub pointing at
+ * another artifact — `-> [dsh:artifact 4b85a272127c] 5.5 KB ≈ 1423 tok stored at artifacts/4b/…txt — query it with
+ * chapters_artifact` — so the store became unreachable at exactly the sizes it exists for, and the model called the
+ * tool 20 times before the leg gave up. Whether the cycle started depended on how large a range the model happened
+ * to ask for, which is why this leg looked like a flake for a day.
+ */
+test('an artifact answer is never stubbed, while an ordinary oversized read still is', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ar-exempt-'))
+  try {
+    const big = 'retrieved chapter body '.repeat(3000) // well over the 300-tok floor below
+    const events = new Map<number, Ev>([
+      [1, { type: 'user/message', data: { message: { content: [{ type: 'text', text: 'query the store' }] } } }],
+      [2, { type: 'tool/call', data: { callId: 'c-read', name: 'read', arguments: '{"file_path":"big.md"}' } }],
+      [3, { type: 'tool/result', data: { message: { source: { kind: 'tool', callId: 'c-read' }, role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c-read', isError: false, content: [{ type: 'text', text: big }] }] } } }],
+      [4, { type: 'tool/call', data: { callId: 'c-art', name: 'chapters_artifact', arguments: '{"action":"read","path":"artifacts/ab/abcd.txt"}' } }],
+      [5, { type: 'tool/result', data: { message: { source: { kind: 'tool', callId: 'c-art' }, role: 'tool', content: [{ type: 'tool-result', toolCallId: 'c-art', isError: false, content: [{ type: 'text', text: big }] }] } } }],
+    ])
+    const { session } = fakeSession(events)
+    const r = await applyArrivalStubs(session, { cwd, storeRoot: '.dsh-chapters', floorTokens: 300, estimate: est })
+    assert.equal(r.stubbed, 1, `only the ordinary read may be deferred: got ${String(r.stubbed)}`)
+    const readText = String(((events.get(3) as Ev).data.message.content[0] as any).content[0].text)
+    const artText = String(((events.get(5) as Ev).data.message.content[0] as any).content[0].text)
+    assert.ok(readText.includes(ARRIVAL_MARKER), 'the oversized read is stubbed as designed (the exemption is not a widening)')
+    assert.equal(artText, big, 'the artifact answer arrives verbatim — a stub here is a cycle, not economy')
+    assert.ok(!artText.includes(ARRIVAL_MARKER), 'and specifically never a pointer to another artifact')
+  } finally { fs.rmSync(cwd, { recursive: true, force: true }) }
+})

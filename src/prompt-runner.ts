@@ -62,8 +62,10 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
     try {
       const ev = event as { type?: string; seq?: number } | undefined
       if (ev?.type !== 'turn/end' || typeof ev.seq !== 'number') return
-      if (!deps.enabled()) return
-      if (!deps.eligible(session)) return
+      // Each early return NAMED, because "the bar never updates" has three different causes and only one of
+      // them is a switch the human set. Silent guards are how tonight took a day.
+      if (!deps.enabled()) { deps.log?.('prompt: not enabled (no defining model) — round skipped'); return }
+      if (!deps.eligible(session)) { deps.log?.(`prompt: session ${String(session.id)} not eligible — round skipped`); return }
       const id = session.id
       const turnSeq = ev.seq
       section(id, async () => {

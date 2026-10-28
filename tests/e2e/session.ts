@@ -229,7 +229,7 @@ export async function focusComposer(page: Page): Promise<void> {
 export function durableLogExists(sessionId: string): boolean {
   for (const dir of sessDirs()) {
     if (!dir.includes(sessionId)) continue
-    return sessionLogFileFor(path.join(SESS_DIR, dir)) !== null
+    return sessionLogFileFor(dir) !== null
   }
   return false
 }
@@ -334,8 +334,13 @@ export function countHumanMessagesCarrying(logText: string, needle: string): num
   for (const line of logText.split('\n')) {
     if (!line.includes('"user/message"')) continue
     try {
-      const ev = JSON.parse(line) as { data?: { message?: { content?: unknown } } }
-      const c = ev?.data?.message?.content
+      const ev = JSON.parse(line) as { data?: { message?: { content?: unknown }, content?: unknown } }
+      // Nested-first with a flat fallback, the same shape rule `unwrapEvent` carries for the gateway: the host
+      // wraps composer-authored messages as `data.message`, while a message a plugin injected through
+      // `agent.followup` is stored FLAT (`{id, role, source, content}`). Measured on the Run test: the offer
+      // was in the log the whole time (seq 34) and this reader could not see it. Reading one shape and
+      // calling the absence a failure is the error this repo has been bitten by repeatedly.
+      const c = ev?.data?.message?.content ?? ev?.data?.content
       const text = typeof c === 'string' ? c
         : Array.isArray(c) ? (c as Array<{ text?: string }>).map((b) => b?.text ?? '').join(' ') : ''
       if (text.includes(want)) n += 1
@@ -557,13 +562,63 @@ export function sessionLogFileFor(dir: string): string | null {
   return best === null ? null : best.file
 }
 
-const sessDirs = (): string[] => { try { return fs.readdirSync(SESS_DIR) } catch { return [] } }
+/**
+ * Every session directory this boot owns — FULL paths.
+ *
+ * Two bugs, both measured today, both of the "silent empty read" family this file has been written to refuse:
+ * (1) the old version returned `fs.readdirSync(SESS_DIR)` — BARE NAMES — while its callers did
+ * `fs.statSync(dir)` and `path.basename(dir)`, resolving those names against the process cwd. Discovery was
+ * therefore empty everywhere, and the give-up diagnostic printed `home=[]` even in runs whose assertions were
+ * passing;
+ * (2) `SESS_DIR` is `sessSlug(ROOT)`, but the app slugs the SESSION's workspace, and on a throwaway home that
+ * is the host's default workspace directory, not the repository. In the working copy the two coincide often
+ * enough to hide it; from a clone at any other path every durable-log read returns '' — which is exactly how a
+ * completed turn (`needle` at seq 10, `turn/end` at seq 43) polled blind for 720 seconds.
+ *
+ * The home is per-port and disposable, so EVERY workspace directory inside it belongs to this boot: prefer the
+ * ROOT slug for determinism, and union the rest instead of assuming the slug matches.
+ */
+/**
+ * Pure core of `sessDirs`, exported so the two failure modes it fixes are TESTED rather than asserted in a
+ * comment: bare-name returns (which callers `statSync` against the process cwd, so discovery is silently empty)
+ * and a workspace slug that cannot match because the app slugs the SESSION's workspace, not the repository root.
+ * A home is per-port and disposable, so every workspace directory inside it belongs to this boot: `preferred`
+ * sorts first for determinism, the rest are unioned rather than ignored.
+ */
+export function sessDirsIn(base: string, preferred: string): string[] {
+  let wsDirs: string[] = []
+  try { wsDirs = fs.readdirSync(base) } catch { return [] }
+  // Preferred FIRST, and ONLY if it yields nothing do we look further. The wider union I introduced today made
+  // a `prompt` leg throw `identity mismatch: dir claims session X, spec holds Y`: discovery could now see a
+  // DIFFERENT workspace's transcripts inside the same disposable home, so adoption could hand back a session the
+  // spec never opened. A fallback is not a licence to mix homes (AGENTS.md: one journey, one boot).
+  const scan = (dirNames: string[]): string[] => {
+    const out: string[] = []
+    for (const w of dirNames) {
+    const wsPath = path.join(base, w)
+    let names: string[] = []
+    try { names = fs.readdirSync(wsPath) } catch { continue }
+    for (const n of names) {
+      if (!/^(session|ch|sub)-/.test(n)) continue
+      const full = path.join(wsPath, n)
+      try { if (fs.statSync(full).isDirectory()) out.push(full) } catch { /* vanished between readdir and stat */ }
+    }
+    }
+    return out
+  }
+  const own = scan([preferred])
+  if (own.length > 0) return own
+  return scan(wsDirs.filter((w) => w !== preferred))
+}
+
+const sessDirs = (): string[] =>
+  sessDirsIn(path.join(E2E_HOME, 'sessions'), path.basename(SESS_DIR))
 
 /** full decoded session log for a session id ('' until the file exists). */
 export function sessionLogTextById(id: string): string {
   for (const dir of sessDirs()) {
     if (!dir.includes(id)) continue
-    const f = sessionLogFileFor(path.join(SESS_DIR, dir))
+    const f = sessionLogFileFor(dir)
     if (f === null) return '' // no durable log yet — an empty answer is honest here, a guess is not
     try { return execFileSync('zstd', ['-dc', f], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }) } catch (e) {
       if (!zstdWarned) { zstdWarned = true; console.error(`e2e: zstd failed reading session log ${dir}: ${String((e as Error)?.message ?? e).slice(0, 160)}`) }
@@ -580,16 +635,46 @@ export function sessionLogTextById(id: string): string {
  * (e.g. 'ch-' for continuation children).
  */
 /** Session ids currently on disk with a given prefix — for "exactly one new child" checks. */
+/**
+ * The session id a directory represents. Parents are `session-<uuid>` and their id is the uuid; children keep
+ * their own prefix (`ch-`, `sub-`) because specs filter on it. Deriving this from a BASENAME matters: `sessDirs()`
+ * returns absolute paths, so testing a raw path for a `ch-` start is never true and a created child becomes invisible
+ * to the rig (measured 2026-10-27: the plans leg polled 240s for a continuation whose seed was on disk and
+ * carried the plan — a false red about the product, caused by our own read).
+ */
+/**
+ * Do these two spellings denote the same session?
+ *
+ * The durable log writes the session event's id WITH the `session-` prefix; the view (`dsh.sessions.current`) and
+ * `sessionIdFromDir` hand back the bare uuid for parents while children keep `ch-`/`sub-`. A guard that compares
+ * the raw strings therefore fires on a spelling — measured as `identity mismatch: dir claims session
+ * session-2ba8…, spec targets 2ba8…` on the bar's own leg, a false red on the exact journey that is supposed to
+ * be trustworthy. A child prefix is NOT a spelling difference: `ch-x` and `x` are different sessions, so the
+ * guard still fires there.
+ */
+export function sameSessionId(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (a === null || a === undefined || b === null || b === undefined) return false
+  const norm = (x: string): string => (x.startsWith('session-') ? x.slice('session-'.length) : x)
+  const [na, nb] = [norm(a), norm(b)]
+  // Children keep their prefix deliberately: stripping it would equate a parent with its continuation.
+  return na === nb && (a.startsWith('ch-') || a.startsWith('sub-')) === (b.startsWith('ch-') || b.startsWith('sub-'))
+}
+
+export function sessionIdFromDir(dir: string): string {
+  const name = path.basename(dir)
+  return name.startsWith('session-') ? name.slice('session-'.length) : name
+}
+
 export function sessIdsWithPrefix(prefix: string): string[] {
   return sessDirs()
-    .map((d) => (d.startsWith('ch-') ? d : d.replace(/^session-/, '')))
+    .map(sessionIdFromDir)
     .filter((id) => id.startsWith(prefix))
 }
 
 export function findSessionIdWhoseLogContains(fragment: string, prefix = ''): string | null {
   for (const dir of sessDirs()) {
     // dirs are `session-<uuid>` (parent) or `ch-<uuid>` (a created child)
-    const id = dir.startsWith('ch-') ? dir : dir.replace(/^session-/, '')
+    const id = sessionIdFromDir(dir)
     if (prefix !== '' && !id.startsWith(prefix)) continue
     if (sessionLogTextById(id).includes(fragment)) return id
   }
@@ -827,7 +912,7 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     const text = sid !== null ? sessionLogTextById(sid) : ''
     if (text === '') return false
     const header = logHeaderId(text)
-    if (header !== null && header !== sid) throw new Error(`identity mismatch: dir claims session ${header}, spec targets ${sid}`)
+    if (header !== null && !sameSessionId(header, sid)) throw new Error(`identity mismatch: dir claims session ${header}, spec targets ${sid}`)
     const evs = logEvents(text)
     const mine = evs.find((e) => e.type === 'user/message' && e.seq > preSeq && e.raw.includes(needle))
     return mine !== undefined && evs.some((e) => e.type === 'turn/end' && e.seq > mine.seq)
@@ -857,8 +942,31 @@ export async function newSessionWithTurn(page: Page, question: string, turnMs = 
     const rowText = question.slice(0, 24)
     const own = page.locator('[role="treeitem"]', { hasText: rowText }).first()
     if (await own.isVisible().catch(() => false)) {
-      await own.click()
-      await page.waitForTimeout(1200)
+      try {
+        await own.click()
+        await page.waitForTimeout(1200)
+      } catch (error) {
+        // A detected failure is a delivered failure (#61). `locator.click: Test timeout of 300000ms exceeded`
+        // with a single "waiting for locator" line tells the next reader nothing about WHY the row never became
+        // actionable — measured on `prompt` under the full coverage run, where the same leg passes alone. So the
+        // state that the click depends on is printed before the failure is re-raised unchanged: the rows the
+        // sidebar actually offers, and the session the view believes is current.
+        const rows = await page.locator('[role="treeitem"]').allInnerTexts().catch(() => [])
+        const cur = await currentSessionId(page).catch(() => null)
+        console.error(`e2e: tree-row click failed for "${rowText}" — ${String((error as Error)?.message ?? error).slice(0, 90)}\n`
+          + `  current session: ${String(cur)}\n  rows (${String(rows.length)}): ${rows.slice(0, 8).map((r) => JSON.stringify(r.slice(0, 46))).join(' | ')}`)
+        // The row count alone did not settle it: `rows (0)` with `current session: null` is either "the app is
+        // alive and its session list is empty" (a store/restore problem) or "the document is gone" (a boot dying
+        // under memory pressure), and the fix belongs to different places. So the same failure reports the
+        // document's own state.
+        const doc = await page.evaluate(() => ({
+          keys: Object.keys((window as unknown as { dsh?: Record<string, unknown> }).dsh ?? {}),
+          body: (document.body?.innerText ?? '').length,
+        })).catch(() => ({ keys: [], body: -1 }))
+        console.error(`  document: url=${String(page.url())} title=${JSON.stringify(await page.title().catch(() => ''))}`
+          + ` bodyChars=${String(doc.body)} dshKeys=${doc.keys.slice(0, 10).join(',') || '-'}`)
+        throw error
+      }
     } else {
       console.warn(`e2e: no tree row matching "${rowText}" — asserting on whatever view is open`)
     }

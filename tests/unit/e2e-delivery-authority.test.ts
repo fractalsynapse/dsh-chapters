@@ -263,3 +263,44 @@ test('the spec side never re-derives boot paths — it imports them (#89)', () =
   assert.match(src, /export const E2E_HOME = e2eHome\(bootPort\(\)\)/, 'the home is boot\u2019s function')
   assert.match(src, /export const E2E_STORE_ROOT = rigStoreRoot\(bootPort\(\)\)/, 'and so is the store root (#70\u2019s lesson, same class)')
 })
+
+/**
+ * The session-directory scan, as behavior (measured 2026-10-27, from the clone's `home=[]` diagnostic).
+ *
+ * Two silent failure modes lived in `sessDirs`: returning BARE NAMES while callers did `statSync(dir)` against
+ * the process cwd (discovery empty everywhere), and trusting `sessSlug(ROOT)` when the app slugs the SESSION's
+ * workspace — which on a throwaway home is the host's default workspace directory. From a clone at any other
+ * path, every durable-log read became '' and a-knowledge-loop polled a completed turn for 720 seconds
+ * (`needle` at seq 10, `turn/end` at seq 43, both on disk the whole time). The home is per-port and disposable,
+ * so nothing inside it can be another boot's: union the workspace directories, preferred first.
+ */
+test('session discovery finds dirs under a workspace slug that is not the repo path', async () => {
+  const { sessDirsIn } = await import('../../tests/e2e/session.ts')
+  const fs = await import('node:fs')
+  const os = await import('node:os')
+  const path = await import('node:path')
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sess-scan-'))
+  try {
+    const base = path.join(home, 'sessions')
+    const other = path.join(base, '--home-someone-else-clone--')
+    const mine = path.join(base, '--home-adrian-Projects-dsh-chapters--')
+    fs.mkdirSync(path.join(other, 'session-aaa11111-1111-1111-1111-111111111111'), { recursive: true })
+    fs.writeFileSync(path.join(other, 'session-aaa11111-1111-1111-1111-111111111111', 'session.lock'), '')
+    fs.mkdirSync(path.join(mine, 'session-bbb22222-2222-2222-2222-222222222222'), { recursive: true })
+    fs.writeFileSync(path.join(mine, 'notes.txt'), 'not a session dir')
+
+    const found = sessDirsIn(base, path.basename(mine))
+    assert.ok(found.every((d) => path.isAbsolute(d)), `paths must be absolute, got ${String(found[0])}`)
+    // Preferred wins ALONE. Widening the scan to every workspace directory in the home made a `prompt` leg throw
+    // `identity mismatch` by adopting a session its spec never opened (#129 follow-up). The wider scan still exists
+    // as a FALLBACK for when the repo-slug directory is genuinely empty — a fallback, not a licence to mix homes.
+    assert.equal(found.length, 1, `only the preferred workspace is read: ${found.join(' , ')}`)
+    assert.ok(found[0]?.endsWith('session-bbb22222-2222-2222-2222-222222222222'),
+      'and it is the preferred slug’s session, never a foreign workspace’s')
+    assert.equal(sessDirsIn(base, 'no-such-workspace').length, 2,
+      'with the preferred slug absent, EVERY other workspace is found — the fallback is deliberately broad, '
+      + 'because a disposable home belongs to this boot and an empty preferred directory means the boot ran in a '
+      + 'different workspace than the spec assumed')
+    assert.equal(sessDirsIn(path.join(home, 'absent'), 'anything').length, 0, 'a missing home is empty, not a throw')
+  } finally { fs.rmSync(home, { recursive: true, force: true }) }
+})
