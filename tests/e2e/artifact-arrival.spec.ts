@@ -44,7 +44,7 @@ test('one oversized read is artifacted at arrival, never prefilled, and answered
 
   await openApp(page)
   const sid = await newSessionWithTurn(page,
-    'var/e2e-book.md is a large reference document. Step 1: fetch it ONCE with the read tool at offset 1, limit 5000 (one call — whatever comes back is handled by the system). '
+    'var/e2e-book.md is a large reference document. Step 1: fetch it ONCE with the read tool at offset 1, limit 2000 — which is the maximum range this host accepts, so the call SUCCEEDS and its whole body arrives at once (one call; whatever comes back is handled by the system). '
     + 'Step 2: answer using the chapters_artifact tool ONLY (never another whole-file read): (a) how many lines start with "## Chapter"; (b) the exact token beginning EMBED- that is buried in one of the first three chapters (use search). '
     + 'Final answer: one short line "<count> chapters; <token>".',
     2_400_000, false) // 40-min turn: the model may explore the book chapter by chapter — every range read is another pruned blob
