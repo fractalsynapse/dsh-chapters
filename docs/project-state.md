@@ -444,3 +444,31 @@ turns — the row system refused it, and the honest fix was to stop injecting a 
 Run submits), #128 (harness devDependencies lag the pinned runtime; 4 sites pass a retired `source.kind`), #130 (a
 boot hang when plot elicitation is off while relief declines — user-reachable from config), and the goal-off
 restores-a-normal-suggestion half of the interplay, which is unit-covered and **not** claimed from a browser.
+
+### 2026-10-28 (later) — the goal-off browser leg withdrawn after four failed captures; the claim returns to unit-only
+
+PR #136 is closed **unmerged** and the tree is byte-identical to the state CI proved green (spec back to the five
+merged tests, `prompt` tape back to 24 files, stamp `lib=b67e373defcad83a`, `corpus:check` agreeing; isolated replay
+`5 passed`, plane 1,115/1,115, `typecheck:e2e` 68 baseline).
+
+Four attempts at the goal-off leg, four different failure classes — recorded because each one is a general trap:
+
+1. `Clear goal` **button** after a turn → CI diverged at `msg32`: a `<goal_round>` where the capture had the human turn.
+2. `/goal clear` immediately, no turn between → CI diverged at `msg12`: runner `Round: 3/256`, capture `Round: 4/256`.
+3. Poll until a round appears, then act → still diverged. The structural reason I had missed: **a goal round is itself
+   a turn, and every turn ends**, so rounds self-sustain — the resulting tape held `Round: 12/256`. Click timing
+   cannot race a loop that schedules itself, and there is no rig knob (the human `/goal` takes no round argument;
+   `goal-round-driver` has no config block).
+4. Bound it with the product's own rule — instruct the model to call `create_goal(max_goal_rounds: 1)` and wait for
+   the quiesced `Round: 1/1` → capture failed at `the host goal bar appears once a goal exists`: the model answered in
+   prose instead of invoking the tool.
+
+Attempt 4 is the one that settles it. A browser leg whose *setup* requires a small model to cooperate is encoding luck
+into the tape, which is exactly what #132 and #135 keep charging this corpus to stop doing — so the leg does not ship
+until its setup is deterministic without asking the model. What survives the exercise is a rig rule worth more than the
+test (#135's entry in the rig list): **a tape may carry a background mechanism's output only when that mechanism has a
+state it cannot leave.**
+
+Site §28 and the interface lock are unchanged, because neither ever claimed the goal-off pixel; AGENTS.md now states
+the half that is unit-covered and is not browser-claimed. `heavy`'s 600-line page fix, the prefix-symmetry fix and the
+rest stay as merged — they are green on the runner.
