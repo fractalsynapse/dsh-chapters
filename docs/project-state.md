@@ -410,3 +410,39 @@ Measured, in the order the evidence arrived:
   (it is a rig alias for `auto`/`elicitedPlot`, which the host does read), the fold that broke a green leg, the
   pin attribution that the pre-change logs disproved, and the `limit 5000` prompt that made a leg depend on a
   rejected call — the last one was a real bug and its fix is what took `arrival` off CI's failing list.
+
+### 2026-10-28 — the acceptance pipeline went green, and the branch is on staging
+
+**Run 40676609079**: deterministic ✅ · pinned-host preset-rows probe ✅ · **acceptance ✅ — ten legs `ok`, each on its
+own boot** (`suite heavy arrival enrich fanout fanout→…` in RIG order: suite, heavy, arrival, enrich, fanout, rules,
+fork, plans, prompt, prompt-off). PR #127 squash-merged to `staging` as `45dd4ac`; #56 closes with it.
+
+What it took, in the order the layers came apart — each fixed by measurement, never by masking:
+
+1. **The proxy join** (`/v1/v1` → 404 → no assistant message) that had nine legs failing on provider wiring.
+2. **The runner assembled 7 tools where a dev host assembled 34** — 28 preset rows naming packages that are not this
+   repo's dependencies, pruned in silence. `linkPinnedToolPackages()` before spawn, plus the `MOUNT FAULT` abort that
+   replaced masking. Refuted along the way, with evidence: bubblewrap provisioning, AppArmor userns, credentials,
+   installed bytes, profile rows, config keys.
+3. **One boot served ten projects** — `globalSetup` boots from the setup process's environment while project `env`
+   reaches workers only. `npm run test:e2e:replay` is now one journey per boot, which is also how tapes are recorded.
+4. **#131, the artifact cycle** — `chapters_artifact` answers were themselves arrival-stubbed, so a stored blob
+   answered with a pointer to another blob and the store was unreachable at exactly the sizes it exists for. Two
+   legs' week-long "flakiness" was this one defect.
+5. **Turn count, not timing** — the last misses were legs whose journey length was the model's choice. Bounding them
+   (`fanout`: one decisive oversized read per child; `arrival`: one read plus ≤2 artifact queries; `heavy`: three named
+   600-line pages) is what made them portable, and bounding `heavy` correctly required learning that **the read tool
+   caps a call at 600 lines** — measured on both machines — which is what made the old fixture's marker pigeonhole work
+   and my first "three reads of 2000" bound unsatisfiable.
+
+Five claims I published and then retracted the same day, each caught by a test or by a byte rather than by
+reflection: the "nearest-prefix serving" matcher theory (`findReplay` requires equal length), the 38× title-call
+signal (a cumulative journal read as one run), the duplicate `<DSH-CHECKOUT>` blind (raw dumps diffed before
+normalizing), `noAuxModel` as an inert key (it is a rig alias for `auto`/`elicitedPlot`, which the host really
+reads), and the folding of injected instructions out of matching (it collapses positional prefixes and mis-serves
+turns — the row system refused it, and the honest fix was to stop injecting a development doc into acceptance).
+
+**Still open, unsoftened:** #126 (a dock cannot write the composer on 0.2.0-rc.2 — click-to-draft shows a refusal and
+Run submits), #128 (harness devDependencies lag the pinned runtime; 4 sites pass a retired `source.kind`), #130 (a
+boot hang when plot elicitation is off while relief declines — user-reachable from config), and the goal-off
+restores-a-normal-suggestion half of the interplay, which is unit-covered and **not** claimed from a browser.
