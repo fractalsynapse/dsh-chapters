@@ -1884,7 +1884,15 @@ later) and on the issue. What the chase established, measured:
 - No HTTP seam exists: grepping every installed `@deepseek-ai/*` lib for a route containing `goal` returns nothing. The
   human `/goal` command takes no rounds argument, and `goal-round-driver` has no config block in `cordis.patch.yml`.
 
-Two candidate designs, both requiring a decision before code: (1) have the rig pre-seed the goal record in the boot's
-storage domain with `maxGoalRounds: 1`, so the leg starts already-quiesced; (2) bound the cascade by giving the goal a
-completion the host can evaluate without a round, which is a host change, not ours. Until one lands, the claim stays
-unit-covered and §28 does not claim the pixel. The leg is **unwritten, not skipped** — that distinction matters here.
+Both candidates were then investigated, and (1) is **not available**: the host's goal state travels in the durable
+event stream (`goal/change`, `goal/changed` in `@deepseek-ai/dsh-goal`), so pre-seeding it would mean fabricating a host
+event — forbidden by invariant 1. The `goal` row that DOES sit in a boot home's storage
+(`storages/session_projcache/sessions/<id>.json`, keys `{seq, val:{current, seenGoalIds, failure}, ver}`) is our own
+mirror, with no round budget. There is no plugin-facing goal API (`ctx.get('…goal…')`, `registerCapability`, `provides:`
+all empty), no HTTP route mentioning `goal` in any installed lib, no config block on `goal-round-driver`, and no rounds
+argument on `/goal`. So today the only way to set a bounded budget is the model calling `create_goal(max_goal_rounds: 1)`
+— which capture attempt 4 proved a tape cannot depend on.
+
+Decision: the claim stays **unit-covered**, §28 keeps not claiming the pixel, and the leg stays **unwritten, not
+skipped** (the distinction matters). To ever show it in a browser the change belongs upstream — a rounds argument on
+`/goal`, or a plugin seam to open a bounded goal. Filed as such on #135 with the greps that establish it.
