@@ -599,3 +599,64 @@ test('a realm with no token meter declines quietly (#78)', async () => {
     fs.rmSync(sinkDir, { recursive: true, force: true })
   }
 })
+
+/**
+ * #140: a small-context model must never be handed an exception where relief should be.
+ *
+ * `dsh-compaction-basic@0.2.0-rc.2` validates its pressure math per routed target:
+ * `pressureBudgetTokens = contextWindow − reservedCompletionTokens − policy.headroomTokens`, and throws
+ * `TargetPressureConfigError` when that is ≤ 0. Its default `headroomTokens` is **65,536**
+ * (`headroomTokens = config.headroomTokens ?? 65536`), so ANY model under that window — 32K, which is the hardware
+ * this plugin is written for — makes relief throw out of `compactIfNeeded` instead of compacting or abstaining. The
+ * reservation exists to bound a routed summarize call; THIS engine overrides `summarize()` (src/engine.ts:664) and
+ * produces the summary deterministically, with no model call to reserve for. The realm therefore has to bound the
+ * headroom, and the subclass has to refuse to let a configuration error escape as a crash:
+ *
+ *   1. relief settles (null or a compaction), never throws, and
+ *   2. the reason reaches the diagnostics sink with the numbers that produced it.
+ *
+ * A generic model/adapter error must STILL propagate after finalization (r19) — that asymmetry is the point: a config
+ * the user can fix is a note, a failing provider is an error.
+ */
+test('#140 a 32K-window target yields no throw: relief abstains with its numbers, while a provider error still propagates', async () => {
+  const prevSink = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  const sinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'small-window-'))
+  const sinkPath = path.join(sinkDir, 'diagnostics.log')
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness({ thresholdRatio: 0.9 }, {})
+  try {
+    const events = [human(0, 'read the big thing'), asst(1, 'reading it now, one result coming')]
+    const session = h.sessionOf('s-small', events, {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    h.setWindow(32_000)
+    h.setSurface(30_000)
+    // The base engine's own math on the default 65,536 headroom: 32,000 − 0 − 65,536 < 0 → TargetPressureConfigError.
+    const outcome = await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal)
+      .then((r) => (r === null ? 'abstained' : 'compacted'))
+      .catch((error: unknown) => `THREW: ${String((error as Error)?.message ?? error).slice(0, 90)}`)
+    assert.doesNotMatch(outcome, /^THREW/,
+      'a realm/headroom problem must surface as a note, never as an exception escaping the relief path')
+    assert.ok(outcome === 'abstained' || outcome === 'compacted', `unexpected outcome ${outcome}`)
+
+    const sink = fs.existsSync(sinkPath) ? fs.readFileSync(sinkPath, 'utf8') : ''
+    assert.match(sink, /32000/, 'the note names the window it was given')
+    assert.match(sink, /65536|headroom/i, 'and the headroom (or that it is the headroom) that made relief impossible')
+
+    // The asymmetry: an ordinary failure still rethrows, after finalization has run.
+    const h2 = harness({ thresholdRatio: 0.9 }, {})
+    try {
+      const session2 = h2.sessionOf('s-provider', events, {
+        requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+      })
+      h2.setThrow(true) // the harness's existing knob: the adapter call throws AFTER our durable plan
+      await h2.engine.compactIfNeeded({ session: session2 } as never, 'pressure' as never, new AbortController().signal)
+        .then(() => assert.fail('the injected adapter error must propagate'),
+          (error: unknown) => assert.match(String((error as Error)?.message), /adapter unavailable/,
+            'an ordinary provider failure is not a configuration note — it must still surface'))
+    } finally { h2.dispose() }
+  } finally {
+    h.dispose()
+    process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
+  }
+})

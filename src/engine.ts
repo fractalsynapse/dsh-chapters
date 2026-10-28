@@ -256,6 +256,29 @@ export function carryOpenRequest(
   return [...parts]
 }
 
+/**
+ * Is this the base engine refusing to run for a CONFIG reason rather than a provider failing? (#140)
+ *
+ * `dsh-compaction-basic@0.2.0-rc.2` validates per routed target:
+ * `pressureBudgetTokens = contextWindow − reservedCompletionTokens − policy.headroomTokens`, and throws its
+ * `TargetPressureConfigError` when that is ≤ 0. Its default `headroomTokens` is 65,536 — a reservation for a routed
+ * summarize call, which THIS engine never makes: `summarize()` is overridden and deterministic (src/engine.ts:664).
+ * On any model whose window is under that default (32K is this plugin's target hardware) the exception otherwise
+ * escapes `compactIfNeeded` forever, so relief is indistinguishable from a crash.
+ *
+ * The class is not re-exported by the bundle's types, so the identity is structural: the error carries the target key
+ * it validated and a message prefixed with the package's own labels. Provider failures match neither and still
+ * propagate, which is the asymmetry the row pins.
+ */
+function isPressureConfigRejection(error: unknown): boolean {
+  const e = error as { name?: string; message?: string; targetKey?: unknown } | null | undefined
+  if (e === null || e === undefined) return false
+  const named = typeof e.name === 'string' && e.name.includes('TargetPressureConfigError')
+  const keyed = typeof e.targetKey === 'string' && e.targetKey.length > 0
+  const labelled = typeof e.message === 'string' && /compaction-basic:|BasicCompactionConfig/.test(e.message)
+  return (keyed && labelled) || (named && labelled)
+}
+
 export class ChaptersCompactionEngine extends BasicCompactionEngine {
   // Base inject is ['llm','tokenMeter','sessions']; subclassing INHERITS statics,
   // so re-declare with what the chapter flow adds (r12's crash, FINDINGS).
@@ -265,6 +288,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     thresholdRatio: z.number(),
     retainRatio: z.number(),
     retainTokens: z.number().step(1).min(0),
+    // #140: the base's own default is 65,536 (`headroomTokens = config.headroomTokens ?? 65536`), which is a
+    // reservation for a routed summarize call. This engine overrides summarize() and routes nothing, so that
+    // default makes the pressure budget negative on any window under it — every 32K model, no relief at all.
+    // Declared here so the key survives the Loader and reaches super's resolveConfig.
+    headroomTokens: z.number().step(1).min(0),
     summarizationProvider: z.string(),
     summarizationModel: z.string(),
     maxTokens: z.number().step(1).min(1),
@@ -279,6 +307,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       thresholdRatio: z.number(),
       retainRatio: z.number(),
       retainTokens: z.number().step(1).min(0),
+      headroomTokens: z.number().step(1).min(0), // #140: mirror the base's modelPolicy exactly (see above)
       summarizationProvider: z.string(),
       summarizationModel: z.string(),
       maxTokens: z.number().step(1).min(1),
@@ -1047,6 +1076,19 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       result = await super.compactIfNeeded(agent, trigger, signal)
     } catch (error) {
       await this.#finalizeGuarded(agent)
+      // #140: a configuration the user can fix is a NOTE, not an exception out of the relief path. Finalization has
+      // already run above, so a durable plan is never left stranded; the base engine's own message carries the window
+      // and the headroom that made the budget negative, which is exactly what an operator needs to change.
+      if (isPressureConfigRejection(error)) {
+        diagnosticWarn(this.ctx.logger, 'realm:engine:pressure-config',
+          `relief unavailable for this target (headroom vs context window; the realm's headroomTokens is the switch) — ${String((error as Error)?.message ?? error)}`)
+        // Both facts are delivered, not one: a config-impossible realm is still a relief that DECLINED while the
+        // surface sat over the trigger, and the over-trigger report is the row (#78) and the operator's numbers.
+        // Suppressing it here would trade one silence for another, which is the failure this file keeps refusing.
+        await this.#reportDecline(agent, signal)
+        this.#noteDecision('compactIfNeeded', trigger, null, agent)
+        return null
+      }
       // A throw while the surface is OVER the trigger is the same field failure as a null —
       // arguably worse, because the user sees the endpoint's 400 rather than our explanation.
       // Report first, then rethrow untouched; the report itself can never mask the error.
