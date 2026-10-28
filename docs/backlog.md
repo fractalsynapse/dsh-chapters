@@ -1681,3 +1681,27 @@ Read at 2026-10-28 while looking for the assertion, so the next reader starts fr
   — so the leg's choreography is: send `/goal`, wait for the host to report active+armed, click the bar's Autorun,
   then assert on the goal control and the durable log. Expect this to need a recorded journey of its own, and to be
   captured alone under `E2E_PROVIDER=harness`.
+
+### Two measured facts about the displacement leg, from the capture that did not finish (#113, objective item 3)
+
+Written instead of shipped, because the leg is red and a red leg on the branch helps nobody. Both facts came from a
+live recording run (`E2E_PROVIDER=harness`, `prompt` leg, 44 tape entries) with the test I added and then reverted:
+
+1. **The goal bar's activation control is real and findable.** After a human turn of `/goal Ship the widget and verify
+   it in the browser`, the host renders `[data-goal-bar]` AND a page-level control labelled `Pause goal` — the
+   assertion `the goal is armed: its own control offers Pause` **passed**. The label must be located page-wide
+   (`button[aria-label="Pause goal"], button:has-text("Pause goal")`), not inside the element that carries the
+   attribute: the host routes the action through its own `Action` component (`client.js` has `"action.pause":
+   "Pause goal"` feeding `label: t("action.pause")`), and scoping to `[data-goal-bar]` found nothing — that mistake
+   cost one capture.
+2. **The blocker is our own bar, and it is a product question.** The next assertion failed: after clicking Autorun,
+   `button:has-text("Autorun off")` never appeared. The dock dispatches `{ t: 'autorun', on: !armed }` locally and then
+   `refresh()` (`prompt-dock.ts:390`), so if the server's read comes back `disarmed`, the label snaps straight back to
+   `Autorun` and the user sees their own click refused. That is exactly the `state.autorun` split the interface lock
+   describes (`server, process-local` like the goal's `activation`, `docs/contract.md:680`) — so either arming needs a
+   turn boundary before it reports armed (and the leg must wait for one), or the write is not landing. I do not know
+   which, and the capture that would tell me is the next experiment, not this note.
+
+Consequence for the objective: item (3)'s displacement pixel and item (4)'s browser-level interplay remain unshown,
+and the reason is now narrow and specific — our bar's armed state does not visibly persist — rather than "the host has
+no affordance", which the first fact disproves.
