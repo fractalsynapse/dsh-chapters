@@ -220,6 +220,8 @@ jobs:
             var/e2e-home-plugins-*.log
             var/e2e-tape-diffs/
             var/e2e-server-*.log
+            var/chain-replay-*.log
+            var/e2e-session-logs/
             var/e2e-engine-errors.log
             /tmp/dsh-e2e/e2e-home-*/sessions/
             /tmp/dsh-e2e/e2e-home-*/storages/
