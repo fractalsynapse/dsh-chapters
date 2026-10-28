@@ -93,41 +93,6 @@ export function renderPinnedPreset(shipped: string, pins: RealmPin): string {
  * Apply the realm pins to a profile patch text: drop any previously written `preset-chapters`
  * row (rerun-safe), append the pinned copy of the shipped one.
  */
-/**
- * Drop the instruction-injection row from a profile patch (#129).
- *
- * The host plugin behind `id: agent-instructions` injects the workspace's `AGENTS.md` as a `user/message` at a turn
- * boundary. Its POSITION in a conversation varies between machines — measured on CI in run 40629952246, where the
- * runner's `msg4` was an assistant turn while the tape's `msg4` was that injected block, missing at `commonPrefix=4`.
- * Folding the text out of the matcher makes it worse, not better: replay serving matches on exact positional
- * prefixes, so deleting content collapses distinct histories into one key and the tie resolves to the wrong
- * assistant turn (`suite` lost its fork door when that was tried, then recovered on revert).
- *
- * So the rig simply does not mount a development instruction file into an acceptance journey. AGENTS.md says nothing
- * shipped may depend on it; that symmetry is honored here by removing the row for every machine, which is a profile
- * fact rather than a matcher exception. Row-scoped removal: a nested `config:` block belongs to its own row and is
- * removed with it, and every other line is untouched.
- */
-export function dropInstructionRow(patchText: string): string {
-  const lines = patchText.split('\n')
-  const out: string[] = []
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? ''
-    const m = line.match(/^(\s*)- id:\s*agent-instructions\s*$/)
-    if (m === null) { out.push(line); continue }
-    const ind = m[1]!.length
-    let j = i + 1
-    while (j < lines.length) {
-      const nxt = lines[j] ?? ''
-      if (nxt.trim() === '') { j++; continue }
-      const indentOf = (nxt.match(/^\s*/)?.[0] ?? '').length
-      if (indentOf > ind) { j++ } else break
-    }
-    i = j - 1 // skip the row and anything nested under it
-  }
-  return out.join('\n')
-}
-
 export function applyRigPresetPin(existing: string, shipped: string, pins: RealmPin): string {
   const kept: string[] = []
   let skipping = false
