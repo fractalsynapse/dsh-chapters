@@ -903,15 +903,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       const surfaceNow = Number(meter.measure?.(agent.session)?.totalTokens ?? NaN)
       const ratioNow = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
       const windowNow = Number(info?.context?.contextWindow ?? NaN)
-      // `noAuxModel` is a rig realm pin: with it set, a recorded journey must NOT gain or lose a model-involving
-      // automatic compaction because of how large this particular machine's header happened to be. The key existed
-      // in `tests/e2e/rig-preset-pin.ts` and was read by NOTHING in this source tree (issue #129) — a determinism
-      // switch that is configured but not consumed is worse than absent, because the comment and the pin test both
-      // claimed the boot was insulated. Arrival deferral is deliberately NOT gated here: it is size-deterministic,
-      // and the `arrival` leg exists to measure it.
-      const noAuxNow = (this as unknown as { config?: { noAuxModel?: boolean } }).config?.noAuxModel === true
-      const overTrigger = !noAuxNow
-        && Number.isFinite(surfaceNow) && Number.isFinite(windowNow)
+      const overTrigger = Number.isFinite(surfaceNow) && Number.isFinite(windowNow)
         && typeof ratioNow === 'number' && surfaceNow > windowNow * ratioNow
       const retainTokens = base.config?.retainTokens
       // The host builds model-info as `{ context: { contextWindow }, ...defaultMaxTokens ? { defaultMaxTokens } : {} }`
