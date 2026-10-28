@@ -543,8 +543,13 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   profile patch. `packages/bundle/base/cordis.patch.yml`'s own header says a patch "replaces the targeted row's whole
   `config` rather than merging it" and rows are addressed by id with last-write-wins; measured, a profile `- id: goal`
   row (even config-less) changed the mounted set and broke `/goal`. A **new** id is the supported form — which is
-  exactly how `preset-chapters` mounts. So the seam is a rig fixture row with its own id calling `ctx.goals.create`
-  with `maxGoalRounds: 1`, not an upstream request (#138 rewritten accordingly).
+  exactly how `preset-chapters` mounts.
+  **But building that seam proved it is not enough, and that is the rule's real form.** `maxGoalRounds: 1` worked — a
+  17-entry tape, `Round: 1/`, no second round — and the goal-bearing leg still could not assert anything, because
+  spending the budget calls `ctx.goals.block(…, 'round-limit')` and `GoalBar.tsx:85-86` renders **no strip** for a
+  blocked goal. So an armed goal has no rest state at any budget: 256 floods, 1 ends it. A mechanism whose only
+  terminal state destroys the thing under test is not a bound — the claims move to a live leg under a wall-clock
+  ceiling (`prompt-goal-live.spec.ts`), and the acceptance job is documented as NOT covering them.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
