@@ -380,3 +380,33 @@ Measured, in the order the evidence arrived:
   #129 (`globalSetup` boots one server from the setup process's env while Playwright applies project env to
   workers, so a multi-project run shares a boot and a home; `scripts/chain-replay.sh` now runs one boot per
   journey, and tightening session discovery to the preferred workspace fixed `prompt`'s `identity mismatch`).
+
+### 2026-10-28 — two product defects closed, and acceptance narrowed to one coupling
+
+- **#131 — artifacts were unreachable.** Arrival-time deferral was applied to `chapters_artifact`'s own output, so
+  asking to read a stored blob returned *another* pointer to another blob. Found in the leg's durable log (20 tool
+  calls, 17 erroring/looping) after three of my own wrong diagnoses (trigger margin, aux turn, haystack size).
+  Exempting artifact answers fixed two legs at once: `arrival` 8 entries and `fanout` 41 captured green, each
+  replaying green alone. Filed with repro; credit matters — both looked like model flakiness for a day.
+- **#113 — the Autorun button refused its own click.** The dock dispatched local state and then `refresh()` re-read
+  the server and flipped the label back; `off` two lines below sent its command correctly, which is how the
+  asymmetry showed. Fixed, guarded by `prompt-dock-autorun-write.test.ts` (red first; the property form survived
+  my `[^}]*` mistake). **Displacement is now observed in Chromium**: with a goal armed the host offers `Pause
+  goal`; clicking Autorun leaves `Autorun off` in place, the host flips to `Resume goal`, `Pause goal` disappears.
+  Recorded under the real provider, replayed model-free twice at 5 passed. That closes item (3)'s last sub-claim
+  and gives item (4) a browser-level half — goal-off restoring a suggestion is still unit-only and still unclaimed.
+- **#129's remaining acceptance gap is one coupling, named.** `#arrive` runs only at the head of the relief entry
+  points, so `auto: false` disables deferral with relief, and leaving it on makes deferral depend on when a
+  threshold crosses on that machine's header bytes. Every remaining CI divergence has the same fingerprint: a
+  checkpoint notice where the other machine has a plain message, or a history one message longer. `heavy` and
+  `fanout` are that, not separate mysteries. The clean fix conflicts with "no second automatic engine timing of our
+  own", so #132 carries four options with costs and a recommendation; the decision is the maintainer's.
+- **Numbers on this branch right now:** plane 1,114/1,114 with 0 skipped; `typecheck` and `typecheck:client` 0;
+  `typecheck:e2e` at its 68 baseline; full one-boot-per-journey chain green ten-for-ten twice (`AR=0`, `A2K=0`);
+  fresh `coverage:e2e` 78.31% (`CVA=0`), stamped `lib=081a726aca738d02`-era corpus. CI: deterministic job green,
+  acceptance red on `heavy`/`fanout` after `arrival` and `prompt` were fixed — four legs to two, both locally and on
+  the runner. #127 unmerged behind that gate; `0.2.2-dev.1` unpublished.
+- **Corrections I made to myself in the open** (each with its evidence in git): the `noAuxModel` "inert key" claim
+  (it is a rig alias for `auto`/`elicitedPlot`, which the host does read), the fold that broke a green leg, the
+  pin attribution that the pre-change logs disproved, and the `limit 5000` prompt that made a leg depend on a
+  rejected call — the last one was a real bug and its fix is what took `arrival` off CI's failing list.
