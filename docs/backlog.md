@@ -1945,3 +1945,18 @@ adds a request (visible at `messages=1`, before any goal is involved), and addin
 the command from creating a goal. **The rig cannot override the goal plugin's row.** #138's ask is therefore specifically
 a host seam — a `/goal` rounds argument or a plugin-facing bounded-goal call — not a patch-shape puzzle, and I should not
 spend another evening rediscovering it.
+
+#### Attempt 5, and it is the one that closes the design space: re-ordering the leg does not bound rounds either
+
+Hypothesis: if the worker loop is armed BEFORE the goal exists, the driver never gets a `turn/end` to fire at, so the
+history carries zero rounds. Measured by capturing the re-ordered leg: **`exit=0`, 194 tape entries, and 76 of them
+contain `goal_round`.** The gate I set for myself ("no round markers in the tape, or I do not ship it") fired, so the
+change was reverted instead of pushed — spec and corpus back to staging's set (23 files, `corpus:check` agreeing at
+`lib=b67e373defcad83a`, replay `5 passed`, tree clean).
+
+Five distinct arrangements, all measured: clear-after-a-turn; clear-immediately; poll-until-a-round; arm-the-loop-first;
+and bounding via the model's `create_goal`. None bounds the driver, because creating a goal starts a self-sustaining
+loop of turns and replay answers every one of them instantly. **Conclusion, with the receipts: a goal-bearing tape leg
+is not achievable on this host without a round bound, and no leg-internal arrangement supplies one.** That is #138, and
+it is a host ask, not a rig task. `git clean` was needed to clear the 171 untracked tape files the capture left behind —
+restoring tracked files does not remove generated ones, and 194 files where 23 belong was the tell.
