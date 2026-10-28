@@ -406,6 +406,27 @@ Entry `apply(ctx, config)`. Build with `tsc -p tsconfig.json` and **build before
 UI (later phase) additionally needs `dsh.client` and a `tsdown.client.config.ts` — see
 `dsh-session-fork/package.json` for the shape.
 
+### A profile patch may not re-declare a host plugin's row — measured on 0.2.0-rc.2
+
+`profiles/web/cordis.patch.yml` layers by row `id`, and the rig relies on that for its **own** rows
+(`preset-chapters`, `agent-preset-registry`, `llm-pi-ai`, `agent-default-model`, `llm-gate`,
+`fetch-timeouts`). Copying that trick onto a row that belongs to the installed bundle is not neutral. Three variants,
+each run against an unchanged spec and corpus so the only variable was the patch:
+
+| profile patch | result |
+|---|---|
+| `- id: goal` + `config: { defaultMaxGoalRounds: 1 }` | the `goal` plugin stops working: `/goal` creates no goal, so `[data-goal-bar]` never renders |
+| `- id: goal` with **no** config | every test passes, but the boot issues a request no tape has: `MISS tape=prompt entries=23 messages=1 closest=0000.json` — at the FIRST message, before any goal exists |
+| no `goal` row in the profile patch | clean run (`5 passed`, rc 0) |
+
+Read it as: duplicating a host row changes the mounted plugin set (extra registration → an extra request), and adding a
+`config:` block to that duplicate replaces the base row rather than merging into it, taking the plugin's real config
+surface with it. So the patch is a way to configure **rows you own**, not a way to reach into a host plugin's settings.
+The concrete consequence: `@deepseek-ai/dsh-goal` does export
+`config = z.object({ defaultMaxGoalRounds: z.number().default(256) })` and `resolveCreateGoal(request,
+defaultMaxGoalRounds)` honors it, but no boot can pin it from the profile — which is why goal-round bounding is a host
+ask (#138) and not a rig bug to fix.
+
 ### Presets are declaration rows now (host ≥ 0.1.7-alpha.1) — measured, with the incident
 
 A user preset used to be a directory `$DSH_HOME/.agent-presets/<id>/` holding `preset.yml` +
