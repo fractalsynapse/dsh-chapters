@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
-import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 
 /**
@@ -551,6 +551,10 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       p = ensurePresetRegistryPin(p, devProfile)
       const shippedPatch = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'cordis.patch.yml'), 'utf8')
       p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port), rigMirrorRoot(port)))
+      // #129: the workspace-instruction injection is development context whose POSITION in a conversation varies
+      // between machines (CI misses at commonPrefix=4 on exactly that block), and folding it out of the matcher
+      // collapses positional prefixes and mis-serves turns. So the row is not mounted at all, on every machine.
+      p = dropInstructionRow(p)
       fs.writeFileSync(patchPath, p)
     }
   }

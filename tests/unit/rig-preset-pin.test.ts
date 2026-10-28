@@ -14,7 +14,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { renderPinnedPreset, applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf, type RealmPin } from '../../tests/e2e/rig-preset-pin.ts'
+import { dropInstructionRow, renderPinnedPreset, applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf, type RealmPin } from '../../tests/e2e/rig-preset-pin.ts'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SHIPPED = fs.readFileSync(path.join(ROOT, 'cordis.patch.yml'), 'utf8')
@@ -173,4 +173,37 @@ test('a booted realm row carries knowledgeMirrorDir, and reruns replace rather t
   assert.equal(count, 1, `exactly one mirror key per row, saw ${String(count)}`)
   assert.equal(realmPinsOf({ thresholdRatio: '0.5' }, '/tmp/x/chapters').knowledgeMirrorDir, undefined,
     'no mirror root passed means no key written — a real install keeps its default')
+})
+
+/**
+ * The rig's booted profile must not carry the instruction-injection row (#129).
+ *
+ * The last remaining CI-vs-host divergence is positional, not contented: the host injects this repository's
+ * `AGENTS.md` as a `user/message` at a turn boundary, and whether it had landed by the time the next request was
+ * assembled differs between machines — run 40629952246 shows the runner's `msg4` an assistant turn where the tape's
+ * `msg4` is that block, so replay misses at `commonPrefix=4`. Folding it out of the matcher is NOT the answer (it was
+ * tried, and it collapses distinct positional prefixes, which makes serving pick the wrong assistant turn: `suite`
+ * went from 4 passed to no fork door). The honest fix is upstream: nothing an acceptance journey depends on may come
+ * from a development instruction file — AGENTS.md says so itself — so the rig's profile simply does not mount it.
+ */
+test('dropInstructionRow removes the agent-injections row and changes nothing else', () => {
+  const patch = [
+    '- id: preset-chapters',
+    '  config:',
+    '    plugins:',
+    '      - id: tool-fs',
+    "        name: '@deepseek-ai/dsh-tool-fs'",
+    '      - id: agent-instructions',
+    "        name: '@deepseek-ai/dsh-agent-instructions'",
+    '      - id: time-context',
+    "        name: '@deepseek-ai/dsh-time-context'",
+    '        config:',
+    '          auto: false',
+  ].join('\n')
+  const out = dropInstructionRow(patch)
+  assert.ok(!out.includes('agent-instructions'), `the injection row must be gone:\n${out}`)
+  assert.ok(out.includes('tool-fs') && out.includes('time-context'), 'every other row survives byte for byte')
+  assert.ok(out.includes('auto: false'), 'and a row config block travels with its row, not into the neighbour')
+  // Idempotent and inert when the row is absent: a second pass must not touch anything.
+  assert.equal(dropInstructionRow(out), out, 'no-ops on a profile that already dropped it')
 })
