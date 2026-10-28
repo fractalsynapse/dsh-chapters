@@ -548,3 +548,35 @@ the lib hash moved — every leg captured `exit=0`, one strict `npm run test:e2e
 commit claimed two stray `src/*.bak` files were removed; they were deleted in the tree but still tracked, and THIS commit
 is what removes them — the claim was right in intent and wrong about state, which is the failure this file exists to
 catch.
+
+### 2026-10-28 (night) — the release, a dead tag, and `heavy` moving to the live class (#140, #128, #141, #142)
+
+**Release state, exactly.** PR #139 (`0.2.2-dev.1`) was CI-green on all three jobs and merged to `main` as `f9943f9` on the
+maintainer's explicit authorization. The tag `0.2.2-dev.1` then **failed the publish blocker** for a reason that was mine:
+the bump commit edited `package.json` only, and `tests/unit/loudness.test.ts:123` asserts
+`PLUGIN_VERSION === package.json.version`, so `src/version.ts` (still `0.2.1`) tripped the gate — Release run
+40771258161, `tests 1282 / pass 1271 / fail 1`. A pushed tag is immutable, so **`0.2.2-dev.1` is a dead release** and stays
+in place with this note; `0.2.2-dev.2` bumps all three version-bearing files at once (`package.json`, `src/version.ts`,
+lock root). I also checked the old base engine directly — `@deepseek-ai/dsh-compaction-basic@0.1.5-rc.2`'s tarball has
+**zero** occurrences of `headroomTokens` — so #140's realm key and #128's dependency alignment are one delivery, not two:
+a realm setting a key the compiled-against base rejects would simply fail `validateKeys`.
+
+**`heavy` is a live-class leg now, chosen by the maintainer, on six captures' worth of evidence.** Four designs on one
+commit produced 5, 7, 12, 23 and 24 tape entries (three mandated reads; one read of a ~68K-token page; one read of a
+~17K-token page tuned to this realm's real 14,400 trigger; one read plus a tool-free report), and CI's own widened miss
+diff — which is why `tapeDiffPayload` was worth building — showed the mechanism: once relief auto-continues the session,
+the child's history is `[system, checkpoint-notice, …]` and at message 12 it was running
+`bash … head -30 tests/e2e/artifact-arrival.spec.ts && grep -rl 'E2E-D3-0731|E2E-PD-0731|…'`, marker-exploration work the
+spec never asked for. The request count belongs to the model, so no tape of that journey is portable. The leg skips under
+`E2E_MODEL === 'replay'` with the reason in the skip message, is absent from `scripts/chain-replay.sh`'s nine-leg list, and
+runs against the real provider under its 110-minute ceiling. **What makes this honest rather than a dodge:** every
+assertion still executes (relief passes shrink, nothing lost from the durable log, the read markers survive, the session
+takes its next turn), and relief timing is covered without a browser or a model by `tests/unit/engine-lifecycle.test.ts`,
+which is where #140's rows live.
+
+**A bug of mine that had to be caught before it could be trusted: I inverted the live-leg guard.** The goal leg passed
+**2/2** for real (`var/goallive-2.log` reads `prompt-goal-live mode=record provider=harness`), and the guard as it shipped
+said `test.skip(process.env.E2E_MODEL !== 'replay', …)` — i.e. it ran only in replay and skipped in live, the opposite of
+its comment and of the intent. My "fix" for the earlier `E2E_TAPE` confusion had flipped the predicate. Proved the way it
+should be proved: after correcting it to `=== 'replay'`, a replay invocation returns `2 skipped` with the reason and exit
+0. Two guards in the tree now share one spelling, and the copy of the predicate is why the fix went to both files at once.

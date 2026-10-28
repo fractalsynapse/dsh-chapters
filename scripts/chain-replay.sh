@@ -17,7 +17,10 @@ cd "$SRC"
 # The project list comes from the pins table — the same authority the boot reads — never a second list here.
 LEGS=$(node -e '
   import("./tests/e2e/rig-pins.ts").then((m) => {
-    const order = ["suite", "heavy", "arrival", "enrich", "fanout", "rules", "fork", "plans", "prompt", "prompt-off"];
+    // #141: `heavy` is GONE from this list on purpose — it is a live-class leg now (see its spec's guard): relief
+// auto-continues a model-written turn, so its request count is machine- and run-dependent (measured 5/7/12/23/24
+// entries on one commit). The nine remaining projects are the model-free acceptance set.
+const order = ["suite", "arrival", "enrich", "fanout", "rules", "fork", "plans", "prompt", "prompt-off"];
     console.log(order.filter((k) => m.RIG_PINS[k] !== undefined).join(" "));
   }).catch(() => console.log(""));
 ' --experimental-strip-types 2>/dev/null)
