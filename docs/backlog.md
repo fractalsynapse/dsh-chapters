@@ -1893,9 +1893,7 @@ all empty), no HTTP route mentioning `goal` in any installed lib, no config bloc
 argument on `/goal`. So today the only way to set a bounded budget is the model calling `create_goal(max_goal_rounds: 1)`
 — which capture attempt 4 proved a tape cannot depend on.
 
-Decision: the claim stays **unit-covered**, §28 keeps not claiming the pixel, and the leg stays **unwritten, not
-skipped** (the distinction matters). To ever show it in a browser the change belongs upstream — a rounds argument on
-`/goal`, or a plugin seam to open a bounded goal. Filed as such on #135 with the greps that establish it.
+Decision, **retracted in its last clause**: the claim stays **unit-covered**, §28 keeps not claiming the pixel, and the leg stays **unwritten, not skipped** — but NOT because the change "belongs upstream". It does not. `ctx.goals.create(agent, request)` is plugin-callable with `maxGoalRounds` in the request (`examples/dsh/packages/goal/goal/src/index.ts:303`, `types.ts:28-30`), so the seam is ours to build as a rig fixture with its own row id; only the *profile-patch override of the base `goal` row* is closed off. See the follow-up below and #138, which was rewritten from "host ask" to "build the rig seam".
 
 ### #135 follow-up — a rig-reachable round budget does not exist, and staging's displacement leg is timing-fragile
 
