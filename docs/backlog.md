@@ -1960,3 +1960,15 @@ loop of turns and replay answers every one of them instantly. **Conclusion, with
 is not achievable on this host without a round bound, and no leg-internal arrangement supplies one.** That is #138, and
 it is a host ask, not a rig task. `git clean` was needed to clear the 171 untracked tape files the capture left behind —
 restoring tracked files does not remove generated ones, and 194 files where 23 belong was the tell.
+
+### #130 attribution, and the two claims it leaves standing
+
+Bounded both of our unbounded relief-path awaits (`src/engine.ts:915`, `:999`) against a 1.5 s budget and ran a row
+against a stubbed adapter: **the step still consumed the whole 4 s race**, so our awaits are real but not the binding
+constraint — the wait is inside `super.compactIfNeeded`, i.e. the host awaiting the adapter on the pressure path. The
+change was reverted rather than shipped on an unproven causal claim (plane 1,115/1,115, `typecheck` 0, clean tree).
+
+Methodological note that cost me a wasted attempt: an adapter stub that **never settles** measures nothing, because the
+host's own base engine calls the same stub and hangs with it. **Slow but eventual** (8 s) is the shape that separates
+our awaits from the host's. Same lesson family as the fictional-shape stubs AGENTS warns about — caught before it became
+a commit this time.
