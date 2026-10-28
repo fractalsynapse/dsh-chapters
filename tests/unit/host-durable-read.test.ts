@@ -27,7 +27,10 @@ const require_ = createRequire(import.meta.url)
 
 /** Resolve one file from an installed host package, walking to the profile-global tree. */
 function readHost(pkg: string, rel: string): { text: string } | { missing: string } {
-  const candidates = [`${pkg}/${rel}`, path.join(process.env.HOME ?? '', 'node_modules', pkg, rel)]
+  // The pinned hermetic install FIRST: it exists in both CI jobs, so a host-fact gate cannot abstain on the
+  // runner while passing on a developer's machine (that abstention is what 19 CI-only skips looked like, and it
+  // also drops covered branches out of the coverage denominator — 84.99% against an 85% gate).
+  const candidates = [path.join(process.cwd(), 'dev/dsh-host-lock/node_modules', pkg, rel), `${pkg}/${rel}`, path.join(process.env.HOME ?? '', 'node_modules', pkg, rel)]
   for (const p of candidates) {
     try {
       return { text: fs.readFileSync(require_.resolve(p), 'utf8') }

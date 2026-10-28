@@ -68,3 +68,162 @@ test('empty-normalizing messages are treated identically on both sides of a matc
     `both sides must apply the same empties policy (incoming drops=${String(incomingDrops)}, stored drops=${String(storedDrops)})`)
   assert.equal(typeof normalizeSingle(''), 'string', 'and an empty message is still a message, not a hole in the array')
 })
+
+/**
+ * ELAPSED-BLIND (#56, measured 2026-10-26 at msg3 of the suite journey).
+ *
+ * The host injects a time-context message every turn whose text carries a wall-clock fact:
+ * `Elapsed since the preceding model-visible message: 12m 4s.` — and `…: unavailable.` when the
+ * span is unknown. A record run answers from a live model minutes apart; a replay run answers from the
+ * tape in seconds. So the same conversation produces DIFFERENT request arrays, `findReplay` finds no
+ * candidate of that length at all (`storedCandidates: []` in the E2E_TAPE_DIFF dump), strict replay
+ * refuses, no assistant message renders, and the leg dies at the fork door after 25 minutes — the same
+ * ending as four unrelated causes today, from a fifth. The date inside that line was already masked;
+ * the duration was not, and the duration is the volatile half.
+ */
+test('the injected time-context snapshot cannot break a tape match (elapsed duration)', () => {
+  const slow = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-26T21:00:00-04:00[America/New_York] Browser time zone for this request: America/New_York. Interpret otherwise-unqualified dates and times in this zone. Elapsed since the preceding model-visible message: 12m 4s.' })
+  const fast = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-26T21:20:00-04:00[America/New_York] Browser time zone for this request: America/New_York. Interpret otherwise-unqualified dates and times in this zone. Elapsed since the preceding model-visible message: unavailable.' })
+  assert.equal(slow, fast, `two spacings of the same injected snapshot must be one identity: …${String(slow).slice(-60)}`)
+  // The blind must be narrow: real conversation text that merely mentions an elapsed time is signal,
+  // and masking it would let a genuine prompt change replay against a stale answer (#69's lesson).
+  const human = normalizeSingle({ role: 'user', content: 'The build took 12m 4s. Elapsed since the preceding model-visible message is a red herring here.' })
+  assert.ok(!human.includes('<ELAPSED>'), 'prose about elapsed time is NOT folded')
+  assert.notEqual(human, slow)
+
+  // The exact shapes seen in one hour of logs, recorded with and without the sentence's final period. The
+  // first version of my fold consumed the period only sometimes, which left a ONE-CHARACTER difference
+  // between an incoming request and the tape recorded minutes earlier — enough to fail the match, enough
+  // to spend 25 minutes at a fork door. Variants are the unit of this kind of bug.
+  const t = (elapsed: string): string => normalizeSingle({ role: 'user', content: `Time sampled while preparing turn 1, step 1: 2026-10-26T21:00:00-04:00[America/New_York] Browser time zone for this request: America/New_York. Interpret otherwise-unqualified dates and times in this zone. ${elapsed}` })
+  const forms = [
+    'Elapsed since the preceding model-visible message: 12m 4s.',
+    'Elapsed since the preceding model-visible message: 12m 4s',
+    'Elapsed since the preceding model-visible message: unavailable.',
+    'Elapsed since the preceding model-visible message: unavailable',
+    'Elapsed since the preceding step context: 11m 36s.',
+  ].map(t)
+  // Two LINES, not one: the host injects `…preceding model-visible message…` in one snapshot position and
+  // `…preceding step context…` in another, and they are different sentences in different messages, so they
+  // are not required to fold to the same token. What MUST hold is that each line folds every VALUE shape to
+  // one identity — the assertion I wrote first was overstated, and the failing row is what caught that.
+  const messageForms = forms.slice(0, 4)
+  assert.ok(messageForms.every((f) => f === messageForms[0]),
+    `all elapsed values of the model-visible line must fold together; got ${new Set(messageForms).size} distinct`)
+  assert.ok(forms[4].includes('step context: <ELAPSED>'), 'the step-context line folds its value too')
+  assert.ok(!forms[4].includes('11m'), 'and the duration itself is gone')
+})
+
+/**
+ * WORKSPACE-BLIND across machines (measured 2026-10-27, from CI's own artifact).
+ *
+ * The CI checkout lives at `/home/runner/work/dsh-chapters/dsh-chapters` — note the doubled directory — while
+ * every tape on this machine was distilled under `/home/adrian/Projects/dsh-chapters`. A miss in
+ * `tape=suite messages=3` on CI with a green chain here can only mean something in the first three messages
+ * still carries the distillation machine. This row asks the normalizer the question directly.
+ */
+test('the same header written under either workspace path folds to one identity', () => {
+  const ci = normalizeSingle({ role: 'user', content: 'Working directory: /home/runner/work/dsh-chapters/dsh-chapters. Plan file: /home/runner/work/dsh-chapters/dsh-chapters/.dsh-chapters/notes.md' })
+  const local = normalizeSingle({ role: 'user', content: 'Working directory: /home/adrian/Projects/dsh-chapters. Plan file: /home/adrian/Projects/dsh-chapters/.dsh-chapters/notes.md' })
+  assert.equal(ci, local, 'a tape distilled on one machine must be replayable on another')
+})
+
+/**
+ * CHAPTER-COUNT-BLIND (measured 2026-10-27, the real cause of `heavy`'s replay miss).
+ *
+ * The byte diff came from `E2E_TAPE_DIFF`, not from reasoning: `msg0` — the system header, 7,276 chars —
+ * compared IDENTICAL between the replay request and the tape, and the divergence was at char 729 of the
+ * checkpoint notice: `Chapter archive: 8 chapter(s) under …` live against `2 chapter(s)` recorded. That
+ * number is derived state, produced by auto-save timing inside the rig session, so no two runs can agree on
+ * it — exactly the class the existing est-token and char-count collapses already handle. Blinding it is not
+ * widening a match: the count is never the thing a leg claims about the product.
+ */
+test('the chapter-count in the checkpoint notice cannot break a tape match', () => {
+  const many = normalizeSingle({ role: 'user', content: '(revise it in your next reply.) Chapter archive: 8 chapter(s) under /tmp/dsh-e2e/e2e-home-41733/chapters/ — verbatim text; reload any with the read tool.' })
+  const few = normalizeSingle({ role: 'user', content: '(revise it in your next reply.) Chapter archive: 2 chapter(s) under /tmp/dsh-e2e/e2e-home-41733/chapters/ — verbatim text; reload any with the read tool.' })
+  assert.equal(many, few, `two counts of the same notice must be one identity: …${many.slice(-70)}`)
+  assert.match(many, /<COUNT> chapter\(s\)/, 'the count folds to a token, not to nothing')
+  // Narrow: a sentence a human typed about chapter counts stays conversation.
+  const prose = normalizeSingle({ role: 'user', content: 'We shipped 8 chapters last sprint, and 2 this one.' })
+  assert.ok(!prose.includes('<COUNT>'), 'prose is not folded')
+})
+
+/**
+ * TOC-LINE collapse: how many chapters the session had written is a derived count.
+ *
+ * `heavy`'s first miss survived the archive-count fold for the same reason the fanout run needed CH-ORDINAL:
+ * the notice lists one line per chapter, so a session that tips one more split sends an extra line and the
+ * message lengths diverge — `…— <MSGCOUNT> (<N> est tokens) 3. [Earlier history](…)…` live against
+ * `…est tokens)</compacted-summary>` recorded. Collapsing only lines that cite a chapter path keeps ordinary
+ * numbered prose untouched; the count is the same family as `<CH>`, `est tokens`, `MSGCOUNT`.
+ */
+test('the chapter list in a checkpoint notice matches regardless of how many entries it has', () => {
+  const two = normalizeSingle({ role: 'user', content: 'Chapter archive:\n1. [Alpha](/tmp/x/chapters/<CH>-alpha.md) — <MSGCOUNT> (<N> est tokens)\n2. [Earlier history](/tmp/x/chapters/<CH>-earlier-history.md) — <MSGCOUNT> (<N> est tokens)\n</compacted-summary>' })
+  const three = normalizeSingle({ role: 'user', content: 'Chapter archive:\n1. [Alpha](/tmp/x/chapters/<CH>-alpha.md) — <MSGCOUNT> (<N> est tokens)\n2. [Earlier history](/tmp/x/chapters/<CH>-earlier-history.md) — <MSGCOUNT> (<N> est tokens)\n3. [Earlier history](/tmp/x/chapters/<CH>-earlier-history.md) — <MSGCOUNT> (<N> est tokens)\n</compacted-summary>' })
+  assert.equal(two, three, `list length must not decide a match:\n two=${two.slice(0, 90)}\nthree=${three.slice(0, 90)}`)
+  const prose = normalizeSingle({ role: 'user', content: 'Fix these:\n1. [login](src/login.ts) is broken\n2. [nav](src/nav.ts) is slow' })
+  assert.ok(prose.includes('src/login.ts'), 'ordinary numbered prose is untouched')
+})
+
+// NOTE, recorded rather than deleted silently: a CHECKOUT-BLIND rule was added here on 2026-10-27 and then
+// removed the same day. It duplicated an existing `<DSH-CHECKOUT>` fold (model-proxy.ts:159), which already
+// matches any absolute path after "implementation checkout is at". The duplicate was written because I compared
+// the RAW header dumps from two machines and read an 18-character gap — exactly the length of the two checkout
+// paths — without first running that text through `substituteAll`, which folds it. A fold that already exists is
+// not a missing fold, and a second predicate for one decision is the failure mode this repo has now named four
+// times. The lesson is procedural: normalize, THEN diff.
+
+/**
+ * TZ-BLIND: the runtime context states the machine's time zone TWICE, and both spellings must fold
+ * (#56, measured on CI 2026-10-27).
+ *
+ * First the CI divergence that was NOT the tool surface: `MISS tape=plans … divergeAt=msg3`, got
+ * `<DATE>[UTC] Browser time zone …` against expected `<DATE>[America/New_York] …`. After folding the bracketed
+ * half, `fork` and `prompt-off` still missed at `commonPrefix=3` with BOTH sides reading `[<TZ>]` — because the
+ * same line names the zone again as the value of "Browser time zone for this request: UTC." One fact, two
+ * spellings, so both are blind. `unavailable` is not machine identity (both machines can write it) and stays.
+ */
+test('the runtime-context time zone cannot break a tape match', () => {
+  const line = (zone: string): string => normalizeSingle({ role: 'user', content: `Time sampled while preparing turn 1, step 1: 2026-10-27T17:35:32-04:00[${zone}] Browser time zone for this request: ${zone}. Interpret otherwise-unqualified dates and times in this zone.` })
+  const utc = line('UTC')
+  const local = line('America/New_York')
+  assert.equal(utc, local, `two machines, one identity:\n  utc:   ${utc.slice(0, 120)}\n  local: ${local.slice(0, 120)}`)
+  assert.match(utc, /\[<TZ>\] Browser time zone/, 'the bracketed form folds')
+  assert.match(utc, /for this request: <TZ>\./, 'and so does the value form')
+  assert.ok(!/UTC|America\/New_York/.test(utc), `no zone survives anywhere: ${utc.slice(0, 200)}`)
+  // `unavailable` is a shared fact, not identity — it must pass through untouched.
+  const none = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-27T21:35:32Z[UTC] Browser time zone for this request: unavailable. Interpret otherwise-unqualified dates and times.' })
+  assert.match(none, /for this request: unavailable\./, 'the sentence that carries no zone keeps its wording')
+  assert.match(none, /\[<TZ>\]/, 'while the zone it does carry still folds')
+  // Narrow: a timezone named in ordinary prose is content and stays.
+  const prose = normalizeSingle({ role: 'user', content: 'Deploy at [America/New_York] peak hours, not [UTC] midnight.' })
+  assert.ok(prose.includes('[America/New_York]'), 'prose is not folded')
+})
+
+/**
+ * MATCH-SYMMETRY: the stored prefix and the incoming list must be normalized THE SAME WAY (#132).
+ *
+ * Found by reading `heavy`'s tape bytes after CI missed at `msg2`: entries carry prefix elements that are literally
+ * empty strings — an assistant turn whose text, reasoning and ids all fold away. At replay, `findReplay` builds the
+ * incoming list with `.filter(x => x !== '')`, so those turns DISAPPEAR from the live request, while the stored
+ * prefix KEEPS them as holes. The two sides are then offset by one element, and a journey that is byte-identical
+ * misses at exactly the index where the first folded turn sat — which is what `commonPrefix=2 divergeAt=msg2` has
+ * meant for `heavy` on every machine, and why the miss moved when a fold changed rather than when a leg changed.
+ *
+ * The fix is symmetry, not tolerance: drop empty elements from stored prefixes at load, exactly as the incoming
+ * side does. Nothing is "matched" that should not be; both sides now mean the same list.
+ */
+test('a prefix element that folds to nothing is dropped from both sides of the match', async () => {
+  const { normalizeStoredPrefix, findReplay } = await import('../../tests/e2e/model-proxy.ts')
+  // NB: a `tool` message is deliberately collapsed to `{"role":"tool"}` (model-proxy.ts:207,273 — scripted
+  // results are zero matching signal), so the third element must be a real content-bearing turn, not a tool one.
+  const stored = ['{"role":"system","content":"sys"}', '{"role":"user","content":"go"}', '', '{"role":"assistant","content":"first"}']
+  const clean = normalizeStoredPrefix(stored)
+  assert.deepEqual(clean, [stored[0], stored[1], stored[3]], `the empty element must be removed, got ${JSON.stringify(clean)}`)
+  assert.equal(normalizeStoredPrefix(clean).length, 3, 'idempotent — a second pass changes nothing')
+
+  const entry = { key: 'k', prefix: clean, status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: '2026-01-01T00:00:00.000Z' }
+  const incoming = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'go' }, { role: 'assistant', content: 'first' }]
+  assert.ok(findReplay([entry] as never, incoming) !== null,
+    'a live request with the folded turn absent must match a tape stored with it present')
+})

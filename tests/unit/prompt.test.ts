@@ -82,9 +82,21 @@ test('the input is deterministic, carries both sections, and ends with the reply
 test('over budget drops the OLDEST chapters first, then the oldest messages, and says so with counts', () => {
   const chapters = [1, 2, 3, 4].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}` }))
   const tail = [1, 2, 3].map((n) => ({ role: 'user' as const, text: `message number ${n} with some bulk ${'x'.repeat(80)}` }))
-  const input = buildSuggestInput(facts(chapters, tail), 600, 240)
-  assert.match(input, /older context dropped to fit the 600-char budget: \d+ chapter line\(s\), \d+ message\(s\)/)
-  assert.ok(input.length <= 600, 'the budget is HARD')
+  // The cap is FRAME-RELATIVE, not a literal. It was `600` until #113 lengthened the instruction block and
+  // the row went red for a reason worth keeping: the fixed frame (head + rules + scaffolding) is a real
+  // cost, and a fixture that hard-codes a cap below it tests nothing about dropping — it tests whether the
+  // frame grew. Measured here, so the next rules edit moves the cap with it instead of breaking CI.
+  const FRAME = buildSuggestInput({ title: 'S', chapters: [], tail: [] }, 1_000_000, 240).length
+  // +200, not +1: the point is that SOME content is squeezed out while the newest survives longest. At a
+  // cap this close to the frame everything goes, which would pass the drop assertion and prove nothing.
+  const cap = FRAME + 200
+  const input = buildSuggestInput(facts(chapters, tail), cap, 240)
+  // Substring + regex literal, not an interpolated RegExp: in a template literal `\(` collapses to `(`, so
+  // the counts became a capture group that matched nothing — my bug, caught by the row failing, not by hope.
+  assert.ok(input.includes(`older context dropped to fit the ${String(cap)}-char budget:`),
+    'the drop is announced with the budget it was fitted to')
+  assert.match(input, /\d+ chapter line\(s\), \d+ message\(s\)/)
+  assert.ok(input.length <= cap, 'the budget is HARD')
   assert.ok(input.includes('message number 3'), 'the newest message survives longest')
   assert.ok(!input.includes('message number 1'), 'oldest goes first')
   // Chapters are the compressible past: at this cap they may ALL be gone — but whatever remains is the newest.
@@ -179,15 +191,20 @@ test('nothing to recommend yet: no events, and no completed assistant turn, both
 test('a valid answer is cached for the turn boundary: the same seq costs one call total', async () => {
   const w = world({ settings: new Map([[PROMPT_SETTING_KEY, 'p/m']]), fetches: ['run the migration'] })
   const first = await w.surface.suggest(SESSION)
-  assert.deepEqual(first, { ok: true, text: 'run the migration' })
+  assert.equal(first.ok, true)
+  assert.equal(first.text, 'run the migration')
   const second = await w.surface.suggest(SESSION)
   assert.equal(second.ok, true)
   assert.equal(w.calls(), 1, 'fresh cache ⇒ zero model tokens on the repeat')
-  // A new completed turn moves the watermark: the answer is recomputed, never served stale.
-  const moved = { ...SESSION, events: [...SESSION.events, ev(3, 'user/message', { role: 'user', content: [{ type: 'text', text: 'and now?' }] }), ev(4, 'assistant/message', { message: { content: [{ type: 'text', text: 'considering' }] } })] }
+  // A new COMPLETED turn moves the watermark: the answer is recomputed, never served stale. The fixture used
+  // to append a bare `user/message` and call that a new turn — it isn't one, and #113 is precisely the bug that
+  // made an unfinished turn re-ask the model (one turn, three suggestions). Key on `turn/end`, so say `turn/end`.
+  const moved = { ...SESSION, events: [...SESSION.events,
+    ev(3, 'user/message', { role: 'user', content: [{ type: 'text', text: 'and then?' }] }),
+    ev(4, 'turn/end', { turn: 2 })] }
   const third = await w.surface.suggest(moved)
   assert.equal(third.ok, true)
-  assert.equal(w.calls(), 2, 'boundary moved ⇒ recompute')
+  assert.equal(w.calls(), 2, 'a new turn/end ⇒ recompute')
 })
 
 test('concurrent requests for one session share ONE in-flight call', async () => {
@@ -294,4 +311,17 @@ test('promptChaptersOf maps ONLY active chapters (superseded records never feed 
     ],
   } as never
   assert.deepEqual(promptChaptersOf(state), [{ number: 1, title: 'good', summary: 's1' }])
+})
+
+test('a cap smaller than the fixed frame ANNOUNCES it instead of returning an over-budget input in silence (#61)', () => {
+  // Every compressible part can be gone and the input can STILL exceed `promptContextChars`, because the
+  // frame itself is bigger than the cap. The old code returned it anyway — `input.length > cap` known and
+  // unsaid, the exact #61 class this repo keeps meeting. It cannot be truncated (never clip), so it speaks.
+  const chapters = [1, 2].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}` }))
+  const tail = [{ role: 'user' as const, text: 'hello' }]
+  const small = buildSuggestInput(facts(chapters, tail), 40, 240)
+  assert.match(small, /frame alone exceeds the 40-char budget by \d+ chars/, `stated with numbers: ${small.slice(-140)}`)
+  assert.match(small, /raise promptContextChars/, 'and the remedy is named')
+  assert.match(small, /nothing was truncated/, 'plus the invariant it respected while doing so')
+  assert.ok(small.length > 40, 'it is honestly over budget and SAYS so, rather than pretending to fit')
 })

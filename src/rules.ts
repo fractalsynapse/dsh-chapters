@@ -30,6 +30,7 @@ import { z } from 'zod'
 import { estimateTokens, sha256 } from './render.ts'
 import { parseCuration } from './indexing.ts'
 import { parseChapterFile } from './enrich-store.ts'
+import { diagnostic } from './diag.ts'
 
 export const RULE_STATUS = ['proposed', 'core', 'revoked'] as const
 export type RuleStatus = (typeof RULE_STATUS)[number]
@@ -522,6 +523,14 @@ export function buildRulesSection(
     })
   }
   if (projectActive.length === 0 && sessionActive.length === 0 && categories.size === 0) return { kind: 'none' }
+
+  // #113, and the reason this is a note rather than a comment: the rig's local boots contribute the rules
+  // section and a GitHub runner does not, and the section is message 0 of every request — so the whole tape
+  // corpus keys on which side of this line each machine lands. Counting the three inputs is the only way to
+  // learn which one differs, and the engine-errors sink is per-port and already uploaded by CI on failure.
+  diagnostic('rules-section', `contributing: project=${String(projectActive.length)}`
+    + ` session=${String(sessionActive.length)} categories=${String(categories.size)}`
+    + ` projectKey=${opts.projectKey ?? 'none'} harness=${opts.harnessId ?? 'none'}`)
 
   const topics = opts.relevanceTopics
   const pSel = selectRules(projectActive, topics)

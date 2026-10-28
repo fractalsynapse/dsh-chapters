@@ -397,3 +397,30 @@ test('exhausted retries relay the throttle once, count it, and still record noth
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+/**
+ * The contract my own fix broke, now pinned (2026-10-26). `localModelUp` must ANSWER, not throw: the row
+ * above asserts `false` for an unreachable remote, and a probe that raises instead of replying turns every
+ * honest "is it up?" call into a crash — which is how I made staging red after merging without re-running
+ * the plane. The loudness a skip deserves still exists; it lives in `requireModelForLeg`, called when a leg
+ * is about to run.
+ */
+test('the probe answers a question; the leg guard is what refuses to skip (#54 doctrine, kept honest)', async () => {
+  const { localModelUp, requireModelForLeg } = await import('../e2e/session.ts')
+  const saved = { up: process.env.E2E_UPSTREAM, mode: process.env.E2E_MODEL, allow: process.env.E2E_ALLOW_SKIP }
+  try {
+    process.env.E2E_MODEL = 'replay'
+    assert.equal(await localModelUp(), true, 'replay IS the model, so it is always reachable')
+    // A dead endpoint must be a plain `false` — no throw escaping the probe.
+    process.env.E2E_MODEL = 'live'
+    process.env.E2E_UPSTREAM = 'http://127.0.0.1:1'
+    assert.equal(await localModelUp(), false, 'a probe returns an answer, not an exception')
+    // And the consequence is separate, explicit, and still loud.
+    assert.throws(() => requireModelForLeg(false, 'no reachable model'), /needs a reachable model/)
+    delete process.env.E2E_ALLOW_SKIP
+    process.env.E2E_ALLOW_SKIP = '1'
+    requireModelForLeg(false, 'no reachable model')  // opted out: silent skip permitted, on purpose
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
+  }
+})

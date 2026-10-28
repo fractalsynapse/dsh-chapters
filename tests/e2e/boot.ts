@@ -2,9 +2,12 @@ import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
-import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { reapOrphanBoots } from './boot-reap.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -94,7 +97,17 @@ export const rigMirrorRoot = (port: number): string => path.join(e2eHome(port), 
 export function resolveHostBinary(
   rootDir: string,
   exists: (p: string) => boolean = (p) => fs.existsSync(p),
+  env: NodeJS.ProcessEnv = process.env,
 ): { binary: string, pinned: boolean } {
+  // E2E_HOST_DIR points at a pinned install OUTSIDE the repository. It wins when present because Node resolves
+  // that binary's bare specifiers by walking ITS ancestors, and from inside the repo the walk climbs to
+  // `/home/<dev>/node_modules` — a developer's linked harness build that a CI runner does not have. Different
+  // mounted bundles mean a different composed system header (7,276 chars in the working copy against 2,783 in a
+  // clean clone, measured 2026-10-27), and the header is message 0: the key every tape matches on. Same fault
+  // #89 closed for binary identity; this is the resolution half it never covered.
+  const external = env.E2E_HOST_DIR
+  const externalBin = external === undefined || external === '' ? null : path.join(external, 'node_modules', '.bin', 'dsh')
+  if (externalBin !== null && exists(externalBin)) return { binary: externalBin, pinned: true }
   const pinned = path.join(rootDir, 'dev', 'dsh-host-lock', 'node_modules', '.bin', 'dsh')
   if (exists(pinned)) return { binary: pinned, pinned: true }
   return { binary: 'dsh', pinned: false }
@@ -149,6 +162,115 @@ export interface BootHandle {
   url: string
   port: number
   stop: () => Promise<void>
+}
+
+/**
+ * The environment a rig boot may see: everything the leg needs, and NONE of the ambient harness identity.
+ *
+ * `DSH_PROFILE_DIR` is the one that cost a day. It is exported into every session of the harness a developer
+ * is working inside, and it names that developer's LIVE profile — the plugins they happen to have mounted.
+ * Overriding `DSH_HOME` alone left the boot composing the developer's plugin set, so the system header (message
+ * 0 of every request, and thus the key every tape matches on) was 7,276 characters locally against 2,783 on a
+ * runner with no such variable. Local chains went green while CI failed, and four regime hypotheses were
+ * examined before this one was. #89 fixed exactly this class for the host BINARY; the profile was the twin it
+ * never closed.
+ */
+export function rigChildEnv(base: NodeJS.ProcessEnv, opts: { home: string; port: number; extra?: NodeJS.ProcessEnv }): NodeJS.ProcessEnv {
+  const AMBIENT_SESSION_KEYS = ['DSH_PROFILE', 'DSH_PROFILE_DIR', 'DSH_SESSION_ID', 'DSH_WEB_URL', 'DSH_SHELL']
+  const env: NodeJS.ProcessEnv = { ...base }
+  for (const key of AMBIENT_SESSION_KEYS) delete env[key]
+  env.DSH_HOME = opts.home
+  // Port-keyed like everything else about a boot: one shared file made a red chain ambiguous — the tail
+  // belonged to whichever project wrote last.
+  env.DSH_CHAPTERS_ENGINE_ERRORS = path.join(ROOT, 'var', `e2e-engine-errors-${String(opts.port)}.log`)
+  if (base.E2E_COVERAGE === '1') env.NODE_V8_COVERAGE = path.join(ROOT, 'var', 'e2e-cov', String(opts.port))
+  return { ...env, ...(opts.extra ?? {}) }
+}
+
+/**
+ * Which entries of the untracked developer home may enter a rig boot (#89 LAYER FOUR, pinned here so the rules
+ * are testable instead of commented).
+ *
+ * The throwaway home is authoritative for nothing except the TRACKED seeds written by `seedRigHomeFromUntrackedDevCopy`
+ * below, so almost everything from `.dshdev-local` is refused: `settings.yaml` and `profiles/web/cordis.patch.yml`
+ * are replaced by their tracked seeds, the whole `profiles/` tree (18 MB of whatever node_modules the last dev run
+ * installed — and WHICH plugins a profile mounts decides WHICH instruction paragraphs the host composes, measured
+ * as 2,783 header chars on a runner against 7,276 here), and the `sessions/` plus `storages/<domain>` state of the
+ * developer's own work.
+ */
+export function shouldCopyIntoRigHome(rel: string): boolean {
+  if (rel === 'settings.yaml') return false
+  if (rel === path.join('profiles', 'web', 'cordis.patch.yml')) return false
+  if (rel.startsWith('profiles')) return false
+  if (rel === '') return true
+  if (rel === 'storages') return true
+  if (rel === path.join('storages', 'workspace.json')) return true
+  if (rel.startsWith('sessions')) return false
+  if (rel.startsWith('storages' + path.sep)) return false
+  if (rel.startsWith('dsh-c')) return false // the plugin's own storage domain, never the developer's
+  return true
+}
+
+/**
+ * Copy what is allowed from the untracked dev home, and treat its ABSENCE as normal.
+ *
+ * A fresh clone (CI's runner, or any developer's first checkout) has no `.dshdev-local` — it is gitignored — and
+ * the boot used to throw there, which meant the rig could only ever be run by a machine that had previously run
+ * the dev profile. That is the same fault this file keeps correcting: a test bed that works only where it was
+ * first built. The tracked seeds are written regardless, so an absent dev home yields a complete, if emptier, boot.
+ */
+export function seedRigHomeFromUntrackedDevCopy(root: string, home: string): { copied: boolean, reason: string } {
+  const src = path.join(root, '.dshdev-local')
+  if (!fs.existsSync(src)) return { copied: false, reason: 'no untracked dev home in this checkout; tracked seeds are authoritative' }
+  fs.cpSync(src, home, { recursive: true, filter: (p) => shouldCopyIntoRigHome(path.relative(src, p)) })
+  return { copied: true, reason: 'filtered copy of the untracked dev home' }
+}
+
+/**
+ * Make the preset's tool rows resolvable from the PINNED install inside a booted home, on every machine.
+ *
+ * Proven by measurement, not theory: a session assembled in a CI-shaped tree registers 7 tools and composes a
+ * 2,880-char header; on a development host it registers 34 and composes 7,396. The only difference is
+ * resolution — our preset prunes child rows it cannot resolve, and locally those rows resolved out of
+ * `~/node_modules`, which no runner has. Message 0 is the tape key, so that asymmetry makes any corpus
+ * recorded on a developer machine unreplayable in CI: the root cause of this branch's longest chase.
+ *
+ * The fix is rig-side and it is determinism rather than convenience: linking the pin's packages into the
+ * booted home's plugin tree makes the NEAREST resolution root the pinned bundle on both machines, so the
+ * recording environment is a property of the version we pin, not of whose laptop runs it. Nothing about the
+ * shipped package's dependency surface changes, and rows the pin genuinely lacks are returned as `missing`
+ * rather than dropped in silence — a silent prune is precisely what produced the short header.
+ */
+export function linkPinnedToolPackages(
+  homeDir: string,
+  rootDir: string,
+): { names: string[], missing: string[], linked: string[], skipped: string[] } {
+  const names: string[] = []
+  const missing: string[] = []
+  const linked: string[] = []
+  const skipped: string[] = []
+  try {
+    const patchText = fs.readFileSync(path.join(homeDir, 'profiles', 'web', 'cordis.patch.yml'), 'utf8')
+    for (const m of patchText.matchAll(/^\s*name:\s*'(@deepseek-ai\/[^']+)'\s*$/gm)) {
+      const full = m[1] ?? ''
+      const short = full.replace('@deepseek-ai/', '')
+      if (short === '' || names.includes(short)) continue
+      names.push(short)
+      const src = path.join(rootDir, 'dev', 'dsh-host-lock', 'node_modules', '@deepseek-ai', short)
+      if (!fs.existsSync(path.join(src, 'package.json'))) { missing.push(short); continue }
+      const destDir = path.join(rootDir, 'node_modules', '@deepseek-ai')
+      const dest = path.join(destDir, short)
+      // NEVER overwrite what is already installed: the repo's own dependency tree is authoritative, and a rig
+      // that replaces a hoisted package with a symlink to the pin could break the build it is testing.
+      if (fs.existsSync(dest)) { skipped.push(short); continue }
+      try {
+        fs.mkdirSync(destDir, { recursive: true })
+        fs.symlinkSync(src, dest, 'dir')
+        linked.push(short)
+      } catch { missing.push(short) }
+    }
+  } catch { /* an unreadable profile is the boot's own problem to report */ }
+  return { names, missing, linked, skipped }
 }
 
 export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandle> {
@@ -209,22 +331,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // like: 6 messages here, 2 on CI, after settings.yaml was already made tracked. Both seeds now come
   // from git; the untracked profile copy is excluded. (#89)
   const PROFILE_SEED = path.join(ROOT, 'tests', 'e2e', 'fixtures', 'dev-profile-cordis.patch.yml')
-  fs.cpSync(path.join(ROOT, '.dshdev-local'), E2E_HOME, { recursive: true, filter: (src) => {
-    const rel = path.relative(path.join(ROOT, '.dshdev-local'), src)
-    if (rel === 'settings.yaml') return false // the tracked seed is written below, always
-    if (rel === path.join('profiles', 'web', 'cordis.patch.yml')) return false // ditto (#89)
-    // LAYER FOUR (#89, and the one the enumeration predicted rather than stumbled into): the whole
-    // `profiles/` tree — 18 MB of node_modules installed by whoever last ran the dev profile — was
-    // copied into every throwaway home. Which plugins a profile has mounted decides which
-    // instruction paragraphs the host composes, and the CI tape diff proved that is what differed:
-    // 2,783 header chars there against 7,276 recorded here, diverging at char 141, mid-sentence,
-    // because the recorded boot had paragraphs (tool guidance rows) the runner's profile never had.
-    // Profiles now come from a base built by the SAME script CI runs, below.
-    if (rel.startsWith('profiles')) return false
-    return rel === ''
-      || rel === 'storages' || rel === 'storages/workspace.json'
-      || (!rel.startsWith('sessions') && !rel.startsWith('storages' + path.sep) && !rel.startsWith('dsh-chapters') && !rel.startsWith('.dsh-chapters'))
-  } })
+  seedRigHomeFromUntrackedDevCopy(ROOT, E2E_HOME)
   {
     const seeded = fs.existsSync(SETTING_SEED)
     if (!seeded) throw new Error(`e2e boot: the tracked profile seed is missing (${path.relative(ROOT, SETTING_SEED)}). `
@@ -282,6 +389,58 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // is wrong, which is precisely the "green tests, dead product" failure this repo keeps being
   // told about. Override with E2E_WINDOW_TOKENS=0 to run against the endpoint's real window.
   const PINNED_CONTEXT_WINDOW = Number(process.env.E2E_WINDOW_TOKENS ?? '32000')
+  // HARNESS-NATIVE ROUTE (#56 lineage, maintainer decision 2026-10-25). This plugin is developed INSIDE DSH,
+  // against a provider the running host already holds — so `E2E_PROVIDER=harness` takes that route from the
+  // ambient profile instead of the tracked `local`/localhost:8080 block, which exists only because a GitHub
+  // runner has no credentials. Distilling and running live legs through a DIFFERENT model than the product
+  // runs against is how the #90 `reasoning_content` divergence class was born: the shape mismatch gets masked
+  // in the blind list instead of removed.
+  //
+  // Credential order, exactly as the maintainer specified: (1) the PARENT ENVIRONMENT's
+  // QWEN_TOKEN_PLAN_API_KEY — how this harness itself gets it; (2) an untracked `.dshdev-local/e2e.env`.
+  // If neither is present the boot REFUSES, loudly, with the remedy — it does not fall back to `local`, and
+  // no leg silently skips. #54 already proved that a route asked of the wrong endpoint skips six projects and
+  // reads like a pass.
+  const harnessRoute = (() => {
+    if (process.env.E2E_PROVIDER !== 'harness') return null
+    const ambient = process.env.E2E_AMBIENT_PROFILE
+      ?? path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'profiles', 'web', 'cordis.patch.yml')
+    let text = ''
+    try { text = fs.readFileSync(ambient, 'utf8') } catch {
+      throw new Error(`e2e: E2E_PROVIDER=harness but the ambient profile is unreadable at ${ambient}`
+        + ' — point E2E_AMBIENT_PROFILE at the profile this host actually runs.')
+    }
+    const route = routeFromProfile(text)
+    if (route === null) {
+      throw new Error(`e2e: could not read a provider route from ${ambient} (needs an agent-default-model row`
+        + ' naming a provider whose block declares apiKeyEnv). Nothing was guessed.')
+    }
+    const fileText = (() => {
+      const f = path.join(ROOT, '.dshdev-local', 'e2e.env')
+      try { return fs.readFileSync(f, 'utf8') } catch { return null }
+    })()
+    const resolved = resolveKey(process.env, fileText, route.apiKeyEnv)
+    if (resolved.key === null) throw new Error(`e2e: harness-native route ${route.id}/${route.model} needs ${route.apiKeyEnv}. ${resolved.remedy}`)
+    // RECORD and HEAL need a plain OpenAI-compatible URL to forward through, because the proxy — not the
+    // host — is what writes the tape. `live` does not: it lets the harness resolve the route itself, which
+    // is why only these two modes require the endpoint and why live must never invent one.
+    if (process.env.E2E_MODEL !== 'live' && process.env.E2E_UPSTREAM === undefined) {
+      const modPath = path.join(ROOT, 'dev', 'dsh-host-lock', 'node_modules', '@earendil-works', 'pi-ai',
+        'dist', 'providers', `${route.id}.js`)
+      let modText = ''
+      try { modText = fs.readFileSync(modPath, 'utf8') } catch {
+        throw new Error(`e2e: harness-native ${process.env.E2E_MODEL ?? 'replay'} needs a proxy endpoint, but the provider module is unreadable at ${modPath}`)
+      }
+      const endpoint = endpointFromProviderModule(modText)
+      if (endpoint === null) throw new Error(`e2e: no baseUrl: in ${modPath} — cannot point the tape proxy at ${route.id}`)
+      process.env.E2E_UPSTREAM = endpoint
+      process.env.E2E_UPSTREAM_KEY = resolved.key
+      process.env.E2E_UPSTREAM_MODEL = route.model
+      console.log(`[e2e] proxy upstream = ${endpoint} (model ${route.model}, key ${String(resolved.key.length)} chars from ${String(resolved.source)})`)
+    }
+    console.log(describeRoute(route, resolved, process.env.E2E_MODEL ?? 'live'))
+    return { route, key: resolved.key }
+  })()
   const modelMode = process.env.E2E_MODEL ?? 'live'
   // REPLAY asserts against recorded prompt prefixes, which carry the host's prompt
   // composition. If the corpus was distilled against a different host than we pin, the
@@ -311,6 +470,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // per-project tapes: a failed capture's entries must never resurrect as
       // another pin's replay continuation (prefix collisions across pins are
       // otherwise invisible and land the session in someone else's transcript)
+      homeDir: E2E_HOME,
       tapeDir: path.join(ROOT, 'tests', 'fixtures', 'model-tape', process.env.E2E_TAPE ?? 'default'),
       journalPath: path.join(ROOT, 'var', 'e2e-tape-misses.log'),
       // #78: enforced in record AND replay. The window is part of the regime the tape was
@@ -340,10 +500,38 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // append it when absent and rewrite the baseURL when a tape proxy is in front.
   {
     const patchPath = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
-    if (fs.existsSync(patchPath)) {
+    // Refuse, never skip. `if (fs.existsSync(patchPath))` made a MISSING profile patch a silent no-op: the
+    // rig booted with no plugin row, no provider block, and no `promptModel`, and every leg still ran — so a
+    // missing profile looked exactly like a feature that does not exist. Measured tonight: clearing one home's
+    // patch file made the Suggested Next Step bar "fail to render" while the actual fault was the rig having
+    // nothing to configure. A boot cannot proceed against a profile it did not write.
+    if (!fs.existsSync(patchPath)) {
+      throw new Error(`e2e boot: the profile patch is missing at ${patchPath} — the rig would boot with no plugin `
+        + 'row, no provider block and no promptModel, which looks identical to a feature that does not exist. '
+        + 'Delete the whole home (rm -rf ' + path.dirname(path.dirname(path.dirname(patchPath))) + ') so it is rebuilt from '
+        + `the tracked seed (${PROFILE_SEED}).`)
+    }
+    {
       let p = fs.readFileSync(patchPath, 'utf8')
-      if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
-        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: 0\n` + p
+      // The host profile is NOT rewritten by default. Measured on CI 2026-10-27: the acceptance job missed
+      // `tape=suite messages=3` with `commonPrefix=0`, i.e. the SYSTEM HEADER itself differed, because the
+      // tapes had been re-distilled with `E2E_PROVIDER=harness` while CI composes `provider=local,
+      // model=qwen3.8-flash-next`. Rewriting the provider row changes the header — which is the one thing a
+      // tape cannot survive. The harness route therefore belongs to the PROXY only (E2E_UPSTREAM below), so the
+      // host stays on the fixture route, the proxy translates it, and CI, the distill run, and the replay run
+      // all compose the same bytes. `E2E_HARNESS_PROFILE=1` restores the rewrite for the live-model `live`
+      // mode, where there is no tape to stay byte-identical with.
+      if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
+        // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host
+        // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
+        p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
+      } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
+        // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
+        // readiness outright (`LEG=fork MODE=replay E2E_HOST_RETRIES=1` died at 120s with the host's log holding
+        // one plugin line and no URL, against ~21s for the same leg otherwise). The YAML parses either way, so
+        // the host needs the field present. A regime is therefore a NUMBER inside a block that is always there,
+        // not a toggle that deletes a required field.
       }
       p = p.replace(/contextWindow: \d+/g, `contextWindow: ${PINNED_CONTEXT_WINDOW}`).replace(/maxTokens: \d+/g, 'maxTokens: 15000')
       if (proxy !== null) p = p.replace(/baseURL: \S+\/v1/, `baseURL: ${proxy.url}`)
@@ -363,6 +551,9 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       p = ensurePresetRegistryPin(p, devProfile)
       const shippedPatch = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'cordis.patch.yml'), 'utf8')
       p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port), rigMirrorRoot(port)))
+      // #132: the workspace-instruction injection is development context whose presence/position varies
+      // by machine; with the legs now bounded, removing the row is the principled determinism fix.
+      p = dropInstructionRow(p)
       fs.writeFileSync(patchPath, p)
     }
   }
@@ -405,7 +596,20 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     s.once('connect', () => { s.destroy(); resolve(true) })
     s.once('error', () => { s.destroy(); resolve(false) })
   })
-  if (busy) {
+  // The port is OURS to reclaim when the holder is this repo's own orphaned boot for this port: a crashed or
+  // Ctrl-C'd run leaves one behind forever, and telling a human to `pkill -f "dsh web --port <n>""` is advice
+  // whose pattern also matches the shell that runs it (measured: my own pkill killed my own check) and can
+  // match the live harness (`node …/dsh web --no-open` is this session's parent). So reap by parsed ps rows
+  // with the repo-root and port constraints, and say which pids were signalled.
+  const reaped = busy ? await reapOrphanBoots(port, ROOT, (line) => console.log(line)) : []
+  const stillBusy = busy && reaped.length > 0
+    ? await new Promise<boolean>((resolve) => {
+        const s = net.connect(port, '127.0.0.1')
+        s.once('connect', () => { s.destroy(); resolve(true) })
+        s.once('error', () => { s.destroy(); resolve(false) })
+      })
+    : busy
+  if (stillBusy || (busy && reaped.length === 0)) {
     throw new Error(`e2e boot: port ${port} is already in use — an earlier run's server survived teardown; kill it (pkill -f "dsh web --port ${port}") or pick another E2E_PORT`)
   }
 
@@ -423,35 +627,31 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // binary it used. A version string is not identity.
   const host = resolveHostBinary(ROOT)
   console.log(`[e2e] host binary: ${host.binary} (pinned=${host.pinned})`)
+
+  // BEFORE the spawn, not after: the preset's tool rows are resolved by the host while it boots, so linking
+  // them after the URL line arrives fixes nothing on a machine that cannot see a developer's home tree (measured
+  // in a CI-shaped clone: rows=27 linked=24 yet still `tools=7`, because the links landed too late). This is
+  // what makes a CI runner and a development host compose the same message 0 (#56).
+  const toolLinks = linkPinnedToolPackages(E2E_HOME, ROOT)
+  fs.writeFileSync(path.join(ROOT, 'var', `e2e-tool-links-${String(port)}.log`),
+    `rows=${String(toolLinks.names.length)} linked=${String(toolLinks.linked.length)}`
+    + ` skippedAlreadyPresent=${toolLinks.skipped.length > 0 ? toolLinks.skipped.join(',') : 'none'}`
+    + ` missingFromPin=${toolLinks.missing.length > 0 ? toolLinks.missing.join(',') : 'none'}\n`)
+
   const child: ChildProcessWithoutNullStreams = spawn(host.binary, ['web', '--port', String(port), '--no-open'], {
     cwd: ROOT,
-    env: {
-      ...process.env,
-      DSH_HOME: E2E_HOME,
-      // Port-keyed like everything else about a boot: one shared file made a red
-      // chain ambiguous — the tail belonged to whichever project wrote last.
-      DSH_CHAPTERS_ENGINE_ERRORS: path.join(ROOT, 'var', `e2e-engine-errors-${port}.log`),
-      ...(process.env.E2E_COVERAGE === '1' ? { NODE_V8_COVERAGE: covDir } : {}),
-      // dev/settings.yaml pins the local provider's key via apiKeyEnv, and a
-      // CI box has no ~/.dsh credentials to fall back on (measured 2026-09-23:
-      // a credential-less .dshdev-local boots, but every session then dies
-      // composing the provider). Tape replay ignores auth entirely (the proxy
-      // answers), so the dummy fills only when neither the environment NOR
-      // the home's .credentials.yaml carries a real key — a machine distilling
-      // tapes against a key-guarded llama must keep using its real one.
-      // #54: forward the diagnostics sink. The boot hands the server an EXPLICIT env
-      // object, so a variable set in the invoking shell never reached the process that
-      // actually refused the child — which is how a browser-path refusal with a full
-      // stack in hand still produced an empty log file. Traceability that stops at the
-      // process boundary is not traceability.
-      ...(process.env.DSH_CHAPTERS_ENGINE_ERRORS !== undefined && process.env.DSH_CHAPTERS_ENGINE_ERRORS !== ''
-        ? { DSH_CHAPTERS_ENGINE_ERRORS: process.env.DSH_CHAPTERS_ENGINE_ERRORS }
-        : {}),
-      ...(proxy !== null && process.env.LOCAL_API_KEY === undefined
-        && !fs.existsSync(path.join(E2E_HOME, '.credentials.yaml'))
-        ? { LOCAL_API_KEY: 'e2e-tape-proxy-dummy' }
-        : {}),
-    },
+    env: rigChildEnv(process.env, {
+      home: E2E_HOME, port,
+      // Credentials ride the same sanitized object, so nothing can re-introduce the ambient-profile leak by
+      // adding a key to a raw spread again.
+      extra: {
+        ...(harnessRoute !== null ? { [harnessRoute.route.apiKeyEnv]: harnessRoute.key } : {}),
+        ...(proxy !== null && process.env.LOCAL_API_KEY === undefined
+          && !fs.existsSync(path.join(E2E_HOME, '.credentials.yaml'))
+          ? { LOCAL_API_KEY: 'e2e-tape-proxy-dummy' }
+          : {}),
+      },
+    }),
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let log = ''
@@ -462,14 +662,24 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   fs.writeFileSync(serverLog, '')
   child.stdout.on('data', (d) => { log += d; fs.appendFileSync(serverLog, d) })
   child.stderr.on('data', (d) => { log += d; fs.appendFileSync(serverLog, d) })
-  const deadline = Date.now() + 60_000
+  // E2E_BOOT_TIMEOUT_MS raises the readiness window for DIAGNOSIS (a boot that is slow and a boot that is
+  // stuck are different faults, and 60s could not tell them apart). The default is unchanged, so CI keeps the
+  // same ceiling it has always had.
+  // Readiness ceiling: 120s by default, overridable with E2E_BOOT_TIMEOUT_MS. Why the change is a rig fix and
+  // not a weakened assertion: this window measures nothing about the product — it waits for the host to print
+  // its URL. In harness mode the host's startup includes a live upstream round trip, and a 60s ceiling produced
+  // `e2e boot failed within 60s (port 41737)` twice while the SAME leg passed in 26.3s once the window allowed
+  // the boot to finish. A ceiling that intermittently kills healthy boots is a false-red generator; no product
+  // claim moves at 120s, and CI's own shape (replay, no provider) never needed more than seconds.
+  const bootWaitedFrom = Date.now()
+  const deadline = Date.now() + Math.max(120_000, Number(process.env.E2E_BOOT_TIMEOUT_MS ?? '120000'))
   while (!/http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.test(log) && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 500))
   }
   const m = /http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.exec(log)
   if (m === null) {
     child.kill('SIGKILL')
-    throw new Error(`e2e boot failed within 60s (port ${port})\n${log.slice(-1500)}`)
+    throw new Error(`e2e boot failed within ${String(Date.now() - bootWaitedFrom)}ms waited (port ${port}) — the ceiling is E2E_BOOT_TIMEOUT_MS, default 120000\n${log.slice(-1500)}`)
   }
   const bootRecord = JSON.stringify({
     url: m[0], port,
@@ -485,10 +695,46 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // per-port copy is the provenance record, where "which boot wrote last" cannot lie.
   fs.writeFileSync(path.join(ROOT, 'var', 'e2e-boot.json'), bootRecord)
   fs.writeFileSync(path.join(ROOT, 'var', `e2e-boot-${String(port)}.json`), bootRecord)
+  // Read the booted profile's plugin ids. Two callers on purpose: at URL-ready (the input the first session
+  // assembled from) and at stop() (after the journey). Measured locally: the same file reads count=43 at boot
+  // and count=44 after the run, so the host rewrites the patch mid-flight and a single reading is not evidence
+  // about machine differences — every one-machine comparison I made from one reading is suspect because of it.
+  const mountReport = (phase: string): void => {
+    try {
+      const webNm = path.join(E2E_HOME, 'profiles', 'web', 'node_modules')
+      const list = (d: string): string[] => { try { return fs.readdirSync(d) } catch { return [] } }
+      const patchFile = path.join(E2E_HOME, 'profiles', 'web', 'cordis.patch.yml')
+      let idsLine = 'unreadable'
+      try {
+        const text = fs.readFileSync(patchFile, 'utf8')
+        const ids = [...text.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gm)].map((x) => x[1])
+        idsLine = `count=${String(ids.length)}:${ids.join(',')}`
+      } catch { /* the home may be gone; absence is the answer */ }
+      // Where do the host's tool packages resolve FROM, in the environment that mounts presets? Our preset
+      // prunes child rows it cannot resolve, and the repository's own node_modules contains exactly ONE
+      // `dsh-tool*` package — so a developer home tree can satisfy what a checkout-only runner cannot, which
+      // is the remaining candidate for "34 tools here, 7 there" while every installed byte matches. Paths
+      // shortened to <home>/<root>/~ and nothing but the path is ever written: no contents, no secrets.
+      const probeFrom = (from: string, pkg: string): string => {
+        try {
+          const resolved = createRequire(path.join(from, 'noop.js')).resolve(pkg) as string
+          return resolved.replace(E2E_HOME, '<home>').replace(ROOT, '<root>').replace(os.homedir(), '~')
+        } catch { return 'no' }
+      }
+      const toolProbe = ['@deepseek-ai/dsh-tool-fs', '@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tools']
+        .map((pkg) => `${pkg.replace('@deepseek-ai/', '')}={${probeFrom(path.join(E2E_HOME, 'profiles', 'web'), `${pkg}/package.json`)},${probeFrom(ROOT, `${pkg}/package.json`)}}`)
+        .join(' ')
+      fs.writeFileSync(path.join(ROOT, 'var', `e2e-home-plugins-${String(port)}-${phase}.log`),
+        `phase=${phase}\nnode_modules=${String(list(webNm).length)}:${list(webNm).slice(0, 12).join(',')}\npatchPluginIds=${idsLine}\ntoolProbe=${toolProbe}\n`)
+    } catch { /* a report must never break a boot */ }
+  }
+  mountReport('boot')
+
   return {
     url: m[0],
     port,
     stop: async () => {
+      mountReport('late')
       if (proxy !== null) await proxy.close().catch(() => undefined)
       if (child.exitCode === null) child.kill('SIGTERM')
       await new Promise<void>((resolve) => {

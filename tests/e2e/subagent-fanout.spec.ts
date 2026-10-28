@@ -56,8 +56,15 @@ test('a parent fans out two subagent readers whose papers exceed their own windo
   const sid = await newSessionWithTurn(page, [
     'Research task. You have TWO subagent tool calls to make, sequentially (run_in_background false on each), in this exact order:',
     '',
-    '1) Spawn ONE subagent whose prompt is: "Read var/e2e-paperA.md with the read tool in ranges of EXACTLY 300 lines for the FIRST SIX ranges only (offset 1, then 301, 601, 901, 1201, 1501 — never one big read, no bash). After the SIXTH read you MUST stop calling tools and answer immediately, whatever remains unread. Do NOT use shell commands. Answer in under 80 words: what the paper claims, including its finding token ' + A_MARK + ' verbatim."',
-    '2) Do the same for var/e2e-paperB.md, finding token ' + B_MARK + '.',
+    // #132: ONE bounded read per child rather than six 300-line ranges. Each of those ranges is ~8K tokens — right at
+    // the 8,000-token deferral floor — so whether a given read got stubbed depended on machine-specific header bytes,
+    // and the capture varied from 10 to 20 tape entries on the same build and regime. The paper is 1,600 numbered
+    // lines (~179 KB), so a single call at the host's maximum range (limit 2000) is unambiguously oversized: the same
+    // mechanism is exercised (result deferred at arrival, the mark recovered through `chapters_artifact`), with far
+    // fewer degrees of freedom. Every assertion below is content-based — both marks and both DONE words in the
+    // parent's answer, ≥2 child reports as tool results — none counts reads, so nothing is weakened by this.
+    '1) Spawn ONE subagent whose prompt is: "Read var/e2e-paperA.md with the read tool exactly ONCE, at offset 1, limit 2000. Do not read it again and do not use shell commands: an oversized result is handled by the system. Then recover the paper\'s finding token ' + A_MARK + ' using ONLY the chapters_artifact tool (action search), and answer in under 60 words: what the paper claims, including that token verbatim."',
+    '2) Do exactly the same for var/e2e-paperB.md, recovering the token ' + B_MARK + '.',
     '',
     'After BOTH subagents have returned, write ONE final paragraph comparing their claims. Your final paragraph MUST contain both finding tokens verbatim and both words PAPER-A-DONE and PAPER-B-DONE.',
   ].join('\n'), 3_900_000, false) // 65-min turn: two child readers share one llama.cpp slot

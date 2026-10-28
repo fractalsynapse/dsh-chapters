@@ -21,6 +21,19 @@ mkdir -p var
 STATUS=0
 npm run coverage:ci 2>&1 | tee var/ci-gate.log || STATUS=$?
 
+# Name what skipped, and why. A gate that reports "skipped 19" is reporting an unknown: the same suite run on a
+# developer machine skips 0 and passes the coverage threshold, while CI skips 19 and misses it by hundredths of a
+# percent. The skips are almost certainly host-bundle lookups, and the row that skips already prints its own
+# reason — this surfaces it as a notice so the next reader sees the cause instead of the count. It never changes
+# the exit status: a skip is information, and lowering a gate to accommodate one is not the fix.
+if [[ -s var/ci-gate.log ]]; then
+  SKIP_LINES=$(grep -aE "# SKIP|skipped .*host bundle|not readable from any of" var/ci-gate.log | head -20 || true)
+  SKIP_COUNT=$(printf '%s\n' "$SKIP_LINES" | grep -ac "SKIP" || true)
+  if [[ -n "$SKIP_LINES" ]]; then
+    printf '::notice::ci-gate: %s skipped-test reasons surfaced (a local run skips 0; each skip removes source branches from the gate):\n%s\n' "${SKIP_COUNT}" "$(printf '%s' "$SKIP_LINES" | head -12 | tr '\n' '|')"
+  fi
+fi
+
 if [[ "$STATUS" -eq 0 ]]; then
   grep -E "^Statements|^Branches|^Functions|^Lines" var/ci-gate.log | sed 's/^/::notice::coverage gate /' || true
   echo "ci-gate: green (exit 0)"

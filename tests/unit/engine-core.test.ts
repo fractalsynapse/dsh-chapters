@@ -197,9 +197,14 @@ test('checkpoint tags still match the installed host bundle (drift => re-anchor,
     // subpath (measured — resolve() threw ERR_PACKAGE_PATH_NOT_EXPORTED, which is a
     // module-system fact, not the drift this gate exists to detect). The file is on
     // disk in the repo's own devDependencies and in every host install layout.
+    // THE PINNED HERMETIC INSTALL FIRST. This row is a host-fact gate, and it silently skipped on the runner
+    // (local: 0 skipped, CI: 19) because its only reachable candidate was `$HOME/node_modules/...` — a
+    // developer's home directory. A gate that passes on one machine and abstains on another measures nothing, and
+    // the abstention also removes covered branches from the CI coverage denominator (84.99% against an 85%
+    // threshold). `dev/dsh-host-lock` is installed by BOTH CI jobs, so this path exists wherever the pin exists.
+    join(process.cwd(), 'dev/dsh-host-lock/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js'),
     join(process.cwd(), 'node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js'),
     '/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js',
-    `${process.env.HOME ?? ''}/node_modules/@deepseek-ai/dsh-compaction-basic/lib/index.js`,
     ...(process.env.DSH_GLOBAL_ROOT !== undefined
       ? [`${process.env.DSH_GLOBAL_ROOT}/@deepseek-ai/dsh-compaction-basic/lib/index.js`] : []),
   ]
