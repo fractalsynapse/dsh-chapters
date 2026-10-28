@@ -472,3 +472,35 @@ state it cannot leave.**
 Site §28 and the interface lock are unchanged, because neither ever claimed the goal-off pixel; AGENTS.md now states
 the half that is unit-covered and is not browser-claimed. `heavy`'s 600-line page fix, the prefix-symmetry fix and the
 rest stay as merged — they are green on the runner.
+
+### 2026-10-28 (evening) — the goal claims are browser-verified, and the corpus no longer records latency
+
+**What changed in the claim.** Both halves of the goal/suggestion interplay are now observed in Chromium: arming the
+bar's Autorun takes a session's next turn away from an active goal (`Pause goal` → `Resume goal`, Pause disappears), and
+after `/goal clear` the bar still produces a real suggestion on the next turn (#135's second half, which had been
+unit-only). **The class of that evidence is the finding, so it is stated with the claim:** both run in
+`tests/e2e/prompt-goal-live.spec.ts` against the real provider under a 420 s wall-clock ceiling (**2 passed**,
+`var/goallive-2.log`), and the model-free acceptance job deliberately does not cover them — `chain-replay.sh` omits the
+project and the spec skips under `E2E_MODEL === 'replay'` with the reason in the message.
+
+**Why they cannot be tape legs.** A goal round is a turn and every turn ends, so an armed goal drives itself; replay
+answers instantly, so the round count tracks machine speed. Two docs-only pushes proved the merged leg was agreeing by
+luck (runs 40697174778, 40706037817 — nine legs `ok`, `prompt` FAILED, `storedCandidates: []`, runner at
+`Round: 1/256`…`Round: 4/256`). I then built the bound the source offered — `ctx.goals.create(agent, { objective,
+maxGoalRounds: 1 })`, plugin-callable, as upstream's own `seed-goal.ts` fixture uses — and it *worked* (17-entry tape,
+`Round: 1/`, no second round) while still being useless: spending a budget calls `ctx.goals.block(…, 'round-limit')`
+and `GoalBar.tsx:85-86` renders no strip for a blocked goal. **An armed goal has no rest state at any budget** — 256
+floods, 1 ends it. Recorded in `docs/contract.md` with the line numbers; #138 restated as that gap.
+
+**Numbers after the change.** `prompt` re-anchored to **14 entries, zero round markers**; replayed `4 passed` twice;
+one full `npm run test:e2e:replay` **ten-for-ten (`CT=0`)**; fresh `coverage:e2e` **77.85%** with the CI plane at
+**93.41 / 85.25 / 90.69** against the 85/85/85 gate; plane 1,118/1,118, `typecheck` 0, `typecheck:client` 0.
+
+**Two of my own bugs, both caught by measurement rather than reflection.** (a) The new spec landed inside `suite`'s
+boot — `suite` is the one project defined by `testIgnore`, so any new file joins it; the suite tape's second request is
+the session-title call over those human messages, and it stopped matching (`MISS tape=suite messages=2 divergeAt=msg1`,
+staging `4 passed` vs mine failing, docs and pins ruled out by reverting them). Fixed by ignoring the file, with the
+selector audit in the comment. (b) My skip guard compared `E2E_TAPE` — the *project name* — to `'replay'`, so it never
+fired; the rig's signal is `E2E_MODEL === 'replay'` (`globalSetup.ts:52`). (c) The `e2e-typecheck-ratchet` then refused
+my +1 error, and instead of raising the ceiling I fixed the cause: one documented cast at the projects boundary replaced
+eleven identical `TS2769`s and the baseline **fell 68 → 59**, which is the direction the ratchet asks for.
