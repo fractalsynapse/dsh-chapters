@@ -1,6 +1,10 @@
 {
   "name": "@treeseed/dsh-chapters",
+<<<<<<< HEAD
   "version": "0.2.2-dev.2",
+=======
+  "version": "0.2.2-dev.1",
+>>>>>>> origin/main
   "description": "dsh plugin: verbatim chapter archive + zero-token index for small-context models",
   "type": "module",
   "license": "Apache-2.0",
