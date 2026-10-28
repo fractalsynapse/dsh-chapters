@@ -456,21 +456,20 @@ latency. Evidence is a docs-only PR (#137, zero non-docs delta) turning acceptan
 storedCandidates: []` while the runner's history held `Round: 1/256`…`Round: 4/256` where the capture had none — run
 40676609079 (all ten legs `ok`) agreed only because the runner's latency reproduced my round count. The displacement
 *behavior* was observed in Chromium and stands; the *replay* of it is not dependable until the goal is created with a
-bounded budget — and reading the source shows that is **ours to build** (`ctx.goals.create(agent, { objective,
-maxGoalRounds: 1 })`), not an upstream gift. Attempted and reverted, with measurements: pinning `defaultMaxGoalRounds: 1` from a boot's profile patch makes
-`/goal` create nothing (staging spec + staging tape: pin active → 1 failed/4 passed; pin removed → 5 passed), and
-asking the model to call `create_goal(max_goal_rounds: 1)` fails capture because it answers in prose.
-Showing the displacement at all required a product fix first — the control dispatched local state only and `refresh()`
-flipped it back, so the click refused itself (see `prompt-dock-autorun-write.test.ts`). The **goal-off restores normal
-suggestion** half of item 4 remains **unit-covered and is not claimed from a browser** (#135 stays open). Four capture
-attempts at that leg are on record and each failed for a reason worth keeping: clicking `Clear goal` after a turn let
-the driver race the click; clearing with no turn between still diverged (`Round: 3/256` vs `4/256`); polling until a
-round appeared also diverged — because **a goal round is itself a turn, so rounds cascade** (one tape reached
-`Round: 12/256`); and bounding the budget by instructing the model to call `create_goal(max_goal_rounds: 1)` failed
-capture at `the host goal bar appears once a goal exists`, the model answering in prose instead of calling the tool.
-That last one is the tell: a browser leg whose setup depends on a small model choosing to invoke a tool is encoding
-luck, and the claim is not worth that. The rig rule stands; the leg does not ship until its setup is deterministic
-without asking the model for cooperation.
+ bounded budget, and the bound was not what I assumed. Built and measured it: `ctx.goals.create(agent, { objective,
+maxGoalRounds: 1 })` is plugin-callable (upstream's own fixture does exactly this) and it WORKED — a 17-entry tape with
+`Round: 1/` and no second round — while the leg still failed, because spending the budget calls
+`ctx.goals.block(…, 'round-limit')` and `GoalBar.tsx:85-86` renders no strip for a blocked goal. **An armed goal has no
+rest state**: budget 256 floods it, budget 1 ends it. Facts and line numbers: docs/contract.md, #138.
+
+So both goal claims are verified **live**, in a class that can say so honestly. `tests/e2e/prompt-goal-live.spec.ts`
+runs them against the real provider under a 420 s ceiling and both passed (**2 passed**): arming Autorun takes the
+continuation from an active goal (`Pause goal` → `Resume goal`, Pause gone — after the inert-control fix in
+`prompt-dock-autorun-write.test.ts`, which is what made the click refuse itself), and after `/goal clear` the bar still
+produces a real suggestion on the next turn (#135's second half, browser-observed at last). The spec refuses to run on a
+tape and `chain-replay.sh` omits the project — the model-free acceptance job does NOT cover these two, a live run does,
+and that is stated wherever the claim is made. What the tape leg keeps is everything goal-free: dock order 30, Analyzing
+→ suggestion, expand, Run as a human-authored turn, and `prompt-off`.
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.
