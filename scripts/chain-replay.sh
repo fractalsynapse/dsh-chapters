@@ -15,12 +15,14 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SRC"
 
 # The project list comes from the pins table — the same authority the boot reads — never a second list here.
+# #141: `heavy` is deliberately ABSENT from this list — it is a live-class leg now (see its spec's guard): relief
+# auto-continues a model-written turn, so its request count is run-dependent (measured 5/7/12/23/24 entries for ONE
+# commit across four designs, with CI's own widened miss diff naming the extra turn). These nine are the model-free
+# acceptance set. Keep this comment OUTSIDE the node -e below: a `//` inside the quoted snippet is shell, not JS, and
+# the bash parser dies on it ("line 21: syntax error near unexpected token `('") — measured on run 40780981969.
 LEGS=$(node -e '
   import("./tests/e2e/rig-pins.ts").then((m) => {
-    // #141: `heavy` is GONE from this list on purpose — it is a live-class leg now (see its spec's guard): relief
-// auto-continues a model-written turn, so its request count is machine- and run-dependent (measured 5/7/12/23/24
-// entries on one commit). The nine remaining projects are the model-free acceptance set.
-const order = ["suite", "arrival", "enrich", "fanout", "rules", "fork", "plans", "prompt", "prompt-off"];
+    const order = ["suite", "arrival", "enrich", "fanout", "rules", "fork", "plans", "prompt", "prompt-off"];
     console.log(order.filter((k) => m.RIG_PINS[k] !== undefined).join(" "));
   }).catch(() => console.log(""));
 ' --experimental-strip-types 2>/dev/null)
