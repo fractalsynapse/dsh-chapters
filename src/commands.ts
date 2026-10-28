@@ -409,6 +409,85 @@ export function registerHostCommands(
           await config.prompt.setModel('')
           return { kind: 'success', text: 'prompt suggestions OFF (stored override; /chapters-prompt model clear restores the config default)' }
         }
+        // #113: the bar's three pulls. `state` answers in k: v lines so ONE output serves both the human
+        // typing it and the component rendering it — a separate JSON verb would be a second contract to keep
+        // in step, and the goal bar's own dock reads plainly-worded state for the same reason.
+        if (verb === 'state') {
+          const sessId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })
+            .session?.id ?? (invocation.agent as { agent?: { session?: { id?: string } } }).agent?.session?.id
+          if (sessId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'state needs a session scope and the chapters prompt store — run it inside a session' }
+          }
+          const st = await config.prompt.bar.read(sessId)
+          const { spec, source } = config.prompt.effective()
+          // #113: `off` must mean OFF. A session with a defining model and no stored offer is `idle` — enabled,
+          // awaiting its first turn — and collapsing that into `off` is what made the bar look switched-off
+          // while the config row was present. The distinction is the human's only signal that the feature is
+          // live but has nothing to say yet, so it is made here, at the one place the state is rendered.
+          const resting = st.status === 'off' && spec !== '' ? { ...st, status: 'idle' as const } : st
+          return { kind: 'success', text: [
+            `suggested next step: ${resting.status}`,
+            `  model: ${spec !== '' ? spec : 'unset'} (${source}) — ${spec === '' ? 'the bar is absent' : 'one offer per completed turn'}`,
+            `  autorun: ${st.autorun}${st.autorun === 'armed' ? ` (${String(st.fired)} round(s) started this process)` : ''}`,
+            `  turn: ${st.turnSeq === null ? '-' : String(st.turnSeq)}`,
+            // #113: intent and the revision it was cut against, because they decide whether autorun may act.
+            // A `goal-edit` offer is held for a keystroke — the host reserves goal edits for a human turn —
+            // and the bar must be able to say that without re-parsing the prompt.
+            `  intent: ${st.intent}${st.intent === 'goal-edit' ? ' — re-cuts the goal, so Run it yourself; autorun will not' : ''}`,
+            `  goal: ${st.goalRevision === null ? 'none' : `revision ${String(st.goalRevision)}`}`,
+            ...(st.error === '' ? [] : [`  error: ${st.error}`]),
+            ...(st.text === '' ? [] : ['  prompt:', ...st.text.split('\n').map((l) => `    ${l}`)]),
+          ].join('\n') }
+        }
+        if (verb === 'run') {
+          // The bar's Run button. Session-scoped like `state`, because "the offer on screen" is a per-session
+          // fact and a global command would run whatever the last session happened to be shown.
+          const runId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })?.session?.id
+            ?? (invocation.agent as { agent?: { session?: { id?: string } } })?.agent?.session?.id
+          if (runId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'run needs a session scope and the chapters prompt store' }
+          }
+          console.error(`[chapters-prompt] /run invoked for session=${String(runId)}`)
+          const res = await config.prompt.bar.runNow(runId)
+          console.error(`[chapters-prompt] /run result ok=${String(res.ok)} reason=${String(res.reason ?? '')}`)
+          return res.ok
+            ? { kind: 'success', text: `running the suggested next step as your own turn:\n${res.text}` }
+            : { kind: 'error', text: `cannot run: ${res.reason ?? 'the offer is no longer available'}` }
+        }
+        if (verb === 'autorun') {
+          const arg = parts[1]
+          const sessId = (invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } })
+            .session?.id ?? (invocation.agent as { agent?: { session?: { id?: string } } }).agent?.session?.id
+          const on = arg === 'on' || arg === 'arm'
+          const off = arg === 'off' || arg === 'disarm'
+          if (sessId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'autorun needs a session scope — run it inside the session you want to drive' }
+          }
+          if (!on && !off) {
+            return { kind: 'error', text: `autorun needs 'on' or 'off' (got ${arg ?? 'nothing'}) — /chapters-prompt autorun on starts the loop, off leaves the offers in place and stops the running` }
+          }
+          const { spec } = config.prompt.effective()
+          if (on && spec === '') {
+            return { kind: 'error', text: 'cannot arm autorun with no prompt model — the loop has nothing to generate offers. /chapters-prompt model <provider/model> first' }
+          }
+          const live = config.prompt.bar.setAutorun(sessId, on)
+          return { kind: 'success', text: on
+            ? `autorun ARMED for ${sessId} — each completed turn's offer runs for you, until you stop it or send a prompt yourself.` + (live.displaced
+                ? ' The goal remains the objective; its own auto-continuation is disarmed, so the suggestion loop now drives the worker. Re-arm it with /goal resume.'
+                : ' The goal still owns the turn; this loop yields to it until the goal is paused, completed, or disarmed.') + ' State: /chapters-prompt state'
+            : `autorun disarmed for ${sessId} — offers still appear each turn; nothing runs itself (${String(live.fired)} round(s) were started this process)` }
+        }
+        if (verb === 'on') {
+          if (config.prompt.bar === undefined) return { kind: 'error', text: 'the chapters prompt store is unavailable in this context' }
+          const { spec } = config.prompt.effective()
+          if (spec === '') {
+            return { kind: 'error', text: 'nothing to turn on: the prompt model is unset. /chapters-prompt model <provider/model> sets it, and setting it IS the enable' }
+          }
+          const holder = invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } }
+          const sessId = holder.session?.id ?? holder.agent?.session?.id
+          if (sessId !== undefined) await config.prompt.bar.setOn(sessId)
+          return { kind: 'success', text: `suggestions ON (${spec}) — the next completed turn offers a next step; /chapters-prompt state shows it, /chapters-prompt autorun on runs them` }
+        }
         if (verb === 'suggest') {
           const holder = invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }
           const sess = holder.session ?? holder.agent?.session
@@ -417,7 +496,32 @@ export function registerHostCommands(
           const titleEvent = [...events].reverse().find((e) => e.type === 'session/title')
           const title = titleEvent !== undefined && typeof titleEvent.data.title === 'string' ? titleEvent.data.title : undefined
           const r = await config.prompt.suggest({ id: sess.id, title, events: [...events] })
-          return r.ok ? { kind: 'success', text: r.text } : { kind: 'error', text: r.text }
+          // #113: this returned `text: r.text` — ONE bare line, which the composer ellipsized with no way to
+          // recover it. /chapters-status gets an expander because it answers with a labelled multi-line block,
+          // so this does the same: the prompt verbatim inside a fence, then the facts that bound it (which
+          // model, from which source, against which cap, for which session). Stating the cap matters because an
+          // over-cap answer is refused and retried, never truncated — the number belongs in the output.
+          const F = String.fromCharCode(96).repeat(3)
+          const { spec, source } = config.prompt.effective()
+          const lim = config.prompt.limits !== undefined ? config.prompt.limits() : undefined
+          const who = `${title !== undefined && title !== '' ? `\u201c${title}\u201d ` : ''}(${sess.id})`
+          const capLine = lim !== undefined
+            ? `  cap: ${String(lim.maxChars)} characters — over-cap is refused and retried, never truncated`
+            : '  cap: (not reported by this surface)'
+          const meta = `  model: ${spec !== '' ? spec : 'unset'} (${source})\n${capLine}`
+          if (r.ok) {
+            return { kind: 'success', text: [
+              `/chapters-prompt suggest — the next prompt for ${who}`, '', F, r.text, F, '', meta,
+              '  use it: copy the text above into the composer (the ghost chip was removed by maintainer decision, #113)',
+            ].join('\n') }
+          }
+          if (r.quiet === true) {
+            // Nothing to offer is an ANSWER to an explicit request, not a failure. With the ghost gone there is
+            // no automated caller that reads a success line as an offer — that collision is what made wiring
+            // `quiet` wrong last time, and removing the chip is what unblocked it.
+            return { kind: 'success', text: [`/chapters-prompt suggest — nothing to offer yet for ${who}`, '', `  ${r.text}`, '', meta].join('\n') }
+          }
+          return { kind: 'error', text: `chapters-prompt: ${r.text}\n  model: ${spec !== '' ? spec : 'unset'} (${source})` }
         }
         return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest' }
       } catch (error) {

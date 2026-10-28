@@ -25,7 +25,7 @@
 import type { ChapterRange, RenderedChapter, SessionEventLike } from './types.ts'
 import { chapterTopics } from './signature.ts'
 import type { ChapterRecord } from './archive.ts'
-import { estimateTokens, renderChapter, renderIndex } from './render.ts'
+import { estimateTokens, noticeIndexSection, renderChapter, renderIndex } from './render.ts'
 import { isInjectedProse } from './injections.ts'
 import { lineageOf } from './types.ts'
 import { slugify, toStoredPath } from './archive.ts'
@@ -59,6 +59,9 @@ export interface EngineConfig {
    * part of that world.
    */
   knowledgeMirrorDir: string
+  /** Lines of the chapter index a continuation notice lists; 0 lists all of them. Keeps the notice's SIZE
+   * settled so a leg parked on the compaction boundary can be captured and replayed (#56). */
+  noticeIndexCap: number
   /** #87: how much of the newest human turn the summary carries verbatim when relief
    *  shadows the turn that asked it. A cap, never a silent cut — the block says how much was left. */
   openRequestCarryMaxChars: number
@@ -101,6 +104,7 @@ export interface EngineConfig {
 export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   artifactStoreRoot: '.dsh-chapters',
   knowledgeMirrorDir: '.dsh-knowledge',
+  noticeIndexCap: 6,
   openRequestCarryMaxChars: 4000,
   lastResortArtifact: true,
   diagnosticsMaxBytes: 8388608,
@@ -442,7 +446,7 @@ export function planSummarize(
       return { number, path, title: range.title, summary: range.summary, startSeq: range.startSeq, endSeq: range.endSeq }
     })
     const allBullets = [...bullets, ...chapters.map((c) => ({ title: c.title, path: c.path, summary: c.summary }))]
-    const index = renderIndex(allBullets)
+    const index = noticeIndexSection(allBullets, config.noticeIndexCap)
     const quote = (p: string): string => p.split('\n').map((l) => `> ${l}`).join('\n')
     const composedParts: string[] = [
       `Chapter archive: ${allBullets.length} chapter(s) under ${config.artifactStoreRoot}/ — verbatim text; reload any with the read tool on its path.`,
@@ -469,7 +473,7 @@ export function planSummarize(
   const path = chapterPathFor(config, state.rootSession, number, identity.title)
 
   const allBullets = [...bullets, { title: identity.title, path, summary: identity.summary }]
-  const index = renderIndex(allBullets)
+  const index = noticeIndexSection(allBullets, config.noticeIndexCap)
   const quote = (p: string): string => p.split('\n').map((l) => `> ${l}`).join('\n')
   const parts: string[] = [
     `Chapter archive: ${allBullets.length} chapter(s) under ${config.artifactStoreRoot}/ — verbatim text; reload any with the read tool on its path.`,

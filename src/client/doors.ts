@@ -406,3 +406,18 @@ export function makeDoorRunner(
     }
   }
 }
+
+/**
+ * Execute a host command line for one session and return its text, or '' when the command plane is
+ * unavailable. The bar's `state` pull and `off` write ride this, because it is the ONE place the client
+ * talks to the wire: the guard row "there is no second runner body in the client chrome" exists to keep
+ * `index.ts` as registration chrome, and a duplicated `commands.execute` in two files is how a wire
+ * behaviour drifts from its own test (#59's one-predicate rule, applied to the transport).
+ */
+export async function runCommandText(remote: ClientRemote | undefined, sessionId: string, line: string): Promise<string> {
+  const exec = remote?.commands?.execute
+  if (exec === undefined) return ''
+  const res = await exec(sessionId, line, [])
+  if (res.ok !== true) return ''
+  return res.value?.result?.text ?? ''
+}

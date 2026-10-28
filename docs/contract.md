@@ -406,6 +406,56 @@ Entry `apply(ctx, config)`. Build with `tsc -p tsconfig.json` and **build before
 UI (later phase) additionally needs `dsh.client` and a `tsdown.client.config.ts` — see
 `dsh-session-fork/package.json` for the shape.
 
+### An armed goal has no rest state — measured, with the lines that prove it
+
+Verified while trying to make a goal-bearing tape leg deterministic (#138). The round driver gates on
+`phase === 'active' && activation === 'armed'` plus agent idleness
+(`@deepseek-ai/dsh-goal-round-driver` `src/index.ts:105-117`), and a round is itself a turn — so every round ends, and
+the next is scheduled. There is no moment in which an armed goal is also at rest:
+
+- **spending the budget ends the goal.** At `:182-188`, `roundsStarted >= maxGoalRounds` calls
+  `ctx.goals.block(agent, ref, { code: 'round-limit', message: 'Goal reached its configured limit of N rounds.' })`.
+- **the strip then disappears.** `@deepseek-ai/dsh-client-ui-goal` `GoalBar.tsx:85-86`: *"Loading, absent, and complete
+  goals have no strip at all"*, and the guard excludes blocked/complete. So the control a test wants to observe
+  (`Pause goal` → `Resume goal`) is not rendered in the state the budget produces.
+- **the per-goal budget is a plugin argument, not a user one.** `ctx.goals.create(agent, { objective, maxGoalRounds })`
+  (`@deepseek-ai/dsh-goal` `src/index.ts:303`, `types.ts:28-30`) — the human `/goal` command passes no budget
+  (`dsh-command-goal` usage is `goal <objective>, /goal clear`; `command-goal/src/index.ts:150` calls `create` without
+  one), so the default 256 applies.
+
+Consequences for this repo, both measured: a goal-bearing tape leg agrees with a runner only while the runner's latency
+happens to reproduce the capture's round count (staging's `prompt` leg failed twice on docs-only pushes:
+`MISS tape=prompt entries=23 storedCandidates: []`, runs 40697174778 / 40706037817); and bounding the budget to 1 makes
+the goal vanish before a leg can act on it (17-entry tape, `Round: 1/`, no second round, `the host goal bar appears once
+a goal exists`). Upstream's own test fixture takes the third path — create then `ctx.goals.disarm(agent)`, noting
+*"An armed goal makes the shipped goal-round-driver start a round at idle, racing the test driver's disposal"* — which
+is the disarmed state, not the armed one a displacement claim needs.
+
+What is needed to test this in a tape: a way to open an **armed** goal whose driver will not fire until released, or a
+non-terminal exhausted state that still renders the control (#138). Until then the goal/suggestion interplay is
+verified live under a wall-clock bound (`tests/e2e/prompt-goal-live.spec.ts`), not by the model-free acceptance job.
+
+### A profile patch may not re-declare a host plugin's row — measured on 0.2.0-rc.2
+
+`profiles/web/cordis.patch.yml` layers by row `id`, and the rig relies on that for its **own** rows
+(`preset-chapters`, `agent-preset-registry`, `llm-pi-ai`, `agent-default-model`, `llm-gate`,
+`fetch-timeouts`). Copying that trick onto a row that belongs to the installed bundle is not neutral. Three variants,
+each run against an unchanged spec and corpus so the only variable was the patch:
+
+| profile patch | result |
+|---|---|
+| `- id: goal` + `config: { defaultMaxGoalRounds: 1 }` | the `goal` plugin stops working: `/goal` creates no goal, so `[data-goal-bar]` never renders |
+| `- id: goal` with **no** config | every test passes, but the boot issues a request no tape has: `MISS tape=prompt entries=23 messages=1 closest=0000.json` — at the FIRST message, before any goal exists |
+| no `goal` row in the profile patch | clean run (`5 passed`, rc 0) |
+
+Read it as: duplicating a host row changes the mounted plugin set (extra registration → an extra request), and adding a
+`config:` block to that duplicate replaces the base row rather than merging into it, taking the plugin's real config
+surface with it. So the patch is a way to configure **rows you own**, not a way to reach into a host plugin's settings.
+The concrete consequence: `@deepseek-ai/dsh-goal` does export
+`config = z.object({ defaultMaxGoalRounds: z.number().default(256) })` and `resolveCreateGoal(request,
+defaultMaxGoalRounds)` honors it, but no boot can pin it from the profile — which is why goal-round bounding is a host
+ask (#138) and not a rig bug to fix.
+
 ### Presets are declaration rows now (host ≥ 0.1.7-alpha.1) — measured, with the incident
 
 A user preset used to be a directory `$DSH_HOME/.agent-presets/<id>/` holding `preset.yml` +
@@ -512,6 +562,11 @@ not stylistic:
   a plain function callable **without an agent turn** — build that seam in Phase 1, not Phase 5, or the
   UI and automatic paths both force a rewrite.
 
+> **SUPERSEDED as a surface by § "Suggested Next Step bar" below** (#113, chip removed in #114). The facts in
+> this section stay authoritative and are the reason the replacement is a docked row: the overlay geometry,
+> the non-writable placeholder, and `inputActions.setDraft`/`submit` were all measured here first. Reviving an
+> overlay must answer all four defects #113 recorded, with measurements.
+
 ## Composer Ghost Layer — measured host facts (#71, verified 2026-10-21 against `examples/dsh` @ 0.2.1-rc.2; runtime pin 0.2.0-rc.2, compile deps still 0.1.5-rc.2)
 
 The prompt-recommendation feature renders a ghost layer in the composer. What the host does
@@ -593,3 +648,229 @@ Two corollaries, both bought once:
 - An injected port that is optional and stops being wired fails as a symptom, not as an error:
   `tests/unit/client-doors.test.ts` has a row that fails if `src/client/index.ts` drops
   `uiWorkspace` from `inject` or stops passing it.
+
+## `ContinuePorts.mutateState` — the row write seam (#101)
+
+`ContinuePorts` exposes **both** `getState`/`putState` and `mutateState(sessionId, fn)`, and the split is
+load-bearing, not historical:
+
+- `getState` is for **reads** (ancestor walks, root resolution) and for nothing else.
+- `putState` survives only for **brand-new rows** — a child row that no other writer can hold yet
+  (`linkChild(freshSession(childId), …)` at `continue-core.ts:527`).
+- **Every write to an EXISTING row goes through `mutateState`**, because `store.put` replaces the whole
+  value: a `getState`→`putState` pair loses any commit another door made in between. The chapter allocator
+  (`reserve`, `reservePlan`) runs *after* hundreds of fs writes, and the commit runs after `agents.create`
+  plus the artifact work — both are windows. AGENTS records the incident class: an enrichment put at
+  04:53:52.841 rewound a compaction commit from 04:53:50.915, deleting its manifest, reservation,
+  `finalized` entry and chapter record while its 960 KB file survived on disk. Files present + records
+  gone is the signature, and `chapters-repair` then looks like a phantom-maker.
+
+`fn` must apply its change to the row it is handed and may not return a captured snapshot — a
+`mutate(id, () => snapshot)` is a stale `put` with better branding (fixed once already in `repair-run.ts`
+for the hollow-payload supersede).
+
+## Suggested Next Step bar
+
+**What a dock component is handed (measured from the host's own contract table,
+`dsh-cordis-client-runner/lib/client.js`, entry `key: "conversation.input.dock"`).** It is a `list` region,
+`scope: session`. Register options are `id` (required), `order` (optional, ascending, default 0), and `label`.
+The component's props are **hooks**, not scalars: `useSessions`, `useSessionStatus`, `useSessionRetainInfo`,
+`useWorkspaces`, `useChat`, `useConversation`, `useInput`, `inputActions`, `useSession`, `sessionId`,
+`useProjection`, `useTrajectory`. Shipped occupants: `todo` (order 0), `goal` (10), `queue` (20).
+
+Why this is written down: the bar's Autorun gate was written against a **scalar** `props.running` that no host
+version supplies, so Autorun reported itself unavailable on a host that exposes the very signal through
+`useSessionStatus`/`useChat`. Reading the contract table beats remembering a prop name. `inputActions` here is
+`{ captureInsertion, insertText, setDraft, addAttachments, removeAttachment, pruneAttachments, submit }`, and
+the composer-write limitation in #126 is measured against that same kit.
+
+**Verbs (interface lock, #113).** `/chapters-prompt` accepts `model …|clear`, `off`, `on`, `state`, `autorun on|off`,
+and **`run`** — submit the offer currently on screen as a **human-authored user turn**, through the same follow-up
+path autorun uses (`agent.followup(suggestPromptMessage(…))`). Run goes through the command plane rather than the
+composer's `inputActions.setDraft` because a dock cannot rely on writing the host editor: measured, `setDraft` is
+accepted and the composer still reads empty, and the goal bar's own `setDraft` is plain React state, not a
+composer write. A plugin's only dependable wire to its own server plane is the command — which is why the bar is
+push-shaped and pull-fed.
+
+**The dock's status hook is a SELECTOR hook (measured, 2026-10-27).** `useSessionStatus` is declared
+`SnapshotSelectorHook<SessionStatusSnapshot>` in `dsh-client-ui-session`'s client types, so it is called as
+`useSessionStatus(selector)` — passing a session id hands the host a string where it wants a function and it
+fails `TypeError: l is not a function`. Two consequences for anyone wiring the bar: the call must be hoisted
+above the component's early `return null` (a hook below that guard changes the hook count and React aborts the
+whole slot, `#310`), and the snapshot's field names are not ours to assume — the dock folds it through
+`deriveRunning`, which maps `boolean`, status words, `{status|state|phase}`, and `{running}`, and returns
+**`undefined` for anything unrecognized**, because `undefined` (unknown) and `false` (idle) are different
+safety answers: unknown must never start a turn.
+
+**State vocabulary (interface lock, #113).** `/chapters-prompt state` reports one of:
+`off` — switched off by the human (a stored override), or no defining model is configured, so the bar renders
+nothing; `idle` — **enabled and awaiting its first recommendation** (no completed turn yet); `analyzing` — a
+generation is in flight for the current turn; `ready` — an offer is on screen with `text`; `failed` — the
+generation could not run, with the reason. `idle` exists because collapsing "nothing yet" into `off` made a
+working feature indistinguishable from a disabled one: measured in the rig, the bar replied
+`suggested next step: off` while the profile row read `model: qwen-token-plan/qwen3.8-flash (config)`.
+The bar stays hidden on `off` only, and re-reads while the state is `idle`/`analyzing`/`ready`.
+ — interface lock (#113, builds on the measured goal-bar facts above)
+
+A composer dock row that, once per **completed turn**, generates a fresh prompt suggestion and offers
+**Run · Autorun · Off**. Modelled on the goal bar because the goal bar is tested and already fits — and the
+mechanical parallel is exact: *a goal re-injects the same directive every turn until the model stops; a
+suggestion re-derives a new directive every turn until the human stops it.*
+
+**Measured anchors for every claim below are in the section above** (dock slot, ordering, anatomy, hiding
+rules, `hooks:` observables, `remote.commands.execute` as the only plugin-reachable call path).
+
+### State, and who owns it
+
+| field | owner | values |
+|---|---|---|
+| `status` | server, persisted per session | `off` \| `analyzing` \| `ready` \| `failed` |
+| `text` | server | the suggestion, verbatim, never truncated (`promptMaxChars` is a **refusal** cap) |
+| `turnSeq` | server | the `turn/end` seq the suggestion was generated **for** — the identity of an offer |
+| `autorun` | **server, process-local** (exactly like the goal's `activation`) | `armed` \| `disarmed` |
+| `expanded` | client, per-mount | `false` collapsed one line · `true` full text shown |
+
+The durable pair (`status`, `turnSeq`) is the server's one-generation-per-turn key; the process-local pair
+(`autorun`, `expanded`) is never persisted — same split the goal bar uses between `goal.phase` and
+`activation`.
+
+**Correction, found while wiring the loop and kept visible because the first version of this table was
+wrong.** `autorun` is *not* client-local: the whole point of the feature is that a suggestion drives the
+next real turn, and a turn is started host-side (`agent.followup`), so the flag has to live where the loop
+does. It is **server-side process-local state**, disarmed on mount and on `agent/created`, re-armed only by
+an explicit human action through the command — the host goal driver's `WeakMap` semantics copied on purpose,
+including the safety property: **a loop cannot resurrect itself after a restart.** `expanded` stays purely
+client-local, because only a browser cares.
+
+### Dock placement
+`conversation.input.dock`, `order: 30` — after todo `0`, goal `10`, queue `20` (ascending sort), so it sits
+**under all other dock entries and directly above the composer card**, which is what "right above the chat
+input" means in this host. It is a docked row, never an overlay, so it cannot cover the placeholder.
+
+### Label and visibility (two fields decide both, as with the goal)
+- `analyzing` → **`Analyzing situation…`**
+- `ready` → **`Recommended Next Step`**
+- `failed` → **`Recommended Next Step`** *plus* an error span (`role="alert"`) naming the reason and code — a
+  detected failure must be a delivered failure (#61); nothing is silently blank.
+- `off`, or a **quiet** refusal (nothing to recommend yet) → renders **nothing**. A refusal is not an error,
+  and shouting it was defect #2 of the removed ghost.
+- Also renders nothing while the session zone is absent, and keeps a just-turned-off guard so it cannot
+  flicker back before the server state catches up (the goal's `clearedGoalId` trick).
+
+### Interactions
+1. **Click the prompt (collapsed)** → expand; full text shown in the same strip.
+2. **Click the prompt (expanded)** → `inputActions.setDraft(text)`: the draft is *replaced*, editable, and
+   nothing is sent. No `Edit`-button fallback unless a browser pass proves the click is captured by the host
+   editor — and if so the fallback is the goal's inline swap, which is already the house pattern.
+3. **Run** → `setDraft(text)` then `submit()`, in that order, so what goes out is visible in the composer
+   first and lands in the durable log as an ordinary **human** message.
+4. **Autorun / Autorun off** → toggles the process-local `armed`/`disarmed`. While armed, after each
+   completed turn the bar pulls, and on `ready` performs the Run path by itself.
+5. **Off** → server `status: 'off'`; generation stops, the row disappears, the configured model is kept so
+   turning it back on is one click.
+
+### Goal composition (per the maintainer's spec, which corrects my first plan)
+Autorun **runs alongside** an active goal — it does not stand aside. The suggested prompt is always generated
+*with the goal in view*: the server reads the newest `goal/change` from the session and feeds the live
+objective into the recommendation, with the directive that the next step must advance an active goal.
+**When the goal completes (or is cleared/paused out of `active`), autorun disarms itself** — the suggestion
+loop yields the stage back to the human at the moment the purpose it was serving is finished. A human prompt
+also disarms autorun, while generation continues on later turn boundaries; re-arming is a human act.
+
+### Enabling
+`promptModel` remains the single switch (empty ⇒ no bar, no calls, no cost) — the model *is* the enable.
+`promptAutorunDefault` (bool, **false**) decides only whether a fresh session starts armed; nothing autoruns
+that a human did not opt into.
+
+### Where the goal's loop actually lives, and what that changes for us (measured 2026-10-25)
+
+The second probe corrected two things I had assumed, and one thing I had written:
+
+- **The goal loop has no timer.** `dsh-goal-round-driver` chains turns off `agent/status === "idle"` and
+  `goal/changed`, coalesced into one serialized task per agent, and starts the next turn with
+  `agent.followup(createUserMessage({…, source:{kind:'goal', goalId, revision, round}}))`. It stops **silently**
+  unless `phase === "active" && activation === "armed"`.
+- **`activation` is process-local and starts disarmed.** On mount the driver disarms every agent, and
+  `agent/created` disarms new ones; only a human `ctx.goals.resume` re-arms. A loop cannot survive a restart
+  on its own.
+- **A plugin may read the goal through the host, not just the log**: `ctx.get('goals').get(agent)` → `GoalView`
+  (adds `roundsStarted` + `activation`), or `ctx.sessionProjections.stateOf(session, 'goal')`. `readActiveGoal`
+  remains for log-only paths (repair, distill, tests).
+- **Trap that governs our authorship**: two invariant companions re-fold the goal stream and
+  `deepEqual`-check every `source.kind:'goal'` message against the package-owned `<goal_round>` template. So
+  **we never author as `goal`** — impersonating that kind is a loud invariant failure by design.
+
+**Decision this forces (and the one I'm making, since it is a semantics choice, not a style one).** Run and
+Autorun are different acts and must not share a mechanism:
+
+| control | mechanism | durable effect | survives a closed tab? |
+|---|---|---|---|
+| **Run** (a button the human pressed) | client `setDraft` + `submit` | an ordinary **human** `user/message` (`source.kind:'user'`) | no — and correctly so |
+| **Autorun** (a loop the human opted into) | server-side `agent.followup(...)` with our **own** producer kind `plugin:dsh-chapters` | a plugin-authored message, screened like a notice, never counted as human input | the loop itself is process-local and **disarms on restart**, mirroring the goal |
+
+That split is what makes it goal-shaped *and* honest: the suggestion reaches the model with the session's full
+tool capability (it is a real turn, not a browser trick), while nothing we generate can masquerade as the
+human typing it. Autorun defaulting off, and being off after any restart, is a safety property inherited from
+the goal driver rather than a limitation to apologize for.
+
+### Goal ↔ suggestion authority and precedence — measured 2026-10-25, host 0.2.0-rc.2
+
+Read this before touching either loop. The two features start turns, and the host reserves *some* turns for
+humans. Facts, with anchors in `dsh-tool-goal/lib/index.js`:
+
+- **`hasDirectHumanInput(ctx, execution)`** = the agent is a runtime root **and** the open turn contains
+  `user/message` with `data.source.kind === 'user'` (:49-52). **`requireDirectHuman`** (:62-65) gates goal
+  `create`/`edit`/`pause`/`resume` — a model cannot re-cut a goal without a human turn in progress.
+- **`isMatchingGoalRound`** (:54-56) additionally grants *completion* authority to the exact admitted goal
+  round (`source.kind === 'goal'` with matching `goalId/revision/round`), so the worker may close the goal it
+  was handed — but not re-author it.
+
+Consequences for this plugin, in order of how much they matter:
+
+1. **A `Run`n suggestion is a human turn, so it CAN re-cut the goal.** The composer's `setDraft`+`submit`
+   produces `source.kind: 'user'`. This is the director path the maintainer is building: the big model writes
+   *"edit the goal to X, because step 2 of the plan showed Y"*, the human presses Run, and the worker now has
+   authority to edit the goal. Nothing about our authorship needs to change for this to work.
+2. **An autorun suggestion is NOT a human turn, so it MUST NOT try to edit the goal.** Our loop authors under
+   `plugin:dsh-chapters` (see above: faking `kind:'user'` here would be a privilege escalation — it would hand
+   an automated loop the authority the host deliberately reserves). So the host's refusal is the correct
+   behaviour, and the feature must respect it rather than route around it.
+3. **Therefore an offer carries an intent, and intent decides whether autorun may act on it.** The suggestion
+   model prefixes its answer: `GOAL:` = this step changes the standing objective → **never auto-run**; the bar
+   holds it for the human's keystroke and says why. Anything else = a worker step → auto-run is allowed.
+   The prefix is stripped before the prompt reaches the composer or the followup, so the worker never sees
+   protocol scaffolding.
+4. **Exactly one thing may start a turn at a boundary.** The host goal driver queues a round on
+   `agent/status === 'idle'` when `phase === 'active' && activation === 'armed'`. If our loop also followed
+   up, the session would start two turns per idle edge — a race against the driver's own reservation fence.
+   So when the service reports the goal `active` **and** `armed`, the suggestion loop **yields**: it keeps
+   generating offers (that is the director's eye on the work) and runs none of them. It runs again when the
+   goal is `paused`, `blocked`, `complete`, disarmed, or absent.
+   Activation is process-local and reachable only through the service (`ctx.get('goals').get(agent)` →
+   `GoalView.activation`), never from the log — that read is the point, not a convenience.
+5. **A goal edit invalidates the offer made under the old revision.** `revision` bumps exactly +1 per
+   accepted mutation, so the loop compares the revision it generated against and refuses to run a stale one
+   instead of pushing last cycle's directive into a re-cut objective.
+
+This is the shape of the pair: the **goal** is the thing the human owns and re-cuts, the **suggestion** is the
+thing the director model re-derives every turn. Autorun drives the worker; the keystroke drives the objective.
+
+### Displacement, not yielding — the maintainer's rule for two autoruns in one session (2026-10-25)
+
+My first pass had the suggestion loop **yield** whenever a goal was `active`+`armed`. That was wrong against
+the spec: *"the autorun for the suggested prompt … can either introduce or **replace** the autorun by the goal
+if it is running."* Yielding made the two features mutually exclusive, which is the opposite of built for each
+other — with a goal armed, a director's autorun would have quietly done nothing at all.
+
+The rule now: **arming prompt autorun displaces the goal's continuation, and the suggestion carries the goal.**
+- Mechanism: `GoalService.disarm(agent)` (`dsh-goal/lib/index.js:622-627`) — *"without changing durable goal
+  phase or revision"*, a later human-authorized `resume` records the new activation edge. That is precisely a
+  cooperative brake: the objective stays authoritative in the log, the driver simply stops re-injecting it, so
+  **exactly one loop starts a turn** at each boundary, and it is whichever the human armed last.
+- The goal is not lost by being disarmed: every suggestion is generated *from* `goal/change` (objective +
+  revision) and the directive still says the next step must advance it. The director's words replace the host's
+  repeated round; the objective is unchanged.
+- If `disarm` is unavailable (no `goals` service on this host) arming still succeeds, and the loop yields the
+  turn — so a missing seam degrades to the safe behaviour rather than double-firing.
+- Re-arming the goal (`/goal resume`, or the bar's next human Run of a `GOAL:` step) is a human act, matching
+  the host's own rule that a model may not resume a paused goal (`GOAL_TOOL_RESUME_PAUSED`).

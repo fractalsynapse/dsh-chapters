@@ -35,8 +35,29 @@ export interface ProxyHandle { url: string; close: () => Promise<void> }
 
 const VOLATILE: Array<[RegExp, string]> = [
   [/\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?/g, '<DATE>'],
+  // ELAPSED-BLIND (#56, measured 2026-10-26): the host's per-turn time snapshot states how long the previous
+  // span was — minutes when the model is answering live, seconds when the tape answers. Keyed on the injected
+  // form's colon so prose that merely mentions an elapsed duration stays conversation identity.
+  // Consume to the end of the line, trailing period included: the first version matched up to the first
+  // period, so `…: 12m 4s.` folded to `<ELAPSED>` while `…: unavailable` kept a different length — a
+  // one-character difference between a request and a tape recorded minutes apart, and enough to fail the
+  // whole leg. Fold the form, not a guess at its value's punctuation.
+  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[^\n"]+/g, '$1: <ELAPSED>'],
+  // CHAPTER-COUNT-BLIND (#56, measured 2026-10-27): the checkpoint notice states how many chapters exist in
+  // THIS session's archive, which auto-save timing decides — 8 on one run, 2 on the next, for the same
+  // journey. The byte diff proved `heavy`'s replay died on exactly that count at char 729 while its system
+  // header matched byte for byte. Same family as the est-token and char-count collapses already here.
+  [/Chapter archive: \d+ chapter\(s\)/g, 'Chapter archive: <COUNT> chapter(s)'],
   // human dates measured crossing midnight: 'Sep 19' recorded, 'Sep 20' replayed
   [/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2}(,? \d{4})?\b/g, '<DATE>'],
+  // TZ-BLIND (#56, measured on CI 2026-10-27): the runtime-context line carries the machine's zone — a captured
+  // `[America/New_York]` replayed on a runner that reports `[UTC]`, which made CI miss at msg3 with messages 0-2
+  // matching. Scoped by the sentence that follows it, so a timezone written anywhere else in prose stays content.
+  [/\[(?:[A-Za-z]+(?:\/[A-Za-z_]+)+|UTC)\](?= Browser time zone)/g, '[<TZ>]'],
+  // The same line states the zone a SECOND time, as the value of "Browser time zone for this request: UTC." — CI
+  // missed `fork`/`prompt-off` at commonPrefix=3 with both sides already reading `[<TZ>]`, because only the
+  // bracketed half was folded. One fact, both spellings, both blind.
+  [/(Browser time zone for this request: )(?:UTC|[A-Za-z]+(?:\/[A-Za-z_]+)+)/g, '$1<TZ>'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
   // the system head embeds the GUI URL `http://127.0.0.1:<port>` and the e2e
   // home path carries `var/e2e-home-<port>` — run-scheduling facts of the
@@ -159,6 +180,15 @@ const VOLATILE: Array<[RegExp, string]> = [
   // served response bytes are untouched, and this rule self-repairs tapes
   // recorded before it (substituteAll runs over stored prefixes at load).
   [/chapters\/\d+-/g, 'chapters/<CH>-'],
+  // TOC-LINE collapse (#56, 2026-10-27): a checkpoint notice lists one line per chapter, and how many lines
+  // exist is a derived count — a session that tips one extra split sends a longer message, so `heavy`'s replay
+  // diverged at the FIRST miss for the same reason the hosted fanout run needed CH-ORDINAL above. Scoped to
+  // lines that cite a path under `chapters/`, so an ordinary numbered list of files in real conversation is
+  // never touched; the count is not the thing a leg claims.
+  // The patterns here run on the JSON-escaped string, where a line break is a literal backslash-n — so an
+  // anchored `^…$` /m rule can never fire (mine did not, and the row caught it). `[^\\]*` stops at the next
+  // escape, which is the end of the line in that representation.
+  [/\d+\.\s*\[[^\]]*\]\([^)]*\/chapters\/[^)]*\)[^\\]*/g, '<TOCLINE>'],
   // and the same for the defused product token (enricher inputs): runs across
   // NEWLINES too — the dump shows spaces only because normalization ate them
   [/(?:⟦injected-context⟧[ \t\n]*){2,}/g, '⟦injected-context⟧ '],
@@ -212,6 +242,20 @@ export function substituteAll(str: string): string {
  * on the same token. Without the stored side folded, adding the blind would have made every
  * reasoning-bearing turn UNMATCHABLE rather than fixing anything.
  */
+/**
+ * Drop prefix elements that fold to nothing, so both sides of a replay match mean the same list (#132).
+ *
+ * The incoming request is normalized per message and empty results are filtered out (`findReplay`); stored prefixes
+ * were only re-substituted, so a turn whose text, reasoning and ids all fold away stayed as an empty element — a
+ * hole that offset every later index. `heavy`'s `commonPrefix=2 divergeAt=msg2` on all machines was that hole, not
+ * model behavior: a fold change moved the miss, which is the tell. Symmetry at load, not tolerance at match time.
+ */
+export function normalizeStoredPrefix(prefix: unknown[]): string[] {
+  return prefix
+    .map((p) => (typeof p === 'string' ? substituteAll(foldReasoning(p)) : normalize(p)))
+    .filter((p) => p !== '')
+}
+
 export const REASONING_TOKEN = '⟦REASONING⟧'
 const REASONING_RE = /"reasoning_content"\s*:\s*"(?:[^"\\]|\\.)*"/g
 export function foldReasoning(text: string): string {
@@ -252,6 +296,8 @@ export interface TapeEntry { key: string; prefix: unknown[]; status: number; con
 export interface ProxyOpts {
   mode: 'record' | 'replay'
   tapeDir: string
+  /** The boot's throwaway home; when present the proxy checks declared-vs-registered tools once. */
+  homeDir?: string
   /**
    * #78: the context window the rig ENFORCES. A hosted upstream accepts a 33K prompt happily, so
    * a context-pressure journey distilled against it never produces the `context-overflow` trigger
@@ -302,7 +348,7 @@ function loadTape(tapeDir: string): TapeEntry[] {
       // sides of the match on current rules without a re-record. (The earlier
       // attempt here re-RAN normalize(), which double-stringified stored
       // strings and broke every legacy match — the S0 root cause.)
-      e.prefix = e.prefix.map((p) => (typeof p === 'string' ? substituteAll(foldReasoning(p)) : normalize(p))).filter((x) => x !== '')
+      e.prefix = normalizeStoredPrefix(e.prefix).filter((x) => x !== '')
       ;(e as Record<string, unknown>).file = f
       out.push(e)
     } catch { /* skip torn */ }
@@ -382,7 +428,7 @@ export function describeMiss(tape: TapeEntry[], incoming: unknown[], label = '?'
     + ` got=${JSON.stringify(got)} expected=${JSON.stringify(exp)}`
 }
 
-function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
+export function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
   const inc = incoming.map(normalizeSingle).filter((x) => x !== '')
   let best: TapeEntry | null = null
   for (const e of tape) {
@@ -544,6 +590,56 @@ async function pumpUpstream(o: PumpOpts): Promise<void> {
 }
 
 
+/**
+ * A declared tool row that produced no registered tool is a FAULT, not a pass — and it must be said out loud.
+ *
+ * Measured on 2026-10-27: the runner boots a host whose installed bytes are provably identical to this machine's
+ * (79/79 declared deps present, 289 packages, `allIntegrityMatch=true`), with the SAME 44-id profile including
+ * 21 `tool-*` rows — and registers only our seven plugin tools, while this host registers 34. The boot's own log
+ * says nothing (CI's server log is 292 bytes), so every mismatch that follows arrives disguised as a corrupt
+ * tape. AGENTS.md: a detected failure is a delivered failure. This is the delivery.
+ *
+ * The map is deliberately narrow — one representative tool per declared row family, the tools every leg needs —
+ * rather than an attempt to mirror the host's whole surface, which would drift the moment the host renames one.
+ */
+export const MOUNT_REQUIREMENTS: Record<string, string> = {
+  'tool-bash': 'bash',
+  'tool-fs': 'read',
+  'tool-goal': 'create_goal',
+  'tool-jobs': 'job_list',
+  'tool-todo': 'todo_write',
+  'tool-web': 'web_fetch',
+}
+
+/** Module scope on purpose: inside the request handler `path` is a LOCAL string (`const path = req.url!`), so a
+`path.join` written there silently becomes string concatenation and fails to compile — which is exactly what my
+first version of the mount check did (TS2448/TS2339). */
+export function rigProfilePatchPath(homeDir: string): string { return path.join(homeDir, 'profiles', 'web', 'cordis.patch.yml') }
+
+// The minimum surface every e2e journey actually uses — `read`/`bash`/`edit`/`write` appear in the prompts of
+// the legs, so a session without them cannot reproduce any recorded conversation. Expressed as a fixed core
+// rather than derived from the profile because I measured that the profile's `tool-*` rows are NOT a reliable
+// signal at request time: the host rewrites the patch mid-run, so the file can read 43 ids when the first
+// request is already in flight and carry the rows only later.
+export const RIG_CORE_TOOLS = ['bash', 'read', 'edit', 'write'] as const
+
+export function mountFault(declaredIds: string[], registeredNames: string[]): string | null {
+  const missingCore = RIG_CORE_TOOLS.filter((t) => !registeredNames.includes(t))
+  if (missingCore.length > 0) {
+    return `MOUNT FAULT: the session registered none of the core tools every journey needs — missing: `
+      + `${missingCore.join(', ')} (declared=${String(declaredIds.length)} registered=${String(registeredNames.length)} `
+      + `registered=${registeredNames.slice(0, 8).join('|')}) — this boot cannot produce a tape any other machine `
+      + `will replay, so it is refused rather than recorded`
+  }
+  const missing = Object.entries(MOUNT_REQUIREMENTS)
+    .filter(([row, tool]) => declaredIds.includes(row) && !registeredNames.includes(tool))
+    .map(([, tool]) => tool)
+  if (missing.length === 0) return null
+  return `MOUNT FAULT: the profile declares tool rows the host never registered — missing: `
+    + `${missing.join(', ')} (declared=${String(declaredIds.length)} registered=${String(registeredNames.length)})`
+    + ` — this boot cannot produce a tape any other machine will replay, so it is refused rather than recorded`
+}
+
 export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // Which project's tape this is — a miss must name itself (see the journal line).
   const tapeName = path.basename(opts.tapeDir)
@@ -561,6 +657,43 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   const upstreamTimeoutMs = opts.upstreamTimeoutMs ?? Number(process.env.E2E_UPSTREAM_TIMEOUT_MS ?? 600_000)
   const stallWarnMs = opts.stallWarnMs ?? Number(process.env.E2E_UPSTREAM_STALL_MS ?? 60_000)
   let inFlight = 0
+  // E2E_DUMP_HEADER=1 writes the first system header this boot composes, once, to var/e2e-header-<tape>.log.
+  // Motivation is measurement hygiene, not logging: three rounds of reasoning about a 7,276-char header here
+  // against 2,783 on a runner could not be settled by inference, and the miss journal truncates `got=` to 110
+  // chars. The artifact CI already uploads can carry the whole text, so the diff is byte-exact and offline.
+  // No secrets: this is the composed prompt, and the bearer header never reaches this path.
+  let headerDumped = false
+  // Up to THREE requests, not just the first: if the runner's tools grow between requests, the 34-vs-7 gap is a
+  // mount-TIMING race (the preset finishing after turn one) and not a capability difference — and that distinction
+  // decides whether the fix is a boot-readiness gate or a profile change. One dump cannot tell those apart.
+  let dumpQuota = 3
+  let mountChecked = false
+  const dumpHeader = (messages: string[], tools?: unknown): void => {
+    if (headerDumped || dumpQuota <= 0 || process.env.E2E_DUMP_HEADER !== '1') return
+    dumpQuota -= 1
+    const sys = messages.find((m) => m.includes(String.fromCharCode(34) + "role" + String.fromCharCode(34) + ":" + String.fromCharCode(34) + "system" + String.fromCharCode(34)))
+    if (sys === undefined) return
+    headerDumped = dumpQuota <= 0
+    try {
+      // Derived, not hardcoded: model-proxy has no ROOT of its own, and re-typing the repo path is how the
+      // #89 class of drift is born. The tape dir is `<repo>/tests/fixtures/model-tape/<name>`.
+      const repoRoot = path.resolve(opts.tapeDir, '..', '..', '..', '..')
+      // Tools ride along, because every sentence a runner was missing was tool guidance: the header is a strict
+      // subset of ours (2,847 chars / 26 sentences against 7,276 / 64, zero CI-only sentences), which means the
+      // runner EXPOSES FEWER TOOLS rather than composing different prose. Names only, never descriptions.
+      const names = Array.isArray(tools)
+        // OpenAI-wire shape: `{ type:'function', function:{ name } }`. Reading only `t.name` printed seven
+        // question marks on CI — a probe whose output is unknowable is worse than no probe (AGENTS.md: measure
+        // the payload SHAPE, not its presence).
+        ? (tools as Array<Record<string, unknown>>).map((t) => {
+            const fn = t?.function as Record<string, unknown> | undefined
+            return String(fn?.name ?? t?.name ?? '?')
+          }).sort().join(',')
+        : 'none-reported'
+      fs.appendFileSync(path.join(repoRoot, 'var', `e2e-header-${tapeName}.log`), `chars=${String(sys.length)}\ntools=${String(Array.isArray(tools) ? tools.length : 0)}\nnames=${names}\n${sys}\n`)
+    } catch { /* diagnostics never break a leg */ }
+  }
+
   const journal = (line: string): void => {
     try { fs.appendFileSync(activityLog, `${new Date().toISOString()} tape=${tapeName} ${line}\n`) } catch { /* visibility never breaks the run */ }
   }
@@ -576,6 +709,42 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
         let body: Record<string, unknown> = {}
         try { body = JSON.parse(raw.toString('utf8')) as Record<string, unknown> } catch { /* non-json passthrough below */ }
         const inc = messagesOf(body)
+        // DUMP AT THE REQUEST-RECEIVED POINT, not inside the forwarding branch: replay answers from the tape and
+        // never reaches the upstream path, and my first version therefore produced a header file locally (record)
+        // and NOTHING on CI (replay) — a probe that only fires in the mode I already understand is not a probe.
+        // Serialize the way the matcher does: `messagesOf()` yields parsed objects, and String(object) would
+        // silently never match.
+        dumpHeader(inc.map((m) => (typeof m === "string" ? m : JSON.stringify(m) ?? "")), (body as Record<string, unknown>).tools)
+        // Once per boot: does every tool the profile DECLARES actually appear in the registered list? The
+        // runner's silent 7-against-44 is the case this exists for; without it the gap surfaces only as a
+        // corpus that no other machine can replay.
+        if (opts.homeDir !== undefined && !mountChecked) {
+          mountChecked = true
+          try {
+            const patchText = fs.readFileSync(rigProfilePatchPath(opts.homeDir), 'utf8')
+            const declared: string[] = [...patchText.matchAll(/^\s*-?\s*id:\s*(\S+)\s*$/gm)].map((x) => x[1] ?? '')
+            const rawTools = (body as Record<string, unknown>).tools
+            const names = Array.isArray(rawTools)
+              ? (rawTools as Array<Record<string, unknown>>).map((t) => {
+                  const fnm = t?.function as Record<string, unknown> | undefined
+                  return String(fnm?.name ?? t?.name ?? '')
+                })
+              : []
+            const fault = mountFault(declared, names)
+            if (fault !== null) {
+              // Delivery is the point, and `journal()` alone was not enough: it writes the ACTIVITY log
+              // (`var/e2e-upstream.log`), while the rig-fault guard aborts on the misses journal and the CI
+              // annotation reads stdout. My first version therefore printed a fault on CI that nothing watched
+              // and nothing showed — a detected failure delivered to a file no one reads is the same bug as not
+              // detecting it (AGENTS.md). So: activity log, the watched journal, and stderr.
+              journal(fault)
+              try {
+                if (opts.journalPath !== undefined) fs.appendFileSync(opts.journalPath, `${new Date().toISOString()} tape=${tapeName} ${fault}\n`)
+              } catch { /* delivery is best effort, never a second failure */ }
+              console.error(fault)
+            }
+          } catch { /* an unreadable profile is not this check's business; the boot itself reports that */ }
+        }
         // #78: enforced in BOTH modes, before anything else. The regime is part of what the tape
         // records — a distill that saw a refusal and retried after relief must see the same refusal
         // on replay, or the request sequence diverges and the chain fails for a reason that looks
@@ -624,7 +793,14 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           }
         }
         // ---- record: stream through, capture bytes, append tape
-        const upstreamUrl = new URL((opts.upstream ?? 'http://localhost:8080') + req.url!)
+        // Join, do not concatenate. The base for an OpenAI-compatible provider conventionally INCLUDES its
+        // `/v1` (the Alibaba token-plan route is `…/compatible-mode/v1`) while the request path the harness
+        // sends also starts with `/v1/`, so naive `base + req.url` produced
+        // `/compatible-mode/v1/v1/chat/completions` → 404 → no assistant message → "Fork with chapters element
+        // not found" across every leg. The doubled prefix, not the model or the key, was the blocker.
+        const base = (opts.upstream ?? 'http://localhost:8080').replace(/\/+$/, '')
+        const path = req.url!
+        const upstreamUrl = new URL(base.match(/\/v1$/) && path.startsWith('/v1/') ? base + path.slice(3) : base + path)
         const transport = upstreamUrl.protocol === 'https:' ? https : http
         const fwd: Record<string, unknown> = { ...req.headers, host: upstreamUrl.host }
         if (opts.upstreamKey !== undefined && opts.upstreamKey !== '') {
@@ -683,7 +859,22 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
   // process. `boot.ts` still sets E2E_PROXY_PORT (port+1000) because the profile patch must
   // name the proxy URL before the proxy exists — that requirement is preserved exactly.
   const wantPort = process.env.E2E_PROXY_PORT !== undefined ? Number(process.env.E2E_PROXY_PORT) : 0
-  await new Promise<void>((resolve) => server.listen(wantPort, '127.0.0.1', resolve))
+  // Bind the derived port when it is free and ANY port when it is not. The derivation prevents collisions
+  // between CONCURRENT legs; it cannot prevent an orphan from a run that was killed mid-boot, and two chain
+  // runs today died on `listen EADDRINUSE … 42733` reading like a product failure. Falling back is safe here
+  // specifically because tape matching is HOSTPORT-BLIND and the profile receives the proxy's real bound URL
+  // (below), so no behavior depends on the number being predictable.
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: NodeJS.ErrnoException): void => {
+      if (error.code !== 'EADDRINUSE' || wantPort === 0) { reject(error); return }
+      console.warn(`[tape-proxy] port ${String(wantPort)} is held (likely an orphaned boot); falling back to an ephemeral port`)
+      server.removeListener('error', onError)
+      server.once('error', (e) => { reject(e) })
+      server.listen(0, '127.0.0.1', () => { resolve() })
+    }
+    server.once('error', onError)
+    server.listen(wantPort, '127.0.0.1', () => { server.removeListener('error', onError); resolve() })
+  })
   const bound = server.address() as { port: number } | null
   if (bound === null) throw new Error('tape proxy: listen reported no address — the URL cannot be built')
   return {

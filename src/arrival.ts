@@ -41,6 +41,26 @@ const kb = (n: number): string => n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)
 
 export async function applyArrivalStubs(session: ArrivalSessionShim, opts: ArrivalOpts): Promise<ArrivalResult> {
   let stubbed = 0
+  // #131: resolve each result's tool name once, so an artifact ANSWER can be exempted below.
+  //
+  // Arrival-time deferral was applied to `chapters_artifact`'s own output: asking to read a stored blob returned
+  // ANOTHER stub pointing at ANOTHER blob, so the store became unreachable at exactly the sizes it exists for, and
+  // the `arrival` leg's model called the tool 20 times before the run gave up. A query answer is the payload the
+  // caller reached for — economizing it is a cycle, not context relief. The tool already bounds its own output per
+  // action (`limit`, `maxTokens`), so nothing needs a second layer here.
+  const nameByCall = new Map<string, string>()
+  for (const seq of [...session.surface.nodes]) {
+    const ev = session.eventAt(seq)
+    if (ev?.type !== 'tool/call') continue
+    const d = ev.data as { callId?: unknown, name?: unknown } | undefined
+    if (typeof d?.callId === 'string' && typeof d?.name === 'string') nameByCall.set(d.callId, d.name)
+  }
+  const isArtifactAnswer = (message: Record<string, unknown>): boolean => {
+    const src = message.source as { callId?: unknown } | undefined
+    const wrappers = Array.isArray(message.content) ? message.content as { toolCallId?: unknown }[] : []
+    const ids: unknown[] = [src?.callId, message.toolCallId, ...wrappers.map((w) => w?.toolCallId)]
+    return ids.some((id) => typeof id === 'string' && nameByCall.get(id) === 'chapters_artifact')
+  }
   for (const seq of [...session.surface.nodes]) {
     const event = session.eventAt(seq)
     if (event?.type !== 'tool/result') continue
@@ -72,6 +92,7 @@ export async function applyArrivalStubs(session: ArrivalSessionShim, opts: Arriv
       : typeof w.text === 'string' ? w.text : ''
     const text = carriers.map(textOf).join('')
     if (text.length === 0 || text.includes(ARRIVAL_MARKER)) continue
+    if (isArtifactAnswer(data.message)) continue // #131 — a pointer to a pointer is not relief
     const tokens = opts.estimate(data.message)
     if (tokens < opts.floorTokens) continue
     const hash = sha256(text)

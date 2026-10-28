@@ -100,6 +100,12 @@ export interface ContinuePorts {
   readCallerEvents(): Promise<SessionEventLike[]>
   getState(sessionId: string): Promise<SessionState>
   putState(sessionId: string, state: SessionState): Promise<void>
+  /**
+   * The ONLY safe way to write an EXISTING row (#101): `fn` receives the live row and returns its
+   * replacement, so a chapter another door committed while we were rendering files cannot be overwritten.
+   * `getState`→`putState` is reserved for brand-new rows (see docs/contract.md).
+   */
+  mutateState(sessionId: string, fn: (state: SessionState) => SessionState): Promise<void>
   /** ArchiveFs anchored at the caller's workspace cwd (the read tool reaches it). */
   fs(): import('./archive.ts').ArchiveFs
   budgetProbe(): Promise<BudgetProbe>
@@ -314,9 +320,12 @@ export async function runContinue(
     .filter((r) => r.stats.overTarget)
     .map((r) => `chapter "${r.range.title}" is ${r.stats.estimatedTokens} est tokens over chapterTokenTarget — split at the next continuation, never clip`))
   // Same hard ceiling as the save door (#59), same ordering: refuse before anything is reserved.
-  const tooBig = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
-  if (tooBig.length > 0) {
-    throw new Refusal({ ok: false, reason: `ranges refused as oversize: ${tooBig.join('; ')}`, warnings })
+  const oversize = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  // A single indivisible event is not a refusal: it is delivered as a warning so the human can see the
+  // chapter that will need sliced reloads (#61), and the continuation goes ahead.
+  warnings.push(...oversize.indivisible)
+  if (oversize.errors.length > 0) {
+    throw new Refusal({ ok: false, reason: `ranges refused as oversize: ${oversize.errors.join('; ')}`, warnings })
   }
 
   const fs = ports.fs()
@@ -324,18 +333,18 @@ export async function runContinue(
     fs,
     allocator: {
       async reserve(attemptId, count) {
-        const fresh = await ports.getState(args.callerSessionId)
-        const r = reserve(fresh, attemptId, count)
-        await ports.putState(args.callerSessionId, r.state)
-        return r.numbers
+        // #101: the allocator runs after every artifact write, so the row has had plenty of chances to move
+        // under us. Allocate against the LIVE row inside mutate; `numbers` is the only thing we carry out.
+        let numbers: number[] = []
+        await ports.mutateState(args.callerSessionId, (live) => { const r = reserve(live, attemptId, count); numbers = r.numbers; return r.state })
+        return numbers
       },
       // Plan documents allocate on their OWN counter, so writing one can never
       // consume a chapter number or shift the TOC's ordering.
       async reservePlan(attemptId, count) {
-        const fresh = await ports.getState(args.callerSessionId)
-        const r = reservePlanNumber(fresh, attemptId, count)
-        await ports.putState(args.callerSessionId, r.state)
-        return r.numbers
+        let numbers: number[] = []
+        await ports.mutateState(args.callerSessionId, (live) => { const r = reservePlanNumber(live, attemptId, count); numbers = r.numbers; return r.state })
+        return numbers
       },
     },
     storeRoot: config.artifactStoreRoot,
@@ -521,8 +530,10 @@ async function finishChild(
     throw new Refusal({ ok: false, reason: `child creation refused: ${(error as Error).message}`, warnings })
   }
   if (commitRecords.length > 0) {
-    const callerFresh = await ports.getState(args.callerSessionId)
-    await ports.putState(args.callerSessionId, appendChapters(callerFresh, commitRecords))
+    // #101: this write lands after `agents.create`, the longest await in the flow. A snapshot taken before
+    // it and put here would delete whatever the turn/end listener archived meanwhile — records gone, files
+    // on disk, which is the signature that made repair look like a twin-maker.
+    await ports.mutateState(args.callerSessionId, (live) => appendChapters(live, commitRecords))
   }
   await ports.putState(childId, linkChild(freshSession(childId), args.callerSessionId, callerState.rootSession))
 

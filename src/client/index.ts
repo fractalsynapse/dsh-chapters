@@ -28,11 +28,8 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 // The host's own tooltip bubble — a platform module served by the loader table,
 // external like react. Every action in this row labels through it.
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import { DOOR_ACTIONS, makeDoorRunner, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
-import {
-  ghostKeyAction, ghostReducer, makeModelLabelFetcher, makePromptFetcher, shouldShowGhost,
-  type GhostEvent, type GhostFetchResult, type GhostPhase, type GhostSuggestion,
-} from './prompt-ghost.ts'
+import { PromptDock } from './prompt-dock.ts'
+import { DOOR_ACTIONS, makeDoorRunner, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -74,16 +71,6 @@ const CSS = [
   '.dsh-chapters_forkAction:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
   '.dsh-chapters_forkAction:disabled{cursor:default;opacity:.4}',
   '.dsh-chapters_forkNote{color:var(--dsw-alias-label-tertiary);padding-left:4px;font-size:13px;line-height:20px}',
-  // #71 the prompt ghost chip — the overlay anchor is the composer card's top band
-  // (`inset: 0 0 auto; height: 0`), the same hole the trigger menu pops from. The
-  // chip floats there, placeholder-caption palette, click-to-accept; the Right-arrow
-  // path needs no pixels at all. Fails open: worst case (host restyles the card) it
-  // reads as a slightly misplaced suggestion, never broken chrome.
-  '.dsh-chapters_ghostWrap{position:absolute;top:2px;left:14px;right:14px;display:flex;justify-content:flex-start;pointer-events:none;z-index:1}',
-  '.dsh-chapters_ghost{pointer-events:auto;display:inline-flex;align-items:center;gap:6px;max-width:min(70%,560px);padding:2px 10px;border:none;border-radius:12px;cursor:pointer;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-caption);font-size:12px;line-height:18px}',
-  '.dsh-chapters_ghost:hover{color:var(--dsw-alias-label-secondary)}',
-  '.dsh-chapters_ghostText{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}',
-  '.dsh-chapters_ghostGlyph{flex:none;font-weight:600}',
   'button[class*="_action"][aria-label="Branch into a new conversation"],button[class*="_action"][aria-label="\u5728\u65b0\u5bf9\u8bdd\u4e2d\u5206\u652f"]{display:none !important}',
 ].join('\n')
 const CSS_TAG_ID = 'dsh-chapters/assistant-action.css'
@@ -134,130 +121,6 @@ function makeDoorAction(door: DoorAction) {
   }
 }
 
-/**
- * The ghost chrome (#71): standard session hooks in, pure decisions out. It
- * holds NO logic — visibility, gestures, and the wire live in prompt-ghost.ts;
- * this component only binds those to React and the host Tooltip.
- */
-interface GhostProps {
-  sessionId: string
-  useInput: (sel: (s: { draft: string; attachmentIds: readonly unknown[] }) => unknown) => unknown
-  useSession: (sel: (s: { running?: boolean | null }) => unknown) => unknown
-  inputActions?: { setDraft(text: string): void } | undefined
-  fetchSuggestion: () => Promise<GhostFetchResult>
-  fetchLabel: () => Promise<string | null>
-}
-
-function makeGhostView() {
-  return function ChaptersPromptGhost(props: GhostProps) {
-    const snap = props.useInput((s) => s) as { draft: string; attachmentIds: readonly unknown[] } | undefined
-    const running = (props.useSession((s) => s.running) as boolean | null | undefined) ?? false
-    const draft = snap?.draft ?? ''
-    const hasAttachments = (snap?.attachmentIds.length ?? 0) > 0
-    const [state, setState] = useState<{ phase: GhostPhase; boundary: number }>({ phase: 'idle', boundary: 0 })
-    const [suggestion, setSuggestion] = useState<GhostSuggestion | null>(null)
-    const [model, setModel] = useState<string | null>(null)
-    // #79: the label answer is what tells this component whether the feature exists at all.
-    // Until it arrives, nothing is fetched; when it says OFF, nothing is EVER fetched. Before
-    // this, an idle edge pulled `/chapters-prompt suggest` on every boot and the server had to
-    // refuse it — visible in the durable log as `prompt suggestions are off` command errors in
-    // sessions that never enabled the feature.
-    const [labelKnown, setLabelKnown] = useState(false)
-    const alive = useRef(true)
-    useEffect(() => () => { alive.current = false }, [])
-    const dispatch = useCallback((ev: GhostEvent) => { setState((s) => ghostReducer(s, ev)) }, [])
-
-    // The model label is a display fact: fetch once per mount, absence tolerated.
-    // #79: the dep array used to be `[props]`, and React hands a NEW props object every render
-    // — with this component subscribed to the whole input store, that meant a durable
-    // `/chapters-prompt model` command per keystroke (measured: 4–26 command pairs per session,
-    // on boots where the feature is OFF and the correct number is zero). The callback is read
-    // through a ref so the mount-scoped guard cannot be defeated by an unstable identity.
-    const fetchLabelRef = useRef(props.fetchLabel)
-    fetchLabelRef.current = props.fetchLabel
-    const labelFetched = useRef(false)
-    useEffect(() => {
-      if (labelFetched.current) return
-      labelFetched.current = true
-      void fetchLabelRef.current().then((m) => {
-        if (!alive.current) return
-        setModel(m)
-        setLabelKnown(true)
-      })
-    }, [])
-
-    // Idle edge: the first settled render and every running true→false transition
-    // open a new boundary (the host-side cache watermark does the token economics;
-    // this only decides WHEN to ask).
-    const prevRunning = useRef<boolean | null>(null)
-    useEffect(() => {
-      const first = prevRunning.current === null
-      const edge = !running && (first || prevRunning.current === true)
-      prevRunning.current = running
-      if (edge) dispatch({ type: 'idle-edge' })
-    }, [running, dispatch])
-
-    // One fetch per boundary, while idle. A late answer cannot resurrect an
-    // accepted/dismissed chip — the reducer owns that race.
-    const fetchedFor = useRef(-1)
-    const { phase, boundary } = state
-    useEffect(() => {
-      if (!labelKnown || model === null) return
-      if (phase !== 'idle' || fetchedFor.current === boundary) return
-      fetchedFor.current = boundary
-      void props.fetchSuggestion().then((r) => {
-        if (!alive.current) return
-        setSuggestion(r.ok ? { text: r.text, model: model !== null ? model : undefined } : null)
-        dispatch({ type: 'fetched', ok: r.ok })
-      })
-    }, [phase, boundary, props, dispatch, labelKnown, model])
-
-    const accept = useCallback(() => {
-      if (suggestion === null) return
-      props.inputActions?.setDraft(suggestion.text)
-      dispatch({ type: 'accept' })
-    }, [suggestion, props, dispatch])
-
-    // The gesture: ArrowRight accepts, Esc dismisses — ONLY while the chip is
-    // visible, ONLY for events whose target is the composer editor itself
-    // (`data-composer-input`), attached at capture because the host keymap never
-    // claims ArrowRight and Escape-with-no-menu passes. The listener detaches
-    // with visibility, so a hidden ghost cannot eat a keystroke.
-    const visible = shouldShowGhost(state.phase, running, draft, hasAttachments, suggestion)
-    useEffect(() => {
-      if (!visible) return
-      const onKey = (event: KeyboardEvent) => {
-        const action = ghostKeyAction(event.key)
-        if (action === null) return
-        const target = event.target as HTMLElement | null
-        if (target === null || typeof target.closest !== 'function' || target.closest('[data-composer-input]') === null) return
-        event.preventDefault()
-        event.stopPropagation()
-        if (action === 'accept') accept()
-        else dispatch({ type: 'dismiss' })
-      }
-      document.addEventListener('keydown', onKey, true)
-      return () => { document.removeEventListener('keydown', onKey, true) }
-    }, [visible, accept, dispatch])
-
-    if (!visible || suggestion === null) return null
-    const tip = `next step suggested${model !== null ? ` by ${model}` : ''} — → or click puts it in the draft, Esc dismisses`
-    return h('span', { className: 'dsh-chapters_ghostWrap' },
-      h(Tooltip, {
-        label: tip,
-        side: 'top' as const,
-        children: h('button', {
-          type: 'button',
-          className: 'dsh-chapters_ghost',
-          'aria-label': 'Accept the suggested next prompt',
-          onClick: accept,
-        },
-          h('span', { className: 'dsh-chapters_ghostGlyph', 'aria-hidden': 'true' }, '→'),
-          h('span', { className: 'dsh-chapters_ghostText' }, suggestion.text)) as ReactElement<Record<string, unknown>>,
-      }))
-  }
-}
-
 export function apply(ctx: Ctx): void {
   injectStyles()
   const slots = ctx.slots
@@ -302,20 +165,16 @@ export function apply(ctx: Ctx): void {
     order: door.order,
     inject: (sessionId: string) => ({ run: () => run(sessionId) }),
   }, component)))
-  // #71: the ghost row. ONE component identity (built here, not per slot
-  // re-inject), ONE wire body (prompt-ghost.ts), standard session hooks do the
-  // rest. Registration into a slot another package declares rides slots.inject,
-  // which waits for the declaration — the documented cross-package pattern.
-  const ghostView = makeGhostView()
-  const fetchSuggestion = makePromptFetcher(remote)
-  const fetchLabel = makeModelLabelFetcher(remote)
-  slots.inject('conversation.input.overlay', () => slots.register({
-    name: 'conversation.input.overlay',
-    id: 'chapters-prompt-ghost',
-    order: 12,
+  slots.inject('conversation.input.dock', () => slots.register({
+    name: 'conversation.input.dock',
+    id: 'chapters-prompt',
+    // Under every other dock entry and directly above the composer card: todo 0, goal 10, queue 20, and the
+    // host sorts ascending by priority then order (measured in dsh-client-ui-slots).
+    order: 30,
     inject: (sessionId: string) => ({
-      fetchSuggestion: () => fetchSuggestion(sessionId),
-      fetchLabel: () => fetchLabel(sessionId),
+      // The bar is a mouth for the command plane, and the ONE wire body in `doors.ts` carries it: a plugin has
+      // no declarable RPC namespace, so this pull transport is why the bar is push-shaped and pull-fed.
+      exec: (line: string) => runCommandText(remote, sessionId, line),
     }),
-  }, ghostView))
+  }, PromptDock))
 }

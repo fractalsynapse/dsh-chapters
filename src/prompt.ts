@@ -29,7 +29,26 @@ export const PROMPT_SETTING_KEY = 'prompt.model'
 
 export interface PromptRoute { provider: string; model: string }
 
-export interface PromptSuggestionResult { ok: boolean; text: string }
+/**
+ * An offer, or a refusal. `quiet: true` marks the refusals that are NOT news — "there is nothing to recommend
+ * yet" and "suggestions are off" — so a caller can tell silence from failure (#113: the first thing the
+ * feature did on a fresh thread was shout). Genuine failures (no route, assembly, the model call) leave
+ * `quiet` falsy so they stay visible.
+ *
+ * WHY THIS IS NOT WIRED INTO `/chapters-prompt suggest` yet: the composer ghost obtains its suggestion by
+ * EXECUTING that same command over the client remote (`src/client/prompt-ghost.ts:61-65`) and treats
+ * `kind === 'success'` with non-empty text as AN OFFER. So softening the command's `kind` would render
+ * "no suggestion — nothing to recommend yet" as ghost text: a new bug, worse than the one it fixes. The
+ * command result carries no payload slot for this distinction, and the ghost's own guard
+ * (`shouldShowGhost`) has nothing to key on. Fixing the silence properly needs one of: a structured field on
+ * the command result the client may read, the ghost calling the surface through its own seam instead of a
+ * human-facing command, or the refusal text being machine-tagged. Decided deliberately, not by prose-prefix
+ * matching — see #113.
+ */
+export interface PromptSuggestionResult { ok: boolean; text: string; /** 'nothing to recommend' when quiet; otherwise what went wrong — the bar shows it (#61). */ quiet?: boolean; reason?: string }
+
+/** What the surface will and won't accept, for a caller that must REPORT it (the command block, #113). */
+export interface PromptLimits { maxChars: number; contextChars: number }
 
 export interface PromptConfig {
   /** config default for the model; '' ⇒ off unless a stored override says otherwise. */
@@ -58,7 +77,7 @@ export interface PromptDeps {
 
 /** A live session as the command hands it over: id, an optional title, and the
  *  surface events (what the working model sees — the same view the defining model reads). */
-export interface SuggestSession { id: string; title?: string | undefined; events: SessionEventLike[] }
+export interface SuggestSession { id: string; title?: string | undefined; events: SessionEventLike[]; /** #113: when a goal governs the session, the constraint on the next step — see `goalDirectiveOf`. Text, not a goal object: goal semantics stay in one module. */ goalDirective?: string | undefined }
 
 /** The surface the host command and `/chapters-status` speak to. */
 export interface PromptSurface {
@@ -66,6 +85,10 @@ export interface PromptSurface {
   effective(): { spec: string; source: 'override' | 'config' | 'unset' }
   setModel(spec: string | null): Promise<void>
   suggest(session: SuggestSession): Promise<PromptSuggestionResult>
+  /** #113: the Suggested Next Step bar's server-side access — the row plus the process-local loop flags. */
+  bar?: import('./prompt-state.ts').PromptBarAccess
+  /** the configured caps, so an output can state the number it validated against */
+  limits(): PromptLimits
   /** One line for /chapters-status — ON names the model, OFF names the command. */
   statusLine(): string
 }
@@ -117,6 +140,8 @@ export function tailFromEvents(events: SessionEventLike[]): { role: 'user' | 'as
 }
 
 export interface SuggestFacts {
+  /** #113: the active goal's constraint on the next step, already worded. Absent ⇒ no goal block. */
+  goalDirective?: string | undefined
   title?: string | undefined
   chapters: { number: number; title: string; summary: string }[]
   tail: { role: 'user' | 'assistant'; text: string }[]
@@ -141,11 +166,17 @@ export function buildSuggestInput(facts: SuggestFacts, capChars: number, maxChar
   const perMessage = (t: string) => (t.length > msgCap ? `${t.slice(0, msgCap - 1)}…` : t)
   const render = (announce: string): string => {
     const head = `You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.`
-    const rules = `Write the ONE next prompt the human should send. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt.`
+    const rules = `Write the ONE next prompt the human should send. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt. If it changes the standing objective, prefix it with GOAL: (the human sends those; autorun will not). Do not use the prefix for an ordinary next step.`
     const parts = [
       head,
       '',
       `## Session${facts.title !== undefined && facts.title !== '' ? `: ${facts.title}` : ''}`,
+      // #113: the goal is stated BEFORE the history, because it is the thing that decides whether a candidate
+      // next step counts as progress. A suggestion that ignores an active goal is noise, and the maintainer's
+      // rule is that the two compose — so the constraint is not a footnote after the tail.
+      ...(facts.goalDirective !== undefined && facts.goalDirective !== ''
+        ? ['', facts.goalDirective, '']
+        : []),
       '',
       chapters.length > 0 ? '## Where it has been (chapters)' : '## Where it has been (no chapters yet)',
       ...chapters.map((c) => `${c.number}. ${c.title} — ${c.summary}`),
@@ -171,7 +202,14 @@ export function buildSuggestInput(facts: SuggestFacts, capChars: number, maxChar
     if (tail.length > 1) { tail.shift(); droppedTail += 1; continue }
     if (msgCap > 40) { msgCap = Math.max(40, Math.floor(msgCap / 2)); continue }
     if (tail.length === 1) { tail = []; droppedTail += 1; continue }
-    return input
+    // Every compressible part is gone and the input is STILL over cap: the fixed frame (head + rules +
+    // section scaffolding) alone exceeds `promptContextChars`. That was previously returned in silence,
+    // which is the #61 class exactly — the code knows, and says nothing. It cannot be truncated (invariant:
+    // refuse or announce, never clip), so it announces what happened and how to fix it. Surfaced by my own
+    // added rules text, which is how I found it: a longer frame made a tight fixture impossible to fit.
+    return input.length > capChars
+      ? `${input}\n(frame alone exceeds the ${String(capChars)}-char budget by ${String(input.length - capChars)} chars — raise promptContextChars; nothing was truncated)`
+      : input
   }
 }
 
@@ -201,7 +239,7 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
   const cache = new Map<string, { text: string; seq: number }>()
   const inflight = new Map<string, Promise<PromptSuggestionResult>>()
 
-  const refuse = (reason: string): PromptSuggestionResult => ({ ok: false, text: reason })
+  const refuse = (reason: string, quiet = false): PromptSuggestionResult => ({ ok: false, text: reason, ...(quiet ? { quiet: true } : {}) })
 
   const effective = (): { spec: string; source: 'override' | 'config' | 'unset' } =>
     effectivePromptSpec(deps.getSetting(PROMPT_SETTING_KEY), deps.config.model)
@@ -251,20 +289,27 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
 
     async suggest(session) {
       const { spec } = effective()
-      if (spec === '') return refuse('prompt suggestions are off — enable with /chapters-prompt model <provider/model>')
+      if (spec === '') return refuse('prompt suggestions are off — enable with /chapters-prompt model <provider/model>', true)
       const events = session.events
-      if (events.length === 0) return refuse('nothing to recommend yet — the session has no surface events')
-      const seq = events[events.length - 1]!.seq
+      if (events.length === 0) return refuse('nothing to recommend yet — the session has no surface events', true)
+      // #113: the cache key is the COMPLETED TURN, not the last surface event. A turn is many events — every
+      // step appends one — so an event-scoped key missed on each step and asked the model again, which is how
+      // one turn produced three different suggestions for the maintainer. Inside a turn the human sees one
+      // stable offer; a new turn is a new question.
+      let turnSeq = -1
+      for (const ev of events) { if (ev.type === 'turn/end' && ev.seq > turnSeq) turnSeq = ev.seq }
       const tail = tailFromEvents(events)
-      if (!tail.some((m) => m.role === 'assistant')) return refuse('nothing to recommend yet — no completed assistant turn')
+      if (!tail.some((m) => m.role === 'assistant')) return refuse('nothing to recommend yet — no completed assistant turn', true)
       const fresh = cache.get(session.id)
-      if (fresh !== undefined && fresh.seq === seq) return { ok: true, text: fresh.text }
+      if (fresh !== undefined && fresh.seq === turnSeq) return { ok: true, text: fresh.text }
       const pending = inflight.get(session.id)
       if (pending !== undefined) return await pending
-      const job = run(session, seq).finally(() => { inflight.delete(session.id) })
+      const job = run(session, turnSeq).finally(() => { inflight.delete(session.id) })
       inflight.set(session.id, job)
       return await job
     },
+
+    limits: () => ({ maxChars: deps.config.maxChars, contextChars: deps.config.contextChars }),
 
     statusLine() {
       const { spec, source } = effective()

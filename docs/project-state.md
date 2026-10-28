@@ -321,3 +321,186 @@ being edited from is solved — see [docs/development.md](docs/development.md).
 
 Then [docs/contract.md](docs/contract.md) for how to declare things, and
 [docs/verify.md](docs/verify.md) before claiming any step passes.
+
+## Round: the bar renders, and the chain went green locally (2026-10-26/27, host 0.2.0-rc.2)
+
+Measured, in the order the evidence arrived:
+
+- **`prompt` and `prompt-off` pass in Chromium**, in record and in strict replay: the docked row mounts above
+  the composer at order 30, shows `Analyzing`/the offer, expands, drafts-or-explains, and Run reaches the
+  durable log as a user-role message. 10-project chain `E2E_MODEL=replay npm run test:e2e` → **EXIT=0**
+  (`suite` 4 passed 39.8s, `heavy` 1.8m, `arrival`, `enrich`, `fanout`, `rules`, `fork`, `plans`, `prompt`
+  4 passed, `prompt-off`). `coverage:e2e` → **EXIT=0** on the same build.
+- **Four causes, all found by measurement after a wrong theory each time.** (1) The tape proxy joined
+  `…/compatible-mode/v1` + `/v1/chat/completions` into `/v1/v1/…`, so nine legs had no assistant row at all.
+  (2) `off` meant disabled, empty, and broken at once; `idle` split them apart. (3) A per-turn
+  `Elapsed since the preceding model-visible message: …` line was unmasked, so replay diverged from record by
+  one character of punctuation. (4) `prompt`'s failure was a React **#310 hook-order crash** — a hook I added
+  sat below the component's early `return null` — and it *looked* credential-dependent because the credential
+  changed when the row's visibility transitioned. The journal's silence (zero `MISS tape=prompt`) is what killed
+  that theory in front of the evidence.
+- **Rig honesty landed too:** a strict-replay `MISS` is now fatal for the leg that produced it, with a byte
+  baseline so it cannot blame another leg's history; the proxy falls back to an ephemeral port rather than
+  dying on an orphan; `applyRigEnv` and `rigEnv` became one derivation (mutation-proven); a missing profile
+  patch throws instead of being skipped; the chain-coverage row is mutation-proven and caught
+  `--project=prompt-off` substring-matching `--project=prompt`.
+- **Still open, named not smoothed:** CI's acceptance job is red while the local chain is green and its
+  annotation carries no verdict lines (repro running); Autorun's idle edge is **unwired** — `useSessionStatus`
+  is documented in the dock's prop list but calling it failed twice, so the gate keeps `running` undefined and
+  Autorun says it is unavailable, which means objective item 3's "Autorun displaces the goal" pixel is not yet
+  shown and item 4 remains unit-covered only; and the `prompt` tape is 546 entries / 12 MB, needing a cap.
+
+### 2026-10-27 — the three bullets above are now superseded, item by item
+
+- **Autorun's idle edge is wired, and the browser says so.** The dock was being handed `useSessionStatus` — a
+  `SnapshotSelectorHook`, so calling it with a session id made the host use a string as a selector and it threw
+  `TypeError: l is not a function`. The signal the legs needed was on a different prop all along: `useSession`'s
+  snapshot carries `running`. Wired through an identity selector folded by `deriveRunning` (unknown ≠ idle), the
+  leg now asserts arm-ability and passes: `prompt` 4 passed in Chromium, model-free replay, twice (distill and
+  replay). **What is still not shown is the displacement pixel** — Autorun superseding a goal's continuation — so
+  objective item 3 remains partly open and item 4 is still unit-covered only.
+- **CI's acceptance annotation carries its verdict now,** and the failure it names is not a tape fault:
+  `MOUNT FAULT: the session registered none of the core tools every journey needs — missing: bash, read, edit,
+  write (declared=44 registered=7 …)`. Root cause found by measurement, not argument: the booted profile's preset
+  names 28 `@deepseek-ai/*` plugin packages, none of which is a dependency of this repository, so a development
+  host resolved them out of `~/node_modules` and a CI runner resolved nothing and our preset silently pruned 21
+  tool rows — 34 tools here against 7 there, and message 0 is the tape key. `linkPinnedToolPackages()` now links
+  the pinned install into `node_modules/@deepseek-ai` **before** the host spawns (never replacing what the repo
+  already installs), and the CI-shaped clone measured `tools=7 / chars=2880` → `tools=34 / chars=7378`. Provisioning
+  bubblewrap and lifting the AppArmor userns restriction were tried first and are recorded as NOT the cause, each
+  refuted by the runner's own artifact.
+- **The `prompt` tape is 14 entries, not 546.** The bloat was repeated distills accumulating in a directory the
+  ad-hoc loops never cleared; `distill-tapes.sh` clears per project, and the corpus is re-anchored on the capped
+  build with `CORPUS_HOST` stamped (`lib=fcd1e375bab82d3d`, `distilledAt = 2026-10-27`), strict chain green twice
+  locally at that point. Later the same day the pin-link change invalidated those captures and the corpus was
+  restored to the stamped state rather than left mixed — recorded here because "green" has to name the build it
+  belongs to.
+- **New, still open, and named:** #128 (our typecheck passes against harness types a release line behind the pin —
+  four sites pass `source.kind: 'plugin'`, which 0.2.0-rc.2 rejects; and `package.json` 0.2.0 vs lock 0.1.22), and
+  #129 (`globalSetup` boots one server from the setup process's env while Playwright applies project env to
+  workers, so a multi-project run shares a boot and a home; `scripts/chain-replay.sh` now runs one boot per
+  journey, and tightening session discovery to the preferred workspace fixed `prompt`'s `identity mismatch`).
+
+### 2026-10-28 — two product defects closed, and acceptance narrowed to one coupling
+
+- **#131 — artifacts were unreachable.** Arrival-time deferral was applied to `chapters_artifact`'s own output, so
+  asking to read a stored blob returned *another* pointer to another blob. Found in the leg's durable log (20 tool
+  calls, 17 erroring/looping) after three of my own wrong diagnoses (trigger margin, aux turn, haystack size).
+  Exempting artifact answers fixed two legs at once: `arrival` 8 entries and `fanout` 41 captured green, each
+  replaying green alone. Filed with repro; credit matters — both looked like model flakiness for a day.
+- **#113 — the Autorun button refused its own click.** The dock dispatched local state and then `refresh()` re-read
+  the server and flipped the label back; `off` two lines below sent its command correctly, which is how the
+  asymmetry showed. Fixed, guarded by `prompt-dock-autorun-write.test.ts` (red first; the property form survived
+  my `[^}]*` mistake). **Displacement is now observed in Chromium**: with a goal armed the host offers `Pause
+  goal`; clicking Autorun leaves `Autorun off` in place, the host flips to `Resume goal`, `Pause goal` disappears.
+  Recorded under the real provider, replayed model-free twice at 5 passed. That closes item (3)'s last sub-claim
+  and gives item (4) a browser-level half — goal-off restoring a suggestion is still unit-only and still unclaimed.
+- **#129's remaining acceptance gap is one coupling, named.** `#arrive` runs only at the head of the relief entry
+  points, so `auto: false` disables deferral with relief, and leaving it on makes deferral depend on when a
+  threshold crosses on that machine's header bytes. Every remaining CI divergence has the same fingerprint: a
+  checkpoint notice where the other machine has a plain message, or a history one message longer. `heavy` and
+  `fanout` are that, not separate mysteries. The clean fix conflicts with "no second automatic engine timing of our
+  own", so #132 carries four options with costs and a recommendation; the decision is the maintainer's.
+- **Numbers on this branch right now:** plane 1,114/1,114 with 0 skipped; `typecheck` and `typecheck:client` 0;
+  `typecheck:e2e` at its 68 baseline; full one-boot-per-journey chain green ten-for-ten twice (`AR=0`, `A2K=0`);
+  fresh `coverage:e2e` 78.31% (`CVA=0`), stamped `lib=081a726aca738d02`-era corpus. CI: deterministic job green,
+  acceptance red on `heavy`/`fanout` after `arrival` and `prompt` were fixed — four legs to two, both locally and on
+  the runner. #127 unmerged behind that gate; `0.2.2-dev.1` unpublished.
+- **Corrections I made to myself in the open** (each with its evidence in git): the `noAuxModel` "inert key" claim
+  (it is a rig alias for `auto`/`elicitedPlot`, which the host does read), the fold that broke a green leg, the
+  pin attribution that the pre-change logs disproved, and the `limit 5000` prompt that made a leg depend on a
+  rejected call — the last one was a real bug and its fix is what took `arrival` off CI's failing list.
+
+### 2026-10-28 — the acceptance pipeline went green, and the branch is on staging
+
+**Run 40676609079**: deterministic ✅ · pinned-host preset-rows probe ✅ · **acceptance ✅ — ten legs `ok`, each on its own boot**: suite, heavy, arrival, enrich, fanout, rules, fork, plans, prompt, prompt-off. PR #127 squash-merged to `staging` as `45dd4ac`; #56 closes with it.
+
+What it took, in the order the layers came apart — each fixed by measurement, never by masking:
+
+1. **The proxy join** (`/v1/v1` → 404 → no assistant message) that had nine legs failing on provider wiring.
+2. **The runner assembled 7 tools where a dev host assembled 34** — 28 preset rows naming packages that are not this
+   repo's dependencies, pruned in silence. `linkPinnedToolPackages()` before spawn, plus the `MOUNT FAULT` abort that
+   replaced masking. Refuted along the way, with evidence: bubblewrap provisioning, AppArmor userns, credentials,
+   installed bytes, profile rows, config keys.
+3. **One boot served ten projects** — `globalSetup` boots from the setup process's environment while project `env`
+   reaches workers only. `npm run test:e2e:replay` is now one journey per boot, which is also how tapes are recorded.
+4. **#131, the artifact cycle** — `chapters_artifact` answers were themselves arrival-stubbed, so a stored blob
+   answered with a pointer to another blob and the store was unreachable at exactly the sizes it exists for. Two
+   legs' week-long "flakiness" was this one defect.
+5. **Turn count, not timing** — the last misses were legs whose journey length was the model's choice. Bounding them
+   (`fanout`: one decisive oversized read per child; `arrival`: one read plus ≤2 artifact queries; `heavy`: three named
+   600-line pages) is what made them portable, and bounding `heavy` correctly required learning that **the read tool
+   caps a call at 600 lines** — measured on both machines — which is what made the old fixture's marker pigeonhole work
+   and my first "three reads of 2000" bound unsatisfiable.
+
+Five claims I published and then retracted the same day, each caught by a test or by a byte rather than by
+reflection: the "nearest-prefix serving" matcher theory (`findReplay` requires equal length), the 38× title-call
+signal (a cumulative journal read as one run), the duplicate `<DSH-CHECKOUT>` blind (raw dumps diffed before
+normalizing), `noAuxModel` as an inert key (it is a rig alias for `auto`/`elicitedPlot`, which the host really
+reads), and the folding of injected instructions out of matching (it collapses positional prefixes and mis-serves
+turns — the row system refused it, and the honest fix was to stop injecting a development doc into acceptance).
+
+**Still open, unsoftened:** #126 (a dock cannot write the composer on 0.2.0-rc.2 — click-to-draft shows a refusal and
+Run submits), #128 (harness devDependencies lag the pinned runtime; 4 sites pass a retired `source.kind`), #130 (a
+boot hang when plot elicitation is off while relief declines — user-reachable from config), and the goal-off
+restores-a-normal-suggestion half of the interplay, which is unit-covered and **not** claimed from a browser.
+
+### 2026-10-28 (later) — the goal-off browser leg withdrawn after four failed captures; the claim returns to unit-only
+
+PR #136 is closed **unmerged** and the tree is byte-identical to the state CI proved green (spec back to the five
+merged tests, `prompt` tape back to 24 files, stamp `lib=b67e373defcad83a`, `corpus:check` agreeing; isolated replay
+`5 passed`, plane 1,115/1,115, `typecheck:e2e` 68 baseline).
+
+Four attempts at the goal-off leg, four different failure classes — recorded because each one is a general trap:
+
+1. `Clear goal` **button** after a turn → CI diverged at `msg32`: a `<goal_round>` where the capture had the human turn.
+2. `/goal clear` immediately, no turn between → CI diverged at `msg12`: runner `Round: 3/256`, capture `Round: 4/256`.
+3. Poll until a round appears, then act → still diverged. The structural reason I had missed: **a goal round is itself
+   a turn, and every turn ends**, so rounds self-sustain — the resulting tape held `Round: 12/256`. Click timing
+   cannot race a loop that schedules itself, and there is no rig knob (the human `/goal` takes no round argument;
+   `goal-round-driver` has no config block).
+4. Bound it with the product's own rule — instruct the model to call `create_goal(max_goal_rounds: 1)` and wait for
+   the quiesced `Round: 1/1` → capture failed at `the host goal bar appears once a goal exists`: the model answered in
+   prose instead of invoking the tool.
+
+Attempt 4 is the one that settles it. A browser leg whose *setup* requires a small model to cooperate is encoding luck
+into the tape, which is exactly what #132 and #135 keep charging this corpus to stop doing — so the leg does not ship
+until its setup is deterministic without asking the model. What survives the exercise is a rig rule worth more than the
+test (#135's entry in the rig list): **a tape may carry a background mechanism's output only when that mechanism has a
+state it cannot leave.**
+
+Site §28 and the interface lock are unchanged, because neither ever claimed the goal-off pixel; AGENTS.md now states
+the half that is unit-covered and is not browser-claimed. `heavy`'s 600-line page fix, the prefix-symmetry fix and the
+rest stay as merged — they are green on the runner.
+
+### 2026-10-28 (evening) — the goal claims are browser-verified, and the corpus no longer records latency
+
+**What changed in the claim.** Both halves of the goal/suggestion interplay are now observed in Chromium: arming the
+bar's Autorun takes a session's next turn away from an active goal (`Pause goal` → `Resume goal`, Pause disappears), and
+after `/goal clear` the bar still produces a real suggestion on the next turn (#135's second half, which had been
+unit-only). **The class of that evidence is the finding, so it is stated with the claim:** both run in
+`tests/e2e/prompt-goal-live.spec.ts` against the real provider under a 420 s wall-clock ceiling (**2 passed**,
+`var/goallive-2.log`), and the model-free acceptance job deliberately does not cover them — `chain-replay.sh` omits the
+project and the spec skips under `E2E_MODEL === 'replay'` with the reason in the message.
+
+**Why they cannot be tape legs.** A goal round is a turn and every turn ends, so an armed goal drives itself; replay
+answers instantly, so the round count tracks machine speed. Two docs-only pushes proved the merged leg was agreeing by
+luck (runs 40697174778, 40706037817 — nine legs `ok`, `prompt` FAILED, `storedCandidates: []`, runner at
+`Round: 1/256`…`Round: 4/256`). I then built the bound the source offered — `ctx.goals.create(agent, { objective,
+maxGoalRounds: 1 })`, plugin-callable, as upstream's own `seed-goal.ts` fixture uses — and it *worked* (17-entry tape,
+`Round: 1/`, no second round) while still being useless: spending a budget calls `ctx.goals.block(…, 'round-limit')`
+and `GoalBar.tsx:85-86` renders no strip for a blocked goal. **An armed goal has no rest state at any budget** — 256
+floods, 1 ends it. Recorded in `docs/contract.md` with the line numbers; #138 restated as that gap.
+
+**Numbers after the change.** `prompt` re-anchored to **14 entries, zero round markers**; replayed `4 passed` twice;
+one full `npm run test:e2e:replay` **ten-for-ten (`CT=0`)**; fresh `coverage:e2e` **77.85%** with the CI plane at
+**93.41 / 85.25 / 90.69** against the 85/85/85 gate; plane 1,118/1,118, `typecheck` 0, `typecheck:client` 0.
+
+**Two of my own bugs, both caught by measurement rather than reflection.** (a) The new spec landed inside `suite`'s
+boot — `suite` is the one project defined by `testIgnore`, so any new file joins it; the suite tape's second request is
+the session-title call over those human messages, and it stopped matching (`MISS tape=suite messages=2 divergeAt=msg1`,
+staging `4 passed` vs mine failing, docs and pins ruled out by reverting them). Fixed by ignoring the file, with the
+selector audit in the comment. (b) My skip guard compared `E2E_TAPE` — the *project name* — to `'replay'`, so it never
+fired; the rig's signal is `E2E_MODEL === 'replay'` (`globalSetup.ts:52`). (c) The `e2e-typecheck-ratchet` then refused
+my +1 error, and instead of raising the ceiling I fixed the cause: one documented cast at the projects boundary replaced
+eleven identical `TS2769`s and the baseline **fell 68 → 59**, which is the direction the ratchet asks for.

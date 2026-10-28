@@ -810,3 +810,125 @@ Rules that follow, in the order they bite:
    bytes change", generalized: anything that changes what the plugin *sends*.
 4. If a green replay is ever obtained on a corpus whose legs have different build stamps, treat it as
    unexplained rather than as evidence.
+
+## Harness-native acceptance (`E2E_PROVIDER=harness`)
+
+The rig used to have exactly one model route: a tracked profile block pinning `local` at
+`http://localhost:8080/v1`, because a GitHub runner has no credentials and can start a llama.cpp server. On
+this machine that made acceptance a second-class citizen — the model was almost never up, live legs
+`test.skip`-ed themselves (which reads like a pass), and re-distilling meant standing up an inference server
+before you could look at UI.
+
+`E2E_PROVIDER=harness` takes the route from **the profile this host is actually running** — read from
+`$DSH_HOME/profiles/web/cordis.patch.yml` (override with `E2E_AMBIENT_PROFILE`) — and the credential from, in
+order:
+
+1. **the parent environment**, `QWEN_TOKEN_PLAN_API_KEY` — the same way this harness instance got it. When you
+   run a leg from your own shell, this is the only step.
+2. `.dshdev-local/e2e.env`, untracked and gitignored, parsed **without executing it** (`readEnvFile` — values
+   are data, never a shell).
+3. otherwise the boot **refuses**, naming the remedy. No fallback to `local`, no silent skip, no guessed route.
+
+What it deliberately keeps: the **pinned 32K stress window**. `harnessProviderPatch` rewrites
+`contextWindow` rather than inheriting the endpoint's 196K, because the whole pressure/cache journey exists to
+observe `context-overflow` — a hosted window would swallow a 33K prompt and the leg would measure a boot where
+nothing is wrong.
+
+Commands (all of them print one `[provider] …` line naming provider, model, window and where the key came
+from, with the credential's length but never its value):
+
+| command | mode | what it's for |
+|---|---|---|
+| `npm run e2e:harness:live` | live | a real look at the UI on the model the product runs against |
+| `npm run e2e:harness:heal` | replay + fallback | tape hits replay, **misses go live and are appended** — a self-healing pass instead of a full re-record (the switch existed in code but was never surfaced) |
+| `npm run corpus:heal -- --project=<leg>` | replay + fallback | one leg, when you know which one drifted |
+| `npm run corpus:record -- --project=<leg>` | record | re-distill one leg after a deliberate product-prompt change |
+
+Why this is more than convenience: the `#90 REASONING-BLIND` entry in the tape's blind list masks
+`reasoning_content` shape differences. Tapes distilled through a different provider than the product uses will
+always need masks; distilling through the product's own route removes a class of divergence instead of hiding
+it. Stated as strong inference from the measurement, to be confirmed the first time a harness-native
+re-distill stops needing that mask.
+
+Note on what an agent shell can see: the harness **withholds** `QWEN_TOKEN_PLAN_API_KEY` from tool processes
+(measured — the harness's own process env has it, the agent's child shell does not). So a distill or live run
+from inside an agent session needs the `.dshdev-local/e2e.env` path, or the operator runs it. Reading the key
+out of the parent process's environment is technically possible for the same user and is deliberately **not**
+done: the withholding looks intentional, and reaching around it to move a credential into a tool shell would be
+exactly the kind of quiet workaround this project documents itself out of.
+
+## The provider identity is part of the tape key
+
+A tape is matched on the **request**, and the request's first message is the composed system header — which
+states the provider and model. So a corpus distilled with one provider row cannot replay under another, and the
+failure does not look like configuration: it looks like a corrupt tape, because matching dies at
+`commonPrefix=0` and every leg then reports its own downstream symptom (no assistant message, no fork door, no
+plan card, a post-compaction turn that never answers).
+
+Measured the hard way on 2026-10-27: re-distilling the corpus with `E2E_PROVIDER=harness` while hosted CI
+replays in the tracked-local shape produced `MISS tape=suite … tied=[every entry]` on CI and a green chain
+locally — the same command, two different headers. The fix is placement, not normalization:
+
+- **the host profile stays on the fixture provider** (`local/qwen3.8-flash-next`) in record and replay, so the
+  header is identical on every machine and in CI;
+- **the real endpoint lives in the tape proxy** — `E2E_UPSTREAM` derived from the installed provider module and
+  `E2E_UPSTREAM_MODEL` translating the fixture name — so the model answering is the maintainer's while the
+  bytes being recorded are the rig's;
+- `E2E_HARNESS_PROFILE=1` restores the profile rewrite for **live** runs, where there is no tape to stay
+  identical with and the point is genuinely to exercise the ambient provider.
+
+Two consequences worth holding onto: the `reasoning`/`retryPolicy` fields of the synthesized row change product
+behavior (`maxRetries: 0` versus the host default), so "same model, different row" is not a neutral edit; and
+a re-distill must run the leg to **green** — a tape distilled by a failing journey is an incomplete capture, and
+replaying it back as a miss blames the artifact for a run that never finished.
+
+## Two rig rules from the 2026-10-27 mount chase
+
+**A boot must resolve what its profile declares, before the host starts.** The booted profile's preset names 28
+`@deepseek-ai/*` plugin packages, and none of them is a dependency of this repository. On a development host they
+resolve out of `~/node_modules`; on a CI runner they resolve nowhere, `pruneUnresolvableRows()` drops them
+without complaint, and the session composes a 7-tool surface where a laptop gets 34. Because the system header
+is message 0 of every request — the thing tapes match on — that asymmetry makes a locally recorded corpus
+unreplayable in CI, which is what every `commonPrefix=0` on this branch actually was. `linkPinnedToolPackages()`
+now symlinks the pinned install's packages into `node_modules/@deepseek-ai` **before** `spawn`, skipping anything
+the repo already provides (never replace a hoisted dependency with a symlink and risk the build under test), and
+`var/e2e-tool-links-<port>.log` records `rows/linked/skippedAlreadyPresent/missingFromPin` for every boot. The
+ordering is not ceremonial: linking after the URL line was measured to change nothing, because the host has
+already mounted by then.
+
+**Normalize, THEN diff.** Comparing two machines' RAW header dumps showed an 18-character gap — exactly the
+length of the two checkout paths — and produced a duplicate blind for a fold that already existed
+(`<DSH-CHECKOUT>`, `model-proxy.ts:159`). The #89 ordering row caught the collision the moment it shipped; the
+procedure error was mine and is the one to remember: run the text through `substituteAll` before concluding a
+fold is missing. One predicate per semantic decision, and a fold that already exists is not a missing fold.
+
+## A recorded journey must not depend on when the host compacts
+
+**Symptom that gives it away:** the acceptance run misses a *different set of legs* each time, while message 0 keeps
+matching. That is not an unblinded identity token and not a matcher bug. It means the two machines ran the same
+journey and both compacted — at different moments. A checkpoint rewrites the surface, so the same assistant turn
+lands at message index 6 here and index 2 there, and the surface is the tape key.
+
+**The rule:** a leg that is NOT testing the machinery pins `noAuxModel`. It is a rig-side alias, translated at
+profile-write time into the realm keys the engine really reads — `auto: false` + `elicitedPlot: false`,
+`tests/e2e/rig-preset-pin.ts:79`, declared at `src/engine.ts:287` — so the request sequence in the tape is the whole
+story regardless of how large a runner's header happens to be.
+
+**The exceptions are measured, not preferred:** `heavy`, `suite`, `arrival` and `fanout` stay unpinned, because
+pinning them deletes the behavior under test — a pinned `suite` never renders its fork door, a pinned `arrival`
+never gets its stub pair, a pinned `fanout` loses parent synthesis, and `heavy`'s journey *is* the pressure one. Same
+family as setting the arrival floor below the chunk size and calling the passing row a result. The drift row
+(`only the pressure journeys leave model-involving machinery enabled`, `tests/unit/rig-pins.test.ts`) names offenders
+in its failure text and asserts those four stay unpinned.
+
+**And the method trap I walked into, recorded so it costs the next reader nothing:** I searched `src/` for the string
+`noAuxModel`, found none, and concluded the switch was decorative — then shipped a "fix" folding a check into
+`overTrigger`, a local that is computed and dropped, plus a guard test asserting the plugin must contain the alias's
+literal name. Absence of a NAME in a source directory is not absence of an EFFECT: read what the rig writes into the
+profile it boots, not what it calls the field on the way in.
+
+**Why the transcript has to travel with the artifact:** this took three runs to see because the workspace-only
+artifact never contained the booted home's session logs. `scripts/chain-replay.sh` now copies each leg's
+`session.v4.jsonl.zstd` files and registry into `var/e2e-session-logs/<leg>-<port>` (six files, under 4 MB each) so
+the runner's own history sits next to the tape diffs and the misses. When a miss claims "the conversation had
+already taken a different shape", the answer is in that transcript — read it, don't theorize about it.

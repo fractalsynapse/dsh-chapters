@@ -27,7 +27,7 @@ import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
 import { appendChapters, reserve } from './registry.ts'
-import { acquireChapterStore, makeDomainStore } from './store.ts'
+import { acquireChapterStore, makeDomainStore, resolveStoreRoot} from './store.ts'
 import type { ChapterRecord } from './archive.ts'
 import { registerChaptersTools } from './tools.ts'
 import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLike } from './preset.ts'
@@ -36,6 +36,9 @@ import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { createPromptSurface, promptChaptersOf } from './prompt.ts'
+import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
+import { makePromptRoundRunner } from './prompt-runner.ts'
+import { goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
 import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } from './diag.ts'
@@ -171,6 +174,11 @@ export interface Config {
   promptContextChars: number
   /** #71: cap on the recommendation itself; over-cap ⇒ retry once ⇒ refuse (never truncate). */
   promptMaxChars: number
+  /** #113: how many turns an armed autorun may start before it stops and says so. Re-arming does NOT
+   * refresh it, so arming cannot become an infinite loop; the budget is per process, like the flag. */
+  promptMaxRounds: number
+  /** #117: cap on the printed `/chapters-repair` report, so one dry-run cannot emit 300 KB into a 32K window. */
+  repairReportMaxLines: number
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
    * scheme (treedx+ → TreeDX, anything else → git); an explicit value must
    * match the scheme or the link refuses (never a silent fallback). */
@@ -205,6 +213,10 @@ export const Config = Schema.object({
   artifactStoreRoot: Schema.string().default('.dsh-chapters'),
   // #85: pool-mirror root for rules/knowledge reads that produce model-visible text.
   knowledgeMirrorDir: Schema.string().default('.dsh-knowledge'),
+  // Lines of the chapter index a continuation notice lists. 0 = list every chapter (the historical behavior).
+  // A small cap keeps the notice's SIZE settled, which is what makes a leg parked on the compaction boundary
+  // reproducible as a tape; the omission is stated in the notice itself, never silent (#56).
+  noticeIndexCap: Schema.number().step(1).min(0).default(6),
   // #87: the newest human turn carried verbatim into a relief summary, capped.
   openRequestCarryMaxChars: Schema.number().step(1).min(200).default(4000),
   // #78 A: survivability switch, default on (docs/host-compaction-seam.md).
@@ -280,6 +292,9 @@ export const Config = Schema.object({
   promptModel: Schema.string().default(''),
   promptContextChars: Schema.number().default(4000),
   promptMaxChars: Schema.number().default(240),
+  promptMaxRounds: Schema.number().default(24),
+  /** #117: how many lines a `/chapters-repair` report may print. The finding COUNT always leads; */
+  repairReportMaxLines: Schema.number().default(60),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
   // 'treedx', validated at use — schemastery has no literal schema.
   knowledgeProvider: Schema.string().default('auto'),
@@ -377,7 +392,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       // armed on the scheduler, because session rules never travel (§7.5).
       onMinedRules: async ({ cwd, sessionId, chapterNumber, humanText, rules, max, autoActivate }) => {
         const res = captureMinedRules({
-          storeDir: join(cwd, config.artifactStoreRoot),
+          storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot),
           harnessId: config.harnessId,
           sessionId,
           records: store.rules(),
@@ -411,6 +426,20 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     // bare model name rides the same last-seen route enrichment uses, with the
     // persisted route as fallback — a fork-only flow that never compacted in
     // place still has a provider to route through after one tool call.
+    /** Pull the host's own failure text out of a `finish` chunk whose reason kind is `error`. */
+function hostStreamFailure(chunks: readonly string[]): string | null {
+  for (const raw of chunks) {
+    try {
+      const j = JSON.parse(raw) as { type?: string; reason?: { kind?: string; failure?: { message?: string } } }
+      if (j.type === 'finish' && j.reason?.kind === 'error') {
+        const msg = j.reason.failure?.message ?? 'the host reported an error without a message'
+        return `host llm.stream failed: ${msg.replace(/\s+/g, ' ').slice(0, 300)}`
+      }
+    } catch { /* truncated probe slice, not an error signal */ }
+  }
+  return null
+}
+
     const prompt = createPromptSurface({
       getSetting: (k) => store.getSetting(k),
       putSetting: (k, v) => store.putSetting(k, v),
@@ -431,16 +460,115 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         const llm = ctx.llm
         if (llm?.stream === undefined) throw new Error('llm.stream absent')
         const assembler = new BlockAssembler()
+        const seen: string[] = []
+        const lastChunk: string[] = []
         for await (const chunk of llm.stream({
           provider: route.provider, model: route.model,
           messages: [createUserMessage({ content: [{ type: 'text', text: input }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
           maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
-        })) assembler.push(chunk as never)
+        })) {
+          // Measured, not assumed: the fold below keeps only `type === 'text'` blocks, and the bar said
+          // "the model returned no text" on a route that returns text when called directly — so the shapes the
+          // host stream hands us are exactly what had to be seen.
+          lastChunk.push(JSON.stringify(chunk).slice(0, 120))
+          const c = chunk as { type?: string; text?: string; delta?: { text?: string }; content?: { type?: string } }
+          seen.push(`${String(c.type ?? '?')}:${String(c.content?.type ?? c.text ?? c.delta?.text ?? '').slice(0, 10)}`)
+          assembler.push(chunk as never)
+        }
+        // #61: the host already told us what went wrong, inside the stream. Before this, a provider with no
+        // adapter, a refused request, and an empty completion all arrived here as "the model returned no text"
+        // — the detected failure was thrown away and a stranger diagnosis took its place. Now the FIRST real
+        // failure is what the surface reports.
+        const failure = hostStreamFailure(lastChunk)
+        if (failure !== null) throw new Error(failure)
         return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
       },
       warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
     })
+    // #113: the Suggested Next Step bar's server-side state. ONE instance, built here, because it is the
+    // only place that has the store, the model switch, and the live agents at once — and a loop that starts
+    // real turns must not have two copies of "is it armed" to disagree about. `autorun` is process-local on
+    // purpose: like the host goal driver's activation, it starts disarmed and cannot resurrect itself after a
+    // restart, so an unattended loop is impossible by construction rather than by promise.
+    // ONE path from "run this suggestion" to a human-authored turn. Autorun calls it from the idle edge; the
+    // bar's Run calls it from the command plane. Two implementations of "run it" would be two behaviors, and
+    // only one of them is the one the human clicks.
+    const submitOffer = (sessionId: string, text: string): void => {
+      const agents = ctx.agents as unknown as { get?: (id: string) => { followup?: (message: unknown) => unknown } }
+      const agent = agents?.get?.(sessionId)
+      if (agent?.followup === undefined) throw new Error(`no live agent for ${String(sessionId)}`)
+      agent.followup(suggestPromptMessage(text, sessionId))
+    }
+    const promptLoop = makePromptLoop({
+      followup: submitOffer,
+      maxRounds: () => config.promptMaxRounds,
+      // The host's cooperative brake: `GoalService.disarm` stops the driver re-injecting rounds and changes
+      // NOTHING durable ("without changing durable goal phase or revision"), so the objective stays
+      // authoritative while exactly one loop — the one the human armed last — starts the next turn.
+      displaceGoal: (sessionId: string) => {
+        try {
+          const goals = (typeof ctx.get === 'function' ? ctx.get('goals') : undefined) as { disarm?: (agent: unknown) => unknown } | undefined
+          const agents = ctx.agents as unknown as { get?: (id: string) => unknown } | undefined
+          const agent = agents?.get?.(sessionId)
+          if (goals?.disarm === undefined || agent === undefined) return false
+          goals.disarm(agent)
+          return true
+        } catch { return false }
+      },
+      // The goal signal comes from the SERVICE, never folded from the log: `activation` is process-local by
+      // design (dsh-goal keeps it in a WeakMap), so the only honest read is the live GoalView. This is what
+      // lets the loop know when the driver owns the next turn.
+      goalSignal: (sessionId: string) => {
+        try {
+          const goals = (typeof ctx.get === 'function' ? ctx.get('goals') : undefined) as { get?: (agent: unknown) => { phase?: string; activation?: string; revision?: number } | undefined } | undefined
+          const agents = ctx.agents as unknown as { get?: (id: string) => unknown } | undefined
+          const agent = agents?.get?.(sessionId)
+          if (goals === undefined || agent === undefined) return null
+          const view = goals.get?.(agent)
+          if (view === undefined || typeof view.revision !== 'number') return null
+          const phase = view.phase === 'paused' ? 'paused' : view.phase === 'blocked' ? 'blocked' : view.phase === 'complete' ? 'complete' : 'active'
+          return { phase, activation: view.activation === 'armed' ? 'armed' : 'disarmed', revision: view.revision }
+        } catch { return null }
+      },
+      log: (m) => ctx.logger?.info?.(`dsh-chapters: ${m}`),
+      warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
+    })
+    // A narrow, explicit view of the registry row for the bar. The surrounding `store` handle is loosely
+    // typed here, and widening a host-facing type to make a call compile is the exact habit this repo has
+    // been bitten by (#58) — so the two verbs the bar needs are named, not assumed.
+    const promptRow = store as unknown as {
+      get(sessionId: string): Promise<{ promptSuggestion?: typeof noSuggestion }>
+      mutate(sessionId: string, fn: (row: never) => never): Promise<unknown>
+    }
+    const promptBar: PromptBarAccess = {
+      read: async (sessionId: string) => {
+        const status = (await promptRow.get(sessionId)).promptSuggestion ?? noSuggestion
+        const live = promptLoop.statusOf(sessionId)
+        return { ...status, ...live }
+      },
+      // #113: Run is a command, not a keystroke. The offer is read from the row the bar is displaying and
+      // injected as a human-authored follow-up — the same path autorun uses, so what the human clicks and what
+      // the loop arms cannot be two different behaviors. `no live agent` is the honest failure and reaches the
+      // bar as its reason.
+      runNow: async (sessionId: string) => {
+        const st = await promptBar.read(sessionId)
+        if (st.text === '' || st.status !== 'ready') return { ok: false, reason: 'there is no offer on screen to run' }
+        submitOffer(sessionId, st.text)
+        return { ok: true, text: st.text }
+      },
+      setAutorun: (sessionId: string, on: boolean) => promptLoop.setArmed(sessionId, on),
+      disarmHuman: (sessionId: string) => { promptLoop.disarmForHuman(sessionId) },
+      // `off` stops generation for the session without touching the model, so back-on is one action; `on`
+      // clears it and the NEXT completed turn offers again. Both write through mutate, never a snapshot.
+      setOff: async (sessionId: string) => {
+        promptLoop.setArmed(sessionId, false)
+        await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
+      },
+      setOn: async (sessionId: string) => {
+        await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
+      },
+    }
     const scheduler = createScheduler(store, domain, config, undefined, (cwd, ok) => {
       enrich.rememberCwd(cwd)
       if (ok) enrich.queue.onSyncDone('afterPush')
@@ -448,6 +576,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     registerChaptersTools(ctx as never, store, {
       artifactStoreRoot: config.artifactStoreRoot,
       chapterTokenTarget: config.chapterTokenTarget,
+      repairReportMaxLines: config.repairReportMaxLines,
       toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
       continuationBudgetRatio: config.continuationBudgetRatio,
       fallbackPreset: config.fallbackPreset,
@@ -486,7 +615,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       projectKeyOverride: config.projectKeyOverride,
       scheduler,
       enrich,
-      prompt,
+      prompt: { ...prompt, bar: promptBar },
       rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,
         storeRoot: config.artifactStoreRoot,
@@ -565,6 +694,60 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     // mid-step" rule is not engaged; a settled child's turns are all completed
     // by construction, and the anchor is its last `turn/end`.
     if (config.subagentAutoSave) {
+      // #113: one suggestion per completed turn, and a human prompt that suspends the loop. Registered
+      // beside the other turn/end doors rather than as a new timing of our own (AGENTS: no second automatic
+      // engine), and inert whenever the model is unset — the model IS the switch.
+      const promptRunner = makePromptRoundRunner({
+        enabled: () => prompt.effective().spec !== '',
+        eligible: (session) => (session as { header?: { origin?: string } }).header?.origin !== 'subagent',
+        store: store as unknown as Parameters<typeof makePromptRoundRunner>[0]['store'],
+        generate: async (session, turnSeq) => {
+          // The live session object carries the events; this is the same read the archive door uses, and it
+          // is payload-bearing. The GOAL is folded from those events so a suggestion cannot ignore the
+          // purpose it is supposed to advance — the maintainer's rule that the two compose.
+          void turnSeq
+          const events = [...((session as { snapshotEvents?: () => readonly unknown[] }).snapshotEvents?.() ?? [])] as import('./types.ts').SessionEventLike[]
+          const goal = readActiveGoal(events)
+          const r = await prompt.suggest({
+            id: session.id,
+            events,
+            goalDirective: goalDirectiveOf(goal),
+          })
+          // Built as an object with ONLY the keys that hold a value: `exactOptionalPropertyTypes` is on, so
+          // `quiet: undefined` is not the same as omitting `quiet`, and a spread that always writes the key
+          // would not compile — which is the right outcome, because the runner branches on presence.
+          if (r.ok) return { ok: true, text: r.text }
+          return { ok: false, reason: r.reason ?? r.text, ...(r.quiet === undefined ? {} : { quiet: r.quiet }) }
+        },
+        onReady: (sessionId, state) => {
+          // Fire only through the loop's own gate, against the LIVE goal signal: armed/idle/budget/one-per-offer
+          // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
+          promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
+        },
+        now: () => new Date().toISOString(),
+        // The rig's legs run in a throwaway home whose `ctx.logger` output is not retained, so the prompt
+        // plane's own narration is copied to stderr — where the boot's server log keeps it. Every "why did the
+        // bar not move" answer tonight depended on lines that were being thrown away (#61).
+        log: (m) => { console.error(`[chapters-prompt] ${m}`); ctx.logger?.info?.(`dsh-chapters: ${m}`) },
+        warn: (m) => { console.error(`[chapters-prompt] WARN ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
+      })
+      try {
+        ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
+          if (session?.id === undefined) return
+          if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id)
+          // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
+          // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
+          // captured by the boot's server log, so the answer survives the leg (#61).
+          if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
+          promptRunner(session as never, event as never)
+        }) as never)
+        console.error('[chapters-prompt] turn/end door armed')
+        ctx.logger?.info?.('dsh-chapters: suggested-next-step door armed — one offer per completed turn when a prompt model is set (state: /chapters-prompt state)')
+      } catch (error) {
+        console.error(`[chapters-prompt] turn/end door REFUSED: ${String((error as Error)?.message ?? error)}`)
+        ctx.logger?.warn?.(`dsh-chapters: suggested-next-step door registration REFUSED — no turn will offer a suggestion (${String((error as Error)?.message ?? error).slice(0, 160)})`)
+      }
+
       const autoSaveListener = wireSubagentAutoSave(ctx as never, store, {
         presetId: CHAPTERS_PRESET_ID,
         artifactStoreRoot: config.artifactStoreRoot,

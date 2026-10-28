@@ -25,9 +25,51 @@ import { appendChapters, releaseReservation, type SessionState } from './registr
 import { parseFrontmatter } from './indexing.ts'
 import type { ChapterRecord } from './archive.ts'
 import { resolveStoredPath } from './archive.ts'
+import { resolveStoreRoot } from './store.ts'
 import type { RegistryStore } from './store.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import type { SessionEventLike } from './types.ts'
+
+/**
+ * One refusal line → its class: the text before the first `': '`, or `'other'`. Grouping is presentation
+ * only — every item is kept — because the class is shared and the FILE NAMES are the content an operator
+ * needs (#101: 483 repeated `test-litter` lines buried 372 real findings in the maintainer's run, in the
+ * command surface, because only the offline report had been aggregated).
+ */
+const refusalClassOf = (line: string): string => {
+  const i = line.indexOf(':')
+  return i > 0 ? line.slice(0, i).trim() : 'other'
+}
+
+export interface RefusalGroup { cls: string; items: string[] }
+
+export function groupRefusals(refused: string[]): RefusalGroup[] {
+  const order: string[] = []
+  const map = new Map<string, string[]>()
+  for (const r of refused) {
+    const cls = refusalClassOf(r)
+    const bucket = map.get(cls)
+    if (bucket === undefined) { map.set(cls, [r]); order.push(cls) } else bucket.push(r)
+  }
+  // Loudest class first: the one that would otherwise fill the screen is the one to dispose of.
+  return order.map((cls) => ({ cls, items: map.get(cls)! })).sort((a, b) => b.items.length - a.items.length)
+}
+
+/** How many named examples a grouped class keeps visible. The rest is COUNTED, never dropped silently. */
+export const REFUSAL_EXAMPLES = 3
+
+export function renderRefusalGroups(refused: string[], examples: number = REFUSAL_EXAMPLES): string[] {
+  return groupRefusals(refused).map(({ cls, items }) => {
+    const detail = (r: string): string => { const i = r.indexOf(':'); return i > 0 ? r.slice(i + 1).trim() : r }
+    if (items.length === 1) return `refused: ${items[0]}`
+    const keep = Math.max(1, examples)
+    const shown = items.slice(0, Math.min(items.length, keep)).map(detail).join(' | ').slice(0, 300)
+    const withheld = items.length - Math.min(items.length, keep)
+    return `refused ×${String(items.length)} (${cls}): ${shown}`
+      + (withheld > 0 ? `; ${String(withheld)} more of the same class` : '')
+      + ' — each names its own file; nothing in this class is touched automatically'
+  })
+}
 
 export interface RepairPorts {
   store: RegistryStore
@@ -102,7 +144,7 @@ export function fileSetFromDisk(cwd: string, storeRoot: string, rootSession: str
     // starts, both measured on the first real run: `listDir` returns FILES, so every chapter became a
     // "second root" (36,000 findings), and then every OTHER SESSION's legitimate tree did (634). One
     // directory per root session is the normal shape of this store — litter is a directory nothing owns.
-    roots: subdirs(path.join(cwd, storeRoot)).filter((d) => !knownRoots.includes(path.basename(d))),
+    roots: subdirs(resolveStoreRoot(cwd, storeRoot)).filter((d) => !knownRoots.includes(path.basename(d))),
     // the #58 signature is a fact about the BYTES, so read it from the bytes
     looksLikeShell: (p) => {
       try {
@@ -257,7 +299,20 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
           }
           const marked = markSupersededBy(fresh, f.target.number, cover[0]!.number, 'hollow-payload')
           if (marked.problem !== undefined) { refused.push(`hollow-payload ch.${f.target.number}: ${marked.problem}`); continue }
-          await store.mutate(opts.sessionId, () => marked.state)
+          // #101: `mutate(id, () => snapshot)` is a stale `put` wearing a mutate's clothes — the fn must
+          // apply the change to the row mutate hands it, because another door may have committed between
+          // the `get` above and this write (measured once already: an enrichment put at 04:53:52.841
+          // rewound a compaction commit from 04:53:50.915). Re-derive from the fresh row; if the chapter
+          // we meant to supersede is gone or changed, refuse rather than resurrect a snapshot.
+          // captured, not re-read: `f.target.number` is proven non-undefined by the check above, and a
+          // closure cannot see that narrowing (a cast would have hidden the case where it ever changes).
+          const hollowTarget = f.target.number
+          const hollowCover = cover[0]!.number
+          await store.mutate(opts.sessionId, (live) => {
+            const re = markSupersededBy(live, hollowTarget, hollowCover, 'hollow-payload')
+            if (re.problem !== undefined) { refused.push(`hollow-payload ch.${String(hollowTarget)}: ${re.problem} (row moved during repair)`); return live }
+            return re.state
+          })
           journal.entries.push({ kind: 'registry', path: fresh.chapters.find((c) => c.number === f.target.number)?.path ?? `ch.${f.target.number}`, beforeSha: null, afterSha: cover[0]!.sha256 })
           flush()
           ports.log(`superseded hollow ch.${f.target.number} by ${cover.length} chapter(s) [${cover.map((c) => c.number).join(', ')}] that together carry seqs ${f.target.fromSeq}-${f.target.toSeq}`)
@@ -423,3 +478,28 @@ export async function restoreRepair(ports: RepairPorts, journalId: string, sessi
 }
 
 export type { RepairFinding, SessionState }
+
+/**
+ * Bound a repair report so one command result cannot outgrow the archive (#117).
+ *
+ * Why this is a function and not arithmetic in the command: the same rule has to hold for the in-host
+ * `/chapters-repair` and the offline runner, and a decision that exists in two places is a decision that
+ * drifts (#59's lesson). Pure, so the three things that matter are rows rather than intentions — the count
+ * always survives, the withheld remainder is counted and named with a remedy, and a short report is not
+ * wrapped in ceremony.
+ *
+ * The trigger was measured: a 23-session dry-run printed 2,796 findings as ONE `command/done` result —
+ * 311 KB, an event larger than `2 × chapterTokenTarget` — which is what made that session permanently
+ * un-compactable by `chapters_continue`. Clipping is forbidden by invariant, so the only honest options were
+ * to stop generating the monster or to cap with a remedy. Both are here: the cap, and the count leading.
+ */
+export function capReportLines(body: readonly string[], capLines: number): { shown: string[]; withheld: number; capLine: string } {
+  const cap = Math.max(1, Math.floor(capLines))
+  const withheld = Math.max(0, body.length - cap)
+  if (withheld === 0) return { shown: [...body], withheld: 0, capLine: '' }
+  return {
+    shown: body.slice(0, cap),
+    withheld,
+    capLine: `  … report capped at ${String(cap)} of ${String(body.length)} lines (repairReportMaxLines) — ${String(withheld)} withheld, nothing dropped: per-session detail is /chapters-repair dry-run <session-id>, or raise the cap`,
+  }
+}

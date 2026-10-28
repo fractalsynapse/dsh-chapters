@@ -90,6 +90,11 @@ test('THE ACTUAL BUG: a door whose child creation is refused reaches the sink fr
       // once meant the row failed inside reserve() on a field nobody told it about.
       getState: async () => freshSession('A'),
       putState: async () => { },
+      // #101: the allocator now reserves through mutate, so a stub that DROPS the mutation would hand back
+      // no numbers and the door would fail before createChild — the row would then be asserting a different
+      // guard than it claims. Apply fn the way the store does (this file's getState/putState stay no-ops by
+      // design: the point is the sink record, not the registry).
+      mutateState: async (_id: string, fn: (s: never) => never) => { fn(freshSession('A') as never) },
       fs: () => ({
         async write(p: string, c: string) { files.set(p, c) },
         async read(p: string) { return files.get(p) },

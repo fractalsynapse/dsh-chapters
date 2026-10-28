@@ -1,9 +1,9 @@
 # Tape provenance — `prompt` project
 
-**Distilled 2026-10-24** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
-Last recorded verdict: exit 0, 6 tape entries.
+**Distilled 2026-10-28** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
+Last recorded verdict: exit 0, 14 tape entries.
 
-- **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41739, threshold 0.99, arrival floor (realm default), auxiliary model calls off, prompt-ghost model defined.
+- **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41739, threshold 0.9, arrival floor (realm default), auxiliary model calls off.
   The boot and every worker read those pins; replay boots the SAME regime, or the tape means
   something else than it recorded (#56 — divergent pins were the reason replay MISSed).
 - **Upstream:** SCRIPTED stub (`tests/e2e/stub-model.ts`) — deliberately. This leg must NOT freeze one model's decision to plan / to suggest a constant only the stub mints.

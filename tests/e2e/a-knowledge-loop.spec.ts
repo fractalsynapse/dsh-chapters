@@ -80,6 +80,11 @@ test('the knowledge loop end to end over a real git remote, from the browser', a
     // the child — identified EXACTLY: the app switches the live session to
     // the child, and localStorage names it (no freshest-file guessing).
     const before = childCount()
+    // Bounded and NAMED before clicking. Without this the click waits on Playwright's action timeout and the
+    // whole test dies at the project timeout (measured: `locator.click: Test timeout of 1500000ms exceeded` — a
+    // 25-minute hang whose message said nothing about the door). The claim is unchanged and slightly stronger:
+    // the door must actually render, and if it does not, the failure says so at the right place.
+    await expect(forkDoor(page), 'the fork door renders once a continuation is available').toBeVisible({ timeout: 120_000 })
     await forkDoor(page).click()
     await expect.poll(() => childCount(), { timeout: 30_000, intervals: [500] }).toBeGreaterThan(before)
     let kid: string | null = null
