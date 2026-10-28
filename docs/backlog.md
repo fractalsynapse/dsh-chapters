@@ -1725,3 +1725,20 @@ and the third option — pinning anyway — deletes the behavior the legs test, 
 
 Reverted: pins and the allowlist row back to the committed set, corpus restored. The rows held the line — both failed
 the moment I claimed a regime the capture refutes — and that is the reason the re-test is short rather than hopeful.
+
+### The key-split question, bounded to one fact: which `applyArrivalStubs` site goes silent under `auto: false` (#129, #130)
+
+Checked rather than assumed, because this branch has been fooled by that twice today. `auto` is **not** another dead
+key: the host's `BasicCompactionConfig` reads it — `dsh-compaction-basic/lib/index.js` validates it as a boolean and
+defaults it to `true` — so `auto: false` really does suppress the host's relief, and the docs' "one realm key, two
+behaviors" claim stands.
+
+What is NOT settled is the one fact a split needs: `src/engine.ts` calls `applyArrivalStubs` at two sites — ~862, in
+the event-driven arrival listener (`floorTokens: toolResultArtifactTokens`), and ~944, inside the pressure path
+(`floorTokens: ceiling`). Under the pin, `arrival` loses its stub pair. Which site went silent, and why? The answer
+decides where a second key must live. Getting it requires one pinned capture plus a grep of that run's session log for
+arrival markers — a measurement, not another theory.
+
+Stated so the next session inherits a limit, not a license: **do not implement the split before that is known.** A
+switch wired to the wrong site is the #130 mistake wearing a new costume — a key the rig writes and nothing consumes —
+and there is already a guard-shaped lesson about that in this file.
