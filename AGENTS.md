@@ -510,6 +510,18 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   reasoning that "matching only, served bytes untouched, no re-record needed", and CI answered that the runner's
   first main request now normalizes shorter than the recorded entry expects, so a legitimate later turn was served
   early — the probe landing at index 3 where the tape had it later. That was my own claim failing, not the model's.
+- **Never bound an async driver's turn count by timing or by polling — bound it with the driver's own stopping rule.**
+  A goal round fires at every `turn/end`, and **a round is itself a turn, so every round schedules the next**: the
+  driver cascades until the goal is cleared or its budget (`maxGoalRounds`, default 256) is spent. Measured on one
+  leg, three times: clearing right after `/goal` still diverged (`Round: 3/256` vs the capture's `4/256` at
+  `divergeAt=msg12`); waiting until a round *appeared* still diverged, for the cascade reason; and my claim that
+  "a slash command is not an agent turn, so the window holds zero driver turns" was **false** — the last tape held
+  `Round: 12/256`. No click timing races a self-sustaining loop, and there is no rig knob for it (the human `/goal`
+  command takes no round argument; `goal-round-driver` has no config block). The portable form is the product's own:
+  create the goal via `create_goal(max_goal_rounds: 1)`, then wait for the **quiesced** marker `Round: 1/1` — after
+  which the driver is structurally incapable of firing again — and only then act. General form: a tape may contain a
+  background mechanism's output only when that mechanism has a state it cannot leave; "I clicked quickly" is not a
+  bound.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
