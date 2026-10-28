@@ -452,12 +452,15 @@ offers `Pause goal`; clicking the bar's Autorun leaves `Autorun off` in place af
 flips to `Resume goal`, and `Pause goal` disappears. Recorded alone under the real provider and replayed model-free
 twice (5 passed each). It required a product fix first — the control dispatched local state only and `refresh()`
 flipped it back, so the click refused itself (see `prompt-dock-autorun-write.test.ts`). The **goal-off restores normal
-suggestion** half is now browser-observed too (#135): activate a goal, clear it through the host's own `Clear goal`
-control, assert `[data-goal-bar]` is **absent** (`toHaveCount(0)`), take one more ordinary turn, and the bar still
-produces a real suggestion — `clearing the goal leaves the bar offering a suggestion on the next turn`, captured
-alone and replayed model-free at **6 passed** twice. What that leg deliberately does NOT assert is the `intent` label:
-`goal-edit` vs `worker-step` is a server-side classification of model output, and a leg that breaks when the
-classifier phrases things differently is measuring luck, not the contract.
+suggestion** half of item 4 remains **unit-covered and is not claimed from a browser** (#135 stays open). Four capture
+attempts at that leg are on record and each failed for a reason worth keeping: clicking `Clear goal` after a turn let
+the driver race the click; clearing with no turn between still diverged (`Round: 3/256` vs `4/256`); polling until a
+round appeared also diverged — because **a goal round is itself a turn, so rounds cascade** (one tape reached
+`Round: 12/256`); and bounding the budget by instructing the model to call `create_goal(max_goal_rounds: 1)` failed
+capture at `the host goal bar appears once a goal exists`, the model answering in prose instead of calling the tool.
+That last one is the tell: a browser leg whose setup depends on a small model choosing to invoke a tool is encoding
+luck, and the claim is not worth that. The rig rule stands; the leg does not ship until its setup is deterministic
+without asking the model for cooperation.
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.

@@ -193,19 +193,6 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
    * because the host routes its action labels through its own `Action` component (`client.js`
    * `"action.pause": "Pause goal"`), and scoping to `[data-goal-bar]` finds nothing.
    */
-  /**
-   * #135: pin the goal driver's contribution to the tape. A goal round fires at every `turn/end`, and the budget
-   * comes from the goal record (`maxGoalRounds`, default 256 — no rig knob, no `/goal` argument), so how many rounds
-   * exist before the leg's next action is machine LATENCY, and latency in a tape is unportable. CI proved it twice on
-   * this leg: `divergeAt=msg32` (`<goal_round>` where the capture had a human turn) and then `divergeAt=msg12` with
-   * `Round: 5/256` against `Round: 4/256`. Waiting for EXACTLY n rounds — read from the durable log's own `Round: n/`
-   * marker — makes the count a property of the spec instead of the machine, which is the standing lesson of #132.
-   */
-  const waitGoalRounds = (sid: string, n: number) => expect.poll(
-    () => sessionLogTextById(sid).includes(`Round: ${n}/`),
-    { timeout: 180_000, intervals: [2000], message: `the goal driver reached round ${n} in this session's own log` },
-  ).toBe(true)
-
   test('clicking Autorun arms the loop and displaces an active goal', async ({ page }) => {
     await openApp(page)
     const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
@@ -214,10 +201,6 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     await expect(goalBar, 'the host goal bar appears once a goal exists').toBeVisible({ timeout: 60_000 })
     const pause = page.locator('button[aria-label="Pause goal"], button:has-text("Pause goal")').first()
     await expect(pause, 'the goal starts armed: the host offers Pause').toBeVisible({ timeout: 60_000 })
-
-    // Exactly one round, on every machine — then arm. Without this the prefix the tape records depends on how fast
-    // the driver outran the click (CI: `Round: 5/256` where the capture had `Round: 4/256`).
-    await waitGoalRounds(sid, 1)
 
     const bar = page.locator(DOCK_BAR)
     await expect(bar, 'the prompt dock row is present').toBeVisible({ timeout: 60_000 })
@@ -234,58 +217,6 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
       'the host goal control flips: arming the loop disarmed the goal driver').toBeVisible({ timeout: 60_000 })
     await expect(pause, 'and Pause is no longer offered').toHaveCount(0)
     void sid
-  })
-
-  /**
-   * #135: the other half of the pair — **goal off restores a normal suggestion**, observed in the browser.
-   *
-   * §28 describes the director (the goal, re-cutting the objective each turn) and the worker (this bar, a fresh
-   * directive each turn) as built to run together, and displacement is now shown. What had never been shown is the
-   * release: once the human clears the goal, the bar must keep working on its own — not go quiet, not stay
-   * goal-shaped. So: activate a goal, clear it through the host's own control (`Clear goal` in
-   * `@deepseek-ai/dsh-client-ui-goal`), take one more ordinary turn, and require the bar to offer again.
-   *
-   * Deliberately NOT asserted: the `intent` label. `goal-edit` vs `worker-step` is a server-side classification of
-   * model output, and a leg that fails when the classifier phrases things differently is measuring luck, not the
-   * contract — the lesson #132 just charged this corpus to learn.
-   */
-  /**
-   * #135: the other half of the pair — **goal off restores a normal suggestion**, observed in the browser.
-   *
-   * First version of this leg clicked the host's `Clear goal` BUTTON after a turn, and CI answered at
-   * `commonPrefix=32 divergeAt=msg32`: the runner had a `<goal_round>` message where my local capture had the next
-   * human turn. That is not a matcher bug — goal rounds fire at `turn/end` with a budget the host takes from the
-   * GOAL RECORD (`maxGoalRounds`, default 256, no rig knob and no `/goal` argument), so the number of rounds between
-   * activating and clearing is a race between the driver and my click, i.e. machine latency baked into a tape. The
-   * last lesson of #132 again, in a new costume: never let the model's or the driver's turn count be a property of
-   * the capture.
-   *
-   * The deterministic form: goal rounds fire ONLY at a turn boundary, and a slash command is not an agent turn — so
-   * activate, clear, and take the first real turn AFTER the goal is already gone. Same claim, same assertions, zero
-   * driver races.
-   */
-  test('clearing the goal leaves the bar offering a suggestion on the next turn', async ({ page }) => {
-    await openApp(page)
-    const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
-    await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
-    const goalBar = page.locator('[data-goal-bar]')
-    await expect(goalBar, 'a goal exists before it can be cleared').toBeVisible({ timeout: 60_000 })
-    await waitGoalRounds(sid, 1)
-
-    // Cleared after EXACTLY one round (pinned above), so the tape's prefix carries a fixed number of driver turns on
-    // any machine. This is the fix for the runner divergence, not a weakening of the claim: the assertions below are
-    // unchanged.
-    await typeComposer(page, '/goal clear', deliveredFor(sid, '/goal clear'))
-    await expect(goalBar, 'the goal control is gone, not merely rephased').toHaveCount(0, { timeout: 60_000 })
-
-    // The first ordinary turn after the goal is gone, and the bar must still do its job.
-    const nextTurn = 'Reply with exactly: DONE'
-    await typeComposer(page, nextTurn, deliveredFor(sid, nextTurn))
-    const bar = page.locator(DOCK_BAR)
-    await expect(bar, 'the bar is still mounted with no goal present').toBeVisible({ timeout: 60_000 })
-    await waitForOffer(bar, page)
-    const offered = await offerText(bar)
-    expect(offered.length, 'the bar produces a real suggestion after the goal is cleared (length)').toBeGreaterThan(0)
   })
 
 })
