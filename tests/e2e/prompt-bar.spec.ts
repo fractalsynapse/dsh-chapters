@@ -193,6 +193,19 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
    * because the host routes its action labels through its own `Action` component (`client.js`
    * `"action.pause": "Pause goal"`), and scoping to `[data-goal-bar]` finds nothing.
    */
+  /**
+   * #135: pin the goal driver's contribution to the tape. A goal round fires at every `turn/end`, and the budget
+   * comes from the goal record (`maxGoalRounds`, default 256 — no rig knob, no `/goal` argument), so how many rounds
+   * exist before the leg's next action is machine LATENCY, and latency in a tape is unportable. CI proved it twice on
+   * this leg: `divergeAt=msg32` (`<goal_round>` where the capture had a human turn) and then `divergeAt=msg12` with
+   * `Round: 5/256` against `Round: 4/256`. Waiting for EXACTLY n rounds — read from the durable log's own `Round: n/`
+   * marker — makes the count a property of the spec instead of the machine, which is the standing lesson of #132.
+   */
+  const waitGoalRounds = (sid: string, n: number) => expect.poll(
+    () => sessionLogTextById(sid).includes(`Round: ${n}/`),
+    { timeout: 180_000, intervals: [2000], message: `the goal driver reached round ${n} in this session's own log` },
+  ).toBe(true)
+
   test('clicking Autorun arms the loop and displaces an active goal', async ({ page }) => {
     await openApp(page)
     const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
@@ -201,6 +214,10 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     await expect(goalBar, 'the host goal bar appears once a goal exists').toBeVisible({ timeout: 60_000 })
     const pause = page.locator('button[aria-label="Pause goal"], button:has-text("Pause goal")').first()
     await expect(pause, 'the goal starts armed: the host offers Pause').toBeVisible({ timeout: 60_000 })
+
+    // Exactly one round, on every machine — then arm. Without this the prefix the tape records depends on how fast
+    // the driver outran the click (CI: `Round: 5/256` where the capture had `Round: 4/256`).
+    await waitGoalRounds(sid, 1)
 
     const bar = page.locator(DOCK_BAR)
     await expect(bar, 'the prompt dock row is present').toBeVisible({ timeout: 60_000 })
@@ -253,9 +270,11 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
     const goalBar = page.locator('[data-goal-bar]')
     await expect(goalBar, 'a goal exists before it can be cleared').toBeVisible({ timeout: 60_000 })
+    await waitGoalRounds(sid, 1)
 
-    // Cleared through the host's own command, with NO agent turn in between — so the round driver never gets a
-    // boundary to fire at. This is the fix for the runner divergence above, not a weakening of the claim.
+    // Cleared after EXACTLY one round (pinned above), so the tape's prefix carries a fixed number of driver turns on
+    // any machine. This is the fix for the runner divergence, not a weakening of the claim: the assertions below are
+    // unchanged.
     await typeComposer(page, '/goal clear', deliveredFor(sid, '/goal clear'))
     await expect(goalBar, 'the goal control is gone, not merely rephased').toHaveCount(0, { timeout: 60_000 })
 
