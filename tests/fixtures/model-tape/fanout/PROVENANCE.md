@@ -1,7 +1,7 @@
 # Tape provenance — `fanout` project
 
 **Distilled 2026-10-28** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
-Last recorded verdict: exit 0, 10 tape entries.
+Last recorded verdict: exit 0, 12 tape entries.
 
 - **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41736, threshold 0.45, arrival floor (realm default).
   The boot and every worker read those pins; replay boots the SAME regime, or the tape means
