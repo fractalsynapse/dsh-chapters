@@ -42,7 +42,8 @@ import { goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } f
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
 import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } from './diag.ts'
-import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler } from '@deepseek-ai/dsh-llm'
+import { auxPromptMessage } from './aux-message.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
 import { providerKindFor, registerProvider } from './provider.ts'
@@ -411,7 +412,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         const assembler = new BlockAssembler()
         for await (const chunk of llm.stream({
           provider: route.provider, model: route.model,
-          messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+          messages: [auxPromptMessage(prompt)],
           maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
         })) assembler.push(chunk as never)
@@ -464,7 +465,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         const lastChunk: string[] = []
         for await (const chunk of llm.stream({
           provider: route.provider, model: route.model,
-          messages: [createUserMessage({ content: [{ type: 'text', text: input }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+          messages: [auxPromptMessage(input)],
           maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
         })) {
@@ -674,7 +675,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           const assembler = new BlockAssembler()
           for await (const chunk of llm.stream({
             provider: route.provider, model: route.model,
-            messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+            messages: [auxPromptMessage(prompt)],
             maxTokens: config.enrichmentMaxTokens,
             purpose: 'compaction',
           })) assembler.push(chunk as never)

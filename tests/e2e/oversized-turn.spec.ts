@@ -102,6 +102,18 @@ function assistantTexts(log: string): string[] {
 }
 
 test('a single turn that outgrows the context window is compacted repeatedly, loses nothing, and the session stays healthy', async ({ page }) => {
+  // #141: this leg is LIVE-CLASS, and the maintainer chose that deliberately. Six captures of one commit came out at
+  // 5, 7, 12, 23 and 24 entries across four designs (three mandated reads, one read of a bigger page, one read of a
+  // smaller page, one read plus a tool-free report), and CI's own widened miss diff showed why: once relief
+  // auto-continues the session, the child does marker-exploration work the spec never asked for, so the request count
+  // belongs to the model and no tape can be portable. `E2E_MODEL === 'replay'` is the rig's replay signal
+  // (globalSetup.ts:52, set by scripts/chain-replay.sh:41), so a replay of this project is refused LOUDLY rather than
+  // silently skipped-and-counted. Nothing here narrows the claim: every assertion below still runs, against the real
+  // provider, under the 110-minute ceiling. Relief timing itself stays covered deterministically, without a browser or
+  // a model, by tests/unit/engine-lifecycle.test.ts (#140's rows included) — that is what makes this class move honest
+  // instead of a way to dodge a failure.
+  test.skip(process.env.E2E_MODEL === 'replay',
+    'oversized-turn is a live-class leg: relief auto-continues a model-written turn, so its request count is not a property of the spec (measured 5/7/12/23/24 on one commit). Run it with E2E_PROVIDER=harness, never against a tape.')
   test.setTimeout(6_600_000) // 110-min ceiling for the widest measured model personality
   test.skip(!(await localModelUp()), 'Local model server not running')
   generateBigFile()

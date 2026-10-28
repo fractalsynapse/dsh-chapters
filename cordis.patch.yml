@@ -280,6 +280,13 @@
                 name: '@treeseed/dsh-chapters/engine'
                 config:
                   thresholdRatio: 0.9
+                  # #140: bound the base engine's pressure headroom. Its default (65,536) is a reservation for a routed
+                  # summarize call; this engine's summarize() is deterministic and routes nothing, so on any window under
+                  # 65,536 — 32K is the target hardware — the default makes `contextWindow − reserved − headroom`
+                  # negative and the base THROWS instead of compacting (see docs/backlog.md, #140). 8,192 leaves a
+                  # positive pressure budget at 32K and is inert at 128K, where the ratio still sets the trigger
+                  # (min(window × 0.9, window − 8,192): 115.2K vs 119.8K, so large windows keep the same boundary).
+                  headroomTokens: 8192
               - id: command-compact
                 name: '@deepseek-ai/dsh-command-compact'
               - id: tool-result-pruner

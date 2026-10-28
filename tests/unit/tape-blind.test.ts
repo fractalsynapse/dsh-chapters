@@ -227,3 +227,40 @@ test('a prefix element that folds to nothing is dropped from both sides of the m
   assert.ok(findReplay([entry] as never, incoming) !== null,
     'a live request with the folded turn absent must match a tape stored with it present')
 })
+
+/**
+ * The miss diagnostic has to be useful in the case that actually happens (#132, #141).
+ *
+ * `findReplay` dumped `storedCandidates` filtered to prefixes of the SAME LENGTH as the incoming history. When a
+ * divergent run produces a different REQUEST COUNT — which is precisely how `heavy` failed on CI (run 40763699443:
+ * `messages=16`, `storedCandidates: []`) — that filter matches nothing, so the artifact recorded an incoming history
+ * and no candidate to compare it against. Every conclusion I drew after that was built on a diff that could not
+ * show the byte. The payload therefore carries the near-length candidates and a census of recorded prefix lengths,
+ * so a count mismatch is readable rather than silent.
+ */
+test('a count-mismatch miss still names near-length candidates and the recorded length census', async () => {
+  const { tapeDiffPayload } = await import('../../tests/e2e/model-proxy.ts')
+  const mk = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `msg-${tag}-${String(i)}`)
+  const tape = [
+    { key: 'k1', prefix: mk(12, 'a'), status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: 'x' },
+    { key: 'k2', prefix: mk(13, 'b'), status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: 'x' },
+    { key: 'k3', prefix: mk(20, 'c'), status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: 'x' },
+  ]
+  const incoming = mk(14, 'run') // a history 14 messages long; the tape has none
+
+  const p = tapeDiffPayload(incoming, tape as never)
+  assert.deepEqual(p.prefixLengthCensus, [12, 13, 20], 'the census says what WAS recorded')
+  assert.equal(p.storedCandidates.length, 0, 'same-length candidates: none exist, and that must stay honest')
+  assert.equal(p.nearLengthCandidates.length, 2,
+    `the 12- and 13-message prefixes must be offered for comparison, got ${String(p.nearLengthCandidates.length)}`)
+  assert.ok(p.incoming.length === 14, 'the incoming history is dumped in full, not truncated to a line')
+})
+
+test('a same-length miss still lands in storedCandidates, with nearest offered too', async () => {
+  const { tapeDiffPayload } = await import('../../tests/e2e/model-proxy.ts')
+  const mk = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `msg-${tag}-${String(i)}`)
+  const tape = [{ key: 'k', prefix: mk(3, 'a'), status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: 'x' }]
+  const p = tapeDiffPayload([...mk(2, 'a'), 'divergent'], tape as never)
+  assert.equal(p.storedCandidates.length, 1, 'the same-length candidate is the one that matters')
+  assert.deepEqual(p.nearLengthCandidates, [], 'nothing extra when an exact-length candidate exists')
+})

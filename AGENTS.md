@@ -462,6 +462,25 @@ maxGoalRounds: 1 })` is plugin-callable (upstream's own fixture does exactly thi
 `ctx.goals.block(…, 'round-limit')` and `GoalBar.tsx:85-86` renders no strip for a blocked goal. **An armed goal has no
 rest state**: budget 256 floods it, budget 1 ends it. Facts and line numbers: docs/contract.md, #138.
 
+`heavy` is live-class as well, by the maintainer's decision on six captures' evidence (#141): relief auto-continues a
+model-written turn and the child then does unrequested marker work, measured at 5/7/12/23/24 tape entries for ONE commit
+across four designs, with CI's widened miss diff naming the extra `bash` turn. `oversized-turn.spec.ts` therefore skips
+under `E2E_MODEL === 'replay'` with the reason in the skip message and is absent from `chain-replay.sh`'s list, which is now
+**nine** model-free legs; relief timing stays covered without a browser or a model in `tests/unit/engine-lifecycle.test.ts`
+(#140's rows). Two release facts belong here too. `0.2.2-dev.1` is a **dead tag**: the bump commit moved `package.json`
+only and `tests/unit/loudness.test.ts:123` (`PLUGIN_VERSION === pkg.version`) failed the publish blocker — a pushed tag is
+immutable, so `0.2.2-dev.2` bumps all three version-bearing files (`package.json`, `src/version.ts`, lock root) together.
+And `@deepseek-ai/dsh-compaction-basic@0.1.5-rc.2` has **zero** occurrences of `headroomTokens` (verified in its tarball),
+which is why the #140 realm key and the #128 alignment must ship as one change. Finally, my own live-leg guard had shipped
+inverted — `test.skip(process.env.E2E_MODEL !== 'replay', …)` runs a live spec only against a tape — corrected to
+`=== 'replay'` and proven by `2 skipped` plus exit 0 on a replay invocation.
+
+**Live-class does not mean live-green, and here it is red.** The `heavy` leg's live run failed on its own bound —
+`expect(summaries.length).toBeLessThanOrEqual(30)` (`var/heavy-live.log`, exit 1) — so NO browser-level claim about relief
+converging on the pinned 32K window is being made: what is proven is that relief neither throws nor crashes there (#140's rows),
+and the nine model-free legs are green on CI. The convergence failure is its own issue (#143) and its first criterion is
+per-pass numbers, not a raised bound.
+
 So both goal claims are verified **live**, in a class that can say so honestly. `tests/e2e/prompt-goal-live.spec.ts`
 runs them against the real provider under a 420 s ceiling and both passed (**2 passed**): arming Autorun takes the
 continuation from an active goal (`Pause goal` → `Resume goal`, Pause gone — after the inert-control fix in
