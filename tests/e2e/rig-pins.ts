@@ -72,7 +72,7 @@ export const RIG_PINS: Record<string, RigPin> = {
   // ends, so an armed goal's request count tracks machine latency; bounding it (budget 1) instead ENDS the goal
   // (`round-limit` → blocked → the strip renders nothing), so there is no observable armed moment. The claims are
   // real and stay tested — on the real provider, under a wall-clock bound — they are simply not tape-verifiable.
-  'prompt-goal-live': { port: 41741, threshold: '0.9', prompt: true },
+  'prompt-goal-live': { port: 41741, threshold: '0.9', prompt: true, noAuxModel: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
