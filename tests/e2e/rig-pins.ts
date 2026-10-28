@@ -30,7 +30,14 @@ export interface RigPin {
 }
 
 export const RIG_PINS: Record<string, RigPin> = {
-  suite: { port: 41731, threshold: '0.75' ,},
+  // Threshold 0.5, not 0.75 (#129): this leg's journey DEPENDS on a checkpoint existing — its capture's first
+  // main request already carries one — and at 0.75 the crossing was decided by a few hundred bytes of
+  // machine-specific header (workspace path length, `clientTimeZone: UTC` vs a named zone, the GUI port in the
+  // injected URL). That is a coin flip: the same corpus compacted on one host and not the other, and the FIRST main
+  // request then had different shapes ([system,user] vs [system,checkpoint,assistant,tool]), which is what every
+  // `divergeAt=msg2` miss on this leg reduces to. A margin wide enough to fire on both machines is the
+  // determinism; pinning `noAuxModel` instead would delete the behavior the leg exists to measure.
+  suite: { port: 41731, threshold: '0.5' },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
   heavy: { port: 41733, threshold: '0.9', floor: '1000000', maxRetries: 3 },
