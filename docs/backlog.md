@@ -1825,3 +1825,29 @@ State of the branch when this session ends, all of it measured rather than asser
   checkpoint content out of matching (it collapses positional prefixes and mis-serves turns — tried, reverted);
   re-anchor a leg off a single green roll (that is how two fake fixes happened); raise a timeout to pass a leg
   whose subject is timing.
+
+### `heavy` is the last acceptance miss; the runtime-fold theory is already dead, tested against the runner's bytes (#132)
+
+Where this stands, measured rather than narrated. Run 40661878031 fails `heavy` and `prompt`; `prompt` now survives
+**nine messages** (`commonPrefix=9 divergeAt=msg9`) where it used to die at 2-4, so the bounded journeys plus the
+injection-row removal moved the whole problem deeper into the conversation — which is what those changes were for.
+`heavy` still misses at `commonPrefix=2 divergeAt=msg2`.
+
+The obvious-looking explanation was that the runner keeps a residue of the runtime-context / `<system-reminder>`
+injections that this host folds to nothing, shifting every index. I took the runner's own transcript (uploaded now by
+`scripts/chain-replay.sh`) and normalized those two events through the real fold:
+
+    seq 11 raw chars 484  -> normalized chars 0
+    seq 12 raw chars 3285 -> normalized chars 0
+
+Both fold to empty, i.e. both are pure injections and drop from matching on either machine. **Theory dead, in one
+command, before it became a change.**
+
+What the runner's transcript does show: `[system, user(prompt), user(runtime), user(reminder), …]` and, at the point
+where the tape has an assistant turn reporting `First call returned (output capped at line 600; found
+MARKER-ALPHA-7731…)`, the runner's `msg2` is the assistant answering the follow-up probe (`STILL-HERE`). So the two
+histories differ in **which assistant turn comes second**, not in message roles or counts. The next read is
+therefore structural, not fold-related: line up the runner's event order against the tape's entry order for
+`heavy` and find the point where the journeys diverge in *sequence* — the probe turn is the suspect, since its
+position depends on when the first turn ends. If the sequence differs only around the probe, the leg's probe
+needs to be gated on a durable-log fact rather than on a poll, which is a spec change with its own row.
