@@ -88,6 +88,7 @@ export default async function setup(fullConfig?: {
     // Deterministic acceptance: no boot may depend on the model's auxiliary calls
     // happening or not happening. Set per project in the test:e2e chain.
     ...(process.env.E2E_NO_AUX_MODEL === '1' ? { noAuxModel: true } : {}),
+    ...(process.env.E2E_NO_PLOT === '1' ? { noElicitedPlot: true } : {}),
   }
   // #90: assigned in BOTH states. The enrich/heavy legs opt in explicitly; every other leg opts OUT, so
   // the idle-triggered ladder can never race the tape. Measured cause: `suite` replay missed on a

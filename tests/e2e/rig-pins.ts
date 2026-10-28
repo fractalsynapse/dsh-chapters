@@ -19,6 +19,8 @@ export interface RigPin {
   floor?: string
   enrich?: boolean
   noAuxModel?: boolean
+  /** #130 experiment: suppress ONLY the plot-elicitation aux call, leaving pressure relief live. */
+  noElicitedPlot?: boolean
   /** The provider's `maxRetries` for this leg. Absent means the rig's deterministic 0. Set only where a leg's
    * own assertions depend on the host re-issuing a refused request — and as a NUMBER, never by deleting the
    * `retryPolicy` block, which the host requires present (measured: deleting it broke boot readiness, #56). */
@@ -37,7 +39,10 @@ export const RIG_PINS: Record<string, RigPin> = {
   // request then had different shapes ([system,user] vs [system,checkpoint,assistant,tool]), which is what every
   // `divergeAt=msg2` miss on this leg reduces to. A margin wide enough to fire on both machines is the
   // determinism; pinning `noAuxModel` instead would delete the behavior the leg exists to measure.
-  suite: { port: 41731, threshold: '0.5' },
+  // #130 matrix cell: relief must stay live (the leg's fork door comes from a real continuation) while the
+  // plot aux turn is suppressed, because that turn is what CI issues and this host does not. 0.5 + suppression
+  // hangs the boot; 0.75 is the ratio the committed corpus was captured at.
+  suite: { port: 41731, threshold: '0.75', noElicitedPlot: true },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
   heavy: { port: 41733, threshold: '0.9', floor: '1000000', maxRetries: 3 },
@@ -65,6 +70,7 @@ export function rigEnv(project: string): Record<string, string> {
   if (p.prompt === true) env.E2E_PROMPT = '1'
   if (p.enrich === true) env.E2E_ENRICH = '1'
   if (p.noAuxModel === true) env.E2E_NO_AUX_MODEL = '1'
+  if (p.noElicitedPlot === true) env.E2E_NO_PLOT = '1'
   if (p.maxRetries !== undefined) env.E2E_MAX_RETRIES = String(p.maxRetries)
   return env
 }

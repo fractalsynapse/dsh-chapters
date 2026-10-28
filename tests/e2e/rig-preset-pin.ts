@@ -77,6 +77,9 @@ export function renderPinnedPreset(shipped: string, pins: RealmPin): string {
       // `auto: false` + `elicitedPlot: false` ARE realm keys today (src/engine.ts:229,264), so a
       // no-aux boot is genuinely no-aux, and the tape's request sequence is the whole story.
       if (pins.noAuxModel === true) { extras.push(`${ind}auto: false`); extras.push(`${ind}elicitedPlot: false`) }
+      // #130: the narrower lever, kept separate because the BOTH-off form hangs the boot at low ratios while the
+      // plot-only form is the cell the acceptance fix actually needs (relief live, aux turn gone).
+      else if (pins.noElicitedPlot === true) { extras.push(`${ind}elicitedPlot: false`) }
       out.push(...extras)
       continue
     }
