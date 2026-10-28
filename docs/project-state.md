@@ -413,9 +413,7 @@ Measured, in the order the evidence arrived:
 
 ### 2026-10-28 — the acceptance pipeline went green, and the branch is on staging
 
-**Run 40676609079**: deterministic ✅ · pinned-host preset-rows probe ✅ · **acceptance ✅ — ten legs `ok`, each on its
-own boot** (`suite heavy arrival enrich fanout fanout→…` in RIG order: suite, heavy, arrival, enrich, fanout, rules,
-fork, plans, prompt, prompt-off). PR #127 squash-merged to `staging` as `45dd4ac`; #56 closes with it.
+**Run 40676609079**: deterministic ✅ · pinned-host preset-rows probe ✅ · **acceptance ✅ — ten legs `ok`, each on its own boot**: suite, heavy, arrival, enrich, fanout, rules, fork, plans, prompt, prompt-off. PR #127 squash-merged to `staging` as `45dd4ac`; #56 closes with it.
 
 What it took, in the order the layers came apart — each fixed by measurement, never by masking:
 
