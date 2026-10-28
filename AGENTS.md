@@ -455,8 +455,9 @@ round is itself a turn, so rounds cascade at 256-budget by default, and how many
 latency. Evidence is a docs-only PR (#137, zero non-docs delta) turning acceptance red with `MISS tape=prompt entries=23
 storedCandidates: []` while the runner's history held `Round: 1/256`…`Round: 4/256` where the capture had none — run
 40676609079 (all ten legs `ok`) agreed only because the runner's latency reproduced my round count. The displacement
-*behavior* was observed in Chromium and stands; the *replay* of it cannot be relied on until #138 gives a way to bound
-rounds. Attempted and reverted, with measurements: pinning `defaultMaxGoalRounds: 1` from a boot's profile patch makes
+*behavior* was observed in Chromium and stands; the *replay* of it is not dependable until the goal is created with a
+bounded budget — and reading the source shows that is **ours to build** (`ctx.goals.create(agent, { objective,
+maxGoalRounds: 1 })`), not an upstream gift. Attempted and reverted, with measurements: pinning `defaultMaxGoalRounds: 1` from a boot's profile patch makes
 `/goal` create nothing (staging spec + staging tape: pin active → 1 failed/4 passed; pin removed → 5 passed), and
 asking the model to call `create_goal(max_goal_rounds: 1)` fails capture because it answers in prose.
 Showing the displacement at all required a product fix first — the control dispatched local state only and `refresh()`
@@ -534,12 +535,17 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   prose instead of calling the tool. So the honest statement is: **a tape may carry a background mechanism's output
   only when that mechanism has a state it cannot leave, and the leg must be able to reach that state without asking
   the model for cooperation.**
-  Correction, because I first wrote "no config block exists" and that was wrong: `@deepseek-ai/dsh-goal` DOES ship
-  `config = z.object({ defaultMaxGoalRounds: z.number().default(256) })`, consumed by
-  `resolveCreateGoal(request, defaultMaxGoalRounds)`. What does not exist is a way to reach it from a boot — inserting a
-  `- id: goal` row with that config into `profiles/web/cordis.patch.yml` makes `/goal` create no goal at all (measured
-  against staging's own spec and tape: pin active → `1 failed/4 passed`; pin removed → `5 passed`). So the missing piece
-  is a host seam (#138), not a weaker assertion — which is why #135's leg is unwritten rather than skipped.
+  **And my follow-up claim was wrong too, twice over.** I wrote "no seam exists, this needs a host change" after
+  grepping installed bundles for a config row and an HTTP route. The source says otherwise
+  (`examples/dsh/packages/goal/goal/src/index.ts:303`): the goal service is registered as `ctx.goals` (`:251`) and
+  **`create(agent, request)` is plugin-callable**, where `request` is
+  `CreateGoalRequest { objective, maxGoalRounds? }` (`types.ts:28-30`) — a per-goal round budget, no model needed, no
+  host change needed. What genuinely fails is one *specific* mechanism: addressing an **existing base row** from a
+  profile patch. `packages/bundle/base/cordis.patch.yml`'s own header says a patch "replaces the targeted row's whole
+  `config` rather than merging it" and rows are addressed by id with last-write-wins; measured, a profile `- id: goal`
+  row (even config-less) changed the mounted set and broke `/goal`. A **new** id is the supported form — which is
+  exactly how `preset-chapters` mounts. So the seam is a rig fixture row with its own id calling `ctx.goals.create`
+  with `maxGoalRounds: 1`, not an upstream request (#138 rewritten accordingly).
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
