@@ -383,7 +383,18 @@ export function PromptDock(props: DockProps): ReactElement | null {
           ...(autorunDisabled
             ? { title: 'Autorun needs the host to publish an idle signal; this build does not, so nothing would fire safely.' }
             : {}),
-          onClick: () => { dispatch({ t: 'autorun', on: state.autorun !== 'armed' }); void refresh() },
+          // A SERVER write, like `off` below. Flipping local state alone was the defect: `refresh()` re-reads the
+          // loop state (`:193`), the server still says `disarmed`, and the label snaps back — so the user watched
+          // their own click be refused and the loop could never be started from the bar. The command surface is
+          // `/chapters-prompt autorun on|off` (src/commands.ts:462-478), which also reports the goal displacement.
+          onClick: () => {
+            void (async () => {
+              const arm = state.autorun !== 'armed'
+              if (exec !== undefined) await exec(`/chapters-prompt autorun ${arm ? 'on' : 'off'}`)
+              dispatch({ t: 'autorun', on: arm })
+              await refresh()
+            })()
+          },
         }),
         h(Action, {
           label: 'Turn prompt suggestions off for this session', glyph: '✕',
