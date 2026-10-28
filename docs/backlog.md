@@ -1705,3 +1705,23 @@ live recording run (`E2E_PROVIDER=harness`, `prompt` leg, 44 tape entries) with 
 Consequence for the objective: item (3)'s displacement pixel and item (4)'s browser-level interplay remain unshown,
 and the reason is now narrow and specific — our bar's armed state does not visibly persist — rather than "the host has
 no affordance", which the first fact disproves.
+
+### `auto: false` is too coarse: it turns off arrival deferral along with relief, which is why two legs cannot be pinned (#129, #130)
+
+Re-tested today, **after** #131 was fixed, in case the artifact cycle had been the whole story. It was not: with the
+pin applied, `arrival` again fails `at least one arrival stub pair (one oversized read)` and `fanout` again fails
+`parent synthesis lost paper A — SYNTHESic, not delivery`. Identical messages, different build. The reason is in the
+module's own header — `src/arrival.ts:7`: the arrival stub pipeline **"Runs at the head of compactIfNeeded/compactNow"**
+— so the realm key that suppresses model-involving relief (`auto: false`) also suppresses the size-deterministic
+deferral that these legs exist to exercise. `noAuxModel` is therefore one switch for two behaviors.
+
+Why this matters for the CI divergence rather than just for the rig: `fanout`'s machine dependence is now explained
+exactly — the child's first message is a checkpoint notice here and the plain delegated prompt on the runner, i.e. the
+**parent** relieved at a different moment — and the only two ways to make that agree are (1) split the keys so relief
+can be off while deferral stays on (real work: a second realm key and a call-site change in the engine), or (2) let the
+legs reach relief at a leg-controlled point instead of a threshold crossing (bulk the leg generates itself, per the
+maintainer's "synthetic bulk" rule). Both are design changes with their own risk; neither is a knob I can set tonight,
+and the third option — pinning anyway — deletes the behavior the legs test, which measurement has now shown twice.
+
+Reverted: pins and the allowlist row back to the committed set, corpus restored. The rows held the line — both failed
+the moment I claimed a regime the capture refutes — and that is the reason the re-test is short rather than hopeful.
