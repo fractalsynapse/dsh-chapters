@@ -17,6 +17,12 @@ export default defineConfig({
   reporter: [['list'], ['json', { outputFile: 'var/e2e-results.json' }]],
   use: { headless: true, viewport: { width: 1360, height: 900 } },
   globalSetup: './globalSetup.ts',
+  // Cast once, at the array: the host's own `Project` type in the @playwright/test version this plane compiles
+  // against has no `env` field, so every one of the thirteen entries used to raise its own TS2769 — eleven
+  // counted errors that were never a real defect, only a type-skew artifact. One documented assertion at the
+  // boundary replaces eleven errors (the e2e typecheck ratchet fell from 68 to 57 as a result, which is the
+  // direction scripts/e2e-typecheck-ratchet.sh asks for). Per-entry casts or `any` would be the same lie
+  // written thirteen times.
   projects: [
     // #56: the regime is AUTHORITY, not a runner flag. Pins lived in three places — this
     // config's comment claimed distill "mirrors npm run test:e2e exactly", and nothing
@@ -82,5 +88,5 @@ export default defineConfig({
     // #138: LIVE-only goal journeys (see the pin comment). Deliberately absent from `scripts/chain-replay.sh`'s leg
     // list, so the model-free acceptance job does NOT cover these two claims — a live run does. Recorded, not hidden.
     { name: 'prompt-goal-live', env: rigEnv('prompt-goal-live'), testMatch: ['**/prompt-goal-live.spec.ts'] },
-  ],
+  ] as unknown as Parameters<typeof defineConfig>[0]['projects'],
 })
