@@ -406,6 +406,35 @@ Entry `apply(ctx, config)`. Build with `tsc -p tsconfig.json` and **build before
 UI (later phase) additionally needs `dsh.client` and a `tsdown.client.config.ts` — see
 `dsh-session-fork/package.json` for the shape.
 
+### An armed goal has no rest state — measured, with the lines that prove it
+
+Verified while trying to make a goal-bearing tape leg deterministic (#138). The round driver gates on
+`phase === 'active' && activation === 'armed'` plus agent idleness
+(`@deepseek-ai/dsh-goal-round-driver` `src/index.ts:105-117`), and a round is itself a turn — so every round ends, and
+the next is scheduled. There is no moment in which an armed goal is also at rest:
+
+- **spending the budget ends the goal.** At `:182-188`, `roundsStarted >= maxGoalRounds` calls
+  `ctx.goals.block(agent, ref, { code: 'round-limit', message: 'Goal reached its configured limit of N rounds.' })`.
+- **the strip then disappears.** `@deepseek-ai/dsh-client-ui-goal` `GoalBar.tsx:85-86`: *"Loading, absent, and complete
+  goals have no strip at all"*, and the guard excludes blocked/complete. So the control a test wants to observe
+  (`Pause goal` → `Resume goal`) is not rendered in the state the budget produces.
+- **the per-goal budget is a plugin argument, not a user one.** `ctx.goals.create(agent, { objective, maxGoalRounds })`
+  (`@deepseek-ai/dsh-goal` `src/index.ts:303`, `types.ts:28-30`) — the human `/goal` command passes no budget
+  (`dsh-command-goal` usage is `goal <objective>, /goal clear`; `command-goal/src/index.ts:150` calls `create` without
+  one), so the default 256 applies.
+
+Consequences for this repo, both measured: a goal-bearing tape leg agrees with a runner only while the runner's latency
+happens to reproduce the capture's round count (staging's `prompt` leg failed twice on docs-only pushes:
+`MISS tape=prompt entries=23 storedCandidates: []`, runs 40697174778 / 40706037817); and bounding the budget to 1 makes
+the goal vanish before a leg can act on it (17-entry tape, `Round: 1/`, no second round, `the host goal bar appears once
+a goal exists`). Upstream's own test fixture takes the third path — create then `ctx.goals.disarm(agent)`, noting
+*"An armed goal makes the shipped goal-round-driver start a round at idle, racing the test driver's disposal"* — which
+is the disarmed state, not the armed one a displacement claim needs.
+
+What is needed to test this in a tape: a way to open an **armed** goal whose driver will not fire until released, or a
+non-terminal exhausted state that still renders the control (#138). Until then the goal/suggestion interplay is
+verified live under a wall-clock bound (`tests/e2e/prompt-goal-live.spec.ts`), not by the model-free acceptance job.
+
 ### A profile patch may not re-declare a host plugin's row — measured on 0.2.0-rc.2
 
 `profiles/web/cordis.patch.yml` layers by row `id`, and the rig relies on that for its **own** rows
