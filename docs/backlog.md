@@ -1851,3 +1851,22 @@ therefore structural, not fold-related: line up the runner's event order against
 `heavy` and find the point where the journeys diverge in *sequence* — the probe turn is the suspect, since its
 position depends on when the first turn ends. If the sequence differs only around the probe, the leg's probe
 needs to be gated on a durable-log fact rather than on a poll, which is a spec change with its own row.
+
+### My own error, caught by the runner: the prefix-symmetry fix DOES require a re-record (#132)
+
+The commit said "this changes matching only — served bytes untouched — so no re-record is needed: CI either agrees
+or it names what's left." CI named what's left: **my own claim**. `normalizeStoredPrefix()` both substitutes *and*
+drops empty elements, and dropping changes a prefix's **length**. A tape recorded before it has different effective
+key shapes than a live request matched against it — so the corpus and the matcher must be re-anchored together, not
+one without the other. The substitution half was length-preserving; the filter half is not, and I reasoned from one
+to the other.
+
+Runner evidence, `000.json` in run 40664455803: the live history is `[system, checkpoint-notice,
+assistant("STILL-HERE"), user("Reply with exactly the single word: STILL-HERE."), …]` — the follow-up probe arriving
+at index 3 where the tape has it later. Under the new filter, the runner's first main request normalizes shorter than
+the recorded entry expected, so a legitimate turn is served where the journey hadn't reached it. Not model
+behavior, not a fold residue: a matcher change shipped without the re-anchor it implied.
+
+Action: re-anchor the corpus on the symmetric matcher and re-verify. Rule extracted, added to the rig list: **any
+change that alters prefix LENGTH is a corpus change, not a matcher change** — length-preserving folds may ship alone,
+length-changing ones never do.

@@ -492,6 +492,14 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   summaries) should be generated deterministically, not elicited, and a leg's prompt should ask for the SHORTEST
   faithful answer that still exercises the mechanism. Never synthetic an *assertion* — what a leg claims must still be
   something a browser or the durable log really produced (see `docs/verify.md`).
+- **A change that alters prefix LENGTH is a corpus change, not a matcher change.** Folds that substitute
+  length-preservingly (dates, ports, workspace paths, reasoning, zone tokens) may ship without a re-record —
+  that is what "stored prefixes re-substitute at load" buys. A change that ADDS or REMOVES elements does not:
+  `normalizeStoredPrefix()` both substitutes and drops empty elements, and dropping changes the key's shape, so
+  the corpus has to be re-taken with it. Measured the hard way (run 40664455803): I shipped the symmetry fix on the
+  reasoning that "matching only, served bytes untouched, no re-record needed", and CI answered that the runner's
+  first main request now normalizes shorter than the recorded entry expects, so a legitimate later turn was served
+  early — the probe landing at index 3 where the tape had it later. That was my own claim failing, not the model's.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
