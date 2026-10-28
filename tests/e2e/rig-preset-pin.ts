@@ -27,6 +27,7 @@ export interface RealmPin {
   toolResultArtifactTokens?: string
   enrichmentEnabled?: boolean
   noAuxModel?: boolean
+  noElicitedPlot?: boolean
   artifactStoreRoot?: string
   /** #85: per-boot pool-mirror root, so a notice's CORE RULES block cannot come from the
    *  developer's repo. Without it, `heavy`'s recorded notice carried `[dev2/001] …` and the
