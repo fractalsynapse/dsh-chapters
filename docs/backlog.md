@@ -1770,3 +1770,29 @@ The pinned run adds no information, and I should have looked at the unpinned log
 Method, again, in writing: **before attributing a failure to a change, find the failure in a run that predates the
 change.** I have now made this error three times today (the fake `noAuxModel` gate, the coarse-key claim, and this
 attribution); the guard against it is cheap and is called a log search.
+
+### Retracted: the margin change did not make `fanout` deterministic — the same build captured 10 entries and, 40 minutes later, 20 (#132)
+
+One-run against one-run, which is the only comparison that means anything (I made the cumulative-sink mistake twice
+today and the second time it nearly became a conclusion):
+
+| measurement | this host (one capture) | runner (one capture, run 40648703376) |
+|---|---|---|
+| `realm:engine:arrive` entries | 24 | 3 |
+| `relief declined` | 11 | 1 |
+| `decided: compaction` | 6 | 0 |
+| tape entries produced | **20** | 10 (committed) |
+| capture outcome | exit=0 | (CI replays, never records) |
+
+Two things follow, and both cut against what I claimed an hour ago. **(a)** `fanout`'s *capture* is not stable on this
+host: the committed corpus is a 10-entry roll and a fresh roll under the identical regime produced 20. So the "41 → 10
+entries is an efficiency win" line was a short roll, not determinism, and I am withdrawing it. **(b)** the runner's
+journey is much *shorter* than mine — 3 arrival entries and zero completed reliefs, where one local run does 24 and
+six. That is not "the crossing landed one turn later"; it is a different number of model turns in the same leg, which
+is what a prefix miss at `messages=14` looks like from the inside.
+
+Therefore the remaining acceptance work is not a rig knob at all. It is the thing the maintainer's rule already says:
+these legs must not depend on how many turns a model feels like taking. A leg whose journey length varies will not
+replay anywhere, and no margin, threshold, or fold fixes that — the journeys have to be shortened and bounded so the
+turn count is a property of the spec, not of the roll. Restoring the corpus to the committed set (my 20-entry roll is
+discarded, not "re-anchored" on a coin flip).
