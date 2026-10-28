@@ -1658,3 +1658,26 @@ carries the bulk, not an injected document — and the engine must actually PERF
 (the `relief declined while the surface is over the trigger` line in #130 means a low ratio does not guarantee relief
 happens, it may just refuse). Until both are true, the no-injection profile stays and these two legs are re-designed,
 not re-rolled. Nothing is committed from a partial campaign.
+
+### What the Autorun-displaces-goal pixel actually requires, from the code as it stands (#113, objective item 3)
+
+Read at 2026-10-28 while looking for the assertion, so the next reader starts from facts:
+
+- `src/client/prompt-dock.ts:380` renders the toggle as `label: state.autorun === 'armed' ? 'Autorun off' : 'Autorun'`
+  with glyphs `⟳`/`⟲`, and disables it with a title when the host publishes no idle signal — **that** affordance is
+  what `prompt` asserts today (arm-ability, `4 passed`).
+- Displacement is a **server fact**, not a dock rendering: `PromptStore.setAutorun(sessionId, on)` returns
+  `{ autorun, fired, displaced }` (`src/prompt-state.ts:160-162`, "true when arming this loop also disarmed the
+  goal"), and `tests/unit/prompt-goal-interplay.test.ts` covers it. The dock has no element that says "the goal's
+  next turn was taken" — so a leg cannot assert displacement by looking at the bar alone.
+- What a browser leg CAN assert, in order of directness: (1) the host's own goal control showing `activation:
+  disarmed` after the bar's Autorun is clicked while a goal is active; (2) the next turn being driven by the bar's
+  suggestion rather than the goal's objective, observable in the session's durable log; (3) `Run` carrying
+  `intent: 'goal-edit'` (the dock titles it "Goal edits need a human turn…", `prompt-dock.ts:375-377`) to prove the
+  split the design claims.
+- Prerequisite that is NOT free: making a goal active inside a rig session. The profile mounts
+  `@deepseek-ai/dsh-command-goal`, so `/goal …` in the composer is the route, but goal activation requires a
+  **direct human turn** in the host (`prompt-dock.ts:376` says so about edits, and `goal-edit` intent exists for it)
+  — so the leg's choreography is: send `/goal`, wait for the host to report active+armed, click the bar's Autorun,
+  then assert on the goal control and the durable log. Expect this to need a recorded journey of its own, and to be
+  captured alone under `E2E_PROVIDER=harness`.
