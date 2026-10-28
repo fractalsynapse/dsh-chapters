@@ -1556,3 +1556,19 @@ Next read, deliberately narrow: extend the same diagnostic to print the page's U
 empty, that is a store/restore problem under instrumentation; if the document itself is gone, it is the boot dying
 under memory pressure, and the fix belongs to how coverage is collected per boot rather than to the spec. Still
 not doing: raising the click timeout.
+
+### CORRECTION, mine: `noAuxModel` was never inert, and I wrote that three times today (#129, 2026-10-27)
+
+Commit messages written earlier today (`fix: make noAuxModel real at the pressure decision…`) claim the key "is read
+by NOTHING in `src/`" and that I made it real in `src/engine.ts`. Both false. `noAuxModel` is a **rig alias**,
+translated at profile-write time into `auto: false` + `elicitedPlot: false` (`tests/e2e/rig-preset-pin.ts:79`), and
+the engine declares `auto: z.boolean()` (`src/engine.ts:287`). My search was for the alias's name inside `src/`, and
+a translation layer will never satisfy it. The no-op is reverted (`fix: remove the no-op "gate"…`), the wrong guard
+test is deleted, and the six-leg pin set that actually works is restored — plane 1,108/1,108, typecheck 0.
+
+What survives, measured independently of that bad theory and still the open work: the asymmetry is real in the
+durable logs — `arrival` ran **one** compaction event on the CI runner and **zero** on this host against the same
+corpus (`var/e2e-session-logs/`, run 40611340353), while `heavy` ran two on both. The six legs that pin the switch
+pass on CI; the four that must not pin it (`heavy`, `suite`, `arrival`, `fanout`) are exactly where the misses land.
+So the remaining fix is a **deterministic trigger** for the machinery those four legs exist to exercise — an explicit
+event at a pinned turn or size rather than a threshold crossing on a header that differs slightly between machines.

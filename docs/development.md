@@ -909,12 +909,23 @@ matching. That is not an unblinded identity token and not a matcher bug. It mean
 journey and both compacted — at different moments. A checkpoint rewrites the surface, so the same assistant turn
 lands at message index 6 here and index 2 there, and the surface is the tape key.
 
-**The rule:** every leg pins `noAuxModel` — it disables automatic compaction and plot elicitation, so the request
-sequence in the tape is the whole story regardless of how large a runner's header happens to be. The one exception is
-`heavy`, whose journey *is* the pressure one: pinning it would make the leg measure a boot where nothing is wrong,
-which is the same mistake as setting the arrival floor below the chunk size. The drift row
+**The rule:** a leg that is NOT testing the machinery pins `noAuxModel`. It is a rig-side alias, translated at
+profile-write time into the realm keys the engine really reads — `auto: false` + `elicitedPlot: false`,
+`tests/e2e/rig-preset-pin.ts:79`, declared at `src/engine.ts:287` — so the request sequence in the tape is the whole
+story regardless of how large a runner's header happens to be.
+
+**The exceptions are measured, not preferred:** `heavy`, `suite`, `arrival` and `fanout` stay unpinned, because
+pinning them deletes the behavior under test — a pinned `suite` never renders its fork door, a pinned `arrival`
+never gets its stub pair, a pinned `fanout` loses parent synthesis, and `heavy`'s journey *is* the pressure one. Same
+family as setting the arrival floor below the chunk size and calling the passing row a result. The drift row
 (`only the pressure journeys leave model-involving machinery enabled`, `tests/unit/rig-pins.test.ts`) names offenders
-in its failure message, and asserts `heavy` stays unpinned, so neither half can rot quietly.
+in its failure text and asserts those four stay unpinned.
+
+**And the method trap I walked into, recorded so it costs the next reader nothing:** I searched `src/` for the string
+`noAuxModel`, found none, and concluded the switch was decorative — then shipped a "fix" folding a check into
+`overTrigger`, a local that is computed and dropped, plus a guard test asserting the plugin must contain the alias's
+literal name. Absence of a NAME in a source directory is not absence of an EFFECT: read what the rig writes into the
+profile it boots, not what it calls the field on the way in.
 
 **Why the transcript has to travel with the artifact:** this took three runs to see because the workspace-only
 artifact never contained the booted home's session logs. `scripts/chain-replay.sh` now copies each leg's
