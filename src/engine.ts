@@ -33,7 +33,8 @@ import {
 import { composeChapters } from './compose.ts'
 import { carryActivePlan, detectPlans } from './plans.ts'
 import { isInjectedProse, stripReminderSpans } from './injections.ts'
-import { BlockAssembler, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler } from '@deepseek-ai/dsh-llm'
+import { auxPromptMessage } from './aux-message.ts'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
 import { lastResortCeilingTokens } from './last-resort.ts'
 import { extractPlot } from './engine-core.ts'
@@ -541,7 +542,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const assembler = new BlockAssembler()
     for await (const chunk of llm.stream({
       provider: route.provider, model: route.model,
-      messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-chapters' } })],
+      messages: [auxPromptMessage(prompt)],
       maxTokens,
       ...(sessionId !== undefined ? { sessionId } : {}),
       purpose: 'compaction',
