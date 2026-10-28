@@ -519,12 +519,14 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   leg, three times: clearing right after `/goal` still diverged (`Round: 3/256` vs the capture's `4/256` at
   `divergeAt=msg12`); waiting until a round *appeared* still diverged, for the cascade reason; and my claim that
   "a slash command is not an agent turn, so the window holds zero driver turns" was **false** — the last tape held
-  `Round: 12/256`. No click timing races a self-sustaining loop, and there is no rig knob for it (the human `/goal`
-  command takes no round argument; `goal-round-driver` has no config block). The portable form is the product's own:
-  create the goal via `create_goal(max_goal_rounds: 1)`, then wait for the **quiesced** marker `Round: 1/1` — after
-  which the driver is structurally incapable of firing again — and only then act. General form: a tape may contain a
-  background mechanism's output only when that mechanism has a state it cannot leave; "I clicked quickly" is not a
-  bound.
+  `Round: 12/256`. No click timing races a self-sustaining loop. The product does have the right bound —
+  `create_goal(max_goal_rounds: 1)` leaves a **quiesced** state (`Round: 1/1`) the driver cannot leave — but using it
+  from a leg also failed: capture died at `the host goal bar appears once a goal exists` because the model answered in
+  prose instead of calling the tool. So the honest statement is: **a tape may carry a background mechanism's output
+  only when that mechanism has a state it cannot leave, and the leg must be able to reach that state without asking
+  the model for cooperation.** Today no rig path seeds a goal record directly (the human `/goal` command takes no
+  rounds argument and `goal-round-driver` has no config block), which is precisely why #135's browser leg is unwritten
+  rather than skipped — the missing piece is a rig knob, not a weaker assertion.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
