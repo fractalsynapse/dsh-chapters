@@ -1,9 +1,9 @@
 # Tape provenance — `heavy` project
 
-**Distilled 2026-10-27** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
-Last recorded verdict: exit 0, 8 tape entries.
+**Distilled 2026-10-28** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
+Last recorded verdict: exit 0, 36 tape entries.
 
-- **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41733, threshold 0.9, arrival floor 1000000.
+- **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41733, threshold 0.45, arrival floor 1000000.
   The boot and every worker read those pins; replay boots the SAME regime, or the tape means
   something else than it recorded (#56 — divergent pins were the reason replay MISSed).
 - **Upstream:** hosted endpoint (`token-plan…`, model `qwen3.8-flash`)

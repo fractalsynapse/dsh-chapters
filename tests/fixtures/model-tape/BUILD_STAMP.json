@@ -1,6 +1,6 @@
 {
-  "lib": "bcb20b90936f6314",
-  "gitSha": "92a096857568a8985e158288e0d671b1d7d73df5",
-  "at": "2026-10-28T06:38:24.360Z",
+  "lib": "9b8ee97a7309fb86",
+  "gitSha": "50b45ad31f50d55f565a2bf5ac43ecd54cf43f92",
+  "at": "2026-10-28T07:03:19.890Z",
   "note": "written by `npm run corpus:stamp`; a replay refuses when lib/ no longer matches"
 }

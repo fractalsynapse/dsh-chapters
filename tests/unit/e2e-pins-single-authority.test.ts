@@ -27,10 +27,10 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // record and replay; `maxRetries: 3` because its post-compaction turn needs the host to re-issue a refused
   // request. Both are declared here as an INDEPENDENT restatement of the table — that is this block's purpose:
   // a one-sided edit to `rig-pins.ts` fails, so a regime change has to be argued for twice.
-  heavy: { E2E_PORT: '41733', E2E_THRESHOLD: '0.9', E2E_FLOOR: '1000000', E2E_MAX_RETRIES: '3' },
+  heavy: { E2E_PORT: '41733', E2E_THRESHOLD: '0.45', E2E_FLOOR: '1000000', E2E_MAX_RETRIES: '3' },
   arrival: { E2E_PORT: '41732', E2E_THRESHOLD: '0.9', E2E_FLOOR: '500' },
   enrich: { E2E_PORT: '41734', E2E_THRESHOLD: '0.9', E2E_ENRICH: '1' },
-  fanout: { E2E_PORT: '41736', E2E_THRESHOLD: '0.75' },
+  fanout: { E2E_PORT: '41736', E2E_THRESHOLD: '0.45' },
   rules: { E2E_PORT: '41735', E2E_THRESHOLD: '0.9' },
   fork: { E2E_PORT: '41737', E2E_THRESHOLD: '0.75' },
   plans: { E2E_PORT: '41738', E2E_THRESHOLD: '0.99', E2E_NO_AUX_MODEL: '1' },

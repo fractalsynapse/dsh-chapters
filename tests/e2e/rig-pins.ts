@@ -45,10 +45,19 @@ export const RIG_PINS: Record<string, RigPin> = {
   suite: { port: 41731, threshold: '0.75', noElicitedPlot: true },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
-  heavy: { port: 41733, threshold: '0.9', floor: '1000000', maxRetries: 3 },
+  // #132: same margin reasoning as `fanout`. At 0.9 the relief crossing lands where a few hundred bytes of
+  // machine-specific header choose the turn, and this leg's whole subject is what happens AFTER relief — so an
+  // early, unambiguous crossing (0.45 of the pinned window) is both more deterministic and a stronger test of the
+  // post-relief behavior. Deferral stays enabled (unlike `noAuxModel`), so nothing under test is deleted.
+  heavy: { port: 41733, threshold: '0.45', floor: '1000000', maxRetries: 3 },
   arrival: { port: 41732, threshold: '0.9', floor: '500' },
   enrich: { port: 41734, threshold: '0.9', enrich: true , noAuxModel: true },
-  fanout: { port: 41736, threshold: '0.75' },
+  // #132 experiment: relief on BOTH sides of the margin. At 0.75 of the pinned 32K window the crossing sits at
+  // ~24K tokens, where a few hundred bytes of machine-specific header decide the turn it happens on — which is
+  // what shifts a child's first message between a plain prompt and a checkpoint notice. 0.45 (14.4K) should put the
+  // relief firmly inside the journey on either machine. Deferral is NOT turned off here, so unlike `noAuxModel`
+  // this cannot delete the behavior the leg tests.
+  fanout: { port: 41736, threshold: '0.45' },
   rules: { port: 41735, threshold: '0.9' , noAuxModel: true },
   fork: { port: 41737, threshold: '0.75' , noAuxModel: true },
   plans: { port: 41738, threshold: '0.99', noAuxModel: true },
