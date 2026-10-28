@@ -843,6 +843,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   }
 
   async #arrive(agent: Agent): Promise<void> {
+    // #129: this path decides whether an oversized tool result becomes an artifact, and three separate
+    // investigations today (arrival's stub-pair failure pinned and unpinned, fanout's lost synthesis, the CI
+    // misses at the first assistant turn) all needed the same fact and none of them could get it: whether
+    // #arrive RAN AT ALL for a given turn. It logged only its two skip branches, so silence was ambiguous
+    // between "not called" and "called, deferred nothing" — the #61 rule applies: entry is a fact worth
+    // delivering, with the numbers that decide the outcome.
+    {
+      const session = agent.session as unknown as ArrivalSessionShim & { header?: { cwd?: string } }
+      diagnosticNote(this.ctx.logger, 'realm:engine:arrive',
+        `entered: nodes=${String(session.surface?.nodes?.length ?? -1)}`
+        + ` cwd=${session.header?.cwd === undefined || session.header.cwd === '' ? 'NONE' : 'set'}`
+        + ` floor=${String(this.chaptersConfig.toolResultArtifactTokens)}`
+        + ` lastResort=${String(this.chaptersConfig.lastResortArtifact === true)}`)
+    }
     const session = agent.session as unknown as ArrivalSessionShim & { header?: { cwd?: string } }
     const cwd = session.header?.cwd
     if (cwd === undefined || cwd === '') {
