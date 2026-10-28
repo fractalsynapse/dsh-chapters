@@ -1796,3 +1796,32 @@ these legs must not depend on how many turns a model feels like taking. A leg wh
 replay anywhere, and no margin, threshold, or fold fixes that — the journeys have to be shortened and bounded so the
 turn count is a property of the spec, not of the roll. Restoring the corpus to the committed set (my 20-entry roll is
 discarded, not "re-anchored" on a coin flip).
+
+### Next-session brief: make the turn count a property of the spec, then re-anchor (#132, #129)
+
+State of the branch when this session ends, all of it measured rather than asserted:
+
+- **Green and committed:** plane 1,114/1,114 with 0 skipped; `typecheck` and `typecheck:client` 0; `typecheck:e2e`
+  at its 68 baseline; full one-boot-per-journey chain ten-for-ten (`MG=0`); `coverage:e2e` `CVM=0` at **78.2%**
+  on the current corpus; corpus stamped and `corpus:check` agreeing. Products of this session, all with red-first
+  rows: **#131** artifact answers no longer arrival-stubbed (two legs' "flakiness" was this), **#113** the Autorun
+  control actually arms (it was inert) and **goal displacement is observed in Chromium** (`Pause goal` →
+  `Resume goal`, replayed model-free at 5 passed twice), `scripts/chain-replay.sh` (one boot per journey, now what
+  `npm run test:e2e:replay` means), `linkPinnedToolPackages()` before spawn (runner assembles 34 tools, was 7),
+  per-leg logs + session transcripts + per-port diagnostics in the CI artifact, and the `arrival` prompt fixed to
+  ask for the `limit` the host actually accepts (which took that leg off CI's list at least once).
+- **Red, and honestly so:** CI acceptance on `heavy arrival fanout`. `arrival` has flipped green→red between
+  identical-code runs; `fanout`'s capture is 10 or 20 entries on **this** host minutes apart. So the tapes are not
+  portable because journeys are open-ended, and the diagnosis is settled: relief timing was a symptom, **model
+  turn count is the cause**.
+- **The work, concretely:** bound each affected leg so the number of model turns is fixed by the spec, then
+  re-anchor. For `fanout` that means two subagents, one delegated read each, and the parent asked for the
+  **shortest faithful synthesis** — assert the stub pair, both markers reaching the parent's answer, and nothing
+  about how many queries it took; if a roll can still vary in turn count, the leg should drive the pieces it can
+  drive (deterministic fixtures, generated bulk) and stop relying on the model to stop early. `heavy` and
+  `arrival` get the same treatment: one bounded read, one bounded artifact query, assertions on the durable log's
+  facts rather than on the model's economy.
+- **Do not**: pin `noAuxModel` on those legs (it deletes deferral, measured three times); fold injected or
+  checkpoint content out of matching (it collapses positional prefixes and mis-serves turns — tried, reverted);
+  re-anchor a leg off a single green roll (that is how two fake fixes happened); raise a timeout to pass a leg
+  whose subject is timing.
