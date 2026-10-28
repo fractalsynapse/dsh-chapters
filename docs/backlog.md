@@ -1572,3 +1572,18 @@ corpus (`var/e2e-session-logs/`, run 40611340353), while `heavy` ran two on both
 pass on CI; the four that must not pin it (`heavy`, `suite`, `arrival`, `fanout`) are exactly where the misses land.
 So the remaining fix is a **deterministic trigger** for the machinery those four legs exist to exercise — an explicit
 event at a pinned turn or size rather than a threshold crossing on a header that differs slightly between machines.
+
+### Correction to my own commit message: `threshold 0.5` does not make `suite` compact earlier — it declines
+
+`test: give suite a threshold margin wide enough to fire on every machine` argued the checkpoint would now fire
+"well before the divergence point on both machines". The engine's own sink says otherwise: at that ratio the leg's
+requests are logged as `relief declined while the surface is over the trigger (surface=22119 trigger=16000
+window=32000 …)` — repeatedly — and the new capture contains **no** checkpoint notice at all. So the capture became
+checkpoint-free because relief is being *refused*, not because it moved earlier. Two consequences, neither of which I
+get to skip: (1) the claim in that commit message is wrong and is corrected here; (2) if `suite`'s journey no longer
+exercises compaction, whatever the leg was written to prove about pressure relief is not being proved by it any more —
+which needs its own answer, not a re-wording.
+
+Measured facts that do hold: `suite` at `0.5` unpinned captures (5 entries) and replays green twice on this host; the
+same leg pinned does not boot at all (two attempts, one log line, no URL) — see #129. Tree restored to the working
+regime; plane 1,108/1,108.
