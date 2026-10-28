@@ -458,7 +458,8 @@ storedCandidates: []` while the runner's history held `Round: 1/256`…`Round: 4
 *behavior* was observed in Chromium and stands; the *replay* of it cannot be relied on until #138 gives a way to bound
 rounds. Attempted and reverted, with measurements: pinning `defaultMaxGoalRounds: 1` from a boot's profile patch makes
 `/goal` create nothing (staging spec + staging tape: pin active → 1 failed/4 passed; pin removed → 5 passed), and
-asking the model to call `create_goal(max_goal_rounds: 1)` fails capture because it answers in prose. It required a product fix first — the control dispatched local state only and `refresh()`
+asking the model to call `create_goal(max_goal_rounds: 1)` fails capture because it answers in prose.
+Showing the displacement at all required a product fix first — the control dispatched local state only and `refresh()`
 flipped it back, so the click refused itself (see `prompt-dock-autorun-write.test.ts`). The **goal-off restores normal
 suggestion** half of item 4 remains **unit-covered and is not claimed from a browser** (#135 stays open). Four capture
 attempts at that leg are on record and each failed for a reason worth keeping: clicking `Clear goal` after a turn let
@@ -532,9 +533,13 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   from a leg also failed: capture died at `the host goal bar appears once a goal exists` because the model answered in
   prose instead of calling the tool. So the honest statement is: **a tape may carry a background mechanism's output
   only when that mechanism has a state it cannot leave, and the leg must be able to reach that state without asking
-  the model for cooperation.** Today no rig path seeds a goal record directly (the human `/goal` command takes no
-  rounds argument and `goal-round-driver` has no config block), which is precisely why #135's browser leg is unwritten
-  rather than skipped — the missing piece is a rig knob, not a weaker assertion.
+  the model for cooperation.**
+  Correction, because I first wrote "no config block exists" and that was wrong: `@deepseek-ai/dsh-goal` DOES ship
+  `config = z.object({ defaultMaxGoalRounds: z.number().default(256) })`, consumed by
+  `resolveCreateGoal(request, defaultMaxGoalRounds)`. What does not exist is a way to reach it from a boot — inserting a
+  `- id: goal` row with that config into `profiles/web/cordis.patch.yml` makes `/goal` create no goal at all (measured
+  against staging's own spec and tape: pin active → `1 failed/4 passed`; pin removed → `5 passed`). So the missing piece
+  is a host seam (#138), not a weaker assertion — which is why #135's leg is unwritten rather than skipped.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
