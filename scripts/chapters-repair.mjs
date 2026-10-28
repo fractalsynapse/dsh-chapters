@@ -193,6 +193,12 @@ if (!fs.existsSync(REGISTRY)) {
   process.exit(2)
 }
 const reg = JSON.parse(fs.readFileSync(REGISTRY, 'utf8'))
+/** #101: the invariant my own runs violated — total chapter records BEFORE any mutation. An apply
+ * that ends with FEWER records is data loss no matter how many registrations it applied, so the count is
+ * taken here, at load, and compared again at the write. Without this the summary could (and did) read
+ * "1,596 registrations applied" while the store went 2,706 → 147. */
+const recordsBefore = Object.values(tablesOf(reg).sessions ?? {}).reduce((n, r) => n + ((r.chapters || []).length), 0)
+const rowsBefore = Object.keys(tablesOf(reg).sessions ?? {}).length
 const store = makeRegistry(reg)
 const all = [...store.sessions()].map(([id]) => id)
 
@@ -305,6 +311,18 @@ if (!YES) {
 
 // write the registry back: backup, then atomic replace
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+/**
+ * The record-count floor (#101). Refuse, do not warn: a run that shrinks the registry has lost
+ * knowledge, and writing it makes the loss durable. The backup still exists (we are before it), the
+ * journals of whatever was applied exist, and the operator gets the numbers to decide with.
+ */
+const recordsNow = Object.values(tablesOf(reg).sessions ?? {}).reduce((n, r) => n + ((r.chapters || []).length), 0)
+if (recordsNow < recordsBefore) {
+  console.error(`\nABORT — record-count floor: the store would go from ${String(recordsBefore)} chapter records (${String(rowsBefore)} rows) to ${String(recordsNow)}.`)
+  console.error('  An apply that reduces the registry is data loss, whatever it also registered; nothing has been written.')
+  console.error('  If this is expected (e.g. you are restoring a smaller state), delete this guard for one run — the pre-apply backup is the safety net either way.')
+  process.exit(1)
+}
 fs.copyFileSync(REGISTRY, `${REGISTRY}.pre-repair-${stamp}.bak`)
 const tmp = `${REGISTRY}.tmp-${stamp}`
 fs.writeFileSync(tmp, `${JSON.stringify(reg, null, 2)}\n`)
