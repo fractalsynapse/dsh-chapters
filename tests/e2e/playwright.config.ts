@@ -74,5 +74,8 @@ export default defineConfig({
     { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
     // Same journey, switch off: the bar must be absent. See tests/e2e/prompt-off.spec.ts.
     { name: 'prompt-off', env: rigEnv('prompt-off'), testMatch: ['**/prompt-off.spec.ts'] },
+    // #138: LIVE-only goal journeys (see the pin comment). Deliberately absent from `scripts/chain-replay.sh`'s leg
+    // list, so the model-free acceptance job does NOT cover these two claims — a live run does. Recorded, not hidden.
+    { name: 'prompt-goal-live', env: rigEnv('prompt-goal-live'), testMatch: ['**/prompt-goal-live.spec.ts'] },
   ],
 })

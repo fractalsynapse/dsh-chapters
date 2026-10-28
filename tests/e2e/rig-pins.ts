@@ -68,6 +68,11 @@ export const RIG_PINS: Record<string, RigPin> = {
   // (it lived in the project that turns the feature ON), which is a test that cannot fail — the exact shape of
   // vacuous green this repo keeps being bitten by (#113, and #54 before it).
   'prompt-off': { port: 41740, threshold: '0.9', noAuxModel: true },
+  // #138: goal-bearing journeys run LIVE only, never against the tape. A goal round is itself a turn and every turn
+  // ends, so an armed goal's request count tracks machine latency; bounding it (budget 1) instead ENDS the goal
+  // (`round-limit` → blocked → the strip renders nothing), so there is no observable armed moment. The claims are
+  // real and stay tested — on the real provider, under a wall-clock bound — they are simply not tape-verifiable.
+  'prompt-goal-live': { port: 41741, threshold: '0.9', prompt: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
