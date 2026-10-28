@@ -504,3 +504,47 @@ selector audit in the comment. (b) My skip guard compared `E2E_TAPE` — the *pr
 fired; the rig's signal is `E2E_MODEL === 'replay'` (`globalSetup.ts:52`). (c) The `e2e-typecheck-ratchet` then refused
 my +1 error, and instead of raising the ceiling I fixed the cause: one documented cast at the projects boundary replaced
 eleven identical `TS2769`s and the baseline **fell 68 → 59**, which is the direction the ratchet asks for.
+
+### 2026-10-28 (late) — a dependency alignment found a live product failure: 32K hosts had no relief at all (#140, #128)
+
+Aligning this repo's `@deepseek-ai/*` compile deps to the host the rig actually boots (`0.2.0-rc.2`) made seven
+`engine-lifecycle` rows throw:
+
+```
+compaction-basic: local/qwen-test reserves 0 completion tokens and 65536 headroom tokens
+of its 32000-token context window …        → TargetPressureConfigError
+```
+
+That is not a test artifact. `dsh-compaction-basic@0.2.0-rc.2` validates
+`contextWindow − reservedCompletionTokens − headroomTokens` per routed target and **throws** when it is ≤ 0, its default
+`headroomTokens` is **65,536**, and that reservation exists to bound a routed summarize call — which this engine does
+not make, because `summarize()` is overridden and deterministic (`src/engine.ts:664`). So on any model under 65,536
+tokens — including 32K, which is this project's own stated target hardware — the plugin's central feature raised an
+exception instead of compacting, and had done so silently for two host minors because the compiler was reading older
+types. The e2e legs cannot see it: the token-plan model reports a window well above the default.
+
+Two changes, deliberately different in kind. The realm's engine row now bounds `headroomTokens: 8192` (inert at 128K —
+`min(window × 0.9, window − 8192)` keeps the ratio as the trigger — and positive at 32K), and the engine refuses to let
+a *configuration* problem escape as a crash: `isPressureConfigRejection()` identifies the class structurally (the
+error type is not re-exported in the bundle's types), logs the cause, and abstains. Provider failures still propagate
+after finalization, and a row pins that asymmetry — r19's distinction between "the user can fix this" and "the
+endpoint failed".
+
+Then the temptation, and why it was refused: after the first cut, the pre-existing `#78` row ("a declined relief while
+over the trigger is reported with its numbers") failed. Editing its expectation would have been the easy green. It was
+right, and my branch had dropped a fact — a config-impossible realm still DECLINED relief while over the trigger — so
+the branch now emits the cause *and* calls `#reportDecline()`. Two silences traded for one is not a fix.
+
+Red-first rows that keep the failure from returning: `host-dep-pinning.test.ts` (compile deps equal the lock's exact pin,
+and the installed copy matches — a caret here is how 32K hosts lost relief twice), `aux-message-kind.test.ts` (no shipped
+code carries the retired bare `source.kind: 'plugin'`; four one-off `llm.stream` sites now say `kind: 'user'`, which is
+what they are), and the drift row in `preset-declaration.test.ts` (realm carries the bound *and* `Config` declares it, so
+the next host bump cannot quietly drop the key).
+
+Measured on this branch: plane **1,287/1,287, 0 fail, 0 skipped**; `typecheck` 0; `typecheck:client` 0; e2e typecheck
+**59/59** (the ratchet fell when one boundary cast replaced eleven identical `TS2769`s); corpus fully re-anchored because
+the lib hash moved — every leg captured `exit=0`, one strict `npm run test:e2e:replay` **ten-for-ten (`CD=0`)**,
+`corpus:check` agreeing. A fresh `coverage:e2e` on this corpus is recorded in the PR body. One accuracy note: my previous
+commit claimed two stray `src/*.bak` files were removed; they were deleted in the tree but still tracked, and THIS commit
+is what removes them — the claim was right in intent and wrong about state, which is the failure this file exists to
+catch.
