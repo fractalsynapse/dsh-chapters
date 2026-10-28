@@ -450,7 +450,15 @@ write the composer on 0.2.0-rc.2 (`insertText` raises
 tracked as #126. **Autorun displacing a goal's continuation is now observed in Chromium** (2026-10-28): with a goal armed the host
 offers `Pause goal`; clicking the bar's Autorun leaves `Autorun off` in place after the server round-trip, the host
 flips to `Resume goal`, and `Pause goal` disappears. Recorded alone under the real provider and replayed model-free
-twice (5 passed each). It required a product fix first — the control dispatched local state only and `refresh()`
+twice (5 passed each) — **but the leg that carries it is portable only by luck, and that is now known (#138)**: a goal
+round is itself a turn, so rounds cascade at 256-budget by default, and how many exist when the leg acts is machine
+latency. Evidence is a docs-only PR (#137, zero non-docs delta) turning acceptance red with `MISS tape=prompt entries=23
+storedCandidates: []` while the runner's history held `Round: 1/256`…`Round: 4/256` where the capture had none — run
+40676609079 (all ten legs `ok`) agreed only because the runner's latency reproduced my round count. The displacement
+*behavior* was observed in Chromium and stands; the *replay* of it cannot be relied on until #138 gives a way to bound
+rounds. Attempted and reverted, with measurements: pinning `defaultMaxGoalRounds: 1` from a boot's profile patch makes
+`/goal` create nothing (staging spec + staging tape: pin active → 1 failed/4 passed; pin removed → 5 passed), and
+asking the model to call `create_goal(max_goal_rounds: 1)` fails capture because it answers in prose. It required a product fix first — the control dispatched local state only and `refresh()`
 flipped it back, so the click refused itself (see `prompt-dock-autorun-write.test.ts`). The **goal-off restores normal
 suggestion** half of item 4 remains **unit-covered and is not claimed from a browser** (#135 stays open). Four capture
 attempts at that leg are on record and each failed for a reason worth keeping: clicking `Clear goal` after a turn let
