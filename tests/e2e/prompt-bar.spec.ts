@@ -33,7 +33,7 @@ function captureConsole(page: import('@playwright/test').Page, sink: string[]): 
   page.on('pageerror', (e) => { sink.push(`pageerror: ${String(e.message).slice(0, 300)}`) })
 }
 
-import { countHumanMessagesCarrying, newSessionWithTurn, openApp, sessionLogTextById } from './session.ts'
+import { countHumanMessagesCarrying, deliveredFor, newSessionWithTurn, openApp, sessionLogTextById, typeComposer } from './session.ts'
 
 const DOCK_BAR = 'div.dsh-chapters_promptDock[data-prompt-bar="true"]'
 
@@ -182,6 +182,41 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     }, null, 1))
     await expect.poll(() => countHumanMessagesCarrying(sessionLogTextById(sid), prompt) > before,
       { timeout: 120_000, intervals: [3_000] }).toBe(true)
+  })
+
+
+  /**
+   * Clicking Autorun must ARM it, and stay armed (objective item 3; the inert-button fix of 2026-10-28).
+   *
+   * This is the smallest honest claim the browser can refute: after the click the control reads `Autorun off` and
+   * the host's own goal control flips to `Resume goal` — the server said `displaced`. Both labels are page-wide,
+   * because the host routes its action labels through its own `Action` component (`client.js`
+   * `"action.pause": "Pause goal"`), and scoping to `[data-goal-bar]` finds nothing.
+   */
+  test('clicking Autorun arms the loop and displaces an active goal', async ({ page }) => {
+    await openApp(page)
+    const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
+    await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
+    const goalBar = page.locator('[data-goal-bar]')
+    await expect(goalBar, 'the host goal bar appears once a goal exists').toBeVisible({ timeout: 60_000 })
+    const pause = page.locator('button[aria-label="Pause goal"], button:has-text("Pause goal")').first()
+    await expect(pause, 'the goal starts armed: the host offers Pause').toBeVisible({ timeout: 60_000 })
+
+    const bar = page.locator(DOCK_BAR)
+    await expect(bar, 'the prompt dock row is present').toBeVisible({ timeout: 60_000 })
+    await waitForOffer(bar, page)
+    const autorun = bar.locator('button[aria-label="Autorun"], button:has-text("Autorun")').first()
+    await expect(autorun, 'Autorun is arm-able').toBeEnabled({ timeout: 60_000 })
+    await autorun.click()
+
+    // The fix under test: the click is a server write, so the label must HOLD at `Autorun off` after `refresh()`
+    // re-reads the loop state, and the goal must give up its continuation.
+    await expect(bar.locator('button[aria-label="Autorun off"], button:has-text("Autorun off")').first(),
+      'the bar holds its armed state after the server round-trip').toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('button[aria-label="Resume goal"], button:has-text("Resume goal")').first(),
+      'the host goal control flips: arming the loop disarmed the goal driver').toBeVisible({ timeout: 60_000 })
+    await expect(pause, 'and Pause is no longer offered').toHaveCount(0)
+    void sid
   })
 
 })
