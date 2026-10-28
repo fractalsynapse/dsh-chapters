@@ -232,6 +232,21 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
    * model output, and a leg that fails when the classifier phrases things differently is measuring luck, not the
    * contract — the lesson #132 just charged this corpus to learn.
    */
+  /**
+   * #135: the other half of the pair — **goal off restores a normal suggestion**, observed in the browser.
+   *
+   * First version of this leg clicked the host's `Clear goal` BUTTON after a turn, and CI answered at
+   * `commonPrefix=32 divergeAt=msg32`: the runner had a `<goal_round>` message where my local capture had the next
+   * human turn. That is not a matcher bug — goal rounds fire at `turn/end` with a budget the host takes from the
+   * GOAL RECORD (`maxGoalRounds`, default 256, no rig knob and no `/goal` argument), so the number of rounds between
+   * activating and clearing is a race between the driver and my click, i.e. machine latency baked into a tape. The
+   * last lesson of #132 again, in a new costume: never let the model's or the driver's turn count be a property of
+   * the capture.
+   *
+   * The deterministic form: goal rounds fire ONLY at a turn boundary, and a slash command is not an agent turn — so
+   * activate, clear, and take the first real turn AFTER the goal is already gone. Same claim, same assertions, zero
+   * driver races.
+   */
   test('clearing the goal leaves the bar offering a suggestion on the next turn', async ({ page }) => {
     await openApp(page)
     const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
@@ -239,13 +254,12 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     const goalBar = page.locator('[data-goal-bar]')
     await expect(goalBar, 'a goal exists before it can be cleared').toBeVisible({ timeout: 60_000 })
 
-    // Clear it the way a human does — the host's own control, not our plugin's state.
-    const clear = page.locator('button[aria-label="Clear goal"], button:has-text("Clear goal")').first()
-    await expect(clear, 'the host offers Clear goal').toBeVisible({ timeout: 60_000 })
-    await clear.click()
+    // Cleared through the host's own command, with NO agent turn in between — so the round driver never gets a
+    // boundary to fire at. This is the fix for the runner divergence above, not a weakening of the claim.
+    await typeComposer(page, '/goal clear', deliveredFor(sid, '/goal clear'))
     await expect(goalBar, 'the goal control is gone, not merely rephased').toHaveCount(0, { timeout: 60_000 })
 
-    // One more ordinary turn, with no goal in the session at all.
+    // The first ordinary turn after the goal is gone, and the bar must still do its job.
     const nextTurn = 'Reply with exactly: DONE'
     await typeComposer(page, nextTurn, deliveredFor(sid, nextTurn))
     const bar = page.locator(DOCK_BAR)
