@@ -406,6 +406,56 @@ Entry `apply(ctx, config)`. Build with `tsc -p tsconfig.json` and **build before
 UI (later phase) additionally needs `dsh.client` and a `tsdown.client.config.ts` — see
 `dsh-session-fork/package.json` for the shape.
 
+### An armed goal has no rest state — measured, with the lines that prove it
+
+Verified while trying to make a goal-bearing tape leg deterministic (#138). The round driver gates on
+`phase === 'active' && activation === 'armed'` plus agent idleness
+(`@deepseek-ai/dsh-goal-round-driver` `src/index.ts:105-117`), and a round is itself a turn — so every round ends, and
+the next is scheduled. There is no moment in which an armed goal is also at rest:
+
+- **spending the budget ends the goal.** At `:182-188`, `roundsStarted >= maxGoalRounds` calls
+  `ctx.goals.block(agent, ref, { code: 'round-limit', message: 'Goal reached its configured limit of N rounds.' })`.
+- **the strip then disappears.** `@deepseek-ai/dsh-client-ui-goal` `GoalBar.tsx:85-86`: *"Loading, absent, and complete
+  goals have no strip at all"*, and the guard excludes blocked/complete. So the control a test wants to observe
+  (`Pause goal` → `Resume goal`) is not rendered in the state the budget produces.
+- **the per-goal budget is a plugin argument, not a user one.** `ctx.goals.create(agent, { objective, maxGoalRounds })`
+  (`@deepseek-ai/dsh-goal` `src/index.ts:303`, `types.ts:28-30`) — the human `/goal` command passes no budget
+  (`dsh-command-goal` usage is `goal <objective>, /goal clear`; `command-goal/src/index.ts:150` calls `create` without
+  one), so the default 256 applies.
+
+Consequences for this repo, both measured: a goal-bearing tape leg agrees with a runner only while the runner's latency
+happens to reproduce the capture's round count (staging's `prompt` leg failed twice on docs-only pushes:
+`MISS tape=prompt entries=23 storedCandidates: []`, runs 40697174778 / 40706037817); and bounding the budget to 1 makes
+the goal vanish before a leg can act on it (17-entry tape, `Round: 1/`, no second round, `the host goal bar appears once
+a goal exists`). Upstream's own test fixture takes the third path — create then `ctx.goals.disarm(agent)`, noting
+*"An armed goal makes the shipped goal-round-driver start a round at idle, racing the test driver's disposal"* — which
+is the disarmed state, not the armed one a displacement claim needs.
+
+What is needed to test this in a tape: a way to open an **armed** goal whose driver will not fire until released, or a
+non-terminal exhausted state that still renders the control (#138). Until then the goal/suggestion interplay is
+verified live under a wall-clock bound (`tests/e2e/prompt-goal-live.spec.ts`), not by the model-free acceptance job.
+
+### A profile patch may not re-declare a host plugin's row — measured on 0.2.0-rc.2
+
+`profiles/web/cordis.patch.yml` layers by row `id`, and the rig relies on that for its **own** rows
+(`preset-chapters`, `agent-preset-registry`, `llm-pi-ai`, `agent-default-model`, `llm-gate`,
+`fetch-timeouts`). Copying that trick onto a row that belongs to the installed bundle is not neutral. Three variants,
+each run against an unchanged spec and corpus so the only variable was the patch:
+
+| profile patch | result |
+|---|---|
+| `- id: goal` + `config: { defaultMaxGoalRounds: 1 }` | the `goal` plugin stops working: `/goal` creates no goal, so `[data-goal-bar]` never renders |
+| `- id: goal` with **no** config | every test passes, but the boot issues a request no tape has: `MISS tape=prompt entries=23 messages=1 closest=0000.json` — at the FIRST message, before any goal exists |
+| no `goal` row in the profile patch | clean run (`5 passed`, rc 0) |
+
+Read it as: duplicating a host row changes the mounted plugin set (extra registration → an extra request), and adding a
+`config:` block to that duplicate replaces the base row rather than merging into it, taking the plugin's real config
+surface with it. So the patch is a way to configure **rows you own**, not a way to reach into a host plugin's settings.
+The concrete consequence: `@deepseek-ai/dsh-goal` does export
+`config = z.object({ defaultMaxGoalRounds: z.number().default(256) })` and `resolveCreateGoal(request,
+defaultMaxGoalRounds)` honors it, but no boot can pin it from the profile — which is why goal-round bounding is a host
+ask (#138) and not a rig bug to fix.
+
 ### Presets are declaration rows now (host ≥ 0.1.7-alpha.1) — measured, with the incident
 
 A user preset used to be a directory `$DSH_HOME/.agent-presets/<id>/` holding `preset.yml` +

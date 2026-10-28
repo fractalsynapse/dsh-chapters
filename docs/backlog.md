@@ -1870,3 +1870,103 @@ behavior, not a fold residue: a matcher change shipped without the re-anchor it 
 Action: re-anchor the corpus on the symmetric matcher and re-verify. Rule extracted, added to the rig list: **any
 change that alters prefix LENGTH is a corpus change, not a matcher change** — length-preserving folds may ship alone,
 length-changing ones never do.
+
+### #135 — the goal-off browser leg needs a rig capability, not a weaker assertion
+
+Four capture attempts, four different failure classes; the full account is in `docs/project-state.md` (2026-10-28,
+later) and on the issue. What the chase established, measured:
+
+- A goal round **is a turn**, and every turn ends, so rounds cascade — no click timing or polling bounds them (one
+  tape reached `Round: 12/256`).
+- The product's own bound (`maxGoalRounds`, quiescent at `Round: 1/1`) is the right shape, but the only way a leg can
+  set it today is by asking the model to call `create_goal(max_goal_rounds: 1)` — and in capture the model answered in
+  prose instead of calling the tool. Setup that needs model cooperation cannot be a tape.
+- No HTTP seam exists: grepping every installed `@deepseek-ai/*` lib for a route containing `goal` returns nothing. The
+  human `/goal` command takes no rounds argument, and `goal-round-driver` has no config block in `cordis.patch.yml`.
+
+Both candidates were then investigated, and (1) is **not available**: the host's goal state travels in the durable
+event stream (`goal/change`, `goal/changed` in `@deepseek-ai/dsh-goal`), so pre-seeding it would mean fabricating a host
+event — forbidden by invariant 1. The `goal` row that DOES sit in a boot home's storage
+(`storages/session_projcache/sessions/<id>.json`, keys `{seq, val:{current, seenGoalIds, failure}, ver}`) is our own
+mirror, with no round budget. There is no plugin-facing goal API (`ctx.get('…goal…')`, `registerCapability`, `provides:`
+all empty), no HTTP route mentioning `goal` in any installed lib, no config block on `goal-round-driver`, and no rounds
+argument on `/goal`. So today the only way to set a bounded budget is the model calling `create_goal(max_goal_rounds: 1)`
+— which capture attempt 4 proved a tape cannot depend on.
+
+Decision, **retracted in its last clause**: the claim stays **unit-covered**, §28 keeps not claiming the pixel, and the leg stays **unwritten, not skipped** — but NOT because the change "belongs upstream". It does not. `ctx.goals.create(agent, request)` is plugin-callable with `maxGoalRounds` in the request (`examples/dsh/packages/goal/goal/src/index.ts:303`, `types.ts:28-30`), so the seam is ours to build as a rig fixture with its own row id; only the *profile-patch override of the base `goal` row* is closed off. See the follow-up below and #138, which was rewritten from "host ask" to "build the rig seam".
+
+### #135 follow-up — a rig-reachable round budget does not exist, and staging's displacement leg is timing-fragile
+
+The obvious knob is real: `@deepseek-ai/dsh-goal` ships `config = z.object({ defaultMaxGoalRounds: z.number().default(256) })`,
+and `resolveCreateGoal(request, defaultMaxGoalRounds)` uses `request.maxGoalRounds ?? defaultMaxGoalRounds`. But
+overriding it from a boot's profile patch **disables the feature the leg needs**: inserting
+
+    - id: goal
+      name: '@deepseek-ai/dsh-goal'
+      config:
+        defaultMaxGoalRounds: 1
+
+makes `/goal` stop creating a goal, and the leg fails at `the host goal bar appears once a goal exists`. Attribution was
+by experiment, not by reading: staging's own spec with staging's own 23-entry tape, **pin active → 1 failed / 4
+passed**; **pin removed → 5 passed**. Nothing was committed; the transform, its wiring and both rows that pinned it are
+gone, and the tree is staging-equal with `corpus:check` agreeing.
+
+Two collateral facts worth keeping, because they are how I got here:
+
+- The first pinned capture reached **326 tape entries in ten minutes**, which is what made me stop and inspect a real
+  boot patch instead of trusting a green unit row. My rows had fed the transform a synthetic patch that *contained* a
+  `goal` row; a real boot's patch contains none (measured: `preset-chapters`, `agent-preset-registry`, `llm-pi-ai`,
+  `agent-default-model`, `llm-gate`, `fetch-timeouts`). Stub-of-the-fictional-shape again, this time mine.
+- **The merged `prompt` leg is portable by luck.** A docs-only PR (#137, zero non-docs delta) turned acceptance red with
+  `MISS tape=prompt entries=23 … storedCandidates: []` while the runner's history held `<goal_round> … Round: 1/256`
+  through `Round: 4/256` in a window my capture recorded with none. Run 40676609079 was green because the runner's
+  latency happened to reproduce my machine's round count. The displacement *behavior* is real and was observed; the
+  leg that carries it cannot currently be replayed dependably.
+
+What that leaves: making the goal legs portable needs a **host** capability — a rounds argument on `/goal`, or a
+plugin-facing seam to open a bounded goal — which is #138. Not a weaker assertion, and not a deleted test: the leg
+stays as merged, with its fragility named instead of hidden.
+
+#### Two variants measured, and they fail DIFFERENTLY (so the conclusion is narrower than "the config is bad")
+
+Run as throwaway mutations of `tests/e2e/boot.ts` against staging's own spec and staging's own 23-entry tape — the
+cheapest possible attribution, ~4 minutes each, nothing committed:
+
+| boot patch | outcome |
+|---|---|
+| `- id: goal` row **with** `config: { defaultMaxGoalRounds: 1 }` | `/goal` creates no goal: the leg fails at `the host goal bar appears once a goal exists` → **1 failed / 4 passed** |
+| `- id: goal` row **with no config at all** | all 5 tests pass, but the run still aborts: `RIG FAULT … MISS tape=prompt entries=23 messages=1 closest=0000.json` — an extra request the tape has no entry for, at the FIRST message |
+| row absent (staging as-is) | **5 passed**, rc 0 |
+
+So a duplicated `goal` row in a boot's profile patch is not a neutral act on this host, configured or not: the layering
+adds a request (visible at `messages=1`, before any goal is involved), and adding the config key goes further and stops
+the command from creating a goal. **The rig cannot override the goal plugin's row.** #138's ask is therefore specifically
+a host seam — a `/goal` rounds argument or a plugin-facing bounded-goal call — not a patch-shape puzzle, and I should not
+spend another evening rediscovering it.
+
+#### Attempt 5, and it is the one that closes the design space: re-ordering the leg does not bound rounds either
+
+Hypothesis: if the worker loop is armed BEFORE the goal exists, the driver never gets a `turn/end` to fire at, so the
+history carries zero rounds. Measured by capturing the re-ordered leg: **`exit=0`, 194 tape entries, and 76 of them
+contain `goal_round`.** The gate I set for myself ("no round markers in the tape, or I do not ship it") fired, so the
+change was reverted instead of pushed — spec and corpus back to staging's set (23 files, `corpus:check` agreeing at
+`lib=b67e373defcad83a`, replay `5 passed`, tree clean).
+
+Five distinct arrangements, all measured: clear-after-a-turn; clear-immediately; poll-until-a-round; arm-the-loop-first;
+and bounding via the model's `create_goal`. None bounds the driver, because creating a goal starts a self-sustaining
+loop of turns and replay answers every one of them instantly. **Conclusion, with the receipts: a goal-bearing tape leg
+is not achievable on this host without a round bound, and no leg-internal arrangement supplies one.** That is #138, and
+it is a host ask, not a rig task. `git clean` was needed to clear the 171 untracked tape files the capture left behind —
+restoring tracked files does not remove generated ones, and 194 files where 23 belong was the tell.
+
+### #130 attribution, and the two claims it leaves standing
+
+Bounded both of our unbounded relief-path awaits (`src/engine.ts:915`, `:999`) against a 1.5 s budget and ran a row
+against a stubbed adapter: **the step still consumed the whole 4 s race**, so our awaits are real but not the binding
+constraint — the wait is inside `super.compactIfNeeded`, i.e. the host awaiting the adapter on the pressure path. The
+change was reverted rather than shipped on an unproven causal claim (plane 1,115/1,115, `typecheck` 0, clean tree).
+
+Methodological note that cost me a wasted attempt: an adapter stub that **never settles** measures nothing, because the
+host's own base engine calls the same stub and hangs with it. **Slow but eventual** (8 s) is the shape that separates
+our awaits from the host's. Same lesson family as the fictional-shape stubs AGENTS warns about — caught before it became
+a commit this time.

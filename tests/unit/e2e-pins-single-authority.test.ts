@@ -40,7 +40,11 @@ const EXPECTED: Record<string, Record<string, string>> = {
   prompt: { E2E_TAPE: 'prompt', E2E_PORT: '41739', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1' },
   // The OFF half: same table entry, no `E2E_PROMPT` key at all. The row below asserts the maps agree, so a
   // stray switch here would fail the derivation comparison rather than silently turning a leg on.
-  'prompt-off': { E2E_TAPE: 'prompt-off', E2E_PORT: '41740', E2E_THRESHOLD: '0.9' }
+  'prompt-off': { E2E_TAPE: 'prompt-off', E2E_PORT: '41740', E2E_THRESHOLD: '0.9' },
+  // #138: the live goal journeys ride their OWN project and regime — bar on, aux machinery pinned off, its own port and tape dir.
+  // Deliberately absent from `scripts/chain-replay.sh`: an armed goal's round count is machine latency, so this project is
+  // verified against the live provider under a wall clock, never against a tape (`prompt-goal-live.spec.ts`).
+  'prompt-goal-live': { E2E_TAPE: 'prompt-goal-live', E2E_PORT: '41741', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' }
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {

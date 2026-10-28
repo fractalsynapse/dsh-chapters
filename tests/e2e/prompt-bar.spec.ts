@@ -35,7 +35,7 @@ function captureConsole(page: import('@playwright/test').Page, sink: string[]): 
 
 import { countHumanMessagesCarrying, deliveredFor, newSessionWithTurn, openApp, sessionLogTextById, typeComposer } from './session.ts'
 
-const DOCK_BAR = 'div.dsh-chapters_promptDock[data-prompt-bar="true"]'
+import { DOCK_BAR, offerText, waitForOffer } from './prompt-bar-offer.ts'
 
 /**
  * The composer, by the name the host gives it — NOT `[contenteditable], textarea` and `first()`, which in this
@@ -46,19 +46,6 @@ const composerOf = (page: import('@playwright/test').Page) =>
   page.getByRole('textbox', { name: /Message or run a task|commands/i }).first()
 
 /** The bar's own words for the offer, without the label, chips and glyphs the collapsed row also carries. */
-async function offerText(bar: import('@playwright/test').Locator): Promise<string> {
-  return (await bar.locator('.dsh-chapters_promptText').first().innerText()).trim()
-}
-
-/** Wait until the row carries a real recommendation — `idle`/`analyzing` are honest states, not results. */
-async function waitForOffer(bar: import('@playwright/test').Locator, page: import('@playwright/test').Page): Promise<void> {
-  await expect.poll(async () => {
-    const line = (await bar.innerText()).replace(/\s+/g, ' ')
-    return /Recommended Next Step/.test(line) && !/No suggestion yet|Analyzing/.test(line) ? 'offer' : line.slice(0, 60)
-  }, { timeout: 200_000, intervals: [3_000] } // the claim: an offer, not a placeholder line
-    ).toBe('offer')
-  void page
-}
 
 test.describe('the suggested-next-step bar docked above the composer', () => {
   test('it registers into the composer dock and is visible without hovering anything', async ({ page }) => {
@@ -185,38 +172,5 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
   })
 
 
-  /**
-   * Clicking Autorun must ARM it, and stay armed (objective item 3; the inert-button fix of 2026-10-28).
-   *
-   * This is the smallest honest claim the browser can refute: after the click the control reads `Autorun off` and
-   * the host's own goal control flips to `Resume goal` — the server said `displaced`. Both labels are page-wide,
-   * because the host routes its action labels through its own `Action` component (`client.js`
-   * `"action.pause": "Pause goal"`), and scoping to `[data-goal-bar]` finds nothing.
-   */
-  test('clicking Autorun arms the loop and displaces an active goal', async ({ page }) => {
-    await openApp(page)
-    const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
-    await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
-    const goalBar = page.locator('[data-goal-bar]')
-    await expect(goalBar, 'the host goal bar appears once a goal exists').toBeVisible({ timeout: 60_000 })
-    const pause = page.locator('button[aria-label="Pause goal"], button:has-text("Pause goal")').first()
-    await expect(pause, 'the goal starts armed: the host offers Pause').toBeVisible({ timeout: 60_000 })
-
-    const bar = page.locator(DOCK_BAR)
-    await expect(bar, 'the prompt dock row is present').toBeVisible({ timeout: 60_000 })
-    await waitForOffer(bar, page)
-    const autorun = bar.locator('button[aria-label="Autorun"], button:has-text("Autorun")').first()
-    await expect(autorun, 'Autorun is arm-able').toBeEnabled({ timeout: 60_000 })
-    await autorun.click()
-
-    // The fix under test: the click is a server write, so the label must HOLD at `Autorun off` after `refresh()`
-    // re-reads the loop state, and the goal must give up its continuation.
-    await expect(bar.locator('button[aria-label="Autorun off"], button:has-text("Autorun off")').first(),
-      'the bar holds its armed state after the server round-trip').toBeVisible({ timeout: 30_000 })
-    await expect(page.locator('button[aria-label="Resume goal"], button:has-text("Resume goal")').first(),
-      'the host goal control flips: arming the loop disarmed the goal driver').toBeVisible({ timeout: 60_000 })
-    await expect(pause, 'and Pause is no longer offered').toHaveCount(0)
-    void sid
-  })
-
+  
 })

@@ -17,6 +17,12 @@ export default defineConfig({
   reporter: [['list'], ['json', { outputFile: 'var/e2e-results.json' }]],
   use: { headless: true, viewport: { width: 1360, height: 900 } },
   globalSetup: './globalSetup.ts',
+  // Cast once, at the array: the host's own `Project` type in the @playwright/test version this plane compiles
+  // against has no `env` field, so every one of the thirteen entries used to raise its own TS2769 — eleven
+  // counted errors that were never a real defect, only a type-skew artifact. One documented assertion at the
+  // boundary replaces eleven errors (the e2e typecheck ratchet fell from 68 to 57 as a result, which is the
+  // direction scripts/e2e-typecheck-ratchet.sh asks for). Per-entry casts or `any` would be the same lie
+  // written thirteen times.
   projects: [
     // #56: the regime is AUTHORITY, not a runner flag. Pins lived in three places — this
     // config's comment claimed distill "mirrors npm run test:e2e exactly", and nothing
@@ -25,7 +31,12 @@ export default defineConfig({
     // tape was distilled under, the surface diverged (stubs appearing where none were
     // recorded), and the proxy MISSed. Playwright merges project `env` into every worker,
     // so record, replay, coverage and a manual run now boot the SAME world.
-    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts'] },
+    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts',
+      // #138: `prompt-goal-live.spec.ts` rides its OWN project (live provider, wall-clock bound). Left here it ran
+      // inside the suite boot — `suite` is everything-not-ignored — and changed that session's human-message set,
+      // which is what the title request at msg1 of the suite tape encodes. Measured: suite `4 passed` on staging's tree,
+      // `MISS tape=suite entries=8 messages=2` with this file present and unignored.
+      '**/prompt-goal-live.spec.ts'] },
     // fork-button rides its OWN boot (2026-09-25, the fanout lesson applied
     // again): knowledge's fork child becomes the workspace's restore target,
     // so a shared boot records/replays whoever ran first's shape — the fork
@@ -74,5 +85,8 @@ export default defineConfig({
     { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
     // Same journey, switch off: the bar must be absent. See tests/e2e/prompt-off.spec.ts.
     { name: 'prompt-off', env: rigEnv('prompt-off'), testMatch: ['**/prompt-off.spec.ts'] },
-  ],
+    // #138: LIVE-only goal journeys (see the pin comment). Deliberately absent from `scripts/chain-replay.sh`'s leg
+    // list, so the model-free acceptance job does NOT cover these two claims — a live run does. Recorded, not hidden.
+    { name: 'prompt-goal-live', env: rigEnv('prompt-goal-live'), testMatch: ['**/prompt-goal-live.spec.ts'] },
+  ] as unknown as Parameters<typeof defineConfig>[0]['projects'],
 })
