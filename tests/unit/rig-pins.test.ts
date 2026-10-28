@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 import { RIG_PINS } from '../../tests/e2e/rig-pins.ts'
 
 
@@ -19,12 +21,46 @@ import { RIG_PINS } from '../../tests/e2e/rig-pins.ts'
  * depends on whether pressure compaction happens to fire is not an acceptance test, it is a coin flip.
  */
 test('only the pressure journeys leave model-involving machinery enabled', () => {
-  const PRESSURE_LEGS = new Set(['heavy'])   // the leg that exists to exercise post-compaction retries
+  // The legs whose journey IS the model-involving machinery, established by measurement (2026-10-27 campaign on
+  // the gated build), not by preference:
+  //   heavy   — post-compaction retries are the point of the leg;
+  //   suite   — the fork door only renders once the session has actually compacted and continued;
+  //   arrival — the leg asserts an arrival stub pair, i.e. the deferral machinery firing on one oversized read;
+  //   fanout  — the parent must consume its children's papers, and gating turned that synthesis away.
+  // Pinning any of these does not make it deterministic; it deletes the behavior under test, which is the same
+  // mistake as setting the arrival floor below the chunk size and calling the passing row a result.
+  const PRESSURE_LEGS = new Set(['heavy', 'suite', 'arrival', 'fanout'])
   const open = Object.entries(RIG_PINS)
     .filter(([name]) => !PRESSURE_LEGS.has(name))
     .filter(([, pins]) => pins.noAuxModel !== true)
     .map(([name]) => name)
   assert.deepEqual(open, [], `these legs would let automatic compaction fire mid-journey, making the tape depend on machine timing: ${open.join(', ')}`)
-  assert.equal(RIG_PINS.heavy?.noAuxModel, undefined,
-    'heavy deliberately keeps the pressure machinery on — pinning it would make the leg measure a boot where nothing is wrong')
+  for (const leg of ['heavy', 'suite', 'arrival', 'fanout']) {
+    assert.equal(RIG_PINS[leg]?.noAuxModel, undefined,
+      `${leg} exercises the machinery — pinning it would make the leg measure a boot where nothing happens`)
+  }
+})
+
+/**
+ * The corpus itself must show the gate working (#129).
+ *
+ * `noAuxModel` is now consumed by the engine (guarded by `rig-realm-keys-consumed.test.ts`), but a consumer that
+ * does nothing is still a green test, so the observable claim is checked where it lives: a recorded journey for any
+ * leg that pins the flag must contain NO automatic-checkpoint notice. If pressure compaction fires anyway, the
+ * tape says so in its own bytes and this row fails — including in CI, where the whole defect was found.
+ */
+test('no pinned leg recorded an automatic checkpoint mid-journey', () => {
+  const dir = 'tests/fixtures/model-tape'
+  for (const [leg, pins] of Object.entries(RIG_PINS)) {
+    if (pins.noAuxModel !== true) continue
+    const base = path.join(dir, leg)
+    if (!fs.existsSync(base)) continue
+    const files = fs.readdirSync(base).filter((f) => f.endsWith('.json'))
+    for (const f of files) {
+      const e = JSON.parse(fs.readFileSync(path.join(base, f), 'utf8')) as { prefix?: unknown[] }
+      const text = (e.prefix ?? []).map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join('')
+      assert.ok(!text.includes('automatically generated checkpoint'),
+        `${leg}/${f} recorded a mid-journey checkpoint while the leg pins noAuxModel — the gate is not holding`)
+    }
+  }
 })
