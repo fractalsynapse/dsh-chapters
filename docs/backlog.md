@@ -1742,3 +1742,31 @@ arrival markers — a measurement, not another theory.
 Stated so the next session inherits a limit, not a license: **do not implement the split before that is known.** A
 switch wired to the wrong site is the #130 mistake wearing a new costume — a key the rig writes and nothing consumes —
 and there is already a guard-shaped lesson about that in this file.
+
+### Second correction on the same claim: the `arrival` stub-pair failure is NOT caused by the pin (#129)
+
+Two commits ago I wrote that `auto: false` suppresses arrival deferral, "verified" by a pinned capture that failed
+`at least one arrival stub pair (one oversized read)`. Checking the same day's other logs before leaving that in the
+record, it is wrong in its attribution: the identical failure appears with **no pin at all** —
+
+| run | pin state | outcome |
+|---|---|---|
+| `camp2` (unpinned) | — | `arrival: exit=0`, 9 entries |
+| `camp3` (unpinned) | — | **`arrival: exit=1`, 3 entries** |
+| `camp5` (unpinned) | — | `arrival: exit=0`, 14 entries |
+| probe just now | `auto: false, elicitedPlot: false` | `arrival: exit=1`, 4 entries, 0 stub markers |
+
+Three unpinned captures of `arrival` failed at record earlier today (one of them while diagnosing #131), so the pin
+is not the differentiator and "one realm key, two behaviors" is **not** established by this evidence. What is
+established, and survives: the host really does read `auto` (`BasicCompactionConfig` validates it, default `true`),
+and `#arrive` is called only from inside the relief path (`src/engine.ts:1024` and `:1083`), matching that module's
+own header — so a relief-side switch *can* reach deferral, which is why the split key is still an open design
+question. It is not established that flipping it caused these failures.
+
+The ordinary explanation is the one I keep reaching for last: the leg's oversized read depends on what the model asks
+for. It fails intermittently, pinned or not, which is exactly the flake class #131's fix reduced but did not remove.
+The pinned run adds no information, and I should have looked at the unpinned logs before writing a mechanism.
+
+Method, again, in writing: **before attributing a failure to a change, find the failure in a run that predates the
+change.** I have now made this error three times today (the fake `noAuxModel` gate, the coarse-key claim, and this
+attribution); the guard against it is cheap and is called a log search.
