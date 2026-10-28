@@ -199,3 +199,38 @@ test('the runtime-context time zone cannot break a tape match', () => {
   const prose = normalizeSingle({ role: 'user', content: 'Deploy at [America/New_York] peak hours, not [UTC] midnight.' })
   assert.ok(prose.includes('[America/New_York]'), 'prose is not folded')
 })
+
+/**
+ * INJECT-POSITION: the whole workspace-instructions reminder must fold, or its position decides matches (#129).
+ *
+ * Measured on CI 2026-10-27 (run 40629952246): after the artifact-cycle fix, `heavy`/`arrival`/`fanout` still missed,
+ * but deeper — `commonPrefix=4`, with the runner's `msg4` an assistant turn and the tape's `msg4` the injected
+ * `<system-reminder>… Instructions from: AGENTS.md …</system-reminder>` block. The AGENTS-BLIND pattern begins AT the
+ * "instructions from:" header, so the host's newer preface ("The following workspace instructions may be relevant to
+ * your work…") survives folding: the message is no longer pure injection, is not dropped, and its arrival TIMING
+ * shifts every later index. A fold that removes the text but leaves the row still lets the row's position arbitrate
+ * the tape — the exact coupling AGENTS-BLIND exists to forbid ("no AGENTS.md change ever requires a re-record").
+ */
+test('a workspace-instructions reminder folds to nothing wherever the host places it', () => {
+  const injected = { role: 'user', content: '<system-reminder>The following workspace instructions may be relevant to your work. More specific instructions take precedence.\n\nInstructions from: AGENTS.md\n\n# dsh-chapters — agent core\n\nNever rewrite the durable log.\n</system-reminder>' }
+  assert.equal(normalizeSingle(injected), '', 'the whole block is development context: it must drop from matching')
+  // The same conversation with and without the injection at a different position must fold identically.
+  const withIt = [
+    { role: 'user', content: 'Which file defines the merge rule?' },
+    injected,
+    { role: 'assistant', content: 'src/compose.ts' },
+  ].map(normalizeSingle).filter((s) => s !== '')
+  const withoutIt = [
+    { role: 'user', content: 'Which file defines the merge rule?' },
+    { role: 'assistant', content: 'src/compose.ts' },
+  ].map(normalizeSingle).filter((s) => s !== '')
+  assert.deepEqual(withIt, withoutIt, 'a shift in the injection position cannot change the compared history')
+})
+
+test('real user text is never dropped by the injection fold', () => {
+  const real = normalizeSingle({ role: 'user', content: 'The file AGENTS.md mentions the merge rule — what does it say?' })
+  assert.ok(real.length > 0, 'conversation that merely mentions the doc stays in the key')
+  assert.ok(real.includes('AGENTS.md'), `and its text survives: …${real.slice(0, 80)}`)
+  const partial = normalizeSingle({ role: 'user', content: 'Please also read Instructions from: AGENTS.md and tell me if it is stale.' })
+  assert.ok(partial.length > 0, 'an inline mention inside a sentence is not an injected block')
+})
