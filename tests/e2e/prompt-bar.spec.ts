@@ -219,4 +219,40 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     void sid
   })
 
+  /**
+   * #135: the other half of the pair — **goal off restores a normal suggestion**, observed in the browser.
+   *
+   * §28 describes the director (the goal, re-cutting the objective each turn) and the worker (this bar, a fresh
+   * directive each turn) as built to run together, and displacement is now shown. What had never been shown is the
+   * release: once the human clears the goal, the bar must keep working on its own — not go quiet, not stay
+   * goal-shaped. So: activate a goal, clear it through the host's own control (`Clear goal` in
+   * `@deepseek-ai/dsh-client-ui-goal`), take one more ordinary turn, and require the bar to offer again.
+   *
+   * Deliberately NOT asserted: the `intent` label. `goal-edit` vs `worker-step` is a server-side classification of
+   * model output, and a leg that fails when the classifier phrases things differently is measuring luck, not the
+   * contract — the lesson #132 just charged this corpus to learn.
+   */
+  test('clearing the goal leaves the bar offering a suggestion on the next turn', async ({ page }) => {
+    await openApp(page)
+    const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
+    await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
+    const goalBar = page.locator('[data-goal-bar]')
+    await expect(goalBar, 'a goal exists before it can be cleared').toBeVisible({ timeout: 60_000 })
+
+    // Clear it the way a human does — the host's own control, not our plugin's state.
+    const clear = page.locator('button[aria-label="Clear goal"], button:has-text("Clear goal")').first()
+    await expect(clear, 'the host offers Clear goal').toBeVisible({ timeout: 60_000 })
+    await clear.click()
+    await expect(goalBar, 'the goal control is gone, not merely rephased').toHaveCount(0, { timeout: 60_000 })
+
+    // One more ordinary turn, with no goal in the session at all.
+    const nextTurn = 'Reply with exactly: DONE'
+    await typeComposer(page, nextTurn, deliveredFor(sid, nextTurn))
+    const bar = page.locator(DOCK_BAR)
+    await expect(bar, 'the bar is still mounted with no goal present').toBeVisible({ timeout: 60_000 })
+    await waitForOffer(bar, page)
+    const offered = await offerText(bar)
+    expect(offered.length, 'the bar produces a real suggestion after the goal is cleared (length)').toBeGreaterThan(0)
+  })
+
 })
