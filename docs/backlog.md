@@ -1611,3 +1611,30 @@ own docs, not a quiet edit. Both `heavy` and `fanout` currently diverge at `comm
 turn) with relief live, which is the checkpoint-shape family, and `arrival` diverges as a 1-message plot request.
 
 Reverted: both legs back to the committed regime, two samples each, no pin shipped around a loop.
+
+### `arrival` is capture-nondeterministic across regimes — the leg tests retrieval luck, not the mechanism (#130)
+
+Three regimes, same runaway, which is what rules out my two theories in one measurement:
+
+| regime | outcome |
+|---|---|
+| threshold 0.9, plot elicitation ON (committed) | captured fine repeatedly today: 9, 14, 19 entries |
+| threshold 0.9, `elicitedPlot: false` | exit=1 at 13 entries once; then **never finished** — 42→63→68→72 requests in 20 min |
+| threshold **0.98**, plot ON | **42 requests at +600 s**, the same runaway; killed at the ceiling |
+
+If the trigger margin and the aux turn were the causes, 0.98-with-plot-on would behave like the committed regime. It
+did not. What is actually varying is whether the small model happens to find the buried token: the leg reads a 373,861-
+byte `var/e2e-book.md` (3,964 lines) and asks it to locate `EMBED-CENTER-4417` near chapter 21 through the artifact
+reference, so success depends on retrieval luck rather than on the mechanism the leg names — *one oversized read
+deferring to an artifact at arrival, never prefilled*. When luck fails, the model re-reads and re-searches and the
+capture spirals to 40–70 requests; when it holds, the same leg finishes in 9.
+
+The fix is a test-design decision, not a rig knob, and it has to be explicit because it touches what the leg proves:
+keep the mechanism (the read must still exceed `toolResultArtifactTokens` so arrival defers it) and make the RETRIEVAL
+tractable — place the buried token within the first few chapters of a smaller book, so the artifact query answers a
+bounded question instead of a needle-in-haystack one. Then guard the part that must NOT change with a row: the book
+still exceeds the deferral threshold on both machines, so the stub pair still happens. Shrinking the haystack is not
+weakening the assertion; asking a 32K model to grep 4,000 lines through a stub was.
+
+Not done, deliberately: another re-roll of the same capture (I have three samples now), a raised timeout, or a pinned
+`noAuxModel` on this leg. All of them hide the design problem.
