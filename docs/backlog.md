@@ -1928,3 +1928,20 @@ Two collateral facts worth keeping, because they are how I got here:
 What that leaves: making the goal legs portable needs a **host** capability — a rounds argument on `/goal`, or a
 plugin-facing seam to open a bounded goal — which is #138. Not a weaker assertion, and not a deleted test: the leg
 stays as merged, with its fragility named instead of hidden.
+
+#### Two variants measured, and they fail DIFFERENTLY (so the conclusion is narrower than "the config is bad")
+
+Run as throwaway mutations of `tests/e2e/boot.ts` against staging's own spec and staging's own 23-entry tape — the
+cheapest possible attribution, ~4 minutes each, nothing committed:
+
+| boot patch | outcome |
+|---|---|
+| `- id: goal` row **with** `config: { defaultMaxGoalRounds: 1 }` | `/goal` creates no goal: the leg fails at `the host goal bar appears once a goal exists` → **1 failed / 4 passed** |
+| `- id: goal` row **with no config at all** | all 5 tests pass, but the run still aborts: `RIG FAULT … MISS tape=prompt entries=23 messages=1 closest=0000.json` — an extra request the tape has no entry for, at the FIRST message |
+| row absent (staging as-is) | **5 passed**, rc 0 |
+
+So a duplicated `goal` row in a boot's profile patch is not a neutral act on this host, configured or not: the layering
+adds a request (visible at `messages=1`, before any goal is involved), and adding the config key goes further and stops
+the command from creating a goal. **The rig cannot override the goal plugin's row.** #138's ask is therefore specifically
+a host seam — a `/goal` rounds argument or a plugin-facing bounded-goal call — not a patch-shape puzzle, and I should not
+spend another evening rediscovering it.
