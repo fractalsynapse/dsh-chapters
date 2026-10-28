@@ -438,8 +438,7 @@ packages, **none a dependency of this repo**, so a runner resolved nothing and o
 closed by `linkPinnedToolPackages()` running **before** the spawn; the runner now assembles 34 tools and gets far
 deeper, failing on conversation content (its first assistant turn carries a different tool call than the capture,
 `glob` where the tape has `read`) after two machine-identity folds (the harness checkout path, already blind via
-`<DSH-CHECKOUT>`, and both spellings of the runtime time zone). Acceptance is therefore **still red**, for a
-different and narrower reason; evidence and eliminated classes: docs/backlog.md. CI's deterministic job
+`<DSH-CHECKOUT>`, and both spellings of the runtime time zone). Acceptance moved a full layer deeper that day and the cause is now **identified by outcome, not theory**: the remaining misses are legs whose **turn count is the model's choice** — a bounded journey (`fanout`: one decisive oversized read per child instead of six ranges sitting on the deferral floor; `arrival`: one read plus at most two artifact queries) **passed on the runner**, and the failing set shrank to `heavy` alone. That leg is bounded the same way (exactly three reads with named offsets; 36 → 9 requests), so the tape's shape is a property of the spec. Relief timing, the 7-vs-34 tool gap, and machine-identity bytes were all real and are all closed; none of them was the last story. Evidence and eliminated classes: docs/backlog.md, #129/#131/#132. CI's deterministic job
 (typecheck · build · unit + integration, branch gate 85%) remains green on this branch. Still open there: a dock cannot
 write the composer on 0.2.0-rc.2 (`insertText` raises
 `draftRev`, `setDraft` mirrors only at mount), so click-to-draft shows an explanation and Run submits instead;
