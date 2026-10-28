@@ -1638,3 +1638,23 @@ weakening the assertion; asking a 32K model to grep 4,000 lines through a stub w
 
 Not done, deliberately: another re-roll of the same capture (I have three samples now), a raised timeout, or a pinned
 `noAuxModel` on this leg. All of them hide the design problem.
+
+### Dropping the injection row shrinks the surface — which is exactly what two legs were secretly relying on (#129)
+
+Campaign on the no-injection build: `arrival` 10, `enrich` 3, `fanout` 14, `rules` 2, `fork` 2, `plans` 3 all captured
+green, while `suite` (4 entries) and `heavy` (15 entries) failed. `heavy`'s failure names the mechanism:
+
+    > 131 | }, { timeout: 480_000, intervals: [5000] }, 'engine chapters recorded for THIS session').toBe(true)
+
+The injected `AGENTS.md` block is thousands of tokens of surface. Remove it and both legs stop reaching their pressure
+trigger inside the journey — `heavy` never records engine chapters, and `suite`'s fork door (which comes from a real
+continuation) never renders. So the row removal is not "free determinism": it is correct in principle (a
+machine-varying development artifact must not arbitrate a tape) and it exposes that these two legs were reaching
+their threshold **with borrowed bytes**, which is the same defect as depending on a runner's header size, one layer
+down.
+
+The honest consequence, in order: `heavy` and `suite` must generate their own pressure — the leg's prompt or fixture
+carries the bulk, not an injected document — and the engine must actually PERFORM relief at the ratio the rig pins
+(the `relief declined while the surface is over the trigger` line in #130 means a low ratio does not guarantee relief
+happens, it may just refuse). Until both are true, the no-injection profile stays and these two legs are re-designed,
+not re-rolled. Nothing is committed from a partial campaign.
