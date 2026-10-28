@@ -242,6 +242,20 @@ export function substituteAll(str: string): string {
  * on the same token. Without the stored side folded, adding the blind would have made every
  * reasoning-bearing turn UNMATCHABLE rather than fixing anything.
  */
+/**
+ * Drop prefix elements that fold to nothing, so both sides of a replay match mean the same list (#132).
+ *
+ * The incoming request is normalized per message and empty results are filtered out (`findReplay`); stored prefixes
+ * were only re-substituted, so a turn whose text, reasoning and ids all fold away stayed as an empty element — a
+ * hole that offset every later index. `heavy`'s `commonPrefix=2 divergeAt=msg2` on all machines was that hole, not
+ * model behavior: a fold change moved the miss, which is the tell. Symmetry at load, not tolerance at match time.
+ */
+export function normalizeStoredPrefix(prefix: unknown[]): string[] {
+  return prefix
+    .map((p) => (typeof p === 'string' ? substituteAll(foldReasoning(p)) : normalize(p)))
+    .filter((p) => p !== '')
+}
+
 export const REASONING_TOKEN = '⟦REASONING⟧'
 const REASONING_RE = /"reasoning_content"\s*:\s*"(?:[^"\\]|\\.)*"/g
 export function foldReasoning(text: string): string {
@@ -334,7 +348,7 @@ function loadTape(tapeDir: string): TapeEntry[] {
       // sides of the match on current rules without a re-record. (The earlier
       // attempt here re-RAN normalize(), which double-stringified stored
       // strings and broke every legacy match — the S0 root cause.)
-      e.prefix = e.prefix.map((p) => (typeof p === 'string' ? substituteAll(foldReasoning(p)) : normalize(p))).filter((x) => x !== '')
+      e.prefix = normalizeStoredPrefix(e.prefix).filter((x) => x !== '')
       ;(e as Record<string, unknown>).file = f
       out.push(e)
     } catch { /* skip torn */ }
@@ -414,7 +428,7 @@ export function describeMiss(tape: TapeEntry[], incoming: unknown[], label = '?'
     + ` got=${JSON.stringify(got)} expected=${JSON.stringify(exp)}`
 }
 
-function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
+export function findReplay(tape: TapeEntry[], incoming: unknown[]): TapeEntry | null {
   const inc = incoming.map(normalizeSingle).filter((x) => x !== '')
   let best: TapeEntry | null = null
   for (const e of tape) {

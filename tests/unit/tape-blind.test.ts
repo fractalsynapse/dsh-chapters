@@ -199,3 +199,31 @@ test('the runtime-context time zone cannot break a tape match', () => {
   const prose = normalizeSingle({ role: 'user', content: 'Deploy at [America/New_York] peak hours, not [UTC] midnight.' })
   assert.ok(prose.includes('[America/New_York]'), 'prose is not folded')
 })
+
+/**
+ * MATCH-SYMMETRY: the stored prefix and the incoming list must be normalized THE SAME WAY (#132).
+ *
+ * Found by reading `heavy`'s tape bytes after CI missed at `msg2`: entries carry prefix elements that are literally
+ * empty strings — an assistant turn whose text, reasoning and ids all fold away. At replay, `findReplay` builds the
+ * incoming list with `.filter(x => x !== '')`, so those turns DISAPPEAR from the live request, while the stored
+ * prefix KEEPS them as holes. The two sides are then offset by one element, and a journey that is byte-identical
+ * misses at exactly the index where the first folded turn sat — which is what `commonPrefix=2 divergeAt=msg2` has
+ * meant for `heavy` on every machine, and why the miss moved when a fold changed rather than when a leg changed.
+ *
+ * The fix is symmetry, not tolerance: drop empty elements from stored prefixes at load, exactly as the incoming
+ * side does. Nothing is "matched" that should not be; both sides now mean the same list.
+ */
+test('a prefix element that folds to nothing is dropped from both sides of the match', async () => {
+  const { normalizeStoredPrefix, findReplay } = await import('../../tests/e2e/model-proxy.ts')
+  // NB: a `tool` message is deliberately collapsed to `{"role":"tool"}` (model-proxy.ts:207,273 — scripted
+  // results are zero matching signal), so the third element must be a real content-bearing turn, not a tool one.
+  const stored = ['{"role":"system","content":"sys"}', '{"role":"user","content":"go"}', '', '{"role":"assistant","content":"first"}']
+  const clean = normalizeStoredPrefix(stored)
+  assert.deepEqual(clean, [stored[0], stored[1], stored[3]], `the empty element must be removed, got ${JSON.stringify(clean)}`)
+  assert.equal(normalizeStoredPrefix(clean).length, 3, 'idempotent — a second pass changes nothing')
+
+  const entry = { key: 'k', prefix: clean, status: 200, contentType: 'text/event-stream', bytes: '', model: 'm', recordedAt: '2026-01-01T00:00:00.000Z' }
+  const incoming = [{ role: 'system', content: 'sys' }, { role: 'user', content: 'go' }, { role: 'assistant', content: 'first' }]
+  assert.ok(findReplay([entry] as never, incoming) !== null,
+    'a live request with the folded turn absent must match a tape stored with it present')
+})
