@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
-import { applyRigPresetPin, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 
 /**
@@ -551,6 +551,9 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       p = ensurePresetRegistryPin(p, devProfile)
       const shippedPatch = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'cordis.patch.yml'), 'utf8')
       p = applyRigPresetPin(p, shippedPatch, realmPinsOf(pins, rigStoreRoot(port), rigMirrorRoot(port)))
+      // #132: the workspace-instruction injection is development context whose presence/position varies
+      // by machine; with the legs now bounded, removing the row is the principled determinism fix.
+      p = dropInstructionRow(p)
       fs.writeFileSync(patchPath, p)
     }
   }

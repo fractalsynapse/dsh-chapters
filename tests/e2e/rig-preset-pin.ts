@@ -93,6 +93,36 @@ export function renderPinnedPreset(shipped: string, pins: RealmPin): string {
  * Apply the realm pins to a profile patch text: drop any previously written `preset-chapters`
  * row (rerun-safe), append the pinned copy of the shipped one.
  */
+/**
+ * Drop the instruction-injection row from a profile patch (#129, #132).
+ *
+ * The host injects the workspace's AGENTS.md as a `user/message`, and its POSITION in a conversation differs by
+ * machine — the fold makes it drop out of matching here while a residue of it survives there, so the compared
+ * prefixes shift by one element and a leg misses at `msg2` (measured: `heavy` on run 40655549390,
+ * `commonPrefix=2 divergeAt=msg2`). Folding the text away was tried and broke a green leg: replay serving matches
+ * on exact positional prefixes, so deleting content collapses distinct histories and mis-serves turns. The honest
+ * fix is upstream — a development instruction file has no business being in an acceptance journey at all, which is
+ * what AGENTS.md itself says.
+ */
+export function dropInstructionRow(patchText: string): string {
+  const lines = patchText.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? ''
+    const m = line.match(/^(\s*)- id:\s*agent-instructions\s*$/)
+    if (m === null) { out.push(line); continue }
+    const ind = m[1]!.length
+    let j = i + 1
+    while (j < lines.length) {
+      const nxt = lines[j] ?? ''
+      if (nxt.trim() === '') { j++; continue }
+      if ((nxt.match(/^\s*/)?.[0] ?? '').length > ind) { j++ } else break
+    }
+    i = j - 1
+  }
+  return out.join('\n')
+}
+
 export function applyRigPresetPin(existing: string, shipped: string, pins: RealmPin): string {
   const kept: string[] = []
   let skipping = false
