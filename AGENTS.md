@@ -472,6 +472,23 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
 - **Proving a failure predates your diff is a step, not an answer.** Two flaky rows were blamed on the
   environment and diagnosed as pre-existing; pre-existing was true and irrelevant — the flake was real
   (an unhandled async EPIPE). Reproduce, then fix.
+- **Test the failure in isolation first; never re-run a suite that is already passing to feel better about
+  it (maintainer directive, 2026-10-27).** Order is: reproduce the broken thing alone (one leg, one spec, one
+  command), fix it, verify it alone; only then run the whole set ONCE, as confirmation — not as a search. Measured
+  cost of ignoring this on one day of the #56/#129 chase: three full ten-leg replay runs (~36 min each of model
+  traffic) were spent re-confirming six legs that had already passed locally *and* on CI, while the four that failed
+  could only be diagnosed from logs the artifact did not carry. `scripts/chain-replay.sh suite` /
+  `scripts/e2e-one.sh` with `LEG=… MODE=replay` exist for exactly this; use them, and prefer `var/chain-replay-<leg>.log`
+  and `var/e2e-tape-diffs/` over another roll. Related: when a measurement matters, capture a BEFORE count — a
+  cumulative log grepped after the fact is not evidence (this session misread one as a 38× signal).
+- **Prefer synthetic bulk over model-authored bulk — Lorem ipsum is fine, and cheaper.** The legs that keep failing
+  are the ones whose journeys wait for the live model to take turns (`suite`, `heavy`, `arrival`, `fanout`), and turn
+  count is what makes capture slow AND nondeterministic. Fixture content is already synthetic
+  (`tests/e2e/subagent-fanout.spec.ts` repeats a word list; `artifact-arrival.spec.ts` reads a generated
+  `var/e2e-book.md`) — extend that: any bytes a test needs in bulk (files, papers, oversized tool output, expected
+  summaries) should be generated deterministically, not elicited, and a leg's prompt should ask for the SHORTEST
+  faithful answer that still exercises the mechanism. Never synthetic an *assertion* — what a leg claims must still be
+  something a browser or the durable log really produced (see `docs/verify.md`).
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 
