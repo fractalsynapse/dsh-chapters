@@ -1870,3 +1870,21 @@ behavior, not a fold residue: a matcher change shipped without the re-anchor it 
 Action: re-anchor the corpus on the symmetric matcher and re-verify. Rule extracted, added to the rig list: **any
 change that alters prefix LENGTH is a corpus change, not a matcher change** — length-preserving folds may ship alone,
 length-changing ones never do.
+
+### #135 — the goal-off browser leg needs a rig capability, not a weaker assertion
+
+Four capture attempts, four different failure classes; the full account is in `docs/project-state.md` (2026-10-28,
+later) and on the issue. What the chase established, measured:
+
+- A goal round **is a turn**, and every turn ends, so rounds cascade — no click timing or polling bounds them (one
+  tape reached `Round: 12/256`).
+- The product's own bound (`maxGoalRounds`, quiescent at `Round: 1/1`) is the right shape, but the only way a leg can
+  set it today is by asking the model to call `create_goal(max_goal_rounds: 1)` — and in capture the model answered in
+  prose instead of calling the tool. Setup that needs model cooperation cannot be a tape.
+- No HTTP seam exists: grepping every installed `@deepseek-ai/*` lib for a route containing `goal` returns nothing. The
+  human `/goal` command takes no rounds argument, and `goal-round-driver` has no config block in `cordis.patch.yml`.
+
+Two candidate designs, both requiring a decision before code: (1) have the rig pre-seed the goal record in the boot's
+storage domain with `maxGoalRounds: 1`, so the leg starts already-quiesced; (2) bound the cascade by giving the goal a
+completion the host can evaluate without a round, which is a host change, not ours. Until one lands, the claim stays
+unit-covered and §28 does not claim the pixel. The leg is **unwritten, not skipped** — that distinction matters here.
