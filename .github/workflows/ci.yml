@@ -223,6 +223,9 @@ jobs:
             var/chain-replay-*.log
             var/e2e-session-logs/
             var/e2e-engine-errors.log
+            var/e2e-engine-errors-*.log
+            var/e2e-tool-links-*.log
+            var/e2e-home-plugins-*.log
             /tmp/dsh-e2e/e2e-home-*/sessions/
             /tmp/dsh-e2e/e2e-home-*/storages/
             /tmp/dsh-e2e/e2e-home-*/settings.yaml
