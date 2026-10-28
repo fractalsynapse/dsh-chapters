@@ -1710,7 +1710,7 @@ no affordance", which the first fact disproves.
 
 Re-tested today, **after** #131 was fixed, in case the artifact cycle had been the whole story. It was not: with the
 pin applied, `arrival` again fails `at least one arrival stub pair (one oversized read)` and `fanout` again fails
-`parent synthesis lost paper A — SYNTHESic, not delivery`. Identical messages, different build. The reason is in the
+`parent synthesis lost paper A — SYNTHESIS, not delivery`. Identical messages, different build. The reason is in the
 module's own header — `src/arrival.ts:7`: the arrival stub pipeline **"Runs at the head of compactIfNeeded/compactNow"**
 — so the realm key that suppresses model-involving relief (`auto: false`) also suppresses the size-deterministic
 deferral that these legs exist to exercise. `noAuxModel` is therefore one switch for two behaviors.
