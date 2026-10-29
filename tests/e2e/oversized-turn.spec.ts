@@ -169,6 +169,36 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   // --- 2: bounded loop — strictly-shrinking passes, deterministic provider,
   // zero usage on every commit.
   const summaries = eventTypes(sessionLogTextById(sid), 'compaction/summary')
+
+  // #143 criterion 1, delivered BEFORE the bound: the leg must say HOW MANY passes it took and WHAT each pass
+  // removed, not just trip an assertion. The live run of 2026-10-28 failed at `38 > 30` with no per-pass numbers
+  // anywhere, which left the next investigation starting from a guess — the exact pattern AGENTS names ("a
+  // cumulative log grepped after the fact is not evidence"). Each `compaction/summary` carries `shadowedSeqs`, so
+  // the table below is read out of the durable log, not computed from a model's account of it. Written to a file so
+  // a failure still leaves it behind, and printed to the reporter so CI's per-leg log carries it too.
+  const surfaceNodesOf = (logText: string): number => {
+    try {
+      const parsed = JSON.parse(logText) as { surface?: { nodes?: unknown[] } }
+      return Array.isArray(parsed.surface?.nodes) ? (parsed.surface?.nodes as unknown[]).length : -1
+    } catch { return -1 }
+  }
+  const passRows: string[] = []
+  let cumulativeShadowed = 0
+  summaries.forEach((sm, i) => {
+    const d = (sm as { data?: Record<string, unknown> }).data ?? {}
+    const shadowed = Array.isArray(d.shadowedSeqs) ? (d.shadowedSeqs as unknown[]).length : -1
+    if (shadowed > 0) cumulativeShadowed += shadowed
+    passRows.push(`pass ${String(i + 1).padStart(2)}: shadowed=${String(shadowed).padStart(3)} cumulative=${String(cumulativeShadowed).padStart(4)} provider=${String(d.provider)} usage=${String(d.usage ?? 'null')}`)
+  })
+  const passReport = [
+    `heavy leg — per-pass relief report (#143). passes=${String(summaries.length)} bound=30`,
+    `surface nodes visible in the durable log: ${String(surfaceNodesOf(sessionLogTextById(sid)))}`,
+    ...passRows,
+  ].join('\n')
+  try { fs.writeFileSync(path.join(ROOT, 'var', 'heavy-passes.log'), passReport + '\n', 'utf8') } catch { /* reporting only */ }
+  // eslint-disable-next-line no-console
+  console.log(passReport)
+
   expect(summaries.length, 'compactions inside one turn must stay bounded').toBeGreaterThanOrEqual(1)
   expect(summaries.length).toBeLessThanOrEqual(30)
   for (const sm of summaries) {
