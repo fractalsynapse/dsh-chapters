@@ -707,3 +707,42 @@ test('#143 the compaction note names the span shadowed and the nodes left on the
   })
   assert.match(noRoute, /route=none/, `an unrouted abstention says so, got: ${noRoute}`)
 })
+
+/**
+ * The window in the note must come from a measurement, not a config key that does not exist (#143, and my own hollow-field bug).
+ *
+ * Verified in the first run after #152 shipped: the note printed `shadowed=5, shadowedTok=4150` — the new fields work —
+ * but also **`window=?`**, because the call site read `config.contextWindow`, a key the realm never carries. My pure-function
+ * row could not catch that: it passes `window` in explicitly, so it pinned the formatter while the wiring stayed broken —
+ * precisely the "assert the shape you read, not the shape you wrote" lesson from `AGENTS.md`. So this row drives the REAL
+ * path (a surface over the trigger, model info reporting a 32K window) and reads the note out of the sink.
+ *
+ * It also pins the honest abstention: `window=?` is legal ONLY before any model info has been resolved, which is why
+ * `#reportDecline` and the last-resort path both cache what the adapter reported.
+ */
+test('#143 the note reports the window the adapter measured, not a config key that never existed', async () => {
+  const sinkDir = fs.mkdtempSync(path.join(os.tmpdir(), 'window-note-'))
+  const sinkPath = path.join(sinkDir, 'diagnostics.log')
+  const prev = process.env.DSH_CHAPTERS_ENGINE_ERRORS
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sinkPath
+  const h = harness({ thresholdRatio: 0.9 }, {})
+  try {
+    const events = [human(0, 'the oversized turn'), asst(1, 'reading it now')]
+    const session = h.sessionOf('s-window-note', events, {
+      requestHeader: () => ({ config: { provider: 'local', model: 'qwen-test' } }),
+    })
+    h.setWindow(32_000)
+    h.setSurface(30_000)
+    await h.engine.compactIfNeeded({ session } as never, 'pressure' as never, new AbortController().signal)
+    const sink = fs.existsSync(sinkPath) ? fs.readFileSync(sinkPath, 'utf8') : ''
+    const noteLine = sink.split('\n').find((l) => /realm:engine:compactIfNeeded.*decided:/.test(l)) ?? ''
+    assert.match(noteLine, /window=32000/,
+      `the note must carry the measured window; a config key that does not exist prints "?" and answers nothing. got: ${noteLine.slice(0, 220)}`)
+    assert.doesNotMatch(noteLine, /window=\?/, 'no hollow field on a path that resolved model info')
+    assert.match(noteLine, /shadowed=\d+/, 'the span field stays')
+    assert.match(noteLine, /shadowedTok=\d+/, 'and the tokens field stays')
+  } finally {
+    h.dispose()
+    process.env.DSH_CHAPTERS_ENGINE_ERRORS = prev
+  }
+})
