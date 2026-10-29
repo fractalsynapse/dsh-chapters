@@ -115,6 +115,14 @@ The index lives at `.codegraph/codegraph.db` and updates incrementally via `code
 
 ## The tape system (why CI has no LLM)
 
+**Two stale things, and only one of them matters.** A rebuild makes the *stamp* stale; a prompt-byte change makes the
+*corpus* stale. `npm run corpus:check` tells them apart (#156): a build-only difference prints an advisory and the replay
+still runs, then `npm run corpus:stamp` re-records the stamp on a green run. A change to what the model actually reads —
+tool and command descriptions, the dock label, the preset persona, the realm ratios and thresholds that decide when relief
+fires — refuses outright, and every affected project has to be re-distilled, because a partly re-recorded corpus matches
+nothing reliably. Before this the gate hashed the built bundle, so it demanded a full re-record for a commit that only
+added diagnostic fields — and refused nothing when it mattered, since the check wasn't run in CI at all.
+
 **A live leg asserts invariants, not a tally.** When a browser journey waits on a model-driven turn, the number of
 internal steps it takes belongs to the run: two live runs of the oversized-turn leg on one commit and one realm produced
 8 and 38 relief passes. The assertion that bounded it (`passes ≤ 30`) therefore failed with nothing broken. What the leg

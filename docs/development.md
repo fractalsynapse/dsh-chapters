@@ -800,11 +800,20 @@ correct. The corpus spanning them is not.
 
 Rules that follow, in the order they bite:
 
-1. **Change `src/` → rebuild → re-distill ALL nine legs.** A partial re-record is a mixed corpus, and a
-   mixed corpus fails at whichever step the builds disagreed — usually inside compaction, where message
-   counts are the thing being matched.
-2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it does not
-   say "this leg predates three plugin commits". When in doubt about build drift, re-record everything.
+1. **Two questions, two answers — `npm run corpus:check` (#156).** A rebuild changes the *bundle*; that alone does **not**
+   make the corpus stale, it makes the *stamp* stale: the check prints an `ADVISORY` and the replay still runs, then
+   `npm run corpus:stamp` re-records `BUILD_STAMP.json` (`lib` + `promptAnchor`) once the legs are green. What does
+   invalidate a corpus is the **prompt-byte anchor** moving — tool and command `description`s, dock `label`s, the preset
+   persona, and the realm keys whose values reach the model (`thresholdRatio`, `retain*`, `headroom*`, artifact/defer
+   tokens, …). Then `verdictFor` refuses with `REFUSED: model-facing bytes moved …` and **all** affected projects must be
+   re-distilled before anything is trusted, because a partial re-record yields a mixed corpus and matching happens across
+   the whole set. The rule in `AGENTS.md` — "re-record when PRODUCT prompt bytes change" — is now a computed quantity
+   rather than a judgement call; logging keys, store paths and `maxBytes` are deliberately outside the anchor, and a
+   manifest file that contributes no tokens fails its own row, so a silently-dead extraction rule cannot masquerade as
+   protection.
+2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it cannot
+   say "this leg predates three plugin commits". The stamp is what says that, and #156's split is what stops the stamp from
+   crying wolf on every rebuild.
 3. **Test-only changes (`tests/e2e/**`) need no re-record** — normalization folds apply at load to both
    sides. Product-behavior changes do. The distinction is exactly AGENTS' "re-record when PRODUCT prompt
    bytes change", generalized: anything that changes what the plugin *sends*.
