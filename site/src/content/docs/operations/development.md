@@ -115,6 +115,15 @@ The index lives at `.codegraph/codegraph.db` and updates incrementally via `code
 
 ## The tape system (why CI has no LLM)
 
+**What `coverage:e2e` promises.** It is a coverage measurement, not an acceptance gate. Under `NODE_V8_COVERAGE=1` the
+server is instrumented for its whole lifetime, and the browser legs' ceilings (a 120 s wait for a door to render, a 300 s
+test timeout) were set against uninstrumented timing. Measured on one tree: the same leg passes clean and fails the door
+wait with coverage on, and across four attempts the failure landed on a different leg each time (`suite`, `prompt`, all of
+them, `fanout`) with a different signature. The ceilings are not being raised — widening a wait to satisfy an
+instrumentation mode is how a test stops meaning anything — so treat the e2e percentage as a report, and the blocking
+number as the deterministic coverage gate in CI's merge job. When you quote the e2e figure, quote the tree and the machine
+conditions with it.
+
 **Two stale things, and only one of them matters.** A rebuild makes the *stamp* stale; a prompt-byte change makes the
 *corpus* stale. `npm run corpus:check` tells them apart (#156): a build-only difference prints an advisory and the replay
 still runs, then `npm run corpus:stamp` re-records the stamp on a green run. A change to what the model actually reads —

@@ -217,6 +217,32 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   the missing host-plane route) that every deterministic layer had missed because each side
   only ever tested against its own convention. The e2e is the integration witness — keep it.
 
+### What `coverage:e2e` promises, and what it cannot deliver
+
+`coverage:e2e` runs the replay chain under `E2E_COVERAGE=1` (a V8 profile per boot, aggregated by
+`scripts/e2e-coverage.mjs`). **It is a coverage report, not an acceptance gate, and it cannot carry the browser timing
+guarantees acceptance has.** Measured 2026-10-28 on one tree with load recorded (3.16–4.30 average on 20 CPUs, two other
+live harnesses on this host, ~68 GB free):
+
+| attempt | legs that failed | signature |
+|---|---|---|
+| 1 | `suite` | `button[aria-label="Fork with chapters"]:visible` — `Timeout: 120000ms` |
+| 2 | `prompt` | `locator.click` — `Test timeout of 300000ms exceeded` |
+| 3 | eight of nine | mixed |
+| 4 | `fanout` | `new-session click never set dsh.sessions.current` |
+
+The controlled A/B fixes the cause: `LEG=suite MODE=replay` → **`4 passed`**; the same command with `E2E_COVERAGE=1` →
+the same 120 s door timeout. So it is V8 instrumentation cost on the server process, landing on whichever leg happens to
+be slow — not a stale corpus or a broken product. Profile volume is not it (19 MB / 4 files for a failing boot), which is
+why narrowing what gets instrumented is the only lever, and that changes what the percentage means.
+
+**Rules that follow.** Two ceilings are involved (120 s `toBeVisible`, 300 s test timeout) and **neither is to be raised**:
+widening a wait to satisfy an instrumentation mode is `AGENTS.md`'s "never widen a test to pass". Read the e2e number as
+a report; the blocking coverage verdict is CI's deterministic gate (statements/branches/functions against 85, in the merge
+job). And when quoting an e2e figure, quote the tree and the machine conditions with it — that is how 77.94%, 77.97%,
+78.05% and 78.34% came to be cited interchangeably when each belongs to a different corpus. See #158, and site §24 for the
+user-facing version.
+
 ### The coverage ledgers (added 2026-09-23 by the coverage audit; gated same day)
 
 - `npm run coverage:ci` — **the gate CI enforces.** `c8 --check-coverage
