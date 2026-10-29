@@ -1,5 +1,14 @@
 # Open items — 2026-10-23 (host 0.2.0-rc.2)
 
+- **A version bump moves THREE files, and one row enforces two of them.** `tests/unit/loudness.test.ts:123` asserts
+  `PLUGIN_VERSION === package.json.version`, so a bump that edits `package.json` alone fails the publish blocker.
+  Measured 2026-10-28: tag `0.2.2-dev.1` pushed, Release run 40771258161 died on exactly that row (`tests 1282 / pass
+  1271 / fail 1`). The tag is immutable, so `dev.1` is a dead release that stays in place. `package-lock.json` is the
+  third carrier — its root `version` and `packages[""].version` — which that row does NOT check, so it can drift while
+  the plane is green (found when `main` and `staging` were merged: `package.json` `0.2.2-dev.1`, `src/version.ts`
+  `0.2.1`, lock `0.2.0` — three values, one repo). Bump all three in one commit; `0.2.2-dev.2` did. Extending the
+  guard to the lockfile is a candidate row, not yet written.
+
 ## State at 2026-10-28 night — `0.2.2-dev.2` is published; two threads left, in order
 
 **Shipped:** `@treeseed/dsh-chapters@0.2.2-dev.2` on npm, dist-tag `dev.2`, `latest` still `0.2.1` (a prerelease must not
