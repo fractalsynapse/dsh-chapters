@@ -176,12 +176,6 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   // cumulative log grepped after the fact is not evidence"). Each `compaction/summary` carries `shadowedSeqs`, so
   // the table below is read out of the durable log, not computed from a model's account of it. Written to a file so
   // a failure still leaves it behind, and printed to the reporter so CI's per-leg log carries it too.
-  const surfaceNodesOf = (logText: string): number => {
-    try {
-      const parsed = JSON.parse(logText) as { surface?: { nodes?: unknown[] } }
-      return Array.isArray(parsed.surface?.nodes) ? (parsed.surface?.nodes as unknown[]).length : -1
-    } catch { return -1 }
-  }
   const passRows: string[] = []
   let cumulativeShadowed = 0
   summaries.forEach((sm, i) => {
@@ -192,7 +186,9 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   })
   const passReport = [
     `heavy leg — per-pass relief report (#143). passes=${String(summaries.length)} bound=30`,
-    `surface nodes visible in the durable log: ${String(surfaceNodesOf(sessionLogTextById(sid)))}`,
+    // (no surface line here: the durable log text is not the surface list — my first attempt parsed it as JSON and
+    // printed `-1`. The engine's own note now carries `nodes=`, measured where the shadowing happens, so the
+    // instrument does not need a second, wrong source.)
     ...passRows,
   ].join('\n')
   try { fs.writeFileSync(path.join(ROOT, 'var', 'heavy-passes.log'), passReport + '\n', 'utf8') } catch { /* reporting only */ }
