@@ -6,6 +6,57 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.2-dev.2 — 2026-10-28 · relief came back for 32K models, and a dead tag taught the release line a rule
+
+Published on npm as `@treeseed/dsh-chapters@0.2.2-dev.2` (dist-tag `dev.2`; `latest` still `0.2.1`, correctly, because a
+prerelease must not claim the default channel).
+
+**The defect this fixes was a product failure, not a pipeline one.** `dsh-compaction-basic@0.2.0-rc.2` validates
+`contextWindow − reservedCompletionTokens − headroomTokens` for each routed target and throws
+`TargetPressureConfigError` when it is ≤ 0. Its default `headroomTokens` is 65,536 — a reservation sized for a routed
+summarize call, which this plugin's engine never makes, because `summarize()` is overridden and deterministic. Our realm
+never bounded it, so **every model under 65,536 tokens got relief as an exception instead of compaction** — and 32K is
+this project's own stated hardware. The realm now sets `headroomTokens: 8192`, and a fixable configuration is reported as
+a note on the diagnostics sink with an abstention rather than escaping as a crash, while provider failures still
+propagate. Seven rows reproduced the throw the moment the repo began type-checking against the host it actually boots.
+
+**Why nobody had seen it for two host minors:** the repo's `@deepseek-ai/*` devDependencies sat at `^0.1.5-rc.2` while the
+e2e rig boots `0.2.0-rc.2`. Both halves are fixed together, because they are one delivery — the `0.1.5-rc.2` tarball
+contains no `headroomTokens` key at all, so a realm that set it against the old types would simply fail config
+validation. Guards now make the drift loud: compile deps must equal the lock's pin exactly (and the *installed* copy must
+match too), and four one-off auxiliary `llm.stream` call sites stopped carrying `source.kind: 'plugin'`, which session
+format v4 retired and host 0.2.x refuses at row admission.
+
+**The release rule this branch earned.** `0.2.2-dev.1` is a **dead tag**: its bump commit moved `package.json` only, while
+a row pins `PLUGIN_VERSION === pkg.version`, so the publish blocker failed it. A pushed tag is never moved or deleted, so
+`dev.1` stays in place unreleased and `dev.2` supersedes it — and every version bump now moves `package.json`,
+`src/version.ts`, and the lockfile's two version fields in a single commit. Catching that also required
+merging `main` back into `staging` (the previous release had squashed in, leaving the branches divergent), which is why
+the release line is verified to have `main` as an ancestor before a tag is pushed.
+
+**What is deliberately not claimed.** The `heavy` leg — one turn outgrowing the window, relief converging in bounded
+passes — is now a **live-provider** leg rather than a tape leg: six captures of one commit produced 5, 7, 12, 23 and 24
+recorded requests, because once relief auto-continues the session the child does work the spec never asked for, so the
+count belongs to the run. The model-free acceptance set is nine legs, all green. And that live leg currently **fails its
+own bound**: 38 compaction passes where the leg asserts ≤ 30, on a pinned 32K window. So this release ships *"relief
+neither throws nor crashes on a 32K window"*; it does **not** ship a browser-level claim that relief *converges* there.
+That is tracked as #143, whose first criterion is per-pass numbers, and the bound is not being raised to make it green.
+
+### 0.2.1 — 2026-10-24 · published; recorded here for completeness
+
+On npm as `@treeseed/dsh-chapters@0.2.1` (`latest`). Follows 0.2.0 on the host-0.2.x line; the release records for the
+behaviour it carries are the 0.2.0 entry below and the concepts pages it points to. This entry exists because the site is
+the release record and had none for it — a gap found while writing the 0.2.2-dev.2 note.
+
+### 0.2.0 — 2026-10-24 · the host-0.2.x line begins; declaration rows and format v4
+
+First release on the `0.2.x` host line: preset **declaration rows** become the supported way a plugin ships its
+composition, and session **format v4** retires the bare `kind: 'plugin'` message wrapper — a continuation notice must use
+a producer-owned kind such as `plugin:dsh-chapters` or the host refuses it at row admission. Both facts were measured
+before they were written down, and the drift rows in `tests/unit/host-seed-contract.test.ts` and
+`tests/unit/preset-declaration.test.ts` are what keep them honest after a host upgrade. Published on npm as
+`@treeseed/dsh-chapters@0.2.0`.
+
 ### 0.1.18 — 2026-10 · the preset became a row you can see, like the host's own
 
 0.1.17 made the preset exist again; it did that by *registering* a declaration row from inside the
