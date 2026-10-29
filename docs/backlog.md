@@ -1,5 +1,12 @@
 # Open items — 2026-10-23 (host 0.2.0-rc.2)
 
+- **A live run must not have its tree changed under it — measured against myself (#143).** While a `heavy` live run was in
+  flight I stashed its spec change and switched branches to send a docs PR. Playwright loads a spec at worker start, so the
+  run in flight may have executed either version, and nothing in its output distinguishes them (the report header label was
+  stale in both). The result is therefore **unattributable**: not a pass, not a failure, just unusable. Rule: commit the leg
+  change on its own branch, run it against that tree, and only then touch the working tree again. Same family as "one journey,
+  one boot" and "re-record WHOLE projects" — the rig's evidence is only as good as the tree it can be pinned to.
+
 - **A version bump moves THREE files, and one row enforces two of them.** `tests/unit/loudness.test.ts:123` asserts
   `PLUGIN_VERSION === package.json.version`, so a bump that edits `package.json` alone fails the publish blocker.
   Measured 2026-10-28: tag `0.2.2-dev.1` pushed, Release run 40771258161 died on exactly that row (`tests 1282 / pass
