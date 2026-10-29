@@ -660,3 +660,50 @@ test('#140 a 32K-window target yields no throw: relief abstains with its numbers
     process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
   }
 })
+
+/**
+ * A compaction note must say what the pass REMOVED, not only that it happened (#143).
+ *
+ * Measured on the instrumented live run of 2026-10-28: `grep -c shadowed var/e2e-engine-errors-41733.log` was **zero**
+ * across 3,772 engine lines. So when #143 asks "why did relief need ~19 calls?", today's bytes cannot answer: the note
+ * carries the compaction id, the route, the surface tokens and the ratio, but not the span the pass shadowed — the one
+ * number that separates "each pass barely shrinks the surface" from "the surface re-grows between passes". That is
+ * #61's delivery rule applied to our own diagnostics: a value the engine holds must reach a file.
+ *
+ * Why this is a pure-function row rather than a plane-level one: **no unit row can reach a real commit.** The base
+ * engine returns a result only for a live `Session` with a plan; every existing harness path abstains (my first draft of
+ * this row "passed" by falling into its `result === null` branch and asserting nothing about the claim — a hollow row,
+ * deleted and replaced by this one). So the formatter is tested directly, and both branches are pinned so neither can
+ * go vacuous.
+ */
+test('#143 the compaction note names the span shadowed and the nodes left on the surface', async () => {
+  const { compactionNote } = await import('../../src/engine-note.ts')
+  const committed = compactionNote({
+    where: 'compactIfNeeded', trigger: 'pressure', route: 'local/qwen-test', surfaceTokens: 21400, window: 32000,
+    result: { compactionId: 'c-1', shadowedSeqs: [3, 4, 5, 6, 7], shadowedTokenCount: 11800 },
+    surfaceNodes: 9,
+  })
+  assert.match(committed, /shadowed=5/, `the pass must report how many nodes it removed, got: ${committed}`)
+  assert.match(committed, /shadowedTok=11800/,
+    `the removal in TOKENS is the number that answers "why did relief repeat" — the host calls it shadowedTokenCount, got: ${committed}`)
+  assert.match(committed, /nodes=9/, `and how many remain on the surface, got: ${committed}`)
+  assert.match(committed, /surface=21400/, 'the measured surface stays')
+  assert.match(committed, /window=32000/, 'and the window it was judged against')
+  assert.match(committed, /c-1/, 'the compaction id stays')
+
+  const abstain = compactionNote({
+    where: 'compactIfNeeded', trigger: 'pressure', route: 'local/qwen-test', surfaceTokens: 4100, window: 32000,
+    result: null,
+  })
+  assert.match(abstain, /decided: none/, `abstention is still reported, got: ${abstain}`)
+  assert.match(abstain, /surface=4100/, 'with the surface it refused to act on')
+  assert.match(abstain, /shadowed=0/, 'and an explicit zero, so "no nodes removed" is a stated fact, not a missing field')
+  assert.match(abstain, /shadowedTok=0/, 'and the same explicit zero for tokens')
+  assert.match(abstain, /nodes=\?/, 'an abstention reports no node count rather than inventing one')
+
+  // The pathological abstention #61 warned about must stay distinguishable: no routed target at all.
+  const noRoute = compactionNote({
+    where: 'compactIfNeeded', trigger: 'pressure', route: null, surfaceTokens: null, window: null, result: null,
+  })
+  assert.match(noRoute, /route=none/, `an unrouted abstention says so, got: ${noRoute}`)
+})
