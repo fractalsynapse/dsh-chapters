@@ -1,5 +1,33 @@
 # Open items — 2026-10-23 (host 0.2.0-rc.2)
 
+## State at 2026-10-28 night — `0.2.2-dev.2` is published; two threads left, in order
+
+**Shipped:** `@treeseed/dsh-chapters@0.2.2-dev.2` on npm, dist-tag `dev.2`, `latest` still `0.2.1` (a prerelease must not
+claim the default channel). Verified against `registry.npmjs.org` directly, because a local `npm view` said it was missing
+while the registry had it — the registry is the source of record, the CLI is a cache. `0.2.2-dev.1` is a dead tag (its bump
+moved `package.json` only; `loudness.test.ts:123` pins `PLUGIN_VERSION === pkg.version`) and stays in place, unreleased and
+unmoved, per the immutability rule. #128 and #140 are closed with their criteria stated honestly — #140's e2e-small-window
+box is **left unchecked on purpose**, because that is now #143.
+
+**Thread 1 — #143, the live defect.** Relief converges in **38** compaction passes where the leg's bound is **30**, on the
+rig's pinned 32K window. The instrument shipped first (#148, merged): the leg now writes a per-pass table (`shadowedSeqs`
+per pass, cumulative, `provider`, `usage`, visible surface nodes) to `var/heavy-passes.log` *ahead of* the assertion, so a
+failing run still delivers the numbers. Next: read that table, find what a pass fails to remove, fix by config/policy — the
+bound is not raised. Note for whoever picks this up: multi-pass convergence is **not reproducible in the unit plane**,
+because the harness fakes the session and pins the surface by hand while the host's real `Session` does the shrinking.
+
+**Thread 2 — #150, the bump that unblocks click-to-draft.** `0.2.1-rc.4` is published (with `0.2.2-alpha.2` beyond it) and
+`InlineEditor` needs `dsh-client-ui-primitives >= 0.2.1-rc.4`, which our pinned `0.2.0-rc.2` runtime predates. So #126's
+last unverified pixel is reachable without waiting on a host composer-draft API. The cost is stated in the issue before any
+work: a full nine-leg re-distill plus `CORPUS_HOST`/stamp, `docs/contract.md` file:line re-verification, both drift gates
+re-read, and #130/#143 re-measured on the new runtime. Do it on its own branch from `staging` with its own PR — never while
+another measurement is in flight, or the result cannot be attributed to a tree.
+
+**Also open, unchanged:** #138 (an armed goal has no rest state → goal journeys live outside the tape class), #130 (boot
+wedge inside `super.compactIfNeeded`), #119/#115/#101/#108 (older test/recovery items), and #120 (the docs rule that is
+already honored). The model-free acceptance set is **nine** legs — #149 corrects the job's own title, which still said ten.
+
+
 Handoff while the nine-leg re-record and strict replay are in flight on
 `feature/56-reanchor-tape-corpus`. Read this section first; the 2026-10-11 record below is history,
 and item 1 there (live-model proof of the plans journey) is still open — tonight's `plans` leg was
