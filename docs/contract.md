@@ -671,6 +671,18 @@ for the hollow-payload supersede).
 
 ## Suggested Next Step bar
 
+> **Host fact, measured 2026-10-28 (the draft gesture's limit, and where it actually lives).** The composer surface a
+> dock receives carries `captureInsertion, insertText, setDraft, persistDraft, addAttachments, removeAttachment,
+> pruneAttachments, submit` — every verb is present and callable — and a programmatic write still throws
+> `Cannot read properties of undefined (reading 'draftRev')` with the composer text left empty. Reproduced identically
+> on host `0.2.0-rc.2` and `0.2.1-rc.4` (`var/e2e-prompt-draft-dump.json`, `LEG=prompt MODE=record`), which is the
+> evidence behind #126 staying a host ask: **`draftRev` is not referenced anywhere in `ui-conversation/src`** in either
+> tag — the identifier lives in `ui-commands/src/client/popup.ts` — so the write path's missing revision object is not
+> the module whose `setDraft` implementation changed between those versions. Do not infer a fix from that module's diff;
+> the source read looked convincing and the browser said otherwise. The shipped client therefore refuses visibly and
+> keeps Run as the working gesture (`docs/verify.md`'s "delivered, not assumed").
+
+
 **What a dock component is handed (measured from the host's own contract table,
 `dsh-cordis-client-runner/lib/client.js`, entry `key: "conversation.input.dock"`).** It is a `list` region,
 `scope: session`. Register options are `id` (required), `order` (optional, ascending, default 0), and `label`.
