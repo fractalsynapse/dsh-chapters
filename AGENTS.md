@@ -452,10 +452,13 @@ deeper, failing on conversation content (its first assistant turn carries a diff
 (`suite heavy arrival enrich fanout rules fork plans prompt prompt-off`). Strict replay locally green twice, `coverage:e2e` exit 0 at **78.34%**, corpus stamped
 `lib=b67e373defcad83a` with `corpus:check` agreeing. Merged to `staging` as `45dd4ac` (PR #127, which closes #56 and carries the accounting).
 Say the trigger honestly, because it is easy to over-claim: CI runs on `pull_request` and on push to `main`, **not** on push to `staging` — so "green on staging"
-means the content that landed is what passed its acceptance checks, not a separate staging push run. Still open there: a dock cannot
-write the composer on 0.2.0-rc.2 (`insertText` raises
-`draftRev`, `setDraft` mirrors only at mount), so click-to-draft shows an explanation and Run submits instead;
-tracked as #126. **Autorun displacing a goal's continuation is now observed in Chromium** (2026-10-28): with a goal armed the host
+means the content that landed is what passed its acceptance checks, not a separate staging push run. Still open there: **a dock cannot write the composer, and it is not the reason I first gave**. A dock does receive the
+verbs — `insertText`, `setDraft`, `submit` are present and callable — and the programmatic write throws
+`Cannot read properties of undefined (reading 'draftRev')` with the composer left empty, **identically on `0.2.0-rc.2`
+and `0.2.1-rc.4`** (`var/e2e-prompt-draft-dump.json`; #126, #162). The earlier wording here — "`setDraft` mirrors only at
+mount" — was an inference from reading the wrong module: `draftRev` appears nowhere in `ui-conversation/src`, in either tag;
+the identifier lives in `ui-commands/src/client/popup.ts`. So the bar shows an explanation and Run submits, and upgrading the
+host is **not** a path to closing #126 — measured, after I argued the opposite from a `.d.ts` diff (#150). **Autorun displacing a goal's continuation is now observed in Chromium** (2026-10-28): with a goal armed the host
 offers `Pause goal`; clicking the bar's Autorun leaves `Autorun off` in place after the server round-trip, the host
 flips to `Resume goal`, and `Pause goal` disappears. Recorded alone under the real provider and replayed model-free
 twice (5 passed each) — **but the leg that carries it is portable only by luck, and that is now known (#138)**: a goal
