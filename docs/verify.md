@@ -52,6 +52,31 @@ near-zero on the first and high on the second.
 
 Steps 4, 7, 8 of the `AGENTS.md` list are G1–G3. They are the whole point of the design.
 
+### Bound a mechanism by its invariants, never by a tally (#143)
+
+A live leg that waits on a model-driven turn must assert what the mechanism **promises**, not what one run happened to
+count. Measured proof, 2026-10-28, one commit and one realm (`heavy`, 32K window, `thresholdRatio: 0.45`, nothing
+arrival-deferred): two live runs produced **8** and **38** `compaction/summary` events. The assertion was `passes ≤ 30`,
+so the leg could go red with nothing broken — a red test that carries no information is worse than no test, because it
+teaches the next reader to ignore it.
+
+**Assert instead:**
+
+1. **Progress per step** — every pass shadows at least one node. A zero-removal pass is the infinite loop any ceiling
+   exists to catch, and it is the actual bug class.
+2. **Monotonicity** — no node is shadowed twice; the shadowed set strictly grows. This is what rules out relief
+   circling instead of converging.
+3. **Post-condition** — relief leaves the surface under the realm's trigger. Read it from the engine's own decision
+   note (`surface=… tok`, `window=…`, `ratio=…`, `shadowed=`, `shadowedTok=`, `nodes=`), which is durable bytes written
+   **during** the run, not a parser's guess afterwards.
+
+A count may stay as **runaway protection**, commented as such (`PASS_CEILING = 60`, ≈2× the worst observed) and never
+cited as the claim. Two related traps this surfaced: (a) a row whose assertion lives in a branch the harness never
+reaches passes while asserting nothing — the unit plane cannot produce a real commit, because the base engine returns a
+result only for a live `Session`, so pin such claims in the leg or on a pure function that is genuinely called; and
+(b) a field printed from a config key the realm does not carry reads `?` forever — measure the shape you *read*
+(#153's `window=?`).
+
 ### Correctness Checks
 
 | # | Check | Procedure | Passes when |

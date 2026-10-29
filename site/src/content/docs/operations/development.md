@@ -115,6 +115,13 @@ The index lives at `.codegraph/codegraph.db` and updates incrementally via `code
 
 ## The tape system (why CI has no LLM)
 
+**A live leg asserts invariants, not a tally.** When a browser journey waits on a model-driven turn, the number of
+internal steps it takes belongs to the run: two live runs of the oversized-turn leg on one commit and one realm produced
+8 and 38 relief passes. The assertion that bounded it (`passes ≤ 30`) therefore failed with nothing broken. What the leg
+asserts instead is what the mechanism promises — every pass removes at least one node, no node is shadowed twice, and
+relief leaves the surface under the realm's trigger, read from the engine's own decision note, which is written during
+the run rather than parsed after it. A count may remain as a runaway guard, commented as one.
+
 E2E browser tests would normally need a live model, a GPU, and minutes per spec. Instead, recorded model exchanges are committed under `tests/fixtures/model-tape/` and replayed by a proxy; every request must match a recorded exchange after **normalization on both sides** (volatile values — ports, paths, token counts — are masked out), or the run fails loudly with a miss journal + diff dump (candidates sorted by shared prefix). Usage numbers ride the tape, so token-meter thresholds fire at identical steps — *threshold behavior* under test with zero model calls. E2E_MODEL=record distills fresh tapes from the local model — once per scenario, whole projects at a time (specs share a boot); re-record when **product prompts** change — doc edits are free with one measured exception: near-threshold scenarios (`heavy`, `fanout`) digest injected docs into model-visible checkpoints.
 
 ## The discipline, condensed
