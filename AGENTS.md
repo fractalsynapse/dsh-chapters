@@ -399,6 +399,14 @@ not a plugin bug.
   ledger, `chapters_segment`'s counts — and where no measurement exists, say the number is unknown and
   continue. "My context is nearly spent" with no reading behind it is a fabrication, and it is the class of
   wrong this repository exists to end.
+- **When you need an answer from the human, call the `ask_user_question` tool — do not put the question in your
+  reply text.** A question in a result message does not block: with a goal active the session simply continues past it,
+  so the human never gets asked and the work proceeds on a guess. The tool suspends execution until they answer, which
+  is what a real decision needs. Keep it to what actually needs their input (a choice between options, missing
+  information you cannot read, a scope change); do not use it to confirm work you were already told to do. The
+  companion rule stands: never end a turn asking *permission* to continue — this bullet is about decisions and missing
+  facts, not about clearance. (Added 2026-10-28 at the maintainer's instruction, after a release-blocking question I
+  posed in prose got no answer because nothing was waiting for it.)
 - **Never end a turn asking for permission to continue.** Uncertainty is not a blocker and a `PLOT:` line is
   not a question. Report a blocker only when it is real and external: a missing credential you cannot read,
   hardware that is not there, a decision that is the maintainer's by right (a release to `main`, a scope
