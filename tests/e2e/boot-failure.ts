@@ -19,6 +19,13 @@ export const TAIL_BUDGET_CHARS = 1200
 
 const TOKEN_LINE = /(token=|url=http|listening on http)/i
 
+/** Measured 2026-10-29 on the maintainer's box: 65,387 of 65,536 inotify watches consumed (55,201 by another
+ * application), and the host's HMR layer answered with ENOSPC. The rig's dead boots carried the same words in the same
+ * pipe the runner was already reading, yet the failure still said only `boot failed within 120000ms` — which is how an
+ * environment limit got mistaken for a plugin defect for a day. Detect it and say it plainly, in the reader's terms:
+ * whose layer it is, and the knob that clears it. */
+const WATCH_LIMIT_LINE = /ENOSPC[^\n]*watchers reached|System limit for number of file watchers/i
+
 /**
  * @param tail - the child's captured output, or `null` when the log could not be read at all.
  */
@@ -48,5 +55,11 @@ export function bootFailureMessage(input: {
     budget -= line.length
   }
   const body = kept.length > 0 ? kept.join(' | ') : '(nothing but URL/token lines)'
-  return `${head}. child log tail (${input.logPath}): ${body}${dropped ? '…[redacted]' : ''}`
+  const watchExhausted = WATCH_LIMIT_LINE.test(input.tail)
+  const cause = watchExhausted
+    ? '. CAUSE: inotify file-watcher budget exhausted — an environment limit, not a plugin defect. '
+      + 'Raise it with `sudo sysctl fs.inotify.max_user_watches=524288`, or free watchers (editors/indexers hold most of them); '
+      + 'the server cannot finish starting its file-watch layer until then.'
+    : ''
+  return `${head}. child log tail (${input.logPath}): ${body}${dropped ? '…[redacted]' : ''}${cause}`
 }

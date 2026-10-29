@@ -37,6 +37,19 @@ test('a missing log file says so rather than pretending the child produced nothi
   assert.doesNotMatch(msg, /\(empty\)/, 'absence is not emptiness')
 })
 
+test('an exhausted inotify watch budget is named as the cause, not left as a hang (#165)', () => {
+  // Measured 2026-10-29: 65,387 of 65,536 watches consumed, and the host's HMR layer answered with ENOSPC. The rig's
+  // dead boots printed this in the same pipe and the runner still only said `boot failed within 120000ms`, so a
+  // maintainer saw a hang and reasonably suspected the plugin. Five words would have ended it.
+  const msg = bootFailureMessage({
+    port: 41735, waitedMs: 120066, ceilingMs: 120000, logPath: 'var/e2e-server-41735.log',
+    tail: "hmr (@deepseek-ai/dsh-hmr): Error: ENOSPC: System limit for number of file watchers reached, watch '/x'\n",
+  })
+  assert.match(msg, /file-watcher budget exhausted/, `the cause must be named, got: ${msg}`)
+  assert.match(msg, /fs\.inotify\.max_user_watches/, `and point at the knob that fixes it, got: ${msg}`)
+  assert.match(msg, /not a plugin defect|environment/i, `and say whose layer it is, got: ${msg}`)
+})
+
 test('the tail is bounded and never echoes the boot URL, which carries the session token', () => {
   const secret = `http://127.0.0.1:41731/?token=${'A'.repeat(64)}`
   const long = `${'x'.repeat(TAIL_BUDGET_CHARS + 900)}\n${secret}`
