@@ -13,6 +13,7 @@
  * measurement that would prove nothing.
  */
 import { execSync } from 'node:child_process'
+import { promptAnchorFor, PROMPT_SURFACE } from './prompt-anchor.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -38,22 +39,56 @@ function libDigest () {
 }
 
 const gitSha = (() => { try { return execSync('git rev-parse HEAD', { cwd: ROOT, encoding: 'utf8' }).trim() } catch { return 'unknown' } })()
-const mode = process.argv[2] ?? 'stamp'
-const built = { lib: libDigest(), gitSha, at: new Date().toISOString() }
+export function verdictFor(prev, built) {
+  // #156: two quantities, two verdicts. `promptAnchor` is the bytes a model reads; `lib` is everything we ship. Only the
+  // first makes a corpus STALE. Conflating them demanded a 45-minute re-record for #152/#153 (diagnostic fields no model
+  // ever sees) while the job that could have caught the real drift is `continue-on-error: true` by decision (#92) — so a
+  // gate in the wrong job enforces nothing, and a gate measuring the wrong bytes trains people to route around it.
+  // Returns `{ stale, advisories, note }`: `stale` is the refuse condition; advisories pass.
+  const advisories = []
+  const stale = typeof prev?.promptAnchor === 'string' && prev.promptAnchor !== built.promptAnchor
+  if (typeof prev?.promptAnchor !== 'string') {
+    advisories.push('the stamp predates the prompt-byte anchor (no promptAnchor field) — run `npm run corpus:stamp` on a green replay; the gate cannot protect a corpus it has no anchor for')
+  }
+  if (typeof prev?.lib === 'string' && prev.lib !== built.lib) {
+    advisories.push(stale
+      ? `the build also changed (lib ${prev.lib} -> ${built.lib})`
+      : `the build changed (lib ${prev.lib} -> ${built.lib}) while every model-facing byte is identical — the tapes still match this build; run \`npm run corpus:stamp\` on a green replay to keep the record honest`)
+  }
+  return { stale, advisories, note: `lib=${built.lib}, promptAnchor=${built.promptAnchor}` }
+}
 
-if (mode === 'stamp') {
+const isCli = process.argv[1] !== undefined && process.argv[1].endsWith('build-stamp.mjs')
+const mode = process.argv[2] ?? 'stamp'
+const anchor = promptAnchorFor('.', PROMPT_SURFACE)
+// #156: two quantities, two verdicts. `promptAnchor` is the bytes a model sees; `lib` is everything we ship.
+// Only the first one makes a corpus stale — a diagnostics-only change moves `lib` and must NOT demand a re-record.
+const built = { lib: libDigest(), promptAnchor: anchor.anchor, gitSha, at: new Date().toISOString() }
+
+if (!isCli) {
+  // Imported for `verdictFor`/`libDigest` by tests: never touch the corpus from an import (#156).
+} else if (mode === 'stamp') {
   fs.writeFileSync(STAMP, JSON.stringify({ ...built, note: 'written by `npm run corpus:stamp`; a replay refuses when lib/ no longer matches' }, null, 2) + '\n')
   console.log(`stamped corpus: lib=${built.lib} git=${built.gitSha.slice(0, 8)}`)
   process.exit(0)
 }
 
-let prev
-try { prev = JSON.parse(fs.readFileSync(STAMP, 'utf8')) } catch {
-  console.error('BUILD_STAMP.json is missing — the corpus predates the one-build rule. Re-record the nine legs (`npm run corpus:rebuild`) and stamp it.')
-  process.exit(1)
+if (!isCli) {
+  // Imported (by tests) for `verdictFor`/`promptAnchorFor` only. The CLI below reads the corpus and can call
+  // `process.exit`, which would kill a test runner that merely wanted a pure function (#156).
+} else {
+  let prev
+  try { prev = JSON.parse(fs.readFileSync(STAMP, 'utf8')) } catch {
+    console.error('BUILD_STAMP.json is missing — the corpus predates the one-build rule. Re-record the nine legs (`npm run corpus:rebuild`) and stamp it.')
+    process.exit(1)
+  }
+
+  const verdict = verdictFor(prev, built)
+  if (verdict.stale) {
+    console.error(`REFUSED: model-facing bytes moved since this corpus was recorded (promptAnchor ${prev.promptAnchor} -> ${built.promptAnchor}). The recorded requests cannot be served by this build: re-record the affected projects, then stamp.`)
+    for (const a of verdict.advisories) console.error(`  also: ${a}`)
+    process.exit(1)
+  }
+  for (const a of verdict.advisories) console.error(`ADVISORY: ${a}`)
+  console.log(`corpus matches the current build (${verdict.note})`)
 }
-if (prev.lib !== built.lib) {
-  console.error(`REFUSED: the plugin changed since this corpus was recorded.\n  stamped: lib=${prev.lib} git=${String(prev.gitSha).slice(0, 8)} (${prev.at})\n  now:     lib=${built.lib} git=${built.gitSha.slice(0, 8)}\nA replay here measures nothing: the recorded requests were produced by different code. Re-record all nine legs under the current build.`)
-  process.exit(1)
-}
-console.log(`corpus matches the current build (lib=${built.lib})`)
