@@ -11,6 +11,7 @@ import { registerHostCommands } from '../../src/commands.ts'
 function harness(prompt?: {
   effective?: () => { spec: string; source: 'override' | 'config' | 'unset' }
   setModel?: (spec: string | null) => Promise<void>
+  setCaps?: (opts: { maxChars?: string | null; contextChars?: string | null }) => Promise<void>
   suggest?: (session: { id: string; title?: string | undefined; events: unknown[] }) => Promise<{ ok: boolean; text: string }>
   statusLine?: () => string
 }) {
@@ -304,4 +305,29 @@ test('run needs a session scope and says so rather than guessing a session', asy
   const res = await h.run('run', {})
   assert.equal(res.kind, 'error')
   assert.match(res.text ?? '', /run needs a session scope/)
+})
+
+test('#188: model <id> [maxChars [contextChars]] stores the caps beside the model; garbage numbers refuse', async () => {
+  const caps: Array<{ maxChars?: string | null; contextChars?: string | null }> = []
+  let effective = { spec: '', source: 'unset' as const }
+  const h = harness({
+    effective: () => effective,
+    setModel: async (s) => { effective = s === null ? { spec: '', source: 'unset' } : { spec: s, source: 'override' } },
+    setCaps: async (opts) => { caps.push(opts) },
+    statusLine: () => 'x',
+  })
+  const both = await h.run('model p/m 2000 50000')
+  assert.equal(both.kind, 'success', both.text)
+  assert.deepEqual(caps[0], { maxChars: '2000', contextChars: '50000' })
+  assert.match(both.text!, /suggestion 2000 chars/, 'the stored caps are echoed')
+  assert.match(both.text!, /context budget 50000 chars/)
+  const none = await h.run('model p/m')
+  assert.equal(none.kind, 'success', none.text)
+  assert.equal(caps.length, 1, 'no numbers, no caps write — derivation stays in charge')
+  assert.match(none.text!, /derive from this model's context window/, 'and the reply says so')
+  const bad = await h.run('model p/m lots')
+  assert.equal(bad.kind, 'error')
+  assert.match(bad.text!, /positive integers/)
+  const extra = await h.run('model p/m 1 2 3')
+  assert.equal(extra.kind, 'error', 'a fourth token is not a cap')
 })
