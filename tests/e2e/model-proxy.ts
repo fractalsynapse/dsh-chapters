@@ -42,11 +42,11 @@ const VOLATILE: Array<[RegExp, string]> = [
   // period, so `…: 12m 4s.` folded to `<ELAPSED>` while `…: unavailable` kept a different length — a
   // one-character difference between a request and a tape recorded minutes apart, and enough to fail the
   // whole leg. Fold the form, not a guess at its value's punctuation.
-  // The value class must not cross role segments (#178, measured): `[^"]+` was fine for a standalone
-  // snapshot — the content's closing quote bounded it — but a plot-note excerpt embeds the snapshot mid-
-  // string with the conversation continuing after it, and the old class ate `assistant: …` whole, which
-  // then made the TIME-BLIND fold run to end-of-string. Bounded by the same markers the time fold uses.
-  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[\s\S]*?(?=\buser:|\bassistant:|\bsystem:|<\/?system-reminder>|"|$)/g, '$1: <ELAPSED>'],
+  // The value is a DURATION, so fold exactly one: `unavailable` or `12m 4s`-shaped tokens, optional
+  // period. The earlier `[^\n"]+` class ate everything to the next quote — inside a plot-note excerpt
+  // that swallowed the `assistant: …` segment after it (#178, measured), and in prose it eats genuine
+  // text. A precise value class needs no boundary lookahead at all.
+  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*(?:unavailable|(?:\d+\s*[hms]\s*)+)\.?/g, '$1: <ELAPSED>'],
   // CHAPTER-COUNT-BLIND (#56, measured 2026-10-27): the checkpoint notice states how many chapters exist in
   // THIS session's archive, which auto-save timing decides — 8 on one run, 2 on the next, for the same
   // journey. The byte diff proved `heavy`'s replay died on exactly that count at char 729 while its system
