@@ -42,7 +42,16 @@ export const RIG_PINS: Record<string, RigPin> = {
   // #130 matrix cell: relief must stay live (the leg's fork door comes from a real continuation) while the
   // plot aux turn is suppressed, because that turn is what CI issues and this host does not. 0.5 + suppression
   // hangs the boot; 0.75 is the ratio the committed corpus was captured at.
-  suite: { port: 41731, threshold: '0.75', noElicitedPlot: true },
+  // #178, measured 2026-10-30: at 0.75 the compaction crossing sits on a few-hundred-byte cliff of
+  // machine identity (workspace path length, TZ spelling) — my re-record caught a checkpoint the CI
+  // runner's byte budget never produced, and the leg MISSed at msg5 with a stored checkpoint message
+  // where the runner had its plain first turn. 0.45 puts relief FIRMLY inside the journey on either
+  // machine (the heavy/fanout reasoning). The #130-era note "0.5 + suppression hangs the boot" is
+  // about suppression COMBINED with a low ratio; `noElicitedPlot` is dropped because tonight's record
+  // proved this host issues the plot turns anyway (three plot-note calls captured) — the suppression
+  // was stale, and with it gone the plot aux calls are ordinary taped requests (their embedded
+  // injection residue is folded symmetrically since #178).
+  suite: { port: 41731, threshold: '0.45' },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
   // #132: same margin reasoning as `fanout`. At 0.9 the relief crossing lands where a few hundred bytes of
