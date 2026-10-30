@@ -40,6 +40,7 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `promptModel` | `''` | the model that **defines** the next work ([§28](/concepts/prompt-recommendations/)). Empty ⇒ the feature does not exist — zero calls, zero surface. Setting it (here, or at runtime with `/chapters-prompt model p/m`) **is** the enable: one knob, no second boolean to drift |
 | `promptContextChars` | 4000 | hard cap on the assembled input slice (registry chapter summaries + the live conversation tail, host-injected context defused first); deterministic order, same discipline as the enrichment input |
 | `promptMaxChars` | 240 | cap on the recommendation the ghost may show. An over-cap answer is retried **once** with the cap restated, then refused — never truncated |
+| — | — | all three model keys take a `provider/model` route — `/chapters-models` lists the exact identifiers this host accepts, their context windows, and each key's current value (#173) |
 | — | — | `/chapters-rule conflicts` has **no key of its own**: it runs one bounded stream call on the conversation route the session already has, **report-only**, never edits a rule. No route ⇒ the verb refuses honestly |
 | `continuationBudgetRatio` | 0.25 | TOC + note share of the window *remaining after the header* |
 | `chapterTokenTarget` / `chapterLimit` | 8000 / 8000 | soft per-chapter size / hard split |

@@ -8,6 +8,7 @@
  *   /chapters-link <https-url> <token>          bind a network git upstream
  *   /chapters-link treedx+<url>/<repo> <token>  bind a TreeDX service upstream
  *   /chapters-status                            last sync result
+ *   /chapters-models [<provider> [<model>]]     discover the ids the three model setters accept (#173)
  *   /chapters-enrich run | model … | report     P2 enrichment surface (record §6.2)
  *   /chapters-prompt model … | off | suggest    prompt recommendations (#71, site §28)
  */
