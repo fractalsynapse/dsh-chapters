@@ -217,6 +217,27 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   the missing host-plane route) that every deterministic layer had missed because each side
   only ever tested against its own convention. The e2e is the integration witness — keep it.
 
+### Reading a dead boot (#165, #166)
+
+When a rig boot never announces its URL, `tests/e2e/boot.ts` throws `bootFailureMessage()` from
+`tests/e2e/boot-failure.ts`, and the message carries: the measured wait, the port, the name of the knob that raises the
+window for diagnosis (`E2E_BOOT_TIMEOUT_MS` — readiness to serve, never a product claim), and the **child's own tail**.
+That tail is the whole value: on 2026-10-28 the single line `[chapters-prompt] turn/end door armed` distinguished "the
+child mounted and stalled before listening" from "the child crashed", and separated the real cause from four wrong
+theories I had already published.
+
+Three shapes must not be blurred, and are pinned by `tests/unit/boot-failure-message.test.ts`: a tail with no lines reads
+`(empty)`; a log that could not be read reads `unreadable or never written` (absence is not emptiness); and output is
+bounded at 1,200 characters with any removal marked `…[redacted]`, so suppression is never mistaken for silence. The
+redaction is not cosmetic: the child prints its own boot URL **carrying a session token**, and the old verbatim slice
+copied it into the Playwright error, the per-leg log and CI annotations. Read `var/e2e-server-<port>.log` and
+`var/e2e-boot-<port>.json` as sensitive for the same reason — I `cat`-ed one during tonight's diagnosis.
+
+**One boot per journey still applies** (site §24, #129): a chain failure after leg one is an environment symptom, not a
+tape symptom. Ruled out on this machine by check rather than hope: dangling tool links, orphan servers, port squatting,
+`ulimit`, inotify instances, free memory, lock files. If a lone leg passes and a chain does not, stop and read the boot
+message before touching a test.
+
 ### What `coverage:e2e` promises, and what it cannot deliver
 
 `coverage:e2e` runs the replay chain under `E2E_COVERAGE=1` (a V8 profile per boot, aggregated by
