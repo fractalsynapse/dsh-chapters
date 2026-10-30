@@ -27,6 +27,7 @@ import { selectProvider } from './provider.ts'
 import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
 import type { PromptCommandSurface } from './prompt.ts'
+import { modelsCommand, type ModelsIo } from './models-command.ts'
 import type { SessionEventLike } from './types.ts'
 import { resolveStoreRoot } from './store.ts'
 import { diagnosticStatusLine } from './diag.ts'
@@ -49,6 +50,8 @@ export interface HostCommandsConfig {
   scheduler?: SyncScheduler
   /** P2 enrichment command surface (host plane; manual-drain semantics). */
   enrich?: EnrichCommandSurface
+  /** #173: model-catalog discovery, re-read per invocation (settings mutate under it). */
+  models?: () => ModelsIo
   /** P3 rule lifecycle family, bound to a workspace (S2 module underneath). */
   rules?: (cwd: string, args: string, sessionId?: string) => Promise<{ kind: 'success' | 'error'; text: string }>
   /** Door 5 (issue #47): whether subagent settlements auto-archive. Reported in
@@ -379,6 +382,18 @@ export function registerHostCommands(
     },
   }
 
+  // #173: the discovery surface for the three model settings. Pure core in models-command.ts;
+  // this shell only refuses when the catalog is not wired and re-reads the io per invocation.
+  const modelsCatalogCommand = {
+    name: 'chapters-models',
+    description: 'Discover the provider/model identifiers the enrichment, rules-mining, and prompt settings accept, with capabilities and current values: /chapters-models [<provider> [<model>]]',
+    input: { hint: '[<provider> [<model>]] — a paste-ready provider/model id works as one arg' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
+      if (config.models === undefined) return { kind: 'error', text: 'the model catalog is not wired on this plane' }
+      return modelsCommand(config.models(), invocation.rawInput ?? '')
+    },
+  }
+
   const promptCommand = {
     name: 'chapters-prompt',
     description: 'Prompt recommendations (#71, site \u00A728): set the defining model, turn the composer ghost off, or answer the client\u2019s pull.',
@@ -540,12 +555,14 @@ export function registerHostCommands(
     if (typeof d3 === 'function') disposers.push(d3 as () => void)
     const d3b = commands.register(promptCommand)
     if (typeof d3b === 'function') disposers.push(d3b as () => void)
+    const d3c = commands.register(modelsCatalogCommand)
+    if (typeof d3c === 'function') disposers.push(d3c as () => void)
     if (config.rules !== undefined) {
       const rulesFn = config.rules
       const rulesCommandDef = {
         name: 'chapters-rule',
         description: 'Rules (record \u00A77): project tier propose/approve/revoke per machine; session tier review, pin, conflict report.',
-        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts' },
+        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts' },
         async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
           // the session id reaches the resolver because the SESSION tier activates
           // by ancestry (§7.5): `active` cannot answer without knowing which tree
