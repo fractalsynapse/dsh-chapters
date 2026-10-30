@@ -417,6 +417,11 @@ the first ~200 tokens of the chapter body for grounding — and whose output is 
   below.
 - **Topics are proposals:** they enter the chapter's frontmatter only through the
   canonicalizer (§6.3) — unknown labels pass as `unvetted`.
+- **What proves it live (#175):** the tape-backed `enrich` leg asserts the plumbing on canned
+  completions. `tests/e2e/model-activities-live.spec.ts` runs the same journey against the real
+  provider, where a REAL completion writes the `generated:` frontmatter (verbatim body preserved),
+  and the mining half asserts the durable rule file itself (§7.5). Live-class: excluded from the
+  model-free acceptance job by design, and the exclusion is stated wherever the claim is made.
 
 ### 6.2 When it runs: idle-batched, never per-turn
 
@@ -614,6 +619,12 @@ rules, not a new policy):
   tree the moment it is written. With it off, every mined rule is written `reviewOnly: true` and
   stays inert until this machine's `approve` fact says core — activation still rides a curation
   fact, so the write-once file is never rewritten (§1.3).
+  **Live proof (#175):** `model-activities-live.spec.ts` puts an explicit standing order in the
+  journey's only human message, drains enrichment against the real provider, and asserts the mined
+  rule FILE — `scope: session`, `derivedFrom: model`, and the `basis` warrant (`stated`/`inferred`,
+  decided by the verbatim-quote gate above; an inferred warrant must render with its "the model
+  wrote this" caveat) — then reads the rule back in full through `/chapters-rule view`. Unit rows
+  pin the gate; this leg pins the journey, against a real completion.
   **The quote check survives, demoted to a label.** Matching the chapter's human bytes verbatim
   classifies a rule `stated`; not matching classifies it `inferred`; the label is rendered *beside
   the rule text, with the chapter it came from*, and it drives nothing. Assistant prose is not

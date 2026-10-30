@@ -197,3 +197,16 @@ the parser so a reworded line that would break the client goes red instead.
 A real push would need a host seam: the plugin appends its recommendation as a durable
 plugin record and a registered projection delivers it. Same component, one seam moved;
 tracked in `docs/backlog.md`.
+
+## What proves it, in which class
+
+The pixels (dock order 30, Analyzing → suggestion, expand, Run submitting a human-authored turn,
+Off hiding the bar) are asserted by the tape-backed `prompt` and `prompt-off` legs — and the
+suggestion text in that corpus was written by a REAL model: the 2026-10-30 re-record ran the leg
+against the live provider with the browser asserting, and the committed tape entry decodes to the
+real completion. The goal/suggestion interplay runs live-only (`prompt-goal-live`, real provider,
+wall-clock bound) because an armed goal has no tape-able rest state. `/chapters-models` — the
+discovery surface for the setting this page's feature rides — is proven live by
+`model-activities-live` (#175): an identifier the command prints is passed to a setter and echoed
+back as the stored override. The live legs are absent from the model-free acceptance job by
+design; every claim on this page names the class that covers it.
