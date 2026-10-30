@@ -107,6 +107,25 @@ export function barLabel(s: PromptBarState): string | null {
   return null
 }
 
+/**
+ * #193: the pull cadence, as a decision instead of an interval constant. Every pull is two recorded
+ * host lifecycle events (`command/run` + `command/done`) the UI renders as history nodes — cadence
+ * IS the litter, so it belongs in this module with a row for every arm. Active = the state can
+ * plausibly change on a short clock (generation in flight, an armed loop to fire, a turn running
+ * that will end into an offer). Quiet = stable; one pull a minute is plenty for a state that only
+ * changes at turn boundaries. Hidden-and-quiet = pull NOTHING (a background tab should write zero
+ * history); hidden-and-active still pulls, because walking away from a running loop is the point of
+ * autorun and pausing it silently would be the loop dying with nobody told.
+ */
+export const ACTIVE_POLL_MS = 10_000
+export const QUIET_POLL_MS = 60_000
+
+export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean }): number | null {
+  const active = s.status === 'analyzing' || s.autorun === 'armed' || s.running
+  if (!active && s.hidden) return null
+  return active ? ACTIVE_POLL_MS : QUIET_POLL_MS
+}
+
 export function barVisible(s: PromptBarState): boolean {
   // Only `off` hides the row. `idle` is enabled-and-waiting, and showing it is the difference between
   // "the feature is live, nothing to say yet" and silence that reads as disabled (#113).
