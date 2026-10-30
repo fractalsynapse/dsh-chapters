@@ -6,6 +6,40 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.4 — 2026-10-30 · the suggestion director stopped flying blind
+
+`0.2.3` shipped the operating surfaces; this patch makes the model behind the Suggested Next Step bar actually
+competent to lead — the maintainer's verdict on the old input was that the feature was "pretty much useless", and the
+fix is #188 in full:
+
+**The director reads the session's memory now.** The suggestion input became: the goal directive with the objective
+WHOLE (the old 600-character slice was itself a truncation), the active plan, the core rules — rendered by the same
+builder a rebuilt head uses, so director and worker can never serve under different rule sets — every chapter on the
+**ancestor path** as title + **detailed** summary + **every plot line** (extracted deterministically from the archived
+bytes, zero model tokens), and the last turn whole. A continuation mid-goal inherits its lineage instead of an empty
+history; an ignorant director leading a stupid worker was the failure mode, and history is the cure.
+
+**Zero truncation is an invariant.** The 500-character per-message slices are gone — a sliced message is a
+hallucination invite. Over budget, the OLDEST chapter drops first, announced in the input itself, until the history
+fits; the protected set never slices, and when it alone cannot fit the suggestion **refuses with the numbers** rather
+than sending a starved assembly. Enrichment's output clamp went loud in the same spirit (` …[truncated]`, inside the
+cap), and its summaries are now contracts: decisions, findings, state changes, open threads — the summary IS a
+chapter's guidance value for this reader.
+
+**The caps follow the model.** `promptMaxChars` 240 → **4096** (a cap that cannot carry a paragraph cannot carry an
+instruction). The context budget derives from the selected model's REAL window — `contextWindow × promptContextRatio
+(default 0.5) × 4 chars/token`: a 32K model and a 1M model get budgets 30× apart from one rule — and
+`/chapters-prompt model <id> [maxChars] [contextChars]` pins explicit numbers beside the model, with
+`/chapters-prompt state` reporting every effective value **and its source**.
+
+**The budget never cuts off a goal.** `promptMaxRounds` governs open-ended iteration only; while a goal is active or
+paused the pursuit is bounded by the goal's lifecycle, and `blocked` now disarms autorun exactly like `complete` —
+server and client stop together, mutation-checked on both planes.
+
+Corpus note: the prompt-byte anchor did **not** move (no command or tool description changed), so only the two legs
+whose aux bytes changed — `prompt` (new assembly) and `enrich` (detailed-summary contract) — were re-recorded, green
+on the real provider, and the full nine-leg chain replayed `SF=0` locally and on CI's blocking acceptance job.
+
 ### 0.2.3 — 2026-10-30 · the model settings became usable: discover them, read what they govern, and watch all three work
 
 A small release with one theme — the three model-driven activities (enrichment, rules mining, prompt suggestions)
