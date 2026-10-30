@@ -6,6 +6,37 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.5 — 2026-10-30 · the bar stops littering your history
+
+A patch with one job. After `0.2.4` the maintainer found session history "littered with multiple `chapters-prompt`
+runs, one right after another" — and the mechanism was measured, not guessed: the Suggested Next Step bar talks to its
+server through `remote.commands.execute('/chapters-prompt state')`, and the host records **every** command execution as
+a `command/run` + `command/done` lifecycle pair that the web UI renders as a history node (`recordInput: false` hides
+only the args; no quiet-invocation mode exists on that wire). The bar's unconditional 10-second keep-poll was therefore
+writing ~360 visible nodes an hour into every bar-enabled session. The command was never "back" — the bar IS the
+surface; its transport was just audible.
+
+**The cadence is now a decision, not an interval** — a pure function in the module that holds every other bar decision,
+with a row per arm and a mutation check behind it:
+
+- **10s only while state can plausibly change**: a generation is `analyzing`, autorun is `armed`, or the host says a
+  turn is `running`,
+- **60s while stable** — an offer on screen changes only at the next turn boundary,
+- **zero pulls in a hidden tab** while quiet — a background session writes no history at all — but an **armed** loop
+  never pauses for a hidden tab, because walking away from a running loop is the point of autorun,
+- **the idle edge pulls immediately** (a turn ending is exactly when a new offer is born), and so does the tab
+  returning to the foreground — freshness where it matters *improved* while volume dropped ~6×,
+- hosts that publish no running signal keep the old 10s behavior, unchanged.
+
+The structural fix is filed and host-gated (#194): the host's push transport (`appendPluginRecord` + projections) makes
+the steady state produce **zero** command executions — measured absent from the pinned host `0.2.0-rc.2` and present in
+`0.2.1-rc.2`, so it waits on a host-pin bump with feature detection and pull fallback. The contract's old "0.2.x-only"
+claim is corrected to 0.2.1+ with the tag evidence in this release's docs.
+
+Corpus note: client-only — the prompt anchor did not move (`18d634dc4172a389`), the lib digest is identical to 0.2.4's,
+and the nine-leg acceptance re-ran green on the fix (one `enrich` boot-ceiling flake on the first pass, proven a runner
+flake by a green local replay and a green rerun).
+
 ### 0.2.4 — 2026-10-30 · the suggestion director stopped flying blind
 
 `0.2.3` shipped the operating surfaces; this patch makes the model behind the Suggested Next Step bar actually
