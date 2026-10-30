@@ -167,10 +167,18 @@ test('enrichment enriches, mining mines with a warrant, view reads it whole, and
     message: 'the models command never printed a provider/model identifier into the durable log',
   }).toBe(true)
   const id = modelIdFrom(allLogs())!
-  await typeComposer(page, `/chapters-enrich model ${id} `, deliveredFor(sid, '/chapters-enrich model '))
+  // The SET echo first ('enrichment model set to …' — the verb's actual success text), then a bare
+  // read-back so the claim is the full round trip: printed id → setter → stored override → echoed
+  // back. The content polls are the gates; deliveredFor only waits for the press to land.
+  await typeComposer(page, `/chapters-enrich model ${id} `, deliveredFor(sid, `/chapters-enrich model ${id} `))
+  await expect.poll(() => allLogs().includes(escaped(`enrichment model set to ${id}`)), {
+    timeout: 90_000, intervals: [2000],
+    message: `the setter never acknowledged ${id}`,
+  }).toBe(true)
+  await typeComposer(page, '/chapters-enrich model ', deliveredFor(sid, '/chapters-enrich model '))
   await expect.poll(() => allLogs().includes(escaped(`enrichment model: ${id}`)), {
     timeout: 90_000, intervals: [2000],
-    message: `the setter never echoed the identifier ${id} back as the stored override`,
+    message: `the read-back never echoed ${id} as the stored override`,
   }).toBe(true)
 
   // --- evidence outlives the throwaway home ---------------------------------------------------

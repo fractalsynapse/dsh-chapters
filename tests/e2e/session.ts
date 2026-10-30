@@ -212,8 +212,33 @@ export async function focusComposer(page: Page): Promise<void> {
     return ae !== null && (ae.matches('div[aria-label*="/ commands, @ files or sessions"]') || ae.closest('div[aria-label*="/ commands, @ files or sessions"]') !== null)
   })
   if (!focused) {
-    const ae = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? 'none')
-    throw new Error(`composer did not take focus (active: ${ae})`)
+    // #175: an overlay can steal the click — measured live, the host's onboarding dialog
+    // ("Add an API key to get started", whose focused control is the `API key` textbox) stood over the
+    // composer after a completed turn. Dismiss a blocking dialog by its OWN sanctioned control — a
+    // close/cancel-class button inside [role=dialog], never a blind Escape — then re-click once. If
+    // focus still fails, the retry throws with the element named, exactly as loudly as before.
+    const dismissed = await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"]')
+      if (dialog === null) return false
+      const btn = Array.from(dialog.querySelectorAll('button'))
+        .find((b) => /^(Configure later|Close|Cancel|Skip|Dismiss|Not now)$/i.test((b.textContent ?? '').trim()))
+      if (btn === undefined) return false
+      ;(btn as HTMLButtonElement).click()
+      return true
+    })
+    await page.waitForTimeout(dismissed ? 600 : 0)
+    if (!dismissed) await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+    await page.mouse.click(box.x + Math.min(60, box.width / 2), box.y + box.height / 2)
+    await page.waitForTimeout(400)
+    const refocused = await page.evaluate(() => {
+      const ae = document.activeElement
+      return ae !== null && (ae.matches('div[aria-label*="/ commands, @ files or sessions"]') || ae.closest('div[aria-label*="/ commands, @ files or sessions"]') !== null)
+    })
+    if (!refocused) {
+      const ae = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.tagName ?? 'none')
+      throw new Error(`composer did not take focus (active: ${ae})`)
+    }
   }
 }
 

@@ -45,3 +45,8 @@ node_modules/
 /playwright/.auth/
 # verification lab: copies of the LIVE registry/store, 40 MB, never commit real user data
 var/recovery-lab/
+
+# live-only legs run against the real provider through the record proxy; their tapes are a
+# byproduct, never corpus (#175 — the model-free acceptance chain must not grow a live leg).
+tests/fixtures/model-tape/model-activities-live/
+tests/fixtures/model-tape/prompt-goal-live/
