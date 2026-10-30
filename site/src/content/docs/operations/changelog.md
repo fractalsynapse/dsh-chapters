@@ -6,6 +6,38 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.2 — 2026-10-29 · the stable channel gets relief back, and the release line learns to check itself
+
+The stable of the `0.2.2-dev` line: everything in `0.2.2-dev.2` — relief restored for models under 65,536 tokens (the
+`headroomTokens` realm fix) and compile deps equal to the pinned runtime — plus sixteen commits that made the pipeline
+*verify* what it had been trusting. It publishes when the maintainer tags `0.2.2` on `main` (npm trusted publishing; the
+tag must equal `package.json` — `0.2.2-dev.1` is the permanent record of what happens when it does not), and `latest`
+then moves off `0.2.1`.
+
+**The relief note speaks now (#152, #153).** The note a compaction pass leaves on the surface carries per-pass numbers —
+shadowed nodes, tokens removed, what remains — and its `window` comes from the adapter rather than a config key that
+never existed, so a note cannot state a context size that is not true.
+
+**The corpus anchor measures the only bytes that matter (#156, #157).** `CORPUS_HOST` pins a digest of the
+model-facing prompt bytes, `npm run corpus:check` runs in CI's blocking job, and a prompt drift fails the build instead
+of silently invalidating nine tape legs. The build digest still moves for non-prompt changes — the advisory says so —
+but only the prompt anchor gates.
+
+**A live mechanism is bound by its invariants, never a tally (#154, #155).** The `heavy` leg asserts what relief must
+do — shadowing decisions, surface state, the note's content — with its count demoted to a runaway guard. It is
+live-class, so the model-free acceptance job names nine legs, not ten (#149), and every claim says which class covers it.
+
+**A dead boot explains itself (#165, #166).** A rig boot that misses its announce window now fails with the child's own
+log tail attached — and names an exhausted inotify watch budget when that is the cause — instead of a bare timeout that
+reads like a plugin defect. The message is bounded, and the boot URL, which carries a session token, is never copied
+into logs or CI annotations again.
+
+**The docs retract what was wrong (#162, #163, #164, #142).** The composer draft refusal is recorded as measured —
+identical on both host runtimes, `draftRev` living in `ui-commands` and not `ui-conversation`, a host bump *not* the path
+to #126; `coverage:e2e` states what it can promise (a report, not a verdict; its ceilings stay untouched); and the
+workflow gains the rule that a decision needing the human goes through `ask_user_question`, because a question in prose
+never blocked a running goal.
+
 ### 0.2.2-dev.2 — 2026-10-28 · relief came back for 32K models, and a dead tag taught the release line a rule
 
 Published on npm as `@treeseed/dsh-chapters@0.2.2-dev.2` (dist-tag `dev.2`; `latest` still `0.2.1`, correctly, because a
