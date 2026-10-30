@@ -57,3 +57,15 @@ test('a completed goal does not keep constraining the loop', () => {
   assert.equal(goal, null, 'a completed goal is not an active purpose')
   assert.match(goalDirectiveOf(goal), /No goal is active/)
 })
+
+test('#188 invariant, enforced: the objective rides WHOLE — a 600-char slice was itself the truncation the contract forbids', () => {
+  // Shipped-claim audit (2026-10-30): the #188 docs, commit, and §26 release line all say "objective
+  // WHOLE", but goalDirectiveOf still carried the old slice(0, 600). Real objectives exceed it — the
+  // one this very session ran under was ~1,200 chars — and a director steering against half an
+  // objective is the exact hallucination invite the zero-truncation invariant exists to forbid.
+  const long = 'ship the thing; '.repeat(80) // ~1,280 chars
+  const goal = { id: 'g', revision: 1, objective: long, phase: 'active', maxGoalRounds: 8 } as never
+  const directive = goalDirectiveOf(goal)
+  assert.ok(directive.includes(long), 'the objective is in the directive VERBATIM and COMPLETE')
+  assert.ok(!directive.includes('…') && !/[.]{3}$/.test(long), 'and nothing wears an ellipsis')
+})
