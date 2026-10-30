@@ -39,10 +39,14 @@ The two-by-two that orients everything else:
 ## 2. How it works, turn by turn
 
 1. A turn completes. If a prompt model is set, it is asked for the next step: one imperative
-   instruction, at most `promptMaxChars` (default **240**) characters, composed from a
-   `promptContextChars` (default **4000**) slice of the live conversation plus the session's
-   chapter summaries. An over-cap answer is *refused, never truncated* — a suggestion you can't
-   see whole is a suggestion you can't judge.
+   instruction, at most `promptMaxChars` (default **240** today) characters, composed from a
+   `promptContextChars` (default **4000**) budget covering the session's chapter summaries, the
+   live conversation tail, and the active goal. An over-cap answer is *refused, never truncated* —
+   a suggestion you can't see whole is a suggestion you can't judge. Both caps are moving per
+   #188: the suggestion cap to a 4K-class default (240 characters predates long-context models and
+   cannot carry a real instruction), the caps settable **with the model** rather than globally,
+   and the context budget re-scoped to the structured set — TOC and rules, the last full turn, the
+   goal, and the plan — sized against the model's actual context.
 2. The offer is classified. Plain text = a **worker-step** (autorun may fire it). A `GOAL:`
    prefix = a **goal-edit**: the model is proposing to re-cut the objective itself. Autorun must
    never act on a goal-edit — the host reserves objective changes for direct human turns — so it
@@ -102,6 +106,13 @@ The two-by-two that orients everything else:
    | mining | `/chapters-rule model <provider/model｜clear>` | distill standing orders — judgment-heavy | unset = rides the annotation call |
    | prompt | `/chapters-prompt model <provider/model>` | **defines the next work**; setting it IS enabling the bar | unset = the feature does not exist |
 
+   The bar's visibility rule is exactly this setting: with no prompt model, the feature does not
+   exist anywhere; the moment one is set, the bar appears docked above the composer (its own dock
+   slot, order 30) and lives there per session — `Analyzing…` after each completed turn, then
+   `Recommended Next Step`. `/chapters-prompt off` hides it for the session (`on` brings it back),
+   and an idle bar stays visible on purpose: "live, nothing to say yet" must not look like
+   "disabled".
+
    Tuning intuition: annotation is volume work — a cheap, fast model is right. Mining reads
    between the lines for instructions worth keeping — this is where a stronger model earns its
    extra call. The prompt model writes the instruction that *becomes the next turn*; under
@@ -140,10 +151,14 @@ goal remains the objective; its own auto-continuation is disarmed, so the sugges
 drives"), and the goal bar flips to `Resume goal`. Autorun needs a prompt model — arming without
 one is refused, loudly.
 
-**Phase 4 — The loop.** Now watch it work. After each completed turn the bar shows *Analyzing…*
-then the suggestion; armed autorun fires worker-steps as human-authored turns; pressure points
-become checkpoints and continuations; idle time annotates and mines. Your role shifts from
-author to editor — which brings us to the situations.
+**Phase 4 — The loop.** Now watch it work. The bar is your primary surface here — everything
+per-turn happens on it, and the commands you typed in Phase 3 were configuration, not the
+workflow. After each completed turn the bar shows *Analyzing…* then *Recommended Next Step*;
+expand it to read the offer in full; **Run** submits it as your own turn; **Autorun** arms the
+loop so worker-step offers run themselves; **Off** hides the bar for the session. Armed autorun
+fires worker-steps as human-authored turns; pressure points become checkpoints and continuations;
+idle time annotates and mines. Your role shifts from author to editor — which brings us to the
+situations.
 
 **Phase 5 — Steering (everything in between).** See the table in §5. The one rule of thumb:
 **typing anything takes the wheel.** A human turn disarms autorun immediately (the offer stays
@@ -152,11 +167,14 @@ visible, and the reply says why), so interrupting is always safe and never loses
 **Phase 6 — Completion.** The model marks the goal complete only when the objective is actually
 achieved, with evidence gathered before the claim; you'll get a closing report. Or it marks
 blocked with the concrete persisting condition. You can end it yourself any time (`/goal clear`,
-or Pause on the goal bar). Note the asymmetry: a completed or cleared goal stops the *goal
-driver* — an armed autorun keeps iterating suggestions until you disarm it
-(`/chapters-prompt autorun off`) or its round budget runs out. That is deliberate (the loop is
-useful for open-ended iteration), but know it's there: **the last thing you do is usually
-`autorun off`.**
+or Pause on the goal bar). When a goal **completes**, the bar's autorun disarms itself — the loop
+exists to serve the session's purpose and stops when that purpose stops. With **no goal** (or
+after one is cleared), an armed loop keeps iterating suggestions within its round budget
+(`promptMaxRounds`, default 24) — open-ended iteration is a feature, but know it's there: the
+last thing you do is usually `autorun off`. The budget itself is being goal-gated per #188: it
+must never cut off the pursuit of an active goal — with a goal present, the goal's own lifecycle
+(and `max_goal_rounds` where the goal driver runs) is the bound, and server and client stop
+together.
 
 **Phase 7 — After.** The work outlives the session: chapters are searchable (`chapters_search`
 for the model, the pool for your team if linked), artifacts remain addressable by hash, and mined
