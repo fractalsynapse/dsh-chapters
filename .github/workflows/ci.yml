@@ -139,11 +139,17 @@ jobs:
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest
-    # ADVISORY for this release, by maintainer decision — see https://github.com/treeseed-ai/dsh-chapters/
+    # BLOCKING again as of #178 (2026-10-30). This job was made advisory by maintainer decision on
+    # 2026-10-24 (#92, "ship first, prove second") UNTIL its evidence landed — and it landed: the nine
+    # legs replay green on CI run after run, the corpus carries a prompt-byte anchor, and corpus:check
+    # gates it in the deterministic job. The cost of staying advisory was measured tonight: a poisoned
+    # suite corpus (#178) failed this job, the run-level conclusion still read `success`, and a merge
+    # proceeded on that reading. Restoring the gate is #92's own recorded consequence, not a reversal.
+    # See https://github.com/treeseed-ai/dsh-chapters/
     # issues/92, which also records the condition that restores it (the `suite`/`enrich`/`heavy` subset
     # green in replay on staging, with `npm run corpus:check` matching the build). The deterministic
     # plane above stays blocking, so code that does not compile or does not pass tests still cannot land.
-    continue-on-error: true
+
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
