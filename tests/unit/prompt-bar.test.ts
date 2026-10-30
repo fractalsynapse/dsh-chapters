@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { barLabel, barVisible, initialBarState, parseBarAutorun, parseBarState, promptBarReducer, shouldAutoFire } from '../../src/client/prompt-bar.ts'
+import { barLabel, barVisible, initialBarState, parseBarAutorun, parseBarState, promptBarReducer, shouldAutoFire, pollSpacingFor, ACTIVE_POLL_MS, QUIET_POLL_MS} from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -138,4 +138,17 @@ test('#188: a BLOCKED goal disarms autorun and blocks firing, exactly like a com
   assert.equal(armed.goalPhase, 'blocked')
   const ready = { ...initialBarState('armed'), status: 'ready' as const, text: 'step', turnSeq: 1, goalPhase: 'blocked' as const }
   assert.equal(shouldAutoFire(ready), false, 'and the fire predicate agrees with the reducer')
+})
+
+test('#193: cadence is a decision — active while state can change, quiet while stable, SILENT in a hidden tab unless the loop is armed', () => {
+  const base = { status: 'ready' as const, autorun: 'disarmed' as const, running: false, hidden: false }
+  assert.equal(pollSpacingFor(base), QUIET_POLL_MS, 'a stable bar costs one pull a minute, not six — every pull is two history nodes')
+  assert.equal(pollSpacingFor({ ...base, status: 'analyzing' }), ACTIVE_POLL_MS, 'generation in flight: watch it closely')
+  assert.equal(pollSpacingFor({ ...base, autorun: 'armed' }), ACTIVE_POLL_MS, 'an armed loop must fire promptly')
+  assert.equal(pollSpacingFor({ ...base, running: true }), ACTIVE_POLL_MS, 'a turn in flight ends into a new offer')
+  assert.equal(pollSpacingFor({ ...base, status: 'idle' }), QUIET_POLL_MS, 'idle-and-stable is the quiet case')
+  assert.equal(pollSpacingFor({ ...base, hidden: true }), null, 'a hidden quiet tab writes NO history nodes at all')
+  assert.equal(pollSpacingFor({ ...base, hidden: true, autorun: 'armed' }), ACTIVE_POLL_MS, 'walking away from an armed loop is the POINT of autorun — never pause it')
+  assert.equal(pollSpacingFor({ ...base, hidden: true, status: 'analyzing' }), ACTIVE_POLL_MS, 'and never pause mid-generation')
+  assert.ok(QUIET_POLL_MS > ACTIVE_POLL_MS, 'quiet must actually be quieter')
 })

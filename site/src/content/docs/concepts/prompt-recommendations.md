@@ -209,14 +209,29 @@ The client **pulls**, on purpose and within known limits. A plugin can own a rea
 observable inside its own slot registration — that is how the goal bar gets its
 `armed/disarmed` — so the bar is *push-shaped*: state arrives as a hook the component
 selects. But a plugin **cannot publish a projection**, and the only plugin-reachable call
-path is `remote.commands.execute`, so that observable is *fed* by a pull of the `state` verb
-on edges the component can actually observe (mount, idle). One output serves both the human
-typing `state` and the component parsing it, and a row feeds the printed block back through
-the parser so a reworded line that would break the client goes red instead.
+path is `remote.commands.execute`, so that observable is *fed* by a pull of the `state` verb.
+One output serves both the human typing `state` and the component parsing it, and a row feeds
+the printed block back through the parser so a reworded line that would break the client goes
+red instead.
 
-A real push would need a host seam: the plugin appends its recommendation as a durable
-plugin record and a registered projection delivers it. Same component, one seam moved;
-tracked in `docs/backlog.md`.
+**A pull is not free where the human can see it** (#193, measured in the host's command
+service): every execution appends a `command/run` + `command/done` lifecycle pair to the
+session log — never model-visible, but the UI renders each pair as a history node, and
+`recordInput: false` hides only the args text, not the node. An unconditional 10-second
+keep-poll therefore wrote ~360 visible nodes per hour into every bar-enabled session — the
+litter is the transport, not a rendering bug. So the cadence is a pure, tested decision
+(`pollSpacingFor`): **10s while state can plausibly change** (generation `analyzing`, autorun
+`armed`, host-published `running`), **60s while quiet**, and **zero pulls in a hidden tab**
+while quiet — never while armed, because walking away from a running loop is the point of
+autorun. The host's idle edge, when published, triggers an immediate pull so a new offer is
+seen the moment the turn that produced it ends.
+
+A real push retires the problem instead of pacing it: the plugin appends its recommendation as
+a durable plugin record and a registered projection delivers it — zero command runs in steady
+state. Measured gate: `appendPluginRecord` is **absent from host 0.2.0-rc.2 and present in
+0.2.1-rc.2** (`git show dsh-v0.2.0-rc.2:packages/core/session/src/index.ts | grep -c
+appendPluginRecord` → 0), so the swap needs a host-pin bump plus feature detection with pull
+fallback — tracked as #194.
 
 ## What proves it, in which class
 

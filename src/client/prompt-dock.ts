@@ -26,6 +26,7 @@ import {
   BAR_RUN_COMMAND,
   deriveRunning,
   BAR_STATE_COMMAND,
+  pollSpacingFor, QUIET_POLL_MS, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -134,9 +135,6 @@ const PULL_TIMEOUT_MS = 15_000
 
 /** Retry ceiling for the FIRST pull only, in attempts and spacing. A mount-time race must not be able to
  * starve the bar forever, and a real `off` answer stops the loop on the first reply either way. */
-/** Cadence of the keep-poll. A local RPC that answers in milliseconds; the cost is one command per
- * interval, and it ends the moment the state is `off`. */
-const POLL_SPACING_MS = 10_000
 
 function execWithTimeout(exec: (line: string) => Promise<string>, line: string, ms: number): Promise<string> {
   return new Promise<string>((resolve, reject) => {
@@ -164,6 +162,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
   useEffect(() => () => { alive.current = false }, [])
   const [busy, setBusy] = useState(false)
   void 0
+  // #193: the mount effect's reschedule handle, so the idle edge and the visibility edge can pull NOW
+  // instead of waiting out a possibly-quiet cadence. Undefined while the poll is not mounted.
+  const kick = useRef<(() => void) | undefined>(undefined)
   const answered = useRef(false)
   const replyStatus = useRef<string>('unknown')
   const stateRef = useRef<PromptBarState>(initialBarState())
@@ -209,28 +210,60 @@ export function PromptDock(props: DockProps): ReactElement | null {
     // Retry until SOMETHING answers. `answered` flips on any parseable reply, including an honest `off`, so
     // this loop cannot make a disabled session look enabled — it only closes the window where a pull fired
     // before the session could take a command and the bar then stayed blank for the rest of the session.
-    // Keep reading while the feature is live. This host publishes no idle edge — the same absence that
-    // makes Autorun refuse to fire — so a pull that only ran at mount would answer `idle` once and then go
-    // quiet for the rest of the session. The poll stops on `off`, which is the only state that means the
-    // human (or the config) switched it away, so a disabled session costs one read and nothing more.
+    // Keep reading while the feature is live, at a cadence that is a DECISION (#193): every pull is two
+    // recorded host lifecycle events (`command/run` + `command/done`) the UI renders as history nodes, so
+    // the old unconditional 10s poll wrote ~360 visible nodes an hour into every bar-enabled session —
+    // the maintainer's "littered with chapters-prompt runs, one right after another". `pollSpacingFor`
+    // paces it: fast while state can change (analyzing / armed / running), slow while stable, and NOTHING
+    // in a hidden tab unless the loop is armed. On hosts that publish no running prop, `running` stays
+    // conservatively true and the cadence stays active — the old behavior, unchanged. `off` still ends it.
     let timer: ReturnType<typeof setTimeout> | undefined
     const tick = async (): Promise<void> => {
-      await refresh()
+      const spacing = pollSpacingFor({
+        status: replyStatus.current as PromptBarStatus,
+        autorun: stateRef.current.autorun,
+        running: stateRef.current.running,
+        hidden: typeof document !== 'undefined' && document.hidden === true,
+      })
+      if (spacing !== null) await refresh()
       if (replyStatus.current === 'off') return
-      // The reply, not the React state. The old condition read `stateRef.current`, which is only advanced by a
+      // The reply, not the React state. The old condition read `stateRef.current`, which is only advanced by
       // render — and while the row is hidden there is no render to wait for, so the poll stopped after its
       // first read and the bar could never observe the offer that landed a minute later. Measured: every
-      // `state read` in the boot log precedes its `ready` write, with none following. 
-      timer = setTimeout(() => { void tick() }, POLL_SPACING_MS)
+      // `state read` in the boot log precedes its `ready` write, with none following.
+      timer = setTimeout(() => { void tick() }, spacing ?? QUIET_POLL_MS)
     }
+    // The idle edge and the tab-foreground edge both mean "something just changed; look NOW" — a scheduled
+    // quiet pull is up to a minute stale, and staleness at exactly the moment an offer lands is how a bar
+    // looks dead. Kick reschedules rather than stacks: it clears the pending timer first.
+    kick.current = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      void tick()
+    }
+    const onVisible = (): void => {
+      if (typeof document !== 'undefined' && !document.hidden) kick.current?.()
+    }
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
     void tick()
-    return () => { if (timer !== undefined) clearTimeout(timer) }
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+      kick.current = undefined
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [refresh])
 
   // Autorun fires off the IDLE edge, never off a render. `running` comes from the host when it publishes it;
   // absent means unknown, and unknown means do not start a turn the human cannot see coming.
+  const prevRunning = useRef<boolean>(props.running ?? true)
   useEffect(() => {
-    dispatch({ t: 'running', running: props.running ?? true })
+    const next = props.running ?? true
+    const prev = prevRunning.current
+    prevRunning.current = next
+    dispatch({ t: 'running', running: next })
+    // #193: the IDLE edge — a turn just ended, which is precisely when a new offer is born. Pull now
+    // instead of waiting out the cadence. Hosts that publish no running prop never produce the
+    // transition, and their cadence stays active anyway.
+    if (prev && !next) kick.current?.()
   }, [props.running])
 
   // Run is a COMMAND, not a keystroke. The composer-write path (`inputActions.setDraft` + `submit`) looked
