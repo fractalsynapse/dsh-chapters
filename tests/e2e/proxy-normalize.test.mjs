@@ -119,3 +119,24 @@ test('EMBEDDED-RUNTIME-BLIND: an injection serialized INSIDE another message dro
   assert.equal(substituteAll(midStored), substituteAll(midIncoming),
     'a mid-excerpt injection (with its closing tag) must drop without eating the segments after it')
 })
+
+test('TIME-BLIND: the time-context snapshot is presence-volatile like the runtime snapshot (#178)', () => {
+  // Measured from the third CI miss dump (2026-10-30, msg5→msg17 across runs): the runner's request carried
+  // `Time sampled while preparing turn 1, step 1: <DATE>[<TZ>] …` as an EXTRA prefix element the recorded
+  // journey never had (incoming 15, census max 16, storedCandidates []). The host injects these by wall-clock
+  // timing — a cold CI boot gets one at turn 1 where the warm recording machine did not — the exact presence
+  // volatility the runtime snapshots already drop for. Same treatment: mask, re-close, drop.
+  const standalone = '{"role":"user","content":"Time sampled while preparing turn 1, step 1: 2026-10-30T03:00:00-04:00[America/New_York] Browser time zone for this request: unavailable. Ask the user to clarify otherwise-unqualified dates and times. Elapsed since the preceding step context: unavailable."}'
+  assert.equal(substituteAll(standalone), '', 'a pure time snapshot drops from matching on every machine')
+  const real = '{"role":"user","content":"Which file defines the merge rule?"}'
+  const withT = [standalone, real].map(substituteAll).filter((x) => x !== '')
+  const without = [real].map(substituteAll).filter((x) => x !== '')
+  assert.deepEqual(withT, without, 'presence parity: an extra time element normalizes away on both sides')
+  // embedded inside another message (a plot-note excerpt serializes the conversation as text)
+  const excStored = '{"role":"user","content":"EXCERPT: user: Which file? user: Time sampled while preparing turn 2, step 3: 2026-10-30T03:00:00-04:00[America/New_York] Browser time zone for this request: unavailable. Elapsed since the preceding step context: unavailable. assistant: compose.ts"}'
+  const excIncoming = '{"role":"user","content":"EXCERPT: user: Which file? assistant: compose.ts"}'
+  assert.equal(substituteAll(excStored), substituteAll(excIncoming), 'an embedded time segment folds away symmetrically')
+  // real prose that merely quotes the phrase is never DROPPED (it may fold, but it survives as a message)
+  const prose = '{"role":"user","content":"The log once said Time sampled while preparing turn 1 and we moved on."}'
+  assert.notEqual(substituteAll(prose), '', 'genuine text is untouchable by the drop')
+})
