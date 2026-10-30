@@ -22,7 +22,7 @@ import { RIG_PINS, rigEnv, projectFromArgv, applyRigEnv } from '../../tests/e2e/
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 
 const EXPECTED: Record<string, Record<string, string>> = {
-  suite: { E2E_PORT: '41731', E2E_THRESHOLD: '0.75', E2E_NO_PLOT: '1' },  // #130: relief live, plot aux suppressed — see rig-pins.ts
+  suite: { E2E_PORT: '41731', E2E_THRESHOLD: '0.45' },  // #178: 0.75 sat on the machine-identity cliff (CI msg-5 miss, local door flake); 0.45 puts relief firmly inside the journey. noElicitedPlot dropped — this host issues plot turns anyway (measured: 3 captured through the suppression), and #130's hang was suppression COMBINED with a low ratio.
   // heavy: trigger 0.5 → 0.9 (#56, 2026-10-27) so its compaction boundary lands at the same message index under
   // record and replay; `maxRetries: 3` because its post-compaction turn needs the host to re-issue a refused
   // request. Both are declared here as an INDEPENDENT restatement of the table — that is this block's purpose:
