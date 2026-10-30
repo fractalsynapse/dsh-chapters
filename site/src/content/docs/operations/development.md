@@ -115,6 +115,30 @@ The index lives at `.codegraph/codegraph.db` and updates incrementally via `code
 
 ## The tape system (why CI has no LLM)
 
+**What `coverage:e2e` promises.** It is a coverage measurement, not an acceptance gate. Under `NODE_V8_COVERAGE=1` the
+server is instrumented for its whole lifetime, and the browser legs' ceilings (a 120 s wait for a door to render, a 300 s
+test timeout) were set against uninstrumented timing. Measured on one tree: the same leg passes clean and fails the door
+wait with coverage on, and across four attempts the failure landed on a different leg each time (`suite`, `prompt`, all of
+them, `fanout`) with a different signature. The ceilings are not being raised — widening a wait to satisfy an
+instrumentation mode is how a test stops meaning anything — so treat the e2e percentage as a report, and the blocking
+number as the deterministic coverage gate in CI's merge job. When you quote the e2e figure, quote the tree and the machine
+conditions with it.
+
+**Two stale things, and only one of them matters.** A rebuild makes the *stamp* stale; a prompt-byte change makes the
+*corpus* stale. `npm run corpus:check` tells them apart (#156): a build-only difference prints an advisory and the replay
+still runs, then `npm run corpus:stamp` re-records the stamp on a green run. A change to what the model actually reads —
+tool and command descriptions, the dock label, the preset persona, the realm ratios and thresholds that decide when relief
+fires — refuses outright, and every affected project has to be re-distilled, because a partly re-recorded corpus matches
+nothing reliably. Before this the gate hashed the built bundle, so it demanded a full re-record for a commit that only
+added diagnostic fields — and refused nothing when it mattered, since the check wasn't run in CI at all.
+
+**A live leg asserts invariants, not a tally.** When a browser journey waits on a model-driven turn, the number of
+internal steps it takes belongs to the run: two live runs of the oversized-turn leg on one commit and one realm produced
+8 and 38 relief passes. The assertion that bounded it (`passes ≤ 30`) therefore failed with nothing broken. What the leg
+asserts instead is what the mechanism promises — every pass removes at least one node, no node is shadowed twice, and
+relief leaves the surface under the realm's trigger, read from the engine's own decision note, which is written during
+the run rather than parsed after it. A count may remain as a runaway guard, commented as one.
+
 E2E browser tests would normally need a live model, a GPU, and minutes per spec. Instead, recorded model exchanges are committed under `tests/fixtures/model-tape/` and replayed by a proxy; every request must match a recorded exchange after **normalization on both sides** (volatile values — ports, paths, token counts — are masked out), or the run fails loudly with a miss journal + diff dump (candidates sorted by shared prefix). Usage numbers ride the tape, so token-meter thresholds fire at identical steps — *threshold behavior* under test with zero model calls. E2E_MODEL=record distills fresh tapes from the local model — once per scenario, whole projects at a time (specs share a boot); re-record when **product prompts** change — doc edits are free with one measured exception: near-threshold scenarios (`heavy`, `fanout`) digest injected docs into model-visible checkpoints.
 
 ## The discipline, condensed

@@ -8,6 +8,7 @@ import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolv
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
+import { bootFailureMessage } from './boot-failure.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -679,7 +680,16 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   const m = /http:\/\/127\.0\.0\.1:[0-9]+\/\?token=\S+/.exec(log)
   if (m === null) {
     child.kill('SIGKILL')
-    throw new Error(`e2e boot failed within ${String(Date.now() - bootWaitedFrom)}ms waited (port ${port}) — the ceiling is E2E_BOOT_TIMEOUT_MS, default 120000\n${log.slice(-1500)}`)
+    // #165: same tail, no token. The child prints its boot URL with a session token, and the old verbatim slice
+    // copied it into the Playwright error, the per-leg log and CI annotations. bootFailureMessage() keeps the
+    // diagnostic line that made tonight diagnosable while redacting credential lines and marking the removal.
+    throw new Error(bootFailureMessage({
+      port,
+      waitedMs: Date.now() - bootWaitedFrom,
+      ceilingMs: Number(process.env.E2E_BOOT_TIMEOUT_MS ?? '120000'),
+      logPath: serverLog,
+      tail: log,
+    }))
   }
   const bootRecord = JSON.stringify({
     url: m[0], port,

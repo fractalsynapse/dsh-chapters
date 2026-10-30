@@ -217,6 +217,53 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   the missing host-plane route) that every deterministic layer had missed because each side
   only ever tested against its own convention. The e2e is the integration witness — keep it.
 
+### Reading a dead boot (#165, #166)
+
+When a rig boot never announces its URL, `tests/e2e/boot.ts` throws `bootFailureMessage()` from
+`tests/e2e/boot-failure.ts`, and the message carries: the measured wait, the port, the name of the knob that raises the
+window for diagnosis (`E2E_BOOT_TIMEOUT_MS` — readiness to serve, never a product claim), and the **child's own tail**.
+That tail is the whole value: on 2026-10-28 the single line `[chapters-prompt] turn/end door armed` distinguished "the
+child mounted and stalled before listening" from "the child crashed", and separated the real cause from four wrong
+theories I had already published.
+
+Three shapes must not be blurred, and are pinned by `tests/unit/boot-failure-message.test.ts`: a tail with no lines reads
+`(empty)`; a log that could not be read reads `unreadable or never written` (absence is not emptiness); and output is
+bounded at 1,200 characters with any removal marked `…[redacted]`, so suppression is never mistaken for silence. The
+redaction is not cosmetic: the child prints its own boot URL **carrying a session token**, and the old verbatim slice
+copied it into the Playwright error, the per-leg log and CI annotations. Read `var/e2e-server-<port>.log` and
+`var/e2e-boot-<port>.json` as sensitive for the same reason — I `cat`-ed one during tonight's diagnosis.
+
+**One boot per journey still applies** (site §24, #129): a chain failure after leg one is an environment symptom, not a
+tape symptom. Ruled out on this machine by check rather than hope: dangling tool links, orphan servers, port squatting,
+`ulimit`, inotify instances, free memory, lock files. If a lone leg passes and a chain does not, stop and read the boot
+message before touching a test.
+
+### What `coverage:e2e` promises, and what it cannot deliver
+
+`coverage:e2e` runs the replay chain under `E2E_COVERAGE=1` (a V8 profile per boot, aggregated by
+`scripts/e2e-coverage.mjs`). **It is a coverage report, not an acceptance gate, and it cannot carry the browser timing
+guarantees acceptance has.** Measured 2026-10-28 on one tree with load recorded (3.16–4.30 average on 20 CPUs, two other
+live harnesses on this host, ~68 GB free):
+
+| attempt | legs that failed | signature |
+|---|---|---|
+| 1 | `suite` | `button[aria-label="Fork with chapters"]:visible` — `Timeout: 120000ms` |
+| 2 | `prompt` | `locator.click` — `Test timeout of 300000ms exceeded` |
+| 3 | eight of nine | mixed |
+| 4 | `fanout` | `new-session click never set dsh.sessions.current` |
+
+The controlled A/B fixes the cause: `LEG=suite MODE=replay` → **`4 passed`**; the same command with `E2E_COVERAGE=1` →
+the same 120 s door timeout. So it is V8 instrumentation cost on the server process, landing on whichever leg happens to
+be slow — not a stale corpus or a broken product. Profile volume is not it (19 MB / 4 files for a failing boot), which is
+why narrowing what gets instrumented is the only lever, and that changes what the percentage means.
+
+**Rules that follow.** Two ceilings are involved (120 s `toBeVisible`, 300 s test timeout) and **neither is to be raised**:
+widening a wait to satisfy an instrumentation mode is `AGENTS.md`'s "never widen a test to pass". Read the e2e number as
+a report; the blocking coverage verdict is CI's deterministic gate (statements/branches/functions against 85, in the merge
+job). And when quoting an e2e figure, quote the tree and the machine conditions with it — that is how 77.94%, 77.97%,
+78.05% and 78.34% came to be cited interchangeably when each belongs to a different corpus. See #158, and site §24 for the
+user-facing version.
+
 ### The coverage ledgers (added 2026-09-23 by the coverage audit; gated same day)
 
 - `npm run coverage:ci` — **the gate CI enforces.** `c8 --check-coverage
@@ -800,11 +847,20 @@ correct. The corpus spanning them is not.
 
 Rules that follow, in the order they bite:
 
-1. **Change `src/` → rebuild → re-distill ALL nine legs.** A partial re-record is a mixed corpus, and a
-   mixed corpus fails at whichever step the builds disagreed — usually inside compaction, where message
-   counts are the thing being matched.
-2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it does not
-   say "this leg predates three plugin commits". When in doubt about build drift, re-record everything.
+1. **Two questions, two answers — `npm run corpus:check` (#156).** A rebuild changes the *bundle*; that alone does **not**
+   make the corpus stale, it makes the *stamp* stale: the check prints an `ADVISORY` and the replay still runs, then
+   `npm run corpus:stamp` re-records `BUILD_STAMP.json` (`lib` + `promptAnchor`) once the legs are green. What does
+   invalidate a corpus is the **prompt-byte anchor** moving — tool and command `description`s, dock `label`s, the preset
+   persona, and the realm keys whose values reach the model (`thresholdRatio`, `retain*`, `headroom*`, artifact/defer
+   tokens, …). Then `verdictFor` refuses with `REFUSED: model-facing bytes moved …` and **all** affected projects must be
+   re-distilled before anything is trusted, because a partial re-record yields a mixed corpus and matching happens across
+   the whole set. The rule in `AGENTS.md` — "re-record when PRODUCT prompt bytes change" — is now a computed quantity
+   rather than a judgement call; logging keys, store paths and `maxBytes` are deliberately outside the anchor, and a
+   manifest file that contributes no tokens fails its own row, so a silently-dead extraction rule cannot masquerade as
+   protection.
+2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it cannot
+   say "this leg predates three plugin commits". The stamp is what says that, and #156's split is what stops the stamp from
+   crying wolf on every rebuild.
 3. **Test-only changes (`tests/e2e/**`) need no re-record** — normalization folds apply at load to both
    sides. Product-behavior changes do. The distinction is exactly AGENTS' "re-record when PRODUCT prompt
    bytes change", generalized: anything that changes what the plugin *sends*.

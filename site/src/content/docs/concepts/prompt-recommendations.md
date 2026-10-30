@@ -25,10 +25,14 @@ has an icon, a status label, the suggested prompt, and three actions:
   it is thinking or stuck.
 - **Click the prompt to expand it.** The row opens in place and shows the complete prompt.
 - **Click it again while expanded to put it in the input box for editing.** This is the part
-  the host does not yet support: on 0.2.0-rc.2 a dock cannot write the composer — `insertText`
-  raises `draftRev` and `setDraft` only mirrors at mount — so the bar **says so on its face**
+  the host does not yet support: a dock can *reach* the composer verbs — `insertText`, `setDraft`,
+  `submit` are all present and callable — but the write path dies on a missing revision object
+  (`Cannot read properties of undefined (reading 'draftRev')`, composer text still empty), and **the bar says so on its face**
   instead of leaving you with a button that did nothing. Reading and committing stay two
-  gestures, and the second one becomes available the day the host exposes a draft API
+  gestures, and the second one becomes available the day the host fixes or exposes a path a dock can call:
+  measured on **both** `0.2.0-rc.2` and `0.2.1-rc.4`, with the `rc.4` draft machinery rebuilt in ways that looked like
+  the fix (`mirrorFn` gone, a `cancelCommandRestore()` added, the method's own comment now claiming "programmatic
+  writes") — and the refusal is byte-identical on both, because `draftRev` is not read in that module at all
   ([#126](https://github.com/treeseed-ai/dsh-chapters/issues/126)).
 - **Run** submits the offer as your own turn, through the same follow-up path autorun uses —
   one code path for "run it", whether you clicked it or the loop armed it.

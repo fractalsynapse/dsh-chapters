@@ -17,6 +17,7 @@ import type { SessionEventLike } from './types.ts'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
+import { compactionNote } from './engine-note.ts'
 import { configureDiagnosticsCap, diagnosticNote, diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
 import { makeChildArchiveListener } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -502,6 +503,10 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
   private enrichPromise: Promise<EnrichWiring> | null = null
   private lastCwd: string | null = null
   private lastRoute: { provider: string; model: string } | null = null
+  // The window the ADAPTER last reported for this route (#143). Cached rather than re-resolved so a note can carry a
+  // measured number; `null` means no model info has been resolved yet, and the note prints `?` — an honest abstention
+  // beats a config key that does not exist, which is what this field replaced.
+  private lastWindowTokens: number | null = null
   private schedulerPromise: Promise<import('./sync.ts').SyncScheduler> | null = null
   #scheduler(): Promise<import('./sync.ts').SyncScheduler> {
     this.schedulerPromise ??= this.store().then(({ store }) => createSyncScheduler({
@@ -947,6 +952,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       const surfaceNow = Number(meter.measure?.(agent.session)?.totalTokens ?? NaN)
       const ratioNow = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
       const windowNow = Number(info?.context?.contextWindow ?? NaN)
+      if (Number.isFinite(windowNow)) this.lastWindowTokens = windowNow
       const overTrigger = Number.isFinite(surfaceNow) && Number.isFinite(windowNow)
         && typeof ratioNow === 'number' && surfaceNow > windowNow * ratioNow
       const retainTokens = base.config?.retainTokens
@@ -1017,6 +1023,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       const info = await llm.resolveModelInfo(route.provider, route.model, signal) as
         { context?: { contextWindow?: number } } | undefined
       const window = info?.context?.contextWindow
+      if (typeof window === 'number') this.lastWindowTokens = window
       const ratio = (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio
       if (typeof window !== 'number' || typeof ratio !== 'number') return
       const triggerTokens = Math.floor(window * ratio)
@@ -1043,14 +1050,32 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // All of it wrapped: a diagnostic that can throw is a diagnostic that will eat the step.
     let route = 'unknown'
     let surface = '? tok'
+    let surfaceTok: number | null = null
     try {
       route = this.lastRoute === null ? 'none' : `${this.lastRoute.provider}/${this.lastRoute.model}`
       const meter = (this.ctx as unknown as { tokenMeter?: { measure?: (s: unknown) => { totalTokens?: number } } }).tokenMeter
       const measured = meter?.measure?.((agent as { session?: unknown }).session)
-      if (typeof measured?.totalTokens === 'number') surface = `${String(measured.totalTokens)} tok`
+      if (typeof measured?.totalTokens === 'number') { surfaceTok = measured.totalTokens; surface = `${String(measured.totalTokens)} tok` }
     } catch { /* never let instrumentation break compaction */ }
+    // #143: the window, the span shadowed and the nodes left on the surface join the note. The string is built by
+    // `compactionNote()` rather than inline, so one formatter owns both branches and a future field cannot be added at
+    // one call site and missed at another (the same one-predicate rule that governs the save core and the title chooser).
+    const windowForNote = this.lastWindowTokens
     diagnosticNote(this.ctx.logger, `realm:engine:${where}`,
-      `${where} decided: ${result === null ? 'none' : `compaction ${String((result as unknown as { compactionId?: string })?.compactionId ?? '?')}`} (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')}, route=${route}, surface=${surface}, ratio=${String((this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio ?? '?')})`)
+      compactionNote({
+        where,
+        trigger,
+        sessionId: (agent as { session?: { id?: string } })?.session?.id ?? null,
+        route: this.lastRoute === null ? null : `${this.lastRoute.provider}/${this.lastRoute.model}`,
+        surfaceTokens: surfaceTok,
+        window: windowForNote,
+        ratio: (this as unknown as { config?: { thresholdRatio?: number } }).config?.thresholdRatio ?? null,
+        surfaceNodes: (() => {
+          const nodesOf = (agent as unknown as { session?: { surface?: { nodes?: unknown } } })?.session?.surface?.nodes
+          return Array.isArray(nodesOf) ? nodesOf.length : null
+        })(),
+        result: result === null ? null : (result as unknown as { compactionId?: string, shadowedSeqs?: readonly number[], shadowedTokenCount?: number }),
+      }))
   }
 
   override async compactIfNeeded(

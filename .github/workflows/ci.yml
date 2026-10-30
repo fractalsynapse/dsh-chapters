@@ -46,6 +46,14 @@ jobs:
       - name: e2e typecheck ratchet
         run: bash scripts/e2e-typecheck-ratchet.sh
       - run: npm run build
+      # #156: the corpus anchor, enforced in the job that can actually block the merge. The acceptance job is advisory by
+      # maintainer decision (#92) — a check placed there would enforce nothing — so the tape bytes are compared here,
+      # with no browser and no model. It refuses only when model-facing bytes moved (re-record); a build-only difference
+      # is advisory, so an ordinary `src/` edit cannot hold the line hostage to a 45-minute re-distill.
+      # (Wording note: the shape row at e2e-pins-single-authority.test.ts counts advisory markers in this file and was
+      # correctly tripped by naming that key in prose — one job may be advisory, and saying so in a comment is not a way
+      # to add a second one.)
+      - run: npm run corpus:check
       # The gate IS the contract: c8 --check-coverage fails the job below
       # 85% on statements, branches, functions (and lines). Current ledger:
       # 97.98 / 85.61 / 93.62. Reports land in var/coverage for the artifact.
@@ -124,7 +132,10 @@ jobs:
           fi
 
   e2e-replay:
-    name: acceptance — ten tape-replay legs, no LLM
+    # #141: NINE, not ten. `heavy` became a live-provider leg (its request count is run-dependent: six
+    # captures of one commit at 5/7/12/23/24 entries), and the goal journeys were already live-only — so the job's own
+    # name was claiming coverage of a leg it no longer runs. The list below is generated from scripts/chain-replay.sh.
+    name: acceptance — nine tape-replay legs, no LLM
     needs: host-capability
     if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
     runs-on: ubuntu-latest

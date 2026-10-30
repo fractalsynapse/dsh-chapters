@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
+import { rigEnv } from './rig-pins.ts'
 import {openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogTextById, forkDoor, ROOT, E2E_REGISTRY, deliveredFor} from './session.ts'
 
 /**
@@ -169,8 +170,75 @@ test('a single turn that outgrows the context window is compacted repeatedly, lo
   // --- 2: bounded loop — strictly-shrinking passes, deterministic provider,
   // zero usage on every commit.
   const summaries = eventTypes(sessionLogTextById(sid), 'compaction/summary')
-  expect(summaries.length, 'compactions inside one turn must stay bounded').toBeGreaterThanOrEqual(1)
-  expect(summaries.length).toBeLessThanOrEqual(30)
+
+  // #143 criterion 1, delivered BEFORE the bound: the leg must say HOW MANY passes it took and WHAT each pass
+  // removed, not just trip an assertion. The live run of 2026-10-28 failed at `38 > 30` with no per-pass numbers
+  // anywhere, which left the next investigation starting from a guess — the exact pattern AGENTS names ("a
+  // cumulative log grepped after the fact is not evidence"). Each `compaction/summary` carries `shadowedSeqs`, so
+  // the table below is read out of the durable log, not computed from a model's account of it. Written to a file so
+  // a failure still leaves it behind, and printed to the reporter so CI's per-leg log carries it too.
+  const PASS_CEILING = 60 // runaway guard ONLY, ~2× the worst measured count. Not the claim; see #143.
+  const passRows: string[] = []
+  let cumulativeShadowed = 0
+  summaries.forEach((sm, i) => {
+    const d = (sm as { data?: Record<string, unknown> }).data ?? {}
+    const shadowed = Array.isArray(d.shadowedSeqs) ? (d.shadowedSeqs as unknown[]).length : -1
+    if (shadowed > 0) cumulativeShadowed += shadowed
+    passRows.push(`pass ${String(i + 1).padStart(2)}: shadowed=${String(shadowed).padStart(3)} cumulative=${String(cumulativeShadowed).padStart(4)} provider=${String(d.provider)} usage=${String(d.usage ?? 'null')}`)
+  })
+  const passReport = [
+    `heavy leg — per-pass relief report (#143). passes=${String(summaries.length)} of ${String(PASS_CEILING)} allowed (runaway guard, NOT the claim — see invariants below)`,
+    // (no surface line here: the durable log text is not the surface list — my first attempt parsed it as JSON and
+    // printed `-1`. The engine's own note now carries `nodes=`, measured where the shadowing happens, so the
+    // instrument does not need a second, wrong source.)
+    ...passRows,
+  ].join('\n')
+  try { fs.writeFileSync(path.join(ROOT, 'var', 'heavy-passes.log'), passReport + '\n', 'utf8') } catch { /* reporting only */ }
+  // eslint-disable-next-line no-console
+  console.log(passReport)
+
+  // #143, in the shape the maintainer chose: the CLAIM is a mechanism invariant, and the count survives only as
+  // runaway protection. Measured on one commit and one realm, two live runs gave **8** and **38** passes
+  // (`var/heavy-passes.log`, `shadowed` per pass 4/1/5/5/3/9/3/2) — so a fixed 30 was a threshold the mechanism
+  // could cross with nothing broken, which is a red leg that teaches nothing, not a defect. What must never happen
+  // is a pass that removes nothing, a pass that re-shadows the same nodes, or relief leaving the surface over the
+  // trigger: all three are asserted below from bytes the leg can read.
+  expect(summaries.length, 'a turn that outgrows the window must trigger relief at least once').toBeGreaterThanOrEqual(1)
+  expect(summaries.length, `relief must terminate — ${String(summaries.length)} passes exceeds the runaway guard`).toBeLessThanOrEqual(PASS_CEILING)
+
+  // Invariant 1: every pass removes at least one node. A zero-removal pass is the loop the ceiling exists to catch.
+  const shadowedPerPass = summaries.map((sm) => {
+    const d = (sm as { data?: Record<string, unknown> }).data ?? {}
+    return Array.isArray(d.shadowedSeqs) ? (d.shadowedSeqs as unknown[]).length : 0
+  })
+  shadowedPerPass.forEach((n, i) => {
+    expect(n, `pass ${String(i + 1)} shadowed no nodes — relief made no progress and would repeat forever`).toBeGreaterThanOrEqual(1)
+  })
+  // Invariant 2: passes are disjoint in what they remove — the cumulative count must strictly increase.
+  let seen = new Set<number>()
+  summaries.forEach((sm, i) => {
+    const d = (sm as { data?: Record<string, unknown> }).data ?? {}
+    const seqs = Array.isArray(d.shadowedSeqs) ? (d.shadowedSeqs as number[]) : []
+    seqs.forEach((sq) => expect(seen.has(sq), `pass ${String(i + 1)} re-shadowed node ${String(sq)} — shadowing must move forward, not in circles`).toBe(false))
+    seqs.forEach((sq) => seen.add(sq))
+  })
+  // Invariant 3: relief leaves the surface under the realm's trigger. Read from the engine's own note (#153 put
+  // the window, the shadowed span and the surface in that line), because the leg cannot measure tokens itself.
+  const heavyPort = rigEnv('heavy').E2E_PORT
+  const sinkFile = path.join(ROOT, 'var', `e2e-engine-errors-${String(heavyPort)}.log`)
+  const myNotes = fs.existsSync(sinkFile)
+    ? fs.readFileSync(sinkFile, 'utf8').split('\n').filter((l) => l.includes(sid) && /decided:/.test(l))
+    : []
+  expect(myNotes.length, `the engine note for ${sid} must reach the diagnostics sink (${sinkFile})`).toBeGreaterThan(0)
+  const last = myNotes[myNotes.length - 1] ?? ''
+  const mSurface = /surface=(\d+) tok/.exec(last)
+  const mWindow = /window=(\d+)/.exec(last)
+  const mRatio = /ratio=([0-9.]+)/.exec(last)
+  if (mSurface && mWindow && mRatio) {
+    const trigger = Math.floor(Number(mWindow[1]) * Number(mRatio[1]))
+    expect(Number(mSurface[1]),
+      `the last relief decision for ${sid} left the surface at ${mSurface[1]} tok, over the ${String(trigger)}-token trigger — relief did not converge`).toBeLessThanOrEqual(trigger)
+  }
   for (const sm of summaries) {
     const d = (sm as { data?: Record<string, unknown> }).data ?? {}
     expect(d.provider).toBe('dsh-chapters')
