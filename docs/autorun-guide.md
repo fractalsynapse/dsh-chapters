@@ -42,11 +42,15 @@ The two-by-two that orients everything else:
    instruction, at most `promptMaxChars` (default **240** today) characters, composed from a
    `promptContextChars` (default **4000**) budget covering the session's chapter summaries, the
    live conversation tail, and the active goal. An over-cap answer is *refused, never truncated* —
-   a suggestion you can't see whole is a suggestion you can't judge. Both caps are moving per
-   #188: the suggestion cap to a 4K-class default (240 characters predates long-context models and
-   cannot carry a real instruction), the caps settable **with the model** rather than globally,
-   and the context budget re-scoped to the structured set — TOC and rules, the last full turn, the
-   goal, and the plan — sized against the model's actual context.
+   a suggestion you can't see whole is a suggestion you can't judge.    As of 0.2.4 (#188, shipped): the suggestion cap defaults to **4096** characters, and both caps
+   belong to the model — `/chapters-prompt model <provider/model> [maxChars] [contextChars]` stores
+   explicit numbers beside the model, and with no explicit numbers the context budget **derives from
+   the model's real window** (`window × promptContextRatio`, default 0.5, at 4 chars/token — a 32K
+   model and a 1M model get budgets 30× apart from one rule). The input itself became the session's
+   memory: the goal whole, the active plan, the core rules, every chapter on the ancestor path as
+   title + detailed summary + every plot line, and the last turn whole — with **zero truncation** as
+   an invariant: over budget, the oldest chapter drops (announced) until the history fits, and a
+   protected set that cannot fit refuses with the numbers instead of sending a starved input.
 2. The offer is classified. Plain text = a **worker-step** (autorun may fire it). A `GOAL:`
    prefix = a **goal-edit**: the model is proposing to re-cut the objective itself. Autorun must
    never act on a goal-edit — the host reserves objective changes for direct human turns — so it
@@ -166,15 +170,13 @@ visible, and the reply says why), so interrupting is always safe and never loses
 
 **Phase 6 — Completion.** The model marks the goal complete only when the objective is actually
 achieved, with evidence gathered before the claim; you'll get a closing report. Or it marks
-blocked with the concrete persisting condition. You can end it yourself any time (`/goal clear`,
-or Pause on the goal bar). When a goal **completes**, the bar's autorun disarms itself — the loop
-exists to serve the session's purpose and stops when that purpose stops. With **no goal** (or
-after one is cleared), an armed loop keeps iterating suggestions within its round budget
-(`promptMaxRounds`, default 24) — open-ended iteration is a feature, but know it's there: the
-last thing you do is usually `autorun off`. The budget itself is being goal-gated per #188: it
-must never cut off the pursuit of an active goal — with a goal present, the goal's own lifecycle
-(and `max_goal_rounds` where the goal driver runs) is the bound, and server and client stop
-together.
+blocked with the concrete persisting condition — and **blocked disarms autorun exactly like
+complete does** (0.2.4, #188: both planes stop together; a loop firing offers at a dead goal
+outlived its purpose). You can end it yourself any time (`/goal clear`, or Pause on the goal
+bar). While a goal is active or paused, the round budget **stands down** — the pursuit is bounded
+by the goal's lifecycle, never cut off by `promptMaxRounds`. With no goal (or after one is
+cleared), an armed loop keeps iterating suggestions within the budget (default 24): open-ended
+iteration is a feature, but know it's there — the last thing you do is usually `autorun off`.
 
 **Phase 7 — After.** The work outlives the session: chapters are searchable (`chapters_search`
 for the model, the pool for your team if linked), artifacts remain addressable by hash, and mined
