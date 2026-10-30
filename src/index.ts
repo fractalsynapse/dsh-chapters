@@ -35,7 +35,8 @@ import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
-import { createPromptSurface, promptChaptersOf } from './prompt.ts'
+import { createPromptSurface, promptChaptersOf, PROMPT_SETTING_KEY } from './prompt.ts'
+import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
 import { makePromptRoundRunner } from './prompt-runner.ts'
 import { goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
@@ -62,6 +63,10 @@ interface HostCtx {
   llm?: {
     resolveModelInfo(provider: string, model: string, signal?: AbortSignal): Promise<{ context?: { contextWindow?: number } } | undefined>
     stream?: (opts: unknown) => AsyncIterable<unknown>
+    /** #173 catalog discovery — host-shaped: listProviders is SYNC (the host's own
+     * list_subagent_models tool consumes it that way), listModels is the advisory catalog. */
+    listProviders?: () => readonly { id: string; name: string }[]
+    listModels?: (provider: string) => Promise<readonly { provider: string; id: string; name: string; description?: string }[]>
   }
 }
 
@@ -616,6 +621,38 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       projectKeyOverride: config.projectKeyOverride,
       scheduler,
       enrich,
+      // #173: discovery surface for the three model settings. The factory re-reads per
+      // invocation — settings mutate underneath (that is what the setters are for) and the
+      // catalog is a host verb, not a snapshot. `llm` is passed only when it really carries
+      // all three catalog verbs: a partial host surface must render as the clean refusal the
+      // pure core gives, never a TypeError mid-render.
+      models: () => {
+        const llm = ctx.llm
+        const catalog = llm !== undefined
+          && typeof llm.listProviders === 'function'
+          && typeof llm.listModels === 'function'
+          && typeof llm.resolveModelInfo === 'function'
+          ? (llm as unknown as ModelsLlm)
+          : undefined
+        const setting = (key: string): string => { try { return store.getSetting(key) ?? '' } catch { return '' } }
+        const enrichVal = setting('enrichment.model')
+        const rulesVal = setting('rules.model')
+        const promptVal = setting(PROMPT_SETTING_KEY)
+        return {
+          llm: catalog,
+          current: {
+            enrichment: enrichVal !== '' ? { value: enrichVal, source: 'settings' as const }
+              : config.enrichmentModel !== '' ? { value: config.enrichmentModel, source: 'config' as const }
+                : { value: setting('enrichment.route'), source: 'conversation-route' as const },
+            rules: rulesVal !== '' ? { value: rulesVal, source: 'settings' as const }
+              : config.rulesModel !== '' ? { value: config.rulesModel, source: 'config' as const }
+                : { value: '', source: 'rides-enrichment' as const },
+            prompt: promptVal !== '' ? { value: promptVal, source: 'settings' as const }
+              : config.promptModel !== '' ? { value: config.promptModel, source: 'config' as const }
+                : { value: '', source: 'off' as const },
+          },
+        }
+      },
       prompt: { ...prompt, bar: promptBar },
       rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,

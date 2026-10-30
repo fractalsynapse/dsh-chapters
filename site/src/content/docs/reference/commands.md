@@ -21,6 +21,26 @@ The no-args answer is a git-status-like block: `Provider`, `Upstream`, `Bound` (
 
 Per linked project: `Project` / `Remote` / `Provider` lines, then `Sync: a push is pending (debounced)` or the last sync mode; then `Last sync: <time> — synced` (or `local-only: <reason>`) with the step trail behind it — `cloned → published N new file(s), M already mirrored → pushed` — and the enrichment status line. With no project and no history it says so in one line and points at `/chapters-link`. Pending counts, vocabulary curation notes, and failure details are all printed — no silence.
 
+## `/chapters-models`
+
+```
+/chapters-models                        # every registered provider + its advertised models, as paste-ready ids
+/chapters-models <provider>             # one provider's advertised models
+/chapters-models <provider> <model>     # one exact route: context window, reasoning efforts
+```
+
+The discovery surface for the three model settings — `enrichment.model`, `rules.model`, and the prompt
+model — because a setter you cannot feed correct identifiers is a setter you cannot use. Every model
+line is the exact `provider/model` string those setters accept, and the output ends with what each of
+the three is **currently** set to (and the command that changes it). The exact-route form resolves
+through the host's `llm` service and adds what only resolution knows: the context window and the
+selectable reasoning efforts, when the adapter advertises them.
+
+Two honesty rules this command never drops: catalog membership is **advisory** (the host routes
+unlisted ids too — an empty catalog means "no selection offered", not "no models work"), and a
+provider or capability the host does not expose is reported as absent, never guessed. Like every
+`/chapters-*` command it renders as a command flow node — zero model-context cost (#173).
+
 ## `/chapters-enrich`
 
 ```
