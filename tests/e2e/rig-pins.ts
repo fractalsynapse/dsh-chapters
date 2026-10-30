@@ -82,6 +82,11 @@ export const RIG_PINS: Record<string, RigPin> = {
   // (`round-limit` → blocked → the strip renders nothing), so there is no observable armed moment. The claims are
   // real and stay tested — on the real provider, under a wall-clock bound — they are simply not tape-verifiable.
   'prompt-goal-live': { port: 41741, threshold: '0.9', prompt: true, noAuxModel: true },
+  // #175: the three model activities (enrichment, mining, models→setter) verified against the REAL
+  // provider — a tape replays canned completions, and the mining claim needs a real one. Enrichment
+  // ON (mining rides the annotation call), own port like every journey. NOT in chain-replay.sh's list;
+  // the model-free acceptance job does not cover it, and the spec refuses to run under E2E_MODEL=replay.
+  'model-activities-live': { port: 41742, threshold: '0.9', enrich: true, noAuxModel: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
