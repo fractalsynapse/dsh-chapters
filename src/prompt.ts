@@ -57,16 +57,26 @@ export interface PromptConfig {
   contextChars: number
   /** cap on the accepted recommendation; over-cap is invalid, never truncated. */
   maxChars: number
+  /** #188: share of the model's context window the derived input budget takes. */
+  contextRatio: number
 }
 
 export interface PromptDeps {
   getSetting(key: string): string | undefined
   putSetting(key: string, value: string): Promise<void>
   deleteSetting(key: string): Promise<void>
-  /** Active chapter records for the calling session's registry row (never the
-   *  ancestor walk — the live tail carries the immediate context; this is the
-   *  economy, and the choice is documented at the site that reads it). */
-  chaptersOf(sessionId: string): Promise<{ number: number; title: string; summary: string }[]>
+  /** #188 REVERSES the old economy on the maintainer's direction: the chapter history of the
+   *  ANCESTOR PATH (a continuation mid-goal inherits its lineage, not an empty list), each entry
+   *  carrying its plots — an index a model cannot research is worthless, so the trajectory rides
+   *  inside the assembly instead. */
+  chaptersOf(session: SuggestSession): Promise<ChapterHistoryEntry[]>
+  /** #188: the selected model's real context window, for the derived budget; null ⇒ no window
+   *  known ⇒ the config fallback, loudly sourced. Absent dep ⇒ same fallback. */
+  resolveWindow?(route: PromptRoute): Promise<number | null>
+  /** #188: the core rules in force for this session (the block a rebuilt head renders from). */
+  rulesOf?(session: SuggestSession): Promise<string>
+  /** #188: the active plan text, when one governs the session. */
+  planOf?(session: SuggestSession): Promise<string>
   config: PromptConfig
   /** The last route the conversation used on this plane, or null. */
   conversationRoute(): PromptRoute | null
@@ -77,7 +87,7 @@ export interface PromptDeps {
 
 /** A live session as the command hands it over: id, an optional title, and the
  *  surface events (what the working model sees — the same view the defining model reads). */
-export interface SuggestSession { id: string; title?: string | undefined; events: SessionEventLike[]; /** #113: when a goal governs the session, the constraint on the next step — see `goalDirectiveOf`. Text, not a goal object: goal semantics stay in one module. */ goalDirective?: string | undefined }
+export interface SuggestSession { id: string; title?: string | undefined; /** #188: the workspace the chapter paths resolve against (the caller's cwd). */ cwd?: string | undefined; events: SessionEventLike[]; /** #113: when a goal governs the session, the constraint on the next step — see `goalDirectiveOf`. Text, not a goal object: goal semantics stay in one module. */ goalDirective?: string | undefined }
 
 /** The surface the host command and `/chapters-status` speak to. */
 export interface PromptSurface {
@@ -87,8 +97,11 @@ export interface PromptSurface {
   suggest(session: SuggestSession): Promise<PromptSuggestionResult>
   /** #113: the Suggested Next Step bar's server-side access — the row plus the process-local loop flags. */
   bar?: import('./prompt-state.ts').PromptBarAccess
-  /** the configured caps, so an output can state the number it validated against */
-  limits(): PromptLimits
+  /** #188: the EFFECTIVE caps with their sources, so an output can state the number it validated
+   *  against AND where it came from (stored beside the model, derived from its window, or config). */
+  limits(route: PromptRoute | null): Promise<PromptLimits & { sources: PromptLimitSources }>
+  /** #188: the caps ride beside the model — stored strings ('' deletes), validated by the caller. */
+  setCaps?(opts: { maxChars?: string | null; contextChars?: string | null }): Promise<void>
   /** One line for /chapters-status — ON names the model, OFF names the command. */
   statusLine(): string
 }
@@ -139,17 +152,99 @@ export function tailFromEvents(events: SessionEventLike[]): { role: 'user' | 'as
   return out
 }
 
+/** One chapter of the assembled history (#188): the index facts PLUS the trajectory. A model that
+ *  cannot research gains nothing from an index it cannot follow — so each chapter carries its plots. */
+export interface ChapterHistoryEntry { number: number; title: string; summary: string; plots: string[] }
+
+/** The settings keys the caps ride beside the model in (#188): switch models, switch its caps. */
+export const PROMPT_MAXCHARS_KEY = 'prompt.maxChars'
+export const PROMPT_CONTEXTCHARS_KEY = 'prompt.contextChars'
+
+/**
+ * Extract a chapter's trajectory from its archived bytes, deterministically: every line-start `PLOT:`
+ * in order, consecutive duplicates collapsed (a checkpoint carries the plot forward verbatim — a
+ * repeat, not a new fact). Zero model tokens, works on chapters archived before this feature existed,
+ * and prose that merely mentions the word mid-line is not a plot line.
+ */
+export function extractPlots(body: string): string[] {
+  const out: string[] = []
+  for (const raw of body.split('\n')) {
+    const m = /^PLOT:[ \t]*(.+)$/.exec(raw.trim())
+    if (m === null) continue
+    const t = m[1]!.trim()
+    if (t === '') continue
+    if (out.length > 0 && out[out.length - 1] === t) continue
+    out.push(t)
+  }
+  return out
+}
+
+export interface PromptLimitSources { maxChars: 'stored' | 'config'; contextChars: 'stored' | 'derived' | 'config' }
+
+/**
+ * The caps resolution chain (#188): stored-beside-the-model → derived from the model's REAL context
+ * window (`window × ratio` tokens at the repo's one estimator, 4 chars/token) → config fallback. A
+ * 1M-window model and a 32K model get budgets 30× apart from ONE rule; a garbage stored value is
+ * ignored rather than parsed into a NaN budget; and the source of each number is reported, because a
+ * cap nobody can attribute is a cap nobody can tune.
+ */
+export function resolvePromptLimits(input: {
+  config: { maxChars: number; contextChars: number; contextRatio: number }
+  window?: number | null
+  stored?: { maxChars?: string; contextChars?: string }
+}): { maxChars: number; contextChars: number; sources: PromptLimitSources } {
+  const posInt = (v: string | undefined): number | null => {
+    if (v === undefined) return null
+    const t = v.trim()
+    if (!/^\d+$/.test(t)) return null
+    const n = Number(t)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }
+  const sm = posInt(input.stored?.maxChars)
+  const sc = posInt(input.stored?.contextChars)
+  const w = input.window
+  const derived = w !== undefined && w !== null && Number.isFinite(w) && w > 0
+    ? Math.floor(w * input.config.contextRatio * 4)
+    : null
+  const useDerived = derived !== null && derived > 0
+  return {
+    maxChars: sm ?? input.config.maxChars,
+    contextChars: sc ?? (useDerived ? derived! : input.config.contextChars),
+    sources: {
+      maxChars: sm !== null ? 'stored' : 'config',
+      contextChars: sc !== null ? 'stored' : (useDerived ? 'derived' : 'config'),
+    },
+  }
+}
+
+/**
+ * The LAST turn, whole (#188): from the final human request through every assistant text that
+ * followed it. Reuses the tail's defusing machinery (host-injected context screened, reminder spans
+ * stripped) and then keeps only the closing exchange — the present the director must follow from.
+ * Never sliced: a message enters whole or the assembly refuses.
+ */
+export function lastTurnFromEvents(events: SessionEventLike[]): { role: 'user' | 'assistant'; text: string }[] {
+  const tail = tailFromEvents(events)
+  let from = -1
+  for (let i = tail.length - 1; i >= 0; i--) {
+    if (tail[i]!.role === 'user') { from = i; break }
+  }
+  return from === -1 ? tail : tail.slice(from)
+}
+
 export interface SuggestFacts {
   /** #113: the active goal's constraint on the next step, already worded. Absent ⇒ no goal block. */
   goalDirective?: string | undefined
+  /** #188: the active plan text, when one governs the session. */
+  plan?: string | undefined
+  /** #188: the core rules in force — the same block a rebuilt head renders from. */
+  rules?: string | undefined
   title?: string | undefined
-  chapters: { number: number; title: string; summary: string }[]
-  tail: { role: 'user' | 'assistant'; text: string }[]
+  /** The ancestor path's chapters, oldest first, each with its plots (#188). */
+  chapters: ChapterHistoryEntry[]
+  /** The last turn whole: the human's request through the final response (#188 — never sliced). */
+  lastTurn: { role: 'user' | 'assistant'; text: string }[]
 }
-
-/** One message's inline budget before its own ellipsis — the cap is a cap, the
- *  ellipsis says so (loudness, #61). */
-const MESSAGE_INLINE_CHARS = 500
 
 /**
  * Assemble the auxiliary input: deterministic (same facts ⇒ same bytes), hard
@@ -157,61 +252,67 @@ const MESSAGE_INLINE_CHARS = 500
  * messages; every drop is ANNOUNCED in the input itself — a silent squeeze
  * would make the answer look derived from bytes that were never sent.
  */
-export function buildSuggestInput(facts: SuggestFacts, capChars: number, maxChars: number): string {
-  const chapters = [...facts.chapters]
-  let tail = [...facts.tail]
-  let droppedChapters = 0
-  let droppedTail = 0
-  let msgCap = MESSAGE_INLINE_CHARS
-  const perMessage = (t: string) => (t.length > msgCap ? `${t.slice(0, msgCap - 1)}…` : t)
-  const render = (announce: string): string => {
-    const head = `You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.`
-    const rules = `Write the ONE next prompt the human should send. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt. If it changes the standing objective, prefix it with GOAL: (the human sends those; autorun will not). Do not use the prefix for an ordinary next step.`
-    const parts = [
+/**
+ * Assemble the director's whole world (#188). Deterministic: same facts ⇒ same bytes.
+ *
+ * Two invariants the old assembly violated and this one exists to keep:
+ *  - ZERO TRUNCATION. Nothing the model reads is ever sliced — the old 500-char per-message ellipsis
+ *    is a hallucination invite and is gone. Messages and chapters enter whole or not at all.
+ *  - The budget is enforced ONLY by the drop ladder: over budget, the OLDEST chapter goes first (the
+ *    recent trajectory is what leads), each drop ANNOUNCED in the input itself. The protected set —
+ *    skeleton, goal (objective whole; the old 600-char slice was itself a truncation), plan, rules,
+ *    last turn — never slices; if it alone cannot fit, the suggestion REFUSES with the numbers.
+ *    A refused suggestion costs one turn; a truncated one poisons the next.
+ */
+export function buildSuggestInput(facts: SuggestFacts, budgetChars: number, maxChars: number): { input: string } | { refusal: string } {
+  const head = 'You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.'
+  const replyRules = `Write the ONE next prompt the human should send. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt. If it changes the standing objective, prefix it with GOAL: (the human sends those; autorun will not). Do not use the prefix for an ordinary next step.`
+  const chapterBlock = (dropOldest: number): string[] => {
+    const cs = facts.chapters.slice(dropOldest)
+    if (cs.length === 0) return ['## Where it has been (no chapters yet)']
+    const out = ['## Where it has been (chapters, oldest first — title, summary, and the plots that carry the trajectory)']
+    for (const c of cs) {
+      out.push(`${c.number}. ${c.title} — ${c.summary}`)
+      if (c.plots.length > 0) {
+        out.push('   Plots:')
+        for (const pl of c.plots) out.push(`   - ${pl}`)
+      }
+    }
+    return out
+  }
+  const assemble = (dropOldest: number): string => {
+    const parts: string[] = [
       head,
       '',
       `## Session${facts.title !== undefined && facts.title !== '' ? `: ${facts.title}` : ''}`,
-      // #113: the goal is stated BEFORE the history, because it is the thing that decides whether a candidate
-      // next step counts as progress. A suggestion that ignores an active goal is noise, and the maintainer's
-      // rule is that the two compose — so the constraint is not a footnote after the tail.
-      ...(facts.goalDirective !== undefined && facts.goalDirective !== ''
-        ? ['', facts.goalDirective, '']
-        : []),
+      // #113: the goal is stated BEFORE the history — it decides whether a candidate next step counts
+      // as progress, so it is never a footnote. #188: the plan and the standing orders ride with it.
+      ...(facts.goalDirective !== undefined && facts.goalDirective !== '' ? ['', String(facts.goalDirective)] : []),
+      ...(facts.plan !== undefined && facts.plan !== '' ? ['', '## Active plan', String(facts.plan)] : []),
+      ...(facts.rules !== undefined && facts.rules !== '' ? ['', '## Standing orders', String(facts.rules)] : []),
       '',
-      chapters.length > 0 ? '## Where it has been (chapters)' : '## Where it has been (no chapters yet)',
-      ...chapters.map((c) => `${c.number}. ${c.title} — ${c.summary}`),
+      ...chapterBlock(dropOldest),
       '',
-      tail.length > 0 ? '## Live tail (oldest first)' : '## Live tail (empty)',
-      ...tail.map((m) => `${m.role === 'user' ? 'Human' : 'Assistant'}: ${perMessage(m.text)}`),
+      ...(facts.lastTurn.length > 0
+        ? ['## Last turn (request through final response)', ...facts.lastTurn.map((m) => `${m.role === 'user' ? 'Human' : 'Assistant'}: ${m.text}`)]
+        : ['## Last turn (empty)']),
     ]
-    if (announce !== '') parts.push(announce)
-    parts.push('', rules)
+    if (dropOldest > 0) {
+      parts.push(`(older chapters dropped to fit the ${budgetChars}-char budget: ${dropOldest} chapter(s) — the recent trajectory leads)`)
+    }
+    parts.push('', replyRules)
     return parts.join('\n')
   }
-  // Trim to budget: chapters are the compressible past; the tail is the present.
-  // The ladder has a floor: a `capChars` smaller than the fixed skeleton (persona +
-  // section headers + reply rule) cannot be met by dropping — the last arm returns
-  // the skeleton as-is. The documented default (4000) is far above it.
-  for (;;) {
-    const announce = droppedChapters + droppedTail === 0
-      ? ''
-      : `\n(older context dropped to fit the ${capChars}-char budget: ${droppedChapters} chapter line(s), ${droppedTail} message(s))`
-    const input = render(announce)
-    if (input.length <= capChars) return input
-    if (chapters.length > 0) { chapters.shift(); droppedChapters += 1; continue }
-    if (tail.length > 1) { tail.shift(); droppedTail += 1; continue }
-    if (msgCap > 40) { msgCap = Math.max(40, Math.floor(msgCap / 2)); continue }
-    if (tail.length === 1) { tail = []; droppedTail += 1; continue }
-    // Every compressible part is gone and the input is STILL over cap: the fixed frame (head + rules +
-    // section scaffolding) alone exceeds `promptContextChars`. That was previously returned in silence,
-    // which is the #61 class exactly — the code knows, and says nothing. It cannot be truncated (invariant:
-    // refuse or announce, never clip), so it announces what happened and how to fix it. Surfaced by my own
-    // added rules text, which is how I found it: a longer frame made a tight fixture impossible to fit.
-    return input.length > capChars
-      ? `${input}\n(frame alone exceeds the ${String(capChars)}-char budget by ${String(input.length - capChars)} chars — raise promptContextChars; nothing was truncated)`
-      : input
+  for (let drop = 0; drop <= facts.chapters.length; drop++) {
+    const input = assemble(drop)
+    if (input.length <= budgetChars) return { input }
+  }
+  const floor = assemble(facts.chapters.length).length
+  return {
+    refusal: `the suggestion input cannot fit — the protected context (goal, plan, rules, last turn) assembles to ${floor} chars, exceeding the ${budgetChars}-char budget with all ${facts.chapters.length} chapter(s) already dropped. Refusing rather than truncating (#188): raise the budget or set a larger model with /chapters-prompt model.`,
   }
 }
+
 
 /**
  * Validate one answer. A wrapping code fence or one pair of wrapping quotes is
@@ -244,28 +345,61 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
   const effective = (): { spec: string; source: 'override' | 'config' | 'unset' } =>
     effectivePromptSpec(deps.getSetting(PROMPT_SETTING_KEY), deps.config.model)
 
+  // #188: one resolution for BOTH the run path and `limits()` — stored beside the model, then the
+  // model's real window by ratio, then config. Two ladders would drift; one cannot.
+  const resolveLimits = async (route: PromptRoute | null): Promise<PromptLimits & { sources: PromptLimitSources }> => {
+    const storedMax = deps.getSetting(PROMPT_MAXCHARS_KEY)
+    const storedCtx = deps.getSetting(PROMPT_CONTEXTCHARS_KEY)
+    let window: number | null = null
+    if (route !== null && deps.resolveWindow !== undefined) {
+      try { window = await deps.resolveWindow(route) } catch { window = null }
+    }
+    return resolvePromptLimits({
+      config: { maxChars: deps.config.maxChars, contextChars: deps.config.contextChars, contextRatio: deps.config.contextRatio },
+      window,
+      stored: {
+        ...(storedMax !== undefined ? { maxChars: storedMax } : {}),
+        ...(storedCtx !== undefined ? { contextChars: storedCtx } : {}),
+      },
+    })
+  }
+
   const run = async (session: SuggestSession, seq: number): Promise<PromptSuggestionResult> => {
     const { spec } = effective()
     const { route, reason } = resolvePromptRoute(spec, deps.conversationRoute())
     if (route === null) return refuse(`prompt suggestions cannot run: ${reason ?? 'no route'}`)
     let input: string
     let chaptersCount = 0
+    // Defaults, so a refusal inside the try still leaves a truthful cap for the retry line.
+    let limits: PromptLimits = { maxChars: deps.config.maxChars, contextChars: deps.config.contextChars }
     try {
-      const chapters = await deps.chaptersOf(session.id)
+      const chapters = await deps.chaptersOf(session)
       chaptersCount = chapters.length
-      const tail = tailFromEvents(session.events)
-      input = buildSuggestInput({ title: session.title, chapters, tail }, deps.config.contextChars, deps.config.maxChars)
+      limits = await resolveLimits(route)
+      const lastTurn = lastTurnFromEvents(session.events)
+      const rules = deps.rulesOf !== undefined ? await deps.rulesOf(session) : ''
+      const plan = deps.planOf !== undefined ? await deps.planOf(session) : ''
+      const built = buildSuggestInput({
+        ...(session.title !== undefined ? { title: session.title } : {}),
+        ...(session.goalDirective !== undefined ? { goalDirective: session.goalDirective } : {}),
+        ...(plan !== '' ? { plan } : {}),
+        ...(rules !== '' ? { rules } : {}),
+        chapters,
+        lastTurn,
+      }, limits.contextChars, limits.maxChars)
+      if ('refusal' in built) return refuse(`no recommendation: ${built.refusal}`)
+      input = built.input
     } catch (error) {
       return refuse(`could not assemble the context: ${String((error as Error)?.message ?? error).slice(0, 160)}`)
     }
-    const cap = `Remember: reply with ONLY the suggested prompt, plain text, at most ${deps.config.maxChars} characters.`
+    const cap = `Remember: reply with ONLY the suggested prompt, plain text, at most ${limits.maxChars} characters.`
     try {
       let text = await deps.fetch(input, route)
-      let verdict = validateSuggestion(text, deps.config.maxChars)
+      let verdict = validateSuggestion(text, limits.maxChars)
       if (!verdict.ok) {
-        deps.warn?.(`prompt retry (${verdict.reason}) after ${chaptersCount} chapter line(s) + tail`)
+        deps.warn?.(`prompt retry (${verdict.reason}) after ${chaptersCount} chapter(s) + last turn`)
         text = await deps.fetch(`${input}\n${cap}`, route)
-        verdict = validateSuggestion(text, deps.config.maxChars)
+        verdict = validateSuggestion(text, limits.maxChars)
       }
       if (!verdict.ok) return refuse(`no recommendation: ${verdict.reason}`)
       cache.set(session.id, { text: verdict.text, seq })
@@ -309,8 +443,17 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
       return await job
     },
 
-    limits: () => ({ maxChars: deps.config.maxChars, contextChars: deps.config.contextChars }),
-
+    limits: (route) => resolveLimits(route),
+    setCaps: async (opts) => {
+      if (opts.maxChars !== undefined) {
+        if (opts.maxChars === null || opts.maxChars === '') await deps.deleteSetting(PROMPT_MAXCHARS_KEY)
+        else await deps.putSetting(PROMPT_MAXCHARS_KEY, opts.maxChars)
+      }
+      if (opts.contextChars !== undefined) {
+        if (opts.contextChars === null || opts.contextChars === '') await deps.deleteSetting(PROMPT_CONTEXTCHARS_KEY)
+        else await deps.putSetting(PROMPT_CONTEXTCHARS_KEY, opts.contextChars)
+      }
+    },
     statusLine() {
       const { spec, source } = effective()
       if (spec === '') return `Prompt suggestions: OFF${source === 'override' ? ' (explicitly off — /chapters-prompt model <provider/model> to enable)' : ' — enable with /chapters-prompt model <provider/model>'}`
@@ -325,4 +468,25 @@ export type PromptCommandSurface = PromptSurface
 /** Active chapters of one registry row, mapped to the facts the input uses. */
 export function promptChaptersOf(state: SessionState): { number: number; title: string; summary: string }[] {
   return state.chapters.filter(isActiveChapter).map((c) => ({ number: c.number, title: c.title, summary: c.summary }))
+}
+
+/**
+ * The ancestor path's chapters with their plots (#188), oldest line first. `rows` is the lineage
+ * root-first INCLUDING the live session; `readBody` fetches one chapter's archived bytes so the
+ * plots come out of the durable archive itself — deterministic, zero model tokens, and it works on
+ * chapters archived before this feature existed. A body that cannot be read contributes its index
+ * facts with no plots: a missing file degrades the trajectory, never the assembly.
+ */
+export function promptChaptersForLineage(opts: {
+  rows: { chapters: SessionState['chapters'] }[]
+  readBody: (path: string) => string | null
+}): ChapterHistoryEntry[] {
+  const out: ChapterHistoryEntry[] = []
+  for (const row of opts.rows) {
+    for (const c of row.chapters.filter(isActiveChapter)) {
+      const body = opts.readBody(c.path) ?? ''
+      out.push({ number: c.number, title: c.title, summary: c.summary, plots: body === '' ? [] : extractPlots(body) })
+    }
+  }
+  return out
 }

@@ -13,7 +13,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPromptSurface, type PromptConfig } from '../../src/prompt.ts'
 
-const CONFIG: PromptConfig = { model: 'local/qwen3.8-flash-next', contextChars: 4000, maxChars: 240 }
+const CONFIG: PromptConfig = { model: 'local/qwen3.8-flash-next', contextChars: 4000, contextRatio: 0.5, maxChars: 240 }
 const msg = (seq: number, type: string, text?: string) =>
   type === 'turn/end'
     ? { type, seq, data: { turn: 1 } }
@@ -26,7 +26,7 @@ function world(opts: { events: never[], fail?: boolean, echo?: string } & Record
     getSetting: (k: string) => settings.get(k),
     putSetting: async (k: string, v: string) => { settings.set(k, v) },
     deleteSetting: async (k: string) => { settings.delete(k) },
-    chaptersOf: async () => [{ number: 1, title: 'Work', summary: 'did the thing' }],
+    chaptersOf: async () => [{ number: 1, title: 'Work', summary: 'did the thing', plots: [] }],
     config: { ...CONFIG, model: 'local/qwen3.8-flash-next' },
     conversationRoute: () => ({ provider: 'local', model: 'qwen3.8-flash-next' }),
     fetch: async (input: string) => {

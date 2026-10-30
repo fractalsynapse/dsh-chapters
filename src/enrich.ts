@@ -57,7 +57,11 @@ export interface GeneratedProvenance {
 export type EnrichableFields = 'title' | 'summary' | 'topics'
 
 const TITLE_CAP = 160
-const SUMMARY_CAP = 600
+// #188: 600 → 2400. The summary is no longer a retrieval blurb — it is the chapter's guidance
+// value for the suggestion director, which reads title+summary+plots INSTEAD of the body. The cap
+// stays (frontmatter hygiene) and its truncation stays LOUD (' …[truncated]'), but 2-3 sentences
+// cannot carry a chapter's decisions, findings, and open threads.
+const SUMMARY_CAP = 2400
 const TOPIC_MAX = 10
 const TOPIC_LEN = 48
 // §7.5 mining bounds: few, short, and traceable. One chapter is not allowed to
@@ -88,7 +92,8 @@ export const ENRICH_MAX_TOKENS_DEFAULT = 4000
 const INSTRUCTION =
   'You annotate one archived chapter of a coding-agent conversation for retrieval. '
   + 'Reply with ONLY one JSON object, no prose, no code fences, shaped exactly: '
-  + '{"title": "<one descriptive sentence, <=120 chars>", "summary": "<2-3 informative sentences>", '
+  + '{"title": "<one descriptive sentence, <=120 chars>", '
+  + '"summary": "<a DETAILED summary — one to three paragraphs capturing the decisions made, findings established, state changed, and threads left open, written for a reader who must direct future work from this chapter alone>", '
   + '"topics": ["<lowercase short labels, 3 to 10>"], "rules": [{"text": "<one imperative standing instruction>", "category": "<short slug>", "quote": "<the user\u0027s own words verbatim>"}]}. '
   + 'Topics are semantic labels (concepts, not file paths). Base everything strictly on the material below.\n'
   + 'rules is OPTIONAL and for durable steering only: a convention, invariant or pitfall the USER stated '
@@ -201,7 +206,12 @@ export function parseEnrichResult(text: string): EnrichResult | null {
   }
   return {
     title: title.slice(0, TITLE_CAP),
-    summary: summary.slice(0, SUMMARY_CAP),
+    // #188: the summary clamp stays LOUD — the input-side cap() has always announced itself
+    // ("truncation is EXPLICIT, never silent"); the output side was a bare slice, which is the same
+    // silence wearing a different hat. The marker fits INSIDE the cap, so the bound is real.
+    summary: summary.length > SUMMARY_CAP
+      ? `${summary.slice(0, SUMMARY_CAP - 13)} …[truncated]`
+      : summary,
     topics,
     rules,
   }

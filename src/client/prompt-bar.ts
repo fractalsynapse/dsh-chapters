@@ -91,7 +91,9 @@ function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarSta
     case 'goal':
       // Per spec: autorun runs ALONGSIDE an active goal and disarms itself when the goal completes — the
       // suggestion loop exists to serve the session's purpose, and stops when that purpose stops.
-      return { ...state, goalPhase: ev.phase, autorun: ev.phase === 'complete' ? 'disarmed' : state.autorun }
+      // #188: blocked joins complete — both planes stop together when the goal reaches a terminal
+      // phase; a loop still firing offers at a blocked goal is the autorun that outlived its purpose.
+      return { ...state, goalPhase: ev.phase, autorun: ev.phase === 'complete' || ev.phase === 'blocked' ? 'disarmed' : state.autorun }
   }
   // Exhaustive fallback: a new event without a case must return the state unchanged rather than
   // compile into `undefined` and blank the bar.
@@ -126,7 +128,7 @@ export function shouldAutoFire(s: PromptBarState): boolean {
   if (s.goal !== null && s.goal.phase === 'active' && s.goal.activation === 'armed') return false
   if (s.autorun !== 'armed') return false
   if (s.running) return false
-  if (s.goalPhase === 'complete') return false
+  if (s.goalPhase === 'complete' || s.goalPhase === 'blocked') return false
   if (s.hiddenTurnSeq !== null && s.hiddenTurnSeq === s.turnSeq) return false
   return true
 }

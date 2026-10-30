@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  PROMPT_SETTING_KEY, buildSuggestInput, createPromptSurface, effectivePromptSpec,
+  PROMPT_SETTING_KEY, buildSuggestInput, createPromptSurface, type ChapterHistoryEntry, effectivePromptSpec,
   promptChaptersOf, resolvePromptRoute, tailFromEvents, validateSuggestion,
   type PromptDeps, type PromptRoute,
 } from '../../src/prompt.ts'
@@ -61,59 +61,59 @@ test('the tail screens injected context through the ONE predicate and keeps conv
 
 // ---------------------------------------------------------------- input assembly
 
-const facts = (chapters: { number: number; title: string; summary: string }[], tail: { role: 'user' | 'assistant'; text: string }[]) =>
-  ({ title: 'Session X', chapters, tail })
+const facts = (chapters: ChapterHistoryEntry[], lastTurn: { role: 'user' | 'assistant'; text: string }[]) =>
+  ({ title: 'Session X', chapters, lastTurn })
+
+const inputOf = (r: { input: string } | { refusal: string }): string => {
+  assert.ok('input' in r, `expected an input, got a refusal: ${'refusal' in r ? r.refusal : ''}`)
+  return (r as { input: string }).input
+}
 
 test('the input is deterministic, carries both sections, and ends with the reply rule + cap', () => {
   const f = facts(
-    [{ number: 1, title: 'Setup', summary: 'installed the rig' }],
+    [{ number: 1, title: 'Setup', summary: 'installed the rig', plots: [] }],
     [{ role: 'user', text: 'hello' }, { role: 'assistant', text: 'hi — what next?' }],
   )
   const a = buildSuggestInput(f, 4000, 240)
-  assert.equal(a, buildSuggestInput(f, 4000, 240))
-  assert.match(a, /second reader/)
-  assert.match(a, /## Session: Session X/)
-  assert.match(a, /1\. Setup — installed the rig/)
-  assert.match(a, /Human: hello\nAssistant: hi — what next\?/)
-  assert.match(a, /at most 240 characters/)
-  assert.ok(!a.includes('dropped'), 'a fitting input announces nothing')
+  assert.deepEqual(a, buildSuggestInput(f, 4000, 240))
+  const input = inputOf(a)
+  assert.match(input, /second reader/)
+  assert.match(input, /## Session: Session X/)
+  assert.match(input, /1\. Setup — installed the rig/)
+  assert.match(input, /Human: hello\nAssistant: hi — what next\?/)
+  assert.match(input, /at most 240 characters/)
+  assert.ok(!input.includes('dropped'), 'a fitting input announces nothing')
 })
 
-test('over budget drops the OLDEST chapters first, then the oldest messages, and says so with counts', () => {
-  const chapters = [1, 2, 3, 4].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}` }))
-  const tail = [1, 2, 3].map((n) => ({ role: 'user' as const, text: `message number ${n} with some bulk ${'x'.repeat(80)}` }))
-  // The cap is FRAME-RELATIVE, not a literal. It was `600` until #113 lengthened the instruction block and
-  // the row went red for a reason worth keeping: the fixed frame (head + rules + scaffolding) is a real
-  // cost, and a fixture that hard-codes a cap below it tests nothing about dropping — it tests whether the
-  // frame grew. Measured here, so the next rules edit moves the cap with it instead of breaking CI.
-  const FRAME = buildSuggestInput({ title: 'S', chapters: [], tail: [] }, 1_000_000, 240).length
-  // +200, not +1: the point is that SOME content is squeezed out while the newest survives longest. At a
-  // cap this close to the frame everything goes, which would pass the drop assertion and prove nothing.
-  const cap = FRAME + 200
-  const input = buildSuggestInput(facts(chapters, tail), cap, 240)
-  // Substring + regex literal, not an interpolated RegExp: in a template literal `\(` collapses to `(`, so
-  // the counts became a capture group that matched nothing — my bug, caught by the row failing, not by hope.
-  assert.ok(input.includes(`older context dropped to fit the ${String(cap)}-char budget:`),
-    'the drop is announced with the budget it was fitted to')
-  assert.match(input, /\d+ chapter line\(s\), \d+ message\(s\)/)
-  assert.ok(input.length <= cap, 'the budget is HARD')
-  assert.ok(input.includes('message number 3'), 'the newest message survives longest')
-  assert.ok(!input.includes('message number 1'), 'oldest goes first')
-  // Chapters are the compressible past: at this cap they may ALL be gone — but whatever remains is the newest.
-  const kept = chapters.filter((c) => input.includes(`${c.number}. t${c.number}`))
+// #188 superseded this row's old contract (drop chapters, then drop tail messages, then HALVE the
+// per-message slice): nothing the model reads is ever sliced now. The ladder drops whole chapters
+// (oldest first, announced) and the last turn is PROTECTED — the assertions that survive are the
+// ones that were load-bearing: budget is hard, oldest goes first, newest leads, drops are announced.
+test('over budget drops the OLDEST chapters first, announced with counts; the last turn is protected', () => {
+  const chapters: ChapterHistoryEntry[] = [1, 2, 3, 4].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}` + 'q'.repeat(300), plots: [] }))
+  const lastTurn = [{ role: 'user' as const, text: 'message number 3 — the present, never dropped' }]
+  const whole = inputOf(buildSuggestInput({ title: 'S', chapters, lastTurn }, 100_000, 240))
+  assert.ok(whole.includes('1. t1') && whole.includes('4. t4'), 'a generous budget keeps the whole history')
+  const tight = buildSuggestInput({ title: 'S', chapters, lastTurn }, whole.length - 1, 240)
+  const tightInput = inputOf(tight)
+  assert.ok(!tightInput.includes('1. t1'), 'the oldest chapter drops first')
+  assert.ok(tightInput.includes('4. t4'), 'the newest chapter survives longest')
+  assert.ok(tightInput.length <= whole.length - 1, 'the budget is HARD')
+  assert.ok(tightInput.includes('message number 3'), 'the last turn is protected — the present is never dropped')
+  assert.ok(tightInput.includes(`dropped to fit the ${String(whole.length - 1)}-char budget:`), 'the drop is announced with the budget it was fitted to')
+  assert.match(tightInput, /\d+ chapter\(s\)/)
+  const kept = chapters.filter((c) => tightInput.includes(`${c.number}. t${c.number}`))
   for (let i = 1; i < kept.length; i++) assert.ok(kept[i - 1]!.number < kept[i]!.number, 'kept chapters are the newest suffix')
+})
 
-  // The order is PINED, not vacuous: chapters whose lines are far bigger than the
-  // drop-announcement mean exactly ONE drop fits the tightened budget — and it is
-  // the OLDEST line that goes.
-  const bigChapters = [1, 2, 3, 4].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}` + 'q'.repeat(300) }))
-  const smallTail = [{ role: 'user' as const, text: 'last' }]
-  const whole = buildSuggestInput({ title: 'S', chapters: bigChapters, tail: smallTail }, 100_000, 240)
-  assert.ok(whole.includes('1. t1') && whole.includes('4. t4'), 'a generous cap keeps everything')
-  const tight = buildSuggestInput({ title: 'S', chapters: bigChapters, tail: smallTail }, whole.length - 1, 240)
-  assert.ok(!tight.includes('1. t1'), 'the oldest chapter line drops first')
-  assert.ok(tight.includes('4. t4'), 'the newest chapter line survives longest')
-  assert.ok(tight.length <= whole.length - 1, 'and the cap still holds')
+test('a budget smaller than the protected frame REFUSES with the numbers instead of returning a silent skeleton', () => {
+  // #188: the old floor behavior returned the frame with an announcement bolted on; the new contract
+  // refuses, because an input that cannot carry the goal and the last turn cannot define a next step,
+  // and a refusal the bar displays is recoverable while a starved suggestion is not.
+  const r = buildSuggestInput({ title: 'S', chapters: [], lastTurn: [{ role: 'user', text: 'go' }] }, 40, 240)
+  assert.ok('refusal' in r, 'refusal, never a starved input')
+  assert.match((r as { refusal: string }).refusal, /40/, 'the budget is named')
+  assert.match((r as { refusal: string }).refusal, /exceed/, 'and so is the fact that the protected set broke it')
 })
 
 // ---------------------------------------------------------------- answer validation
@@ -313,15 +313,15 @@ test('promptChaptersOf maps ONLY active chapters (superseded records never feed 
   assert.deepEqual(promptChaptersOf(state), [{ number: 1, title: 'good', summary: 's1' }])
 })
 
-test('a cap smaller than the fixed frame ANNOUNCES it instead of returning an over-budget input in silence (#61)', () => {
-  // Every compressible part can be gone and the input can STILL exceed `promptContextChars`, because the
-  // frame itself is bigger than the cap. The old code returned it anyway — `input.length > cap` known and
-  // unsaid, the exact #61 class this repo keeps meeting. It cannot be truncated (never clip), so it speaks.
-  const chapters = [1, 2].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}` }))
-  const tail = [{ role: 'user' as const, text: 'hello' }]
-  const small = buildSuggestInput(facts(chapters, tail), 40, 240)
-  assert.match(small, /frame alone exceeds the 40-char budget by \d+ chars/, `stated with numbers: ${small.slice(-140)}`)
-  assert.match(small, /raise promptContextChars/, 'and the remedy is named')
-  assert.match(small, /nothing was truncated/, 'plus the invariant it respected while doing so')
-  assert.ok(small.length > 40, 'it is honestly over budget and SAYS so, rather than pretending to fit')
+test('a budget smaller than the protected frame REFUSES with numbers instead of sending a starved input (#61 → #188)', () => {
+  // The #61 row, updated by the #188 contract: the honest delivery of "cannot fit" is a REFUSAL the
+  // bar displays, not an announcement bolted onto an input that gets sent anyway — sending a starved
+  // assembly to a model and hoping is exactly the silence #61 forbids, wearing a louder costume.
+  const chapters: ChapterHistoryEntry[] = [1, 2].map((n) => ({ number: n, title: `t${n}`, summary: `s${n}`, plots: [] }))
+  const lastTurn = [{ role: 'user' as const, text: 'hello' }]
+  const small = buildSuggestInput(facts(chapters, lastTurn), 40, 240)
+  assert.ok('refusal' in small, 'refusal, never an over-budget input')
+  const refusal = (small as { refusal: string }).refusal
+  assert.match(refusal, /40/, `stated with numbers: ${refusal}`)
+  assert.match(refusal, /\/chapters-prompt model/, 'and the remedy is named')
 })
