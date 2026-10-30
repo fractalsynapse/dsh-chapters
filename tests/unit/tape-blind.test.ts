@@ -110,8 +110,15 @@ test('the injected time-context snapshot cannot break a tape match (elapsed dura
   const messageForms = forms.slice(0, 4)
   assert.ok(messageForms.every((f) => f === messageForms[0]),
     `all elapsed values of the model-visible line must fold together; got ${new Set(messageForms).size} distinct`)
-  assert.ok(forms[4].includes('step context: <ELAPSED>'), 'the step-context line folds its value too')
+  // #178 supersedes the value-fold for these carriers: a COMPLETE time snapshot is now a presence-volatile
+  // message and drops whole (''), which is strictly stronger than folding its value — presence parity across
+  // machines was the actual miss (CI's runner carried a turn-1 snapshot the recording did not). The value
+  // fold still governs partial carriers, pinned by the prose case below and by proxy-normalize's rows.
+  assert.equal(forms[4], '', 'the step-context snapshot drops whole — two machines, one identity, and it is the drop')
   assert.ok(!forms[4].includes('11m'), 'and the duration itself is gone')
+  const proseCarrier = normalizeSingle({ role: 'user', content: 'The transcript footer said Elapsed since the preceding model-visible message: 12m 4s. and then the journey continued with real text.' })
+  assert.ok(proseCarrier.includes('<ELAPSED>'), 'a message that merely CARRIES the elapsed line still folds its value')
+  assert.ok(proseCarrier.includes('the journey continued'), 'and keeps the genuine prose around it')
 })
 
 /**
@@ -184,20 +191,21 @@ test('the chapter list in a checkpoint notice matches regardless of how many ent
  * spellings, so both are blind. `unavailable` is not machine identity (both machines can write it) and stays.
  */
 test('the runtime-context time zone cannot break a tape match', () => {
-  const line = (zone: string): string => normalizeSingle({ role: 'user', content: `Time sampled while preparing turn 1, step 1: 2026-10-27T17:35:32-04:00[${zone}] Browser time zone for this request: ${zone}. Interpret otherwise-unqualified dates and times in this zone.` })
+  const line = (zone: string): string => normalizeSingle({ role: 'user', content: `Time sampled while preparing turn 1, step 1: 2026-10-27T21:35:32Z[${zone}] Browser time zone for this request: ${zone}. Elapsed since the preceding step context: unavailable.` })
   const utc = line('UTC')
   const local = line('America/New_York')
   assert.equal(utc, local, `two machines, one identity:\n  utc:   ${utc.slice(0, 120)}\n  local: ${local.slice(0, 120)}`)
-  assert.match(utc, /\[<TZ>\] Browser time zone/, 'the bracketed form folds')
-  assert.match(utc, /for this request: <TZ>\./, 'and so does the value form')
-  assert.ok(!/UTC|America\/New_York/.test(utc), `no zone survives anywhere: ${utc.slice(0, 200)}`)
+  // #178: the snapshot carrier is now a presence-volatile DROP — the zone question is moot for it because
+  // the whole message normalizes away on every machine. The zone folds below still matter for any carrier
+  // that SURVIVES as a message (prose quoting the lines), which is what these asserts now pin.
+  assert.equal(utc, '', 'the snapshot carrier drops whole; the identity is the drop itself')
+  const prose = normalizeSingle({ role: 'user', content: 'My log said [America/New_York] Browser time zone for this request: America/New_York. and I kept working.' })
+  assert.match(prose, /\[<TZ>\] Browser time zone/, 'the bracketed form folds in a surviving carrier')
+  assert.match(prose, /for this request: <TZ>\./, 'and so does the value form')
+  assert.ok(!/UTC|America\/New_York/.test(prose), `no zone survives anywhere: ${prose.slice(0, 200)}`)
   // `unavailable` is a shared fact, not identity — it must pass through untouched.
-  const none = normalizeSingle({ role: 'user', content: 'Time sampled while preparing turn 1, step 1: 2026-10-27T21:35:32Z[UTC] Browser time zone for this request: unavailable. Interpret otherwise-unqualified dates and times.' })
+  const none = normalizeSingle({ role: 'user', content: 'The notice read Browser time zone for this request: unavailable. which both machines can honestly say.' })
   assert.match(none, /for this request: unavailable\./, 'the sentence that carries no zone keeps its wording')
-  assert.match(none, /\[<TZ>\]/, 'while the zone it does carry still folds')
-  // Narrow: a timezone named in ordinary prose is content and stays.
-  const prose = normalizeSingle({ role: 'user', content: 'Deploy at [America/New_York] peak hours, not [UTC] midnight.' })
-  assert.ok(prose.includes('[America/New_York]'), 'prose is not folded')
 })
 
 /**
