@@ -604,7 +604,17 @@ and does not let a plugin do, with anchors:
   `{value.result.kind/text}`). New **wire events are NOT available to plugins**: the forwarded
   allowlist is app-owned ("the one home of this application's forwarded-Host-event allowlist",
   `packages/api/remotes/src/remote-events.ts:24`).
-- **Push transport is 0.2.x-only.** `appendPluginRecord(session, 'plugin:<name>', data)`
+  **Every execution is recorded** (measured, `packages/interaction/commands/src/index.ts:365-385`):
+  `command/run` + `command/done` lifecycle events, log-only (never model surface) but rendered as
+  history nodes by the web UI; `recordInput: false` (definition flag, `index.ts:71-75`) suppresses
+  only the `args` payload, NOT the node pair. There is no quiet-invocation mode — a polling client
+  on this wire writes visible history every pull, which is why the bar's cadence is a tested
+  decision (#193) and the push swap (#194) is the structural fix.
+- **Push transport is 0.2.1+ (measured 2026-10-30, #193 — this line said "0.2.x-only" and was
+  wrong):** `appendPluginRecord` has **zero occurrences** at tag `dsh-v0.2.0-rc.2`
+  (`packages/core/session/src/index.ts`) and is present at `dsh-v0.2.1-rc.2` (`:492`). The pinned
+  rig host (0.2.0-rc.2) therefore CANNOT serve the push swap; #194 gates on a host-pin bump plus
+  feature detection with pull fallback. `appendPluginRecord(session, 'plugin:<name>', data)`
   (`packages/core/session/src/index.ts:492`, grammar/types at `types.ts:525-543`, reader
   `pluginRecordOf` at `index.ts:508`): durable, append-only, "never enters the model-visible
   surface", retained by fork/resume, skipped by unknown readers. The `verify-plugin-record-callers`
