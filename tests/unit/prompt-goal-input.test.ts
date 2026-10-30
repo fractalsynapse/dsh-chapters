@@ -15,8 +15,15 @@ import type { SessionEventLike } from '../../src/types.ts'
 
 const FACTS = {
   title: 'Ship the bar',
-  chapters: [{ number: 1, title: 'Prior work', summary: 'measured the seam' }],
-  tail: [{ role: 'user' as const, text: 'continue' }, { role: 'assistant' as const, text: 'wired the runner' }],
+  chapters: [{ number: 1, title: 'Prior work', summary: 'measured the seam', plots: [] }],
+  lastTurn: [{ role: 'user' as const, text: 'continue' }, { role: 'assistant' as const, text: 'wired the runner' }],
+}
+
+// #188: the assembly now returns { input } | { refusal }; these rows always fit at 4000, so unwrap.
+const build = (f: Parameters<typeof buildSuggestInput>[0], b = 4000, m = 240): string => {
+  const r = buildSuggestInput(f, b, m)
+  assert.ok('input' in r, `expected an input, got a refusal: ${'refusal' in r ? r.refusal : ''}`)
+  return (r as { input: string }).input
 }
 
 test('an active goal is stated before the history and constrains the next step', () => {
@@ -25,7 +32,7 @@ test('an active goal is stated before the history and constrains the next step',
   } } }] as unknown as SessionEventLike[]
   const goal = readActiveGoal(events)
   assert.ok(goal)
-  const input = buildSuggestInput({ ...FACTS, goalDirective: goalDirectiveOf(goal) }, 4000, 240)
+  const input = build({ ...FACTS, goalDirective: goalDirectiveOf(goal) }, 4000, 240)
   const atGoal = input.indexOf('Land #114 and cut 0.2.2')
   const atTail = input.indexOf('wired the runner')
   assert.ok(atGoal > -1, 'the objective is in the input')
@@ -36,9 +43,9 @@ test('an active goal is stated before the history and constrains the next step',
 })
 
 test('no goal means no goal block — the suggestion stands alone', () => {
-  const withoutDirective = buildSuggestInput(FACTS, 4000, 240)
+  const withoutDirective = build(FACTS, 4000, 240)
   assert.ok(!/ACTIVE GOAL|MUST advance/.test(withoutDirective), 'no goal text leaks in')
-  const withNone = buildSuggestInput({ ...FACTS, goalDirective: goalDirectiveOf(null) }, 4000, 240)
+  const withNone = build({ ...FACTS, goalDirective: goalDirectiveOf(null) }, 4000, 240)
   assert.match(withNone, /No goal is active/, 'but an explicit none still says so, rather than going silent')
 })
 

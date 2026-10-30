@@ -131,3 +131,11 @@ test('deriveRunning folds every host shape, and keeps unknown unknown', async ()
   assert.equal(deriveRunning('something else entirely'), undefined, 'an unrecognized word is not evidence of idle')
   assert.equal(deriveRunning({}), undefined)
 })
+
+test('#188: a BLOCKED goal disarms autorun and blocks firing, exactly like a completed one — both planes stop together', () => {
+  const armed = promptBarReducer({ ...initialBarState('armed'), status: 'ready', text: 'step', turnSeq: 1 }, { t: 'goal', phase: 'blocked' })
+  assert.equal(armed.autorun, 'disarmed', 'a loop firing offers at a blocked goal outlived its purpose')
+  assert.equal(armed.goalPhase, 'blocked')
+  const ready = { ...initialBarState('armed'), status: 'ready' as const, text: 'step', turnSeq: 1, goalPhase: 'blocked' as const }
+  assert.equal(shouldAutoFire(ready), false, 'and the fire predicate agrees with the reducer')
+})

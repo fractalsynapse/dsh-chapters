@@ -29,9 +29,9 @@ test('parseEnrichResult: the tolerant reader and its hard gates', () => {
   assert.equal(parseEnrichResult('{"title":"  ","summary":"S","topics":["a"]}'), null, 'empty title')
   assert.equal(parseEnrichResult('{"title":"T","summary":"S","topics":["unusable \"quoted\""]}'), null, 'only-illegal topics → null')
   // caps clamp, never reject
-  const long = parseEnrichResult(JSON.stringify({ title: 't'.repeat(300), summary: 's'.repeat(900), topics: Array.from({ length: 30 }, (_, i) => `topic${i}`) }))
+  const long = parseEnrichResult(JSON.stringify({ title: 't'.repeat(300), summary: 's'.repeat(3000), topics: ['a'] })) // #188: fixture past the 2400 cap
   assert.ok(long !== null)
-  assert.ok(long.title.length <= 160 && long.summary.length <= 600 && long.topics.length <= 10)
+  assert.ok(long.title.length <= 160 && long.summary.length <= 2400 && long.topics.length <= 10)
 })
 
 // ---------------------------------------------------------- applyEnrich

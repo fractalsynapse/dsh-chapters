@@ -418,8 +418,26 @@ export function registerHostCommands(
               ? 'prompt model override cleared — the config default is unset, so suggestions are OFF'
               : `prompt model override cleared — now following the config default (${spec}, ON)` }
           }
+          // #188: the caps ride WITH the model — `/chapters-prompt model <id> [maxChars [contextChars]]`.
+          // Explicit numbers store beside prompt.model in the settings table; omitted numbers derive from the
+          // selected model's real context window (window × promptContextRatio) at suggestion time, and the
+          // config keys are the no-window fallback. Resolution and sources: `/chapters-prompt state`.
+          const maxArg = parts[2]
+          const ctxArg = parts[3]
+          if (parts.length > 4 || (maxArg !== undefined && !/^[1-9][0-9]*$/.test(maxArg)) || (ctxArg !== undefined && !/^[1-9][0-9]*$/.test(ctxArg))) {
+            return { kind: 'error', text: `model takes <provider/model> [maxChars [contextChars]] — positive integers (got: ${parts.slice(1).join(' ')})` }
+          }
           await config.prompt.setModel(arg)
-          return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables)` }
+          if (config.prompt.setCaps !== undefined && (maxArg !== undefined || ctxArg !== undefined)) {
+            await config.prompt.setCaps({
+              ...(maxArg !== undefined ? { maxChars: maxArg } : {}),
+              ...(ctxArg !== undefined ? { contextChars: ctxArg } : {}),
+            })
+          }
+          const capsNote = maxArg !== undefined || ctxArg !== undefined
+            ? ` Caps stored beside the model${maxArg !== undefined ? `: suggestion ${maxArg} chars` : ''}${ctxArg !== undefined ? `${maxArg !== undefined ? ',' : ':'} context budget ${ctxArg} chars` : ''}.`
+            : " Caps derive from this model's context window (window × promptContextRatio); pass numbers to pin them."
+          return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables).${capsNote}` }
         }
         if (verb === 'off') {
           await config.prompt.setModel('')
@@ -511,7 +529,7 @@ export function registerHostCommands(
           const events = (sess.snapshotEvents?.() ?? []) as readonly SessionEventLike[]
           const titleEvent = [...events].reverse().find((e) => e.type === 'session/title')
           const title = titleEvent !== undefined && typeof titleEvent.data.title === 'string' ? titleEvent.data.title : undefined
-          const r = await config.prompt.suggest({ id: sess.id, title, events: [...events] })
+          const r = await config.prompt.suggest({ id: sess.id, title, cwd: cwdOf(invocation.agent), events: [...events] })
           // #113: this returned `text: r.text` — ONE bare line, which the composer ellipsized with no way to
           // recover it. /chapters-status gets an expander because it answers with a labelled multi-line block,
           // so this does the same: the prompt verbatim inside a fence, then the facts that bound it (which
@@ -519,11 +537,11 @@ export function registerHostCommands(
           // over-cap answer is refused and retried, never truncated — the number belongs in the output.
           const F = String.fromCharCode(96).repeat(3)
           const { spec, source } = config.prompt.effective()
-          const lim = config.prompt.limits !== undefined ? config.prompt.limits() : undefined
+          const lim = config.prompt.limits !== undefined ? await config.prompt.limits(null) : undefined
           const who = `${title !== undefined && title !== '' ? `\u201c${title}\u201d ` : ''}(${sess.id})`
           const capLine = lim !== undefined
-            ? `  cap: ${String(lim.maxChars)} characters — over-cap is refused and retried, never truncated`
-            : '  cap: (not reported by this surface)'
+            ? `  caps: suggestion ${String(lim.maxChars)} chars (${lim.sources.maxChars}) · context budget ${String(lim.contextChars)} chars (${lim.sources.contextChars}) — over-cap is refused and retried, never truncated`
+            : '  caps: (not reported by this surface)'
           const meta = `  model: ${spec !== '' ? spec : 'unset'} (${source})\n${capLine}`
           if (r.ok) {
             return { kind: 'success', text: [
