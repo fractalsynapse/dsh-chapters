@@ -55,8 +55,16 @@ provider or capability the host does not expose is reported as absent, never gue
 ```
 /chapters-rule add <category> "<text>"                     # write-once proposal; binds nothing yet
 /chapters-rule list [--all|--proposed|--category <c>]      # review surface
+/chapters-rule view <id>                                   # ONE rule, completely — full text, status, basis
 /chapters-rule approve <id> | revoke <id>                  # YOUR machine's curation fact — never a shared rewrite
 ```
+
+`list` shows titles, and a title is the first sentence of the body cut at 60 characters — enough to
+find a rule, never enough to judge one. `view` is the reading surface: the FULL untruncated text plus
+everything known about the rule on this machine (status, pin, and for session rules whether they are
+active, held for review, and whether their basis is `stated` — your own words — or `inferred` by the
+model). Approving a rule you have not read is approving nothing; `view` is what makes `approve` a
+judgment instead of a guess (#174, at the maintainer's direction).
 
 The session tier and the audit surface, so automatic capture is never opaque
 ([#50](https://github.com/treeseed-ai/dsh-chapters/issues/50)):

@@ -283,3 +283,77 @@ test('chapter paths are read through the ONE resolver, never a bare join (#69-cl
       `${file} must resolve its ${String(count)} stored path(s) through the helper`)
   }
 })
+
+// #174 — `view`: a rule that cannot be read cannot be approved. These rows are the spec for the
+// rendering: full body (the whole point), identity, THIS machine's effective status, and the
+// session-tier warrant fields (basis/reviewOnly/active) approve is supposed to judge by.
+
+test('view: renders one rule completely — the FULL text list never shows, identity, status, provenance (#174)', async () => {
+  const h = harness()
+  const longBody = 'Never log raw tokens. ' + 'The quick brown fox jumps over the lazy dog. '.repeat(12) + 'SENTINEL-TAIL-WORD'
+  const add = await rulesCommand(h.io, `add security ${longBody}`)
+  assert.equal(add.kind, 'success', add.text)
+  const v = await rulesCommand(h.io, 'view hA/001')
+  assert.equal(v.kind, 'success', v.text)
+  assert.ok(v.text.includes('SENTINEL-TAIL-WORD'), 'the FULL body renders — the tail list truncates must be present')
+  assert.ok(v.text.includes('The quick brown fox'), 'the body middle is present, not a head slice')
+  assert.match(v.text, /hA\/001/)
+  assert.match(v.text, /category:\s+security/)
+  assert.match(v.text, /status:\s+proposed/)
+  assert.match(v.text, /authored:[^\n]*2026-09-20/, 'authored-at from the record')
+  assert.match(v.text, /rules\/hA\/001-/, 'the stored path')
+  const bare = await rulesCommand(h.io, 'view 001')
+  assert.equal(bare.kind, 'success', bare.text)
+  assert.ok(bare.text.includes('SENTINEL-TAIL-WORD'), 'bare-number id normalizes exactly like approve/revoke')
+  h.dispose()
+})
+
+test('view: unknown and missing ids refuse in the list-shaped way', async () => {
+  const h = harness()
+  const bad = await rulesCommand(h.io, 'view 999')
+  assert.equal(bad.kind, 'error'); assert.match(bad.text, /unknown id/)
+  const none = await rulesCommand(h.io, 'view')
+  assert.equal(none.kind, 'error'); assert.match(none.text, /view needs a rule id/)
+  h.dispose()
+})
+
+test('view: a session rule shows its warrant — basis, reviewOnly, active — the fields approve judges by (#174)', async () => {
+  const h = harness({ ancestors: async () => new Set(['ses_abc']) })
+  const dir = path.join(h.cwd, '.dsh-chapters', 'rules', 'hA')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, '005-testing-measure-before.md'), renderRuleFile({
+    number: 5, category: 'testing', title: 'Measure before claiming', sourceSession: 'ses_abc', at: '2026-09-21T10:00:00Z',
+    body: 'Measure the thing before claiming the thing; a guess is a debt.\n',
+    scope: 'session', session: 'ses_abc', derivedFrom: 'model', reviewOnly: true, basis: 'inferred', chapter: 3,
+  }))
+  const v = await rulesCommand(h.io, 'view hA/005')
+  assert.equal(v.kind, 'success', v.text)
+  assert.match(v.text, /session/, 'the tier is named')
+  assert.match(v.text, /basis:\s+inferred/, 'basis shown — the model wrote this, the human never said it')
+  assert.match(v.text, /REVIEW/i, 'held-for-review state shown')
+  // sessionRuleActive (amended 2026-10-21): a reviewOnly rule is INERT until approved — my first
+  // expectation here (active: yes while held) contradicted the shipped semantics, so the row now pins
+  // the true lifecycle: inert while held, active once this machine approves.
+  assert.match(v.text, /active:\s+no/, 'a held mined rule is inert until approved')
+  assert.match(v.text, /Measure the thing before claiming the thing/, 'full body')
+  assert.match(v.text, /ses_abc/, 'source-session provenance')
+  assert.match(v.text, /chapter 3/, 'mined-from-chapter provenance')
+  const ap = await rulesCommand(h.io, 'approve hA/005')
+  assert.equal(ap.kind, 'success', ap.text)
+  const v2 = await rulesCommand(h.io, 'view hA/005')
+  assert.equal(v2.kind, 'success', v2.text)
+  assert.match(v2.text, /active:\s+yes/, 'after approval it binds this tree — and view says so')
+  h.dispose()
+})
+
+test('view: a registry-only rule with no file says the body is not on this machine instead of rendering nothing', async () => {
+  const h = harness()
+  h.table.set('hA/007', {
+    id: 'hA/007', projectKey: 'PKC', number: 7, path: '.dsh-chapters/rules/hA/007-ghost.md',
+    category: 'deploy', title: 'Ghost rule', sourceSession: 'manual', at: '2026-09-22T09:00:00Z',
+  })
+  const v = await rulesCommand(h.io, 'view hA/007')
+  assert.equal(v.kind, 'success', v.text)
+  assert.match(v.text, /not on this machine/i, 'explicit absence — never an empty body rendered as if it were the rule')
+  h.dispose()
+})
