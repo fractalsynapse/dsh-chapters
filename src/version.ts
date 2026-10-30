@@ -6,4 +6,4 @@
  * reader cannot recover later, so it belongs in the bytes. A row in tests asserts this literal equals
  * `package.json`'s version — the one place a hand-mirrored constant must never be allowed to drift.
  */
-export const PLUGIN_VERSION = '0.2.4'
+export const PLUGIN_VERSION = '0.2.5'
