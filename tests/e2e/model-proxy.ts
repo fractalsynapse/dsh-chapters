@@ -142,7 +142,18 @@ const VOLATILE: Array<[RegExp, string]> = [
   // with live state (measured: heavy replay missed on it). Development
   // artifact, masked like the AGENTS block; the surrounding product turns
   // still match exactly.
-  [/Current runtime context\.[\s\S]*?(?=<\/system-reminder>|$)/gi, '<RUNTIME-BLIND>'],
+  // The lookahead also stops at the JSON envelope's closing quote (#178): without it, an injection at the
+  // END of an embedded excerpt made the lazy run swallow the envelope itself (`"}`), destroying bytes the
+  // non-injected side still carries — an asymmetric fold, which is the one thing a matcher must never be.
+  [/Current runtime context\.[\s\S]*?(?=<\/system-reminder>|"|$)/gi, '<RUNTIME-BLIND>'],
+  // EMBEDDED-RUNTIME-BLIND (#178, measured on the 2026-10-30 CI miss): when an injection is serialized
+  // INSIDE another message — the plot-note aux call embeds the whole conversation as text — the mask above
+  // fires but leaves its residue (`user: <RUNTIME-BLIND>`, optionally with the closing tag) inside the
+  // embedding string, and whether that residue exists at all depends on WHEN the host injected relative to
+  // elicitation: machine timing, not journey content. The standalone-message drop cannot reach inside a
+  // string, so the residue is dropped here, symmetrically on both sides (stored prefixes re-substitute at
+  // load). Must run AFTER the mask it cleans up after.
+  [/user: <RUNTIME-BLIND>(?:<\/system-reminder>)?\s*/g, ''],
   // WS-BLIND (measured 2026-09-24, the hosted-CI miss family): the SYSTEM
   // PROMPT itself states the machine's live paths — 'Your working directory
   // is /home/…' and 'the DSH harness implementation checkout is at

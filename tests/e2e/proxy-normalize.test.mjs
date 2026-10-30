@@ -100,3 +100,22 @@ test('derived counts collapse: est-token figures and host-injected char counts',
   assert.equal(a, b, 'two runs of the same chapter shape match despite drifting derived counts')
   assert.ok(a.includes('Chapter 1'), 'the identifying text survives the collapse')
 })
+
+test('EMBEDDED-RUNTIME-BLIND: an injection serialized INSIDE another message drops out whole (#178)', () => {
+  // Measured from the CI miss dump (run of 2026-10-30, var/e2e-tape-diffs/000.json): the plot-note aux call
+  // embeds the conversation as TEXT. On the recording machine a runtime-context injection had landed before
+  // elicitation, so the stored excerpt carried `user: <RUNTIME-BLIND>` (21 bytes) at its end; on the runner the
+  // injection had not landed yet, so its excerpt ended at the previous sentence. RUNTIME-BLIND masks the
+  // injection's CONTENT but left the residue — role prefix plus marker — inside the embedding string, and a
+  // standalone-message drop cannot reach inside another message's text. Symmetric content-level fold: both sides
+  // end without the residue, so elicitation timing stops being machine identity. common=1671/1673 in the dump,
+  // divergence exactly at the residue.
+  const stored = '{"role":"user","content":"state in at most 60 words. EXCERPT: system: You are an agent. user: Which file defines the merge rule? user: Current runtime context. This snapshot supersedes earlier runtime-context snapshots. Current DSH file policy: danger-full-access.'
+  const incoming = '{"role":"user","content":"state in at most 60 words. EXCERPT: system: You are an agent. user: Which file defines the merge rule? '
+  assert.equal(substituteAll(stored + '"}'), substituteAll(incoming + '"}'),
+    'a trailing embedded injection must normalize away entirely')
+  const midStored = '{"role":"user","content":"EXCERPT: user: hello user: Current runtime context. This snapshot supersedes. </system-reminder> assistant: hi there"}'
+  const midIncoming = '{"role":"user","content":"EXCERPT: user: hello assistant: hi there"}'
+  assert.equal(substituteAll(midStored), substituteAll(midIncoming),
+    'a mid-excerpt injection (with its closing tag) must drop without eating the segments after it')
+})
