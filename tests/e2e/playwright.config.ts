@@ -36,7 +36,9 @@ export default defineConfig({
       // inside the suite boot — `suite` is everything-not-ignored — and changed that session's human-message set,
       // which is what the title request at msg1 of the suite tape encodes. Measured: suite `4 passed` on staging's tree,
       // `MISS tape=suite entries=8 messages=2` with this file present and unignored.
-      '**/prompt-goal-live.spec.ts'] },
+      // #175: same reason as prompt-goal-live — the suite boot is everything-not-ignored, and this
+      // live journey would change its human-message set (the suite tape encodes that set at msg1).
+      '**/prompt-goal-live.spec.ts', '**/model-activities-live.spec.ts'] },
     // fork-button rides its OWN boot (2026-09-25, the fanout lesson applied
     // again): knowledge's fork child becomes the workspace's restore target,
     // so a shared boot records/replays whoever ran first's shape — the fork
@@ -88,5 +90,8 @@ export default defineConfig({
     // #138: LIVE-only goal journeys (see the pin comment). Deliberately absent from `scripts/chain-replay.sh`'s leg
     // list, so the model-free acceptance job does NOT cover these two claims — a live run does. Recorded, not hidden.
     { name: 'prompt-goal-live', env: rigEnv('prompt-goal-live'), testMatch: ['**/prompt-goal-live.spec.ts'] },
+    // #175: LIVE-only verification of the three model activities (enrichment, mining with its
+    // warrant, /chapters-models → setter round trip). Absent from chain-replay.sh by design.
+    { name: 'model-activities-live', env: rigEnv('model-activities-live'), testMatch: ['**/model-activities-live.spec.ts'], timeout: 1_200_000 },
   ] as unknown as Parameters<typeof defineConfig>[0]['projects'],
 })

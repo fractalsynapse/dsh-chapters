@@ -42,7 +42,11 @@ const VOLATILE: Array<[RegExp, string]> = [
   // period, so `…: 12m 4s.` folded to `<ELAPSED>` while `…: unavailable` kept a different length — a
   // one-character difference between a request and a tape recorded minutes apart, and enough to fail the
   // whole leg. Fold the form, not a guess at its value's punctuation.
-  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*[^\n"]+/g, '$1: <ELAPSED>'],
+  // The value is a DURATION, so fold exactly one: `unavailable` or `12m 4s`-shaped tokens, optional
+  // period. The earlier `[^\n"]+` class ate everything to the next quote — inside a plot-note excerpt
+  // that swallowed the `assistant: …` segment after it (#178, measured), and in prose it eats genuine
+  // text. A precise value class needs no boundary lookahead at all.
+  [/(Elapsed since the preceding (?:model-visible message|step context)):\s*(?:unavailable|(?:\d+\s*[hms]\s*)+)\.?/g, '$1: <ELAPSED>'],
   // CHAPTER-COUNT-BLIND (#56, measured 2026-10-27): the checkpoint notice states how many chapters exist in
   // THIS session's archive, which auto-save timing decides — 8 on one run, 2 on the next, for the same
   // journey. The byte diff proved `heavy`'s replay died on exactly that count at char 729 while its system
@@ -143,6 +147,34 @@ const VOLATILE: Array<[RegExp, string]> = [
   // artifact, masked like the AGENTS block; the surrounding product turns
   // still match exactly.
   [/Current runtime context\.[\s\S]*?(?=<\/system-reminder>|$)/gi, '<RUNTIME-BLIND>'],
+  // EMBEDDED-RUNTIME-BLIND (#178, measured on the 2026-10-30 CI miss): when an injection is serialized
+  // INSIDE another message — the plot-note aux call embeds the whole conversation as text — the mask above
+  // fires but leaves its residue (`user: <RUNTIME-BLIND>`, optionally with the closing tag) inside the
+  // embedding string, and whether that residue exists at all depends on WHEN the host injected relative to
+  // elicitation: machine timing, not journey content. The standalone-message drop cannot reach inside a
+  // string, so the residue is dropped here, symmetrically on both sides (stored prefixes re-substitute at
+  // load). Must run AFTER the mask it cleans up after.
+  // mid-excerpt injection (closing tag present): the mask fired, drop the residue whole.
+  [/user: <RUNTIME-BLIND><\/system-reminder>\s*/g, ''],
+  // end-of-excerpt injection (no closing tag): the mask's lazy run went to $ and swallowed the JSON
+  // envelope with it — restore exactly those two bytes so a machine whose injection had not landed
+  // yet at elicitation time normalizes IDENTICALLY. Both measured shapes come from the CI dump
+  // (var/e2e-tape-diffs/000.json, 2026-10-30: divergence at char 1671 of 1673, the residue being
+  // precisely `user: <RUNTIME-BLIND>`). A `"`-lookahead variant of the mask itself was tried first and
+  // REVERTED: it stopped the fold at quotes inside the snapshot, which broke the presence-volatile DROP
+  // predicate for standalone injections and MISSed all nine legs at msg5 on CI — folds are corpus-shape
+  // changes; this pair is a no-op on every tape that does not embed the residue (verified: 0 marker
+  // occurrences across the other eight legs' entries).
+  [/user: <RUNTIME-BLIND>\s*$/g, '"}'],
+  // TIME-BLIND (#178, measured on the third CI miss of 2026-10-30): the host's time-context snapshot
+  // ("Time sampled while preparing turn N, step M: …") is injected by wall-clock timing — a cold CI boot
+  // gets one at turn 1 where the warm recording machine did not, so the runner's prefix carried an extra
+  // element the tape never held (incoming 15, census max 16, candidates []). Exactly the presence
+  // volatility the runtime snapshots already drop for; the bound is the next role segment, a closing
+  // tag, or end-of-string, so an embedded occurrence cannot eat the conversation after it.
+  [/Time sampled while preparing turn \d+, step \d+:[\s\S]*?(?=<\/system-reminder>|\buser:|\bassistant:|\bsystem:|$)/g, '<TIME-BLIND>'],
+  [/user: <TIME-BLIND>\s*$/g, '"}'],
+  [/user: <TIME-BLIND>\s*/g, ''],
   // WS-BLIND (measured 2026-09-24, the hosted-CI miss family): the SYSTEM
   // PROMPT itself states the machine's live paths — 'Your working directory
   // is /home/…' and 'the DSH harness implementation checkout is at
@@ -222,7 +254,7 @@ export function substituteAll(str: string): string {
   // array element. Restoring the closing quote+brace lets the existing
   // noise filter drop the message on EVERY machine; messages with genuine
   // text never match this token-only shape, so real content is untouchable.
-  t = t.replace(/^(\{"role":"(?:user|system)","content":")((?:\s|<\/?system-reminder>|<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND)>)*<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND)>)$/, '$1$2"}')
+  t = t.replace(/^(\{"role":"(?:user|system)","content":")((?:\s|<\/?system-reminder>|<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND|TIME-BLIND)>)*<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND|TIME-BLIND)>)$/, '$1$2"}')
   // PRESENCE-volatile injections (skill-catalog change notices, AGENTS
   // re-injects, runtime-context snapshots) may exist in one run's transcript
   // at a position and be entirely absent in another's — equalizing their
@@ -230,7 +262,7 @@ export function substituteAll(str: string): string {
   // message consisting ONLY of such markers is dropped from matching (''),
   // and both array sides filter empties. Real conversation text can never
   // reduce to bare markers, so no genuine message is ever dropped.
-  return /^\{"role":"(?:user|system)","content":"(?:\s|<\/?system-reminder>|<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND)>)*"\}$/.test(t) ? '' : t
+  return /^\{"role":"(?:user|system)","content":"(?:\s|<\/?system-reminder>|<(?:SKILL-CATALOG|AGENTS-BLIND|RUNTIME-BLIND|TIME-BLIND)>)*"\}$/.test(t) ? '' : t
 }
 /** canonical form of a message OBJECT: one stringify + substitutions. */
 /**

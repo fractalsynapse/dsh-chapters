@@ -25,7 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import {
   renderRuleFile, rulePath, collectMirrorRules, appendRuleStatusFact, appendRulePinFact, loadRulePins,
-  collectStoreRules, loadRuleStatusFacts, sessionRuleActive, buildRulesSection, revokedRuleIds,
+  collectStoreRules, loadRuleStatusFacts, sessionRuleActive, buildRulesSection, revokedRuleIds, parseRuleFile,
   type RuleRecord, type RuleStatus,
 } from './rules.ts'
 import type { ProjectRecord } from './sync.ts'
@@ -70,7 +70,7 @@ export interface RulesIo {
 
 export interface RulesReply { kind: 'success' | 'error'; text: string }
 
-const HELP = 'usage: /chapters-rule add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | active | approve <id> | revoke <id> | pin <id> | unpin <id> | model [<provider/model|clear>] | conflicts'
+const HELP = 'usage: /chapters-rule add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | model [<provider/model|clear>] | conflicts'
 
 /** one row per rule, both tiers, with the effective status of THIS machine */
 interface RuleRow {
@@ -209,6 +209,71 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
     if (rows.length === 0) return { kind: 'success', text: scope === 'all' ? 'no rules match' : `no ${scope}-tier rules match` }
     const text = rows.map((r) => `${r.id.padEnd(12)} ${r.scope.padEnd(8)} ${(r.scope === 'session' ? (r.status === 'revoked' ? 'revoked' : (r.active === true ? 'active' : (r.reviewOnly === true ? 'review   ' : 'inactive'))) : r.status).padEnd(10)} ${(r.pinned ? 'pin ' : '    ')}${r.category.padEnd(14)} ${r.title}`).join('\n')
     return { kind: 'success', text: `id           scope    status     pin   category       title\n${text}` }
+  }
+
+  // #174: `view` is the reading surface `approve` was missing. `list` shows titles, and a title is the
+  // first sentence cut at 60 chars — enough to find a rule, never enough to judge one. Everything here
+  // renders in full: the body is the POINT (never truncated — the hard rule is "refuse with numbers",
+  // and a reading verb that clips is neither), plus identity, this machine's effective status, and the
+  // session-tier warrant (basis/reviewOnly/active) the approve decision is supposed to weigh.
+  if (verb === 'view') {
+    let id = parts[1] ?? ''
+    if (id === '') return { kind: 'error', text: `view needs a rule id (see /chapters-rule list). ${HELP}` }
+    if (!id.includes('/')) id = `${io.harnessId}/${id.padStart(3, '0')}`
+    const rows = await known()
+    const row = rows.find((r) => r.id === id)
+    if (row === undefined) return { kind: 'error', text: `no rule ${id} in project ${project.slug} — unknown id (list shows what exists)` }
+    const rec = io.store.getRule(id)
+    // Locate the file for the fields the flattened row does not carry (authoredAt, derivedFrom,
+    // chapter): domain-record path first, then the mirror's relPath, then the store's number prefix.
+    // A rule known ONLY from the registry (pre-sync, no file here) must then SAY its body is absent —
+    // rendering an empty string as if it were the rule is the lie this verb exists to prevent.
+    const num = id.split('/')[1] ?? ''
+    let fileText: string | null = null
+    let shownPath = rec?.path ?? ''
+    const tryRead = (abs: string): void => {
+      if (fileText !== null) return
+      try { fileText = fs.readFileSync(abs, 'utf8'); if (shownPath === '') shownPath = abs } catch { /* next candidate */ }
+    }
+    if (shownPath !== '') tryRead(path.isAbsolute(shownPath) ? shownPath : path.join(cwd, shownPath))
+    if (fileText === null) {
+      const mir = collectMirrorRules(mirror, project.projectKey, io.harnessId).find((r) => r.id === id)
+      if (mir !== undefined) { tryRead(path.join(mirror, mir.relPath)); if (shownPath === '') shownPath = mir.relPath }
+    }
+    if (fileText === null) {
+      try {
+        const hit = fs.readdirSync(path.join(storeDir, 'rules', io.harnessId)).find((f) => f.startsWith(`${num}-`))
+        if (hit !== undefined) tryRead(path.join(storeDir, 'rules', io.harnessId, hit))
+      } catch { /* no store rules dir on this machine */ }
+    }
+    const parsed = fileText !== null ? parseRuleFile(fileText) : null
+    const authoredAt = rec?.at ?? (/^authoredAt: "?(.+?)"?\s*$/m.exec(fileText ?? '')?.[1] ?? '')
+    const source = row.sourceSession !== '' ? row.sourceSession : (rec?.sourceSession ?? parsed?.sourceSession ?? '')
+    const basis = row.basis ?? (parsed !== null && parsed.basis !== 'human' ? parsed.basis : undefined)
+    const derivedFrom = rec?.derivedFrom ?? (parsed !== null && parsed.derivedFrom !== 'human' ? parsed.derivedFrom : undefined)
+    const chapter = rec?.chapter ?? (parsed !== null && parsed.chapter > 0 ? parsed.chapter : undefined)
+    let body = row.body.trim() !== '' ? row.body.trim() : (parsed?.body.trim() ?? '')
+    const lines: string[] = [`rule ${row.id} — ${row.scope} tier`]
+    lines.push(`category:   ${row.category}`)
+    lines.push(`title:      ${row.title}`)
+    if (row.scope === 'session') {
+      lines.push(`status:     ${row.status === 'revoked' ? 'revoked (on this machine)' : row.reviewOnly === true ? `proposed — held for REVIEW (inert here until: /chapters-rule approve ${row.id})` : row.status}`)
+      lines.push(`active:     ${row.active === true ? 'yes (binds this session tree, its continuations, and its subagents)' : 'no'}`)
+    } else {
+      lines.push(`status:     ${row.status} (on THIS machine — other machines curate independently)`)
+    }
+    if (basis !== undefined) lines.push(`basis:      ${basis}${basis === 'inferred' ? ' — the model wrote this; you never said it' : ''}`)
+    lines.push(`pinned:     ${row.pinned ? 'yes (renders into every rebuilt head regardless of caps)' : 'no'}`)
+    if (derivedFrom !== undefined || chapter !== undefined) {
+      lines.push(`derived:    ${derivedFrom ?? 'model'}${chapter !== undefined ? `, mined from chapter ${String(chapter)}` : ''}`)
+    }
+    lines.push(`authored:   ${authoredAt === '' ? '(timestamp not on this machine)' : authoredAt}${source === '' ? '' : ` from ${source}`}`)
+    if (shownPath !== '') lines.push(`path:       ${shownPath}`)
+    lines.push('')
+    lines.push(body === '' ? 'body: NOT ON THIS MACHINE — the rule is known from the registry, but its file has not synced here. Run /chapters-status (sync) or view it on the machine that authored it; nothing was hidden, there is nothing local to show.' : body)
+    lines.push('')
+    lines.push(`actions:    /chapters-rule approve ${row.id} | revoke ${row.id} | pin ${row.id} — approve/revoke are THIS machine's curation facts; the file bytes are write-once`)
+    return { kind: 'success', text: lines.join('\n') }
   }
 
   if (verb === 'active') {

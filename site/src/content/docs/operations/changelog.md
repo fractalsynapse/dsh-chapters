@@ -6,6 +6,41 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.3 — 2026-10-30 · the model settings became usable: discover them, read what they govern, and watch all three work
+
+A small release with one theme — the three model-driven activities (enrichment, rules mining, prompt suggestions)
+went from *configurable* to *operable*, and the pipeline that guards them stopped having corners.
+
+**`/chapters-models` (#173).** The three keys all take `provider/model` routes and nothing in the product said which
+identifiers this host accepts. Now: providers → advertised models as paste-ready ids → one exact route's context
+window and reasoning efforts, with each key's current value and its setter in the footer. Two honesty rules it never
+drops: catalog membership is advisory (the host routes unlisted ids; an empty catalog means "no selection offered",
+not "nothing works"), and unadvertised capabilities are reported absent, never guessed. It is also the first feature
+to move the prompt-byte anchor — `corpus:check` refused at build time exactly as #157 designed, and the nine-leg
+corpus was re-recorded against the new bytes rather than smuggled past the gate.
+
+**`/chapters-rule view <id>` (#174).** `list` shows titles — the first sentence cut at 60 characters — so a mined rule
+could never be read on the command surface, and `approve` asked for a verdict on unseen text. `view` renders one rule
+completely: full body, identity, this machine's effective status, pin, and the session-tier warrant (`active`,
+held-for-`REVIEW`, and `basis: stated` vs `inferred` — with the caveat that an inferred rule is the model's, never
+yours). A registry-only rule whose file hasn't synced says so instead of rendering an empty body.
+
+**All three activities verified live (#175).** A new live-class leg runs against the real provider and asserts durable
+artifacts: a mined rule with an honest `stated` basis (the quote gate checked the model's quote against human bytes
+only), enrichment frontmatter written by a real completion with the verbatim body byte-identical, `view` reading the
+mined rule back in full through the durable log, and a `/chapters-models`-printed identifier surviving the round trip
+into the enrichment setter. The leg is excluded from the model-free acceptance chain by design, and every claim says
+which class covers it.
+
+**The suite corpus stopped racing the machine (#178).** Its journey's turn count had been a function of model latency:
+the spec's fork click cut live tool-rounds mid-flight, so recordings held dangling `tool_calls` tails (audit: 5 of 17
+entries) that instant replay then outran — CI's msg-5/15/17 misses, each fixed layer revealing the next. The opening
+turn is now single-round by construction, two matcher folds landed from CI's own miss-dump bytes (embedded
+runtime/time-context injection residue, and an elapsed-duration fold that ate `assistant:` segments inside plot-note
+excerpts), and time-context snapshots joined the presence-volatile drops. **The acceptance job is blocking again** —
+#92 made it advisory "until its evidence landed"; the evidence landed, and the interim's cost was measured: a poisoned
+corpus failed acceptance while the run-level conclusion still read `success`.
+
 ### 0.2.2 — 2026-10-29 · the stable channel gets relief back, and the release line learns to check itself
 
 The stable of the `0.2.2-dev` line: everything in `0.2.2-dev.2` — relief restored for models under 65,536 tokens (the

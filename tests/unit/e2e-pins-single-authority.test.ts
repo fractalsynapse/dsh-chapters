@@ -22,7 +22,7 @@ import { RIG_PINS, rigEnv, projectFromArgv, applyRigEnv } from '../../tests/e2e/
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 
 const EXPECTED: Record<string, Record<string, string>> = {
-  suite: { E2E_PORT: '41731', E2E_THRESHOLD: '0.75', E2E_NO_PLOT: '1' },  // #130: relief live, plot aux suppressed — see rig-pins.ts
+  suite: { E2E_PORT: '41731', E2E_THRESHOLD: '0.45' },  // #178: 0.75 sat on the machine-identity cliff (CI msg-5 miss, local door flake); 0.45 puts relief firmly inside the journey. noElicitedPlot dropped — this host issues plot turns anyway (measured: 3 captured through the suppression), and #130's hang was suppression COMBINED with a low ratio.
   // heavy: trigger 0.5 → 0.9 (#56, 2026-10-27) so its compaction boundary lands at the same message index under
   // record and replay; `maxRetries: 3` because its post-compaction turn needs the host to re-issue a refused
   // request. Both are declared here as an INDEPENDENT restatement of the table — that is this block's purpose:
@@ -44,7 +44,12 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // #138: the live goal journeys ride their OWN project and regime — bar on, aux machinery pinned off, its own port and tape dir.
   // Deliberately absent from `scripts/chain-replay.sh`: an armed goal's round count is machine latency, so this project is
   // verified against the live provider under a wall clock, never against a tape (`prompt-goal-live.spec.ts`).
-  'prompt-goal-live': { E2E_TAPE: 'prompt-goal-live', E2E_PORT: '41741', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' }
+  'prompt-goal-live': { E2E_TAPE: 'prompt-goal-live', E2E_PORT: '41741', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' },
+  // #175: the three model activities verified against the REAL provider — enrichment ON (mining rides the
+  // annotation call), own port and tape label, absent from chain-replay.sh by design, and the spec refuses
+  // to run under E2E_MODEL=replay. Its tape directory is gitignored: a live leg's recordings are a
+  // byproduct of riding the record proxy, never corpus.
+  'model-activities-live': { E2E_TAPE: 'model-activities-live', E2E_PORT: '41742', E2E_THRESHOLD: '0.9', E2E_ENRICH: '1', E2E_NO_AUX_MODEL: '1' },
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {
@@ -137,15 +142,19 @@ test('the e2e typecheck ratchet exists, is wired, and only ratchets down', () =>
  * this, `continue-on-error: true` would be a silent permanent condition — the same drift that let a
  * skipped journey look like a pass in the first place.
  */
-test('the advisory acceptance gate is scoped, sourced, and reversible (#92)', () => {
+test('the acceptance gate is BLOCKING — no ci.yml job may be advisory (#92 restored by its own condition, #178)', () => {
+  // #92 made acceptance advisory on 2026-10-24 ("ship first, prove second") UNTIL its evidence landed, and the
+  // previous row pinned that interim shape. The evidence landed (nine legs green on CI run after run, the corpus
+  // prompt-anchored, corpus:check blocking), and #178 then measured what the interim was costing: a poisoned suite
+  // corpus FAILED acceptance, the run-level conclusion still read `success`, and a merge to staging proceeded on
+  // that reading. This row now pins the restored state. Re-advisoring a job is not forbidden — it just requires
+  // editing THIS row with a new issue citation, and that friction is the design (#92's own lesson: a weakened
+  // gate is written down where it can be found, never buried in a YAML diff).
   const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
   const advisory = ci.split('\n').filter((l) => /continue-on-error:\s*true/.test(l))
-  assert.equal(advisory.length, 1, `exactly one job may be advisory, found ${String(advisory.length)}: ${JSON.stringify(advisiveTrim(advisory))}`)
-  assert.match(ci, /issues\/92/, 'the weakening must cite the decision that authorized it')
-  const acceptance = /acceptance[^\n]*\n[\s\S]{0,4000}?continue-on-error: true/.test(ci)
-  assert.ok(acceptance, 'and the advisory line must belong to the acceptance job, not to another')
-  const deterministic = ci.slice(ci.indexOf('typecheck · build · unit + integration'), ci.indexOf('acceptance'))
-  assert.doesNotMatch(deterministic, /continue-on-error/, 'the deterministic plane is never advisory')
+  assert.equal(advisory.length, 0, `no job may be advisory without amending this row and citing the issue that authorizes it; found ${String(advisory.length)}: ${JSON.stringify(advisory)}`)
+  assert.match(ci, /name: acceptance — nine tape-replay legs/, 'the acceptance job must EXIST to be blocking — deleting it is not restoring the gate')
+  assert.match(ci, /issues\/92/, 'the restoration comment cites the decision it completes')
 })
 
 const advisiveTrim = (lines) => lines.map((l) => l.trim().slice(0, 40))
@@ -185,7 +194,10 @@ test('the e2e chain covers every leg that has a tape', () => {
     .filter((d) => fs.statSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape', d)).isDirectory())
     .filter((d) => fs.readdirSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape', d)).some((f) => f.endsWith('.json')))
   // `default` is the explore-dev leg, which deliberately has no pin (no regime of its own to assert).
-  const excluded = ['default']
+  // The two LIVE legs are excluded because their tape directories are byproducts of riding the record
+  // proxy against the real provider (#175, gitignored) — a live leg is never a chain leg, and a local
+  // run of one must not trip this gate on the developer's machine.
+  const excluded = ['default', 'prompt-goal-live', 'model-activities-live']
   // Whole tokens, not substrings: `--project=prompt-off` CONTAINS `--project=prompt`, so `includes` would
   // report the bar's own leg as covered by its negative twin. Caught by mutation-testing the gate below.
   const named = new Set(chain.split(/\s+/).filter((t) => t.startsWith('--project=')).map((t) => t.slice('--project='.length)))

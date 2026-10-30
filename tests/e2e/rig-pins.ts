@@ -42,7 +42,16 @@ export const RIG_PINS: Record<string, RigPin> = {
   // #130 matrix cell: relief must stay live (the leg's fork door comes from a real continuation) while the
   // plot aux turn is suppressed, because that turn is what CI issues and this host does not. 0.5 + suppression
   // hangs the boot; 0.75 is the ratio the committed corpus was captured at.
-  suite: { port: 41731, threshold: '0.75', noElicitedPlot: true },
+  // #178, measured 2026-10-30: at 0.75 the compaction crossing sits on a few-hundred-byte cliff of
+  // machine identity (workspace path length, TZ spelling) — my re-record caught a checkpoint the CI
+  // runner's byte budget never produced, and the leg MISSed at msg5 with a stored checkpoint message
+  // where the runner had its plain first turn. 0.45 puts relief FIRMLY inside the journey on either
+  // machine (the heavy/fanout reasoning). The #130-era note "0.5 + suppression hangs the boot" is
+  // about suppression COMBINED with a low ratio; `noElicitedPlot` is dropped because tonight's record
+  // proved this host issues the plot turns anyway (three plot-note calls captured) — the suppression
+  // was stale, and with it gone the plot aux calls are ordinary taped requests (their embedded
+  // injection residue is folded symmetrically since #178).
+  suite: { port: 41731, threshold: '0.45' },
   // heavy's post-compaction turn needs the host to re-issue a refused request: with retries suppressed it
   // dies at step 4 (`STILL-HERE` never answers), with them it passes in ~53s. Declared as a pin, not a global.
   // #132: same margin reasoning as `fanout`. At 0.9 the relief crossing lands where a few hundred bytes of
@@ -73,6 +82,11 @@ export const RIG_PINS: Record<string, RigPin> = {
   // (`round-limit` → blocked → the strip renders nothing), so there is no observable armed moment. The claims are
   // real and stay tested — on the real provider, under a wall-clock bound — they are simply not tape-verifiable.
   'prompt-goal-live': { port: 41741, threshold: '0.9', prompt: true, noAuxModel: true },
+  // #175: the three model activities (enrichment, mining, models→setter) verified against the REAL
+  // provider — a tape replays canned completions, and the mining claim needs a real one. Enrichment
+  // ON (mining rides the annotation call), own port like every journey. NOT in chain-replay.sh's list;
+  // the model-free acceptance job does not cover it, and the spec refuses to run under E2E_MODEL=replay.
+  'model-activities-live': { port: 41742, threshold: '0.9', enrich: true, noAuxModel: true },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */

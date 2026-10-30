@@ -58,7 +58,14 @@ test('the knowledge loop end to end over a real git remote, from the browser', a
     // the turn fine — its own log proves it — while the view stays on an
     // older session), so re-checking a row action here tested the view's
     // navigation history, not this loop.
-    const sid = await newSessionWithTurn(page, 'Which file defines the chapter composer merge rule? Use only file reads (no shell commands); answer with the file and the rule in one sentence.', 720_000, false)
+    // #178: the journey's opening turn is SINGLE-ROUND by construction — the enrich leg's proven
+    // 'one sentence, no tools' shape. The file-reads version raced: live-model latency decided how many
+    // tool rounds completed before the fork click cut the turn, so record left dangling `tool_calls`
+    // tails (audit: 5 of 17 entries) and instant replay responses outran the recording into requests
+    // the tape never held — CI's msg-14/17 MISSes. No assertion here depends on tool use; the claims
+    // are link/status/door/child/push mechanics, and a bounded turn makes them deterministic. The turn
+    // count is now the spec's, not the machine's — the AGENTS rule for async drivers, applied to journeys.
+    const sid = await newSessionWithTurn(page, 'Which file defines the chapter composer merge rule? Answer in one sentence without calling any tools.', 720_000, false)
 
     // ---- 1. link through the composer. The immediate pass clones the (empty)
     // remote and finds NOTHING to publish — a pristine workspace at link time
