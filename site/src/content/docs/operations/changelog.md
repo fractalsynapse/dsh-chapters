@@ -6,6 +6,20 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.6 — 2026-10-30 · the objective rides whole
+
+A one-line correctness patch, found by auditing our own shipped claims against the code. `0.2.4` documented the goal
+directive as carrying the objective **whole** — and `goalDirectiveOf` was still slicing it at 600 characters. Real
+objectives exceed that (this repo's own long-running session operated under a ~1,200-char one), so the suggestion
+director was steering against **half an objective**: the exact silent-truncation class the zero-truncation invariant
+exists to forbid, hiding in the one protected block that never faces the drop ladder.
+
+The fix is the deletion of the slice. Size remains the assembly's job and it already does it: the goal block is
+protected, and a protected set that cannot fit **refuses with the numbers** — a refusal the bar shows, never a
+directive quietly cut in half. Red-first row: a ~1,280-char objective must appear verbatim and complete; it fails on
+the slice and passes on its removal. The goal-free branch of the directive is byte-identical, so no tape moved —
+proven by the `prompt` leg replaying green, not assumed.
+
 ### 0.2.5 — 2026-10-30 · the bar stops littering your history
 
 A patch with one job. After `0.2.4` the maintainer found session history "littered with multiple `chapters-prompt`
