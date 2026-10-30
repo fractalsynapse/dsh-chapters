@@ -503,6 +503,10 @@ activation is derived and needs no approval (§7.5).
   engine; 24 such pairs observed in the r29 session's durable log from the e2e suite):
   - `/chapters-rule list` (`--proposed`, `--category <name>`) — table: id, status, category,
     one-line text, provenance.
+  - `/chapters-rule view <id>` — ONE rule in full: the complete body (untruncated — `list` shows only
+    the creation-time title, the first sentence cut at 60 chars), identity, this machine's effective
+    status, pin, and for session rules `active`/`reviewOnly`/`basis` (stated vs inferred). A rule that
+    cannot be read cannot be approved; added 2026-10-29 at the maintainer's direction (#174).
   - `/chapters-rule approve <id>` — `proposed → core`.
   - `/chapters-rule revoke <id>` — core back to the file, out of the notice.
 - **`core` is the only tier that renders into the continuation notice** (§7.3).
