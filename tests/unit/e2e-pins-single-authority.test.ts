@@ -44,7 +44,12 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // #138: the live goal journeys ride their OWN project and regime — bar on, aux machinery pinned off, its own port and tape dir.
   // Deliberately absent from `scripts/chain-replay.sh`: an armed goal's round count is machine latency, so this project is
   // verified against the live provider under a wall clock, never against a tape (`prompt-goal-live.spec.ts`).
-  'prompt-goal-live': { E2E_TAPE: 'prompt-goal-live', E2E_PORT: '41741', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' }
+  'prompt-goal-live': { E2E_TAPE: 'prompt-goal-live', E2E_PORT: '41741', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' },
+  // #175: the three model activities verified against the REAL provider — enrichment ON (mining rides the
+  // annotation call), own port and tape label, absent from chain-replay.sh by design, and the spec refuses
+  // to run under E2E_MODEL=replay. Its tape directory is gitignored: a live leg's recordings are a
+  // byproduct of riding the record proxy, never corpus.
+  'model-activities-live': { E2E_TAPE: 'model-activities-live', E2E_PORT: '41742', E2E_THRESHOLD: '0.9', E2E_ENRICH: '1', E2E_NO_AUX_MODEL: '1' },
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {
@@ -189,7 +194,10 @@ test('the e2e chain covers every leg that has a tape', () => {
     .filter((d) => fs.statSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape', d)).isDirectory())
     .filter((d) => fs.readdirSync(path.join(ROOT, 'tests', 'fixtures', 'model-tape', d)).some((f) => f.endsWith('.json')))
   // `default` is the explore-dev leg, which deliberately has no pin (no regime of its own to assert).
-  const excluded = ['default']
+  // The two LIVE legs are excluded because their tape directories are byproducts of riding the record
+  // proxy against the real provider (#175, gitignored) — a live leg is never a chain leg, and a local
+  // run of one must not trip this gate on the developer's machine.
+  const excluded = ['default', 'prompt-goal-live', 'model-activities-live']
   // Whole tokens, not substrings: `--project=prompt-off` CONTAINS `--project=prompt`, so `includes` would
   // report the bar's own leg as covered by its negative twin. Caught by mutation-testing the gate below.
   const named = new Set(chain.split(/\s+/).filter((t) => t.startsWith('--project=')).map((t) => t.slice('--project='.length)))
