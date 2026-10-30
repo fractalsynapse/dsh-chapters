@@ -18,7 +18,7 @@ const PROMPT_TEXT = 'Add a regression row that fails before the fix and passes a
 function harness (over: Partial<{
   suggest: (s: unknown) => Promise<{ ok: boolean; text: string; quiet?: boolean }>
   effective: () => { spec: string; source: 'override' | 'config' | 'unset' }
-  limits: () => { maxChars: number; contextChars: number }
+  limits: (route: unknown) => Promise<{ maxChars: number; contextChars: number; sources: { maxChars: string; contextChars: string } }>
 }> = {}) {
   const defs = new Map<string, { handler: (i: { agent: unknown; rawInput?: string }) => Promise<{ kind: string; text?: string }> }>()
   const ctx = { logger: { warn: () => undefined, info: () => undefined }, get: () => ({ register: (d: { name: string }) => { defs.set(d.name, d); return () => undefined } }) }
@@ -32,7 +32,7 @@ function harness (over: Partial<{
       setModel: async () => undefined,
       suggest: over.suggest ?? (async () => ({ ok: true, text: PROMPT_TEXT })),
       statusLine: () => 'Prompt suggestions: ON',
-      limits: over.limits ?? (() => ({ maxChars: 240, contextChars: 4000 })),
+      limits: over.limits ?? (async () => ({ maxChars: 240, contextChars: 4000, sources: { maxChars: 'config', contextChars: 'config' } })),
     } as never,
   })
   const AGENT = { session: { id: 's-9', snapshotEvents: () => [

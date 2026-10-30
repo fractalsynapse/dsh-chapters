@@ -82,3 +82,33 @@ test('the authored message carries our producer kind and form — never the huma
   // `form: 'prompt-suggestion'` and forces any future variant to fail at the authorship boundary instead of
   // at row admission inside the host.
 })
+
+// #188 — the budget is a governor for open-ended iteration, not a guillotine for a goal.
+test('an ACTIVE goal suspends the round budget: the pursuit is bounded by the goal, never by promptMaxRounds', () => {
+  const fired: string[] = []
+  const loop = makePromptLoop({
+    followup: (id, text) => { fired.push(`${id}:${text}`) },
+    maxRounds: () => 2,
+    goalSignal: () => null,
+  })
+  loop.setArmed('s1', true)
+  const offer = (n: number): PromptSuggestionState => ({ status: 'ready', text: `step ${n}`, turnSeq: n, error: '', at: '', intent: 'worker-step', goalRevision: 1 })
+  const activeGoal = { phase: 'active' as const, activation: 'disarmed' as const, revision: 1 }
+  assert.equal(loop.maybeFire('s1', offer(1), activeGoal), true)
+  assert.equal(loop.maybeFire('s1', offer(2), activeGoal), true)
+  // budget spent (2 of 2) — but the goal is still being pursued, so round 3 FIRES:
+  assert.equal(loop.maybeFire('s1', offer(3), activeGoal), true, 'the budget must never cut off the pursuit of an active goal')
+  // a paused goal may resume: still goal-bounded
+  assert.equal(loop.maybeFire('s1', offer(4), { phase: 'paused', activation: 'disarmed', revision: 1 }), true)
+  // terminal phases hand control back to the budget — it was spent, so the loop stops now
+  assert.equal(loop.maybeFire('s1', offer(5), { phase: 'complete', activation: 'disarmed', revision: 1 }), false, 'a completed goal restores the budget, which is already spent')
+  assert.equal(fired.length, 4)
+})
+
+test('with NO goal the budget governs exactly as before', () => {
+  const loop = makePromptLoop({ followup: () => {}, maxRounds: () => 1, goalSignal: () => null })
+  loop.setArmed('s2', true)
+  const offer = (n: number): PromptSuggestionState => ({ status: 'ready', text: `step ${n}`, turnSeq: n, error: '', at: '', intent: 'worker-step', goalRevision: null })
+  assert.equal(loop.maybeFire('s2', offer(1), null), true)
+  assert.equal(loop.maybeFire('s2', offer(2), null), false, 'open-ended iteration stays bounded')
+})

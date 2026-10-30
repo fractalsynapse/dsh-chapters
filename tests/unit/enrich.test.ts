@@ -24,11 +24,14 @@ test('validator: fences and prose tolerated; malformed or empty schemas rejected
 
 test('topics: cleaned, deduped, bounded to 10; title/summary clamped', () => {
   const many = Array.from({ length: 25 }, (_, i) => `Topic-${i} ["weird"]`)
-  const r = parseEnrichResult(JSON.stringify({ title: 'T'.repeat(500), summary: 'S'.repeat(2000), topics: many }))!
+  // #188: SUMMARY_CAP 600 → 2400 (the summary is the chapter's guidance value now, not a blurb),
+  // and the fixture grows past the new cap so this row still proves CLAMPING, not just passing.
+  const r = parseEnrichResult(JSON.stringify({ title: 'T'.repeat(500), summary: 'S'.repeat(3000), topics: many }))!
   assert.equal(r.topics.length, 10)
   assert.ok(r.topics[0] === 'topic-0 weird'.replace(' ', ' '), `got ${r.topics[0]}`)
   assert.ok(!r.topics[0]!.includes('"') && !r.topics[0]!.includes('['))
-  assert.ok(r.title.length <= 160 && r.summary.length <= 600)
+  assert.ok(r.title.length <= 160 && r.summary.length <= 2400)
+  assert.ok(r.summary.includes('[truncated]'), 'the clamp stays LOUD — an announced cap, never a silent slice')
 })
 
 test('applyEnrich: null result is a pure no-op; same values+model idempotent; new model updates provenance chain', () => {

@@ -136,8 +136,14 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
       }
       if (state.turnSeq === null) return false
       if (s.firedFor === state.turnSeq) return false // one turn per offer, never a retry storm
+      // #188: the round budget is a governor for open-ended iteration, not a guillotine for a goal.
+      // While a goal exists (active OR paused — paused may resume), the pursuit is bounded by the
+      // GOAL's lifecycle: max_goal_rounds where the driver runs, complete/blocked/cleared where this
+      // loop displaced it. The suggestion budget must never cut the pursuit off before the objective.
+      // No goal, or a goal that reached a terminal phase: the budget applies exactly as before.
+      const goalBoundsIt = goal !== null && (goal.phase === 'active' || goal.phase === 'paused')
       const cap = deps.maxRounds()
-      if (s.fired >= cap) {
+      if (!goalBoundsIt && s.fired >= cap) {
         s.armed = 'disarmed'
         deps.warn?.(`prompt: autorun stopped for ${id} after ${String(cap)} rounds (promptMaxRounds) — re-arm to continue`)
         return false

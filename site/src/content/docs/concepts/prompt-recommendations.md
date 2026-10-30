@@ -121,13 +121,29 @@ re-derives every turn. Autorun drives the worker; your keystroke drives the obje
 
 ## What the model reads
 
-A bounded, deterministic slice — the same discipline as the enrichment input:
+The director cannot research — no tools, no session, one bounded call — so the input IS its whole
+world, and an ignorant director leads a stupid worker. The assembly (deterministic: same facts ⇒
+same bytes) carries, in order:
 
-- the goal directive, if a goal is active,
-- the session's chapter summaries (the TOC facts the registry already holds),
-- the live tail of the conversation (capped by `promptContextChars`),
-- nothing else. Host-injected context is defused before the cap; command results, notices,
-  and your private instruction files are not silently fed to a second model.
+- **the goal directive** when a goal is active — objective **whole**, because nothing the model
+  reads is ever truncated,
+- **the active plan**, if one governs the session,
+- **the core rules** in force — the same block a rebuilt head renders from,
+- **the chapter history**: every chapter on the **ancestor path** (a continuation mid-goal inherits
+  its lineage's history, not an empty list), each as **title + detailed summary + every plot line**
+  its span carries. Plots are the historical trajectory, extracted deterministically from the
+  archived bytes (`PLOT:` lines — zero model tokens), and the summaries are detailed because
+  enrichment writes them for exactly this reader (#188),
+- **the last turn**, whole: the human's request through the final response,
+- nothing else. Host-injected context is defused before assembly; command results, notices, and
+  your private instruction files are not silently fed to a second model.
+
+**Zero truncation is an invariant.** A sliced message is a hallucination invite, so the budget
+(`promptContextChars`) is enforced purely by a **drop ladder with announcements**: over budget, the
+OLDEST chapter drops first, and onward until the history fits — recent trajectory leads. The
+protected set (skeleton, goal, plan, rules, last turn) is never sliced; if it alone exceeds the
+budget the suggestion **refuses with the numbers** and the bar shows the reason. A refused
+suggestion costs one turn; a truncated one poisons the next.
 
 The model is also told the `GOAL:` protocol above, so it can mark a step that changes the objective.
 The answer must be a single imperative prompt of at most `promptMaxChars` characters. An
@@ -149,8 +165,11 @@ dsh-chapters is zero-inference (rendered from the log, indexed without a model).
   now three consumers: annotation, mined rules, recommendations);
 - **autorun multiplies the turns, not the calls**: each round is a real turn, so it costs what
   you would have spent running that prompt yourself, plus the one call that proposed it.
-  `promptMaxRounds` bounds how many rounds one arming may start, and re-arming does **not**
-  refresh the budget — arming cannot become an infinite loop.
+  `promptMaxRounds` bounds how many rounds one arming may start **when no goal is active**, and
+  re-arming does **not** refresh the budget — arming cannot become an infinite loop. With a goal,
+  the budget stands down: the pursuit is bounded by the goal's own lifecycle (complete, blocked,
+  cleared) and never cut off by the suggestion budget (#188). A blocked goal disarms autorun on
+  both planes, exactly like a completed one.
 
 ## Where it never goes
 
@@ -174,9 +193,10 @@ Syntax is at [§15 Commands](/reference/commands/), keys at
 | Key | Default | Meaning |
 |---|---|---|
 | `promptModel` | `''` | the defining model; **empty ⇒ the feature does not exist**. Setting it is the enable |
-| `promptContextChars` | 4000 | hard cap on the assembled input slice |
-| `promptMaxChars` | 240 | cap on the accepted answer; over-cap ⇒ retry once ⇒ refuse with numbers |
-| `promptMaxRounds` | 24 | how many turns one arming of autorun may start; re-arming does not refresh it |
+| `promptContextChars` | derived | budget for the assembled input. **Model-derived by default**: `contextWindow × promptContextRatio` at 4 chars/token when the prompt model's window resolves; this key is the fallback when no window is known, and `/chapters-prompt model <id> [maxChars] [contextChars]` stores an explicit pair beside the model |
+| `promptContextRatio` | 0.5 | share of the model's context window the derived budget takes — a 1M-window model and a 32K model get budgets 30× apart from one rule |
+| `promptMaxChars` | 4096 | cap on the accepted answer (was 240 — a cap that cannot carry a paragraph cannot carry an instruction); over-cap ⇒ retry once ⇒ refuse with numbers |
+| `promptMaxRounds` | 24 | how many turns one arming of autorun may start **with no active goal**; re-arming does not refresh it. An active goal bounds the loop by its own lifecycle instead (#188) |
 
 To look at the state rather than the bar: `/chapters-prompt state` prints the status, the
 model and where it came from, the autorun flag and rounds spent, the turn the offer belongs

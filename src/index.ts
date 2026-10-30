@@ -21,8 +21,8 @@
  *  - Config uses schemastery (default import) — plain specs are for tool
  *    parameters, zod for domain records; never mix.
  */
-import { writeFileSync, existsSync, readdirSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { writeFileSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, isAbsolute } from 'node:path'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import Schema from '@deepseek-ai/schemastery'
@@ -35,7 +35,9 @@ import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
-import { createPromptSurface, promptChaptersOf, PROMPT_SETTING_KEY } from './prompt.ts'
+import { carryActivePlan } from './plans.ts'
+import { buildRulesSection } from './rules.ts'
+import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } from './prompt.ts'
 import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
 import { makePromptRoundRunner } from './prompt-runner.ts'
@@ -180,6 +182,8 @@ export interface Config {
   promptContextChars: number
   /** #71: cap on the recommendation itself; over-cap ⇒ retry once ⇒ refuse (never truncate). */
   promptMaxChars: number
+  /** #188: share of the prompt model's context window the derived input budget takes. */
+  promptContextRatio: number
   /** #113: how many turns an armed autorun may start before it stops and says so. Re-arming does NOT
    * refresh it, so arming cannot become an infinite loop; the budget is per process, like the flag. */
   promptMaxRounds: number
@@ -296,8 +300,14 @@ export const Config = Schema.object({
   // rides the existing enrichmentMaxTokens budget — one auxiliary budget, now
   // three consumers (annotation, mined rules, recommendations).
   promptModel: Schema.string().default(''),
-  promptContextChars: Schema.number().default(4000),
-  promptMaxChars: Schema.number().default(240),
+  // #188: the caps belong to the model. contextChars is now the NO-WINDOW FALLBACK — when the prompt
+  // model is set through /chapters-prompt model, the budget derives from its real context window
+  // (window × promptContextRatio at 4 chars/token); 32000 keeps a 32K-class model whole when no
+  // window resolves. maxChars rises 240 → 4096: a cap that cannot carry a paragraph cannot carry an
+  // instruction (the maintainer's number, 2026-10-30).
+  promptContextChars: Schema.number().default(32000),
+  promptMaxChars: Schema.number().default(4096),
+  promptContextRatio: Schema.number().default(0.5),
   promptMaxRounds: Schema.number().default(24),
   /** #117: how many lines a `/chapters-repair` report may print. The finding COUNT always leads; */
   repairReportMaxLines: Schema.number().default(60),
@@ -450,11 +460,72 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       getSetting: (k) => store.getSetting(k),
       putSetting: (k, v) => store.putSetting(k, v),
       deleteSetting: (k) => store.deleteSetting(k),
-      chaptersOf: async (sessionId) => promptChaptersOf(await store.get(sessionId)),
+      // #188: the ANCESTOR PATH's chapters with plots, not the live row alone — a continuation
+      // mid-goal inherits its lineage's trajectory. Bodies are read from the archive itself
+      // (deterministic, zero model tokens); an unreadable body degrades to no plots, never to an
+      // assembly failure.
+      chaptersOf: async (session) => {
+        const rows: { chapters: ChapterRecord[] }[] = []
+        const seen = new Set<string>()
+        let cur: string | null = session.id
+        while (cur !== null && !seen.has(cur)) {
+          seen.add(cur)
+          const row = await store.get(cur)
+          if (row === undefined) break
+          rows.unshift(row)
+          cur = row.parentSession
+        }
+        const cwd = session.cwd ?? ''
+        return promptChaptersForLineage({
+          rows,
+          readBody: (rel) => {
+            try { return readFileSync(isAbsolute(rel) ? rel : join(cwd, rel), 'utf8') } catch { return null }
+          },
+        })
+      },
+      // #188: the caps derive from the selected model's REAL window; null falls back to config loudly.
+      resolveWindow: async (route) => {
+        const info = await ctx.llm?.resolveModelInfo(route.provider, route.model).catch(() => undefined)
+        return info?.context?.contextWindow ?? null
+      },
+      // #188: the standing orders a rebuilt head would render — the SAME builder and budget, so the
+      // director and the worker can never operate under different rule sets. A degraded rules read
+      // degrades the suggestion (empty section); it never fails the assembly.
+      rulesOf: async (session) => {
+        try {
+          const cwd = session.cwd ?? ''
+          if (cwd === '') return ''
+          const project = projectForCwd(store.projects(), cwd)
+          if (project === undefined) return ''
+          const walk = await ruleAncestorSet({
+            seeds: [session.id],
+            registryAncestors: async (sid) => await ancestorSessionIds(async (x) => await store.get(x), sid),
+          })
+          const built = buildRulesSection(join(cwd, DEFAULT_CLONE_DIR), {
+            projectKey: project.projectKey,
+            harnessId: config.harnessId,
+            budgetTokens: config.coreRulesBudgetTokens,
+            storeDir: resolveStoreRoot(cwd, config.artifactStoreRoot),
+            ancestorSessions: walk.ancestors,
+          })
+          return 'text' in built ? (built as { text: string }).text : ''
+        } catch { return '' }
+      },
+      // #188: the operative plan via the SAME carry mechanism continuations seed with, budgeted at the
+      // context cap — its own announced clip (which names the archive chapter citing the full text)
+      // fires only if the plan alone would eat the entire budget.
+      planOf: async (session) => {
+        try {
+          const row = await store.get(session.id)
+          const docs = ((row as unknown as { planDocs?: unknown[] } | undefined)?.planDocs ?? []) as Parameters<typeof carryActivePlan>[0]
+          return carryActivePlan(docs, { maxChars: config.promptContextChars }) ?? ''
+        } catch { return '' }
+      },
       config: {
         model: config.promptModel,
         contextChars: config.promptContextChars,
         maxChars: config.promptMaxChars,
+        contextRatio: config.promptContextRatio,
       },
       conversationRoute: () => {
         if (hostRoute !== null) return hostRoute
@@ -748,6 +819,9 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           const goal = readActiveGoal(events)
           const r = await prompt.suggest({
             id: session.id,
+            // #188: the workspace the chapter paths resolve against — without it the lineage walk
+            // cannot read chapter bodies, and the plots (the trajectory) would silently vanish.
+            cwd: (session as { header?: { cwd?: string } }).header?.cwd ?? '',
             events,
             goalDirective: goalDirectiveOf(goal),
           })
