@@ -27,7 +27,7 @@
 import { createElement as h, useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 // The host's own tooltip bubble — a platform module served by the loader table,
 // external like react. Every action in this row labels through it.
-import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { withTooltip, nativeTitle } from './tooltip.ts'
 import { PromptDock } from './prompt-dock.ts'
 import { DOOR_ACTIONS, makeDoorRunner, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
 
@@ -107,6 +107,7 @@ function makeDoorAction(door: DoorAction) {
     const button = h('button', {
       type: 'button',
       'aria-label': door.label,
+      ...nativeTitle(door.label),
       disabled: busy,
       onClick,
       className: 'dsh-chapters_forkAction',
@@ -114,7 +115,7 @@ function makeDoorAction(door: DoorAction) {
       h('svg', { viewBox: '0 0 16 16', width: '15', height: '15', fill: 'currentColor', 'aria-hidden': 'true' },
         h('path', { d: door.iconPath })))
     return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
-      h(Tooltip, { label: door.label, side: 'bottom' as const, children: button as ReactElement<Record<string, unknown>> }),
+      withTooltip(door.label, button as ReactElement<Record<string, unknown>>),
       note !== null
         ? h('span', { className: 'dsh-chapters_forkNote' }, note)
         : null)

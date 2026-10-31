@@ -21,12 +21,12 @@
  */
 
 import { createElement as h, useCallback, useEffect, useReducer, useRef, useState, type ReactElement } from 'react'
-import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { withTooltip, nativeTitle } from './tooltip.ts'
 import {
   BAR_RUN_COMMAND,
   deriveRunning,
   BAR_STATE_COMMAND,
-  pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, type PromptBarStatus,
+  pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, edgeKickDelayMs, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -60,7 +60,7 @@ export interface DockProps {
 const CSS = [
   // Metrics copied from the goal bar's measured module so the two rows read as one family: a 36px card,
   // host elevation + radius tokens, and the host's own composer width vars so it tracks the card above it.
-  '.dsh-chapters_promptDock{box-sizing:border-box;width:calc(100% - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));margin:0 auto}',
+  '.dsh-chapters_promptDock{box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));margin:0 auto}',
   '.dsh-chapters_promptBar{isolation:isolate;box-sizing:border-box;width:100%;border-radius:var(--dsw-radius-md);height:36px;box-shadow:var(--dsw-elevation-panel);border:0;align-items:center;gap:10px;padding:4px 5px 4px 12px;display:flex;position:relative}',
   '.dsh-chapters_promptBar::before{z-index:-1;border-radius:inherit;background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);content:"";pointer-events:none;position:absolute;inset:0}',
   '.dsh-chapters_promptExpanded::before{align-items:flex-start;position:absolute;inset:0}',
@@ -103,13 +103,13 @@ const Action = (props: { label: string; glyph: string; onClick: () => void; disa
   const button = h('button', {
     type: 'button', className: 'dsh-chapters_promptBtn', 'aria-label': props.label,
     ...(props.disabled === true ? { disabled: true } : {}),
-    ...(props.title !== undefined ? { title: props.title } : {}),
+    ...(props.title !== undefined ? { title: props.title } : nativeTitle(props.label)),
     onClick: props.onClick,
   }, props.glyph)
   // Props matched to the call `doors.ts` already makes successfully: the host Tooltip takes
   // { label, side, children } and nothing else that I have verified. Inventing extra props (portal, delayMs)
   // failed the overload on the first compile, which is the right way to learn it.
-  return h(Tooltip, { label: props.label, side: 'bottom' as const, children: button as ReactElement<Record<string, unknown>> })
+  return withTooltip(props.label, button as ReactElement<Record<string, unknown>>)
 }
 
 /** Run is allowed whenever there is an offer; AUTORUN is what the intent and the goal gate. Keeping the
@@ -190,6 +190,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // #193: the mount effect's reschedule handle, so the idle edge and the visibility edge can pull NOW
   // instead of waiting out a possibly-quiet cadence. Undefined while the poll is not mounted.
   const kick = useRef<(() => void) | undefined>(undefined)
+  // #211: when the last pull STARTED (a failed pull is still a rendered node — the floor counts it),
+  // and the pending debounced edge pull, which a rising edge cancels.
+  const lastPullAt = useRef<number | null>(null)
+  const edgeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const answered = useRef(false)
   const replyStatus = useRef<string>('unknown')
   const stateRef = useRef<PromptBarState>(initialBarState())
@@ -209,6 +213,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
   const refresh = useCallback(async (): Promise<void> => {
     if (exec === undefined || pulling.current) return
     pulling.current = true
+    lastPullAt.current = Date.now()
     try {
       // Bounded, and loudly so. Tonight's whole diagnosis cost was paid because this await had no ceiling:
       // a wire that never answers produced no dispatch, no catch and no `finally`, which looked identical to
@@ -306,6 +311,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
     void tick({ mount: true })
     return () => {
       if (timer !== undefined) clearTimeout(timer)
+      if (edgeTimer.current !== undefined) { clearTimeout(edgeTimer.current); edgeTimer.current = undefined }
       kick.current = undefined
       if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
     }
@@ -319,10 +325,21 @@ export function PromptDock(props: DockProps): ReactElement | null {
     const prev = prevRunning.current
     prevRunning.current = next
     dispatch({ t: 'running', running: next })
-    // #193: the IDLE edge — a turn just ended, which is precisely when a new offer is born. Pull now
-    // instead of waiting out the cadence. Hosts that publish no running prop never produce the
-    // transition, and their cadence stays active anyway.
-    if (prev && !next) kick.current?.()
+    // #211 supersedes the #193 immediate kick, measured on the maintainer's live host: it publishes
+    // `running` at STEP granularity — every tool call and thinking block flickers it — and an
+    // immediate pull per falling edge was a rendered command node per tool call, all of it waste
+    // (the server row changes only at TURN boundaries). So a falling edge SCHEDULES its pull after
+    // edgeKickDelayMs (debounce, rate-floored against the last pull) and a rising edge CANCELS it:
+    // step flicker coalesces to zero pulls, and a real turn end — a fall with no rise after it —
+    // pulls exactly once, ~2s later. Hosts that publish no running prop never produce transitions
+    // and keep their cadence unchanged.
+    if (prev && !next) {
+      if (edgeTimer.current !== undefined) clearTimeout(edgeTimer.current)
+      const since = lastPullAt.current === null ? Number.MAX_SAFE_INTEGER : Date.now() - lastPullAt.current
+      edgeTimer.current = setTimeout(() => { edgeTimer.current = undefined; kick.current?.() }, edgeKickDelayMs(since))
+    } else if (!prev && next) {
+      if (edgeTimer.current !== undefined) { clearTimeout(edgeTimer.current); edgeTimer.current = undefined }
+    }
   }, [props.running])
 
   // Run is a COMMAND, not a keystroke. The composer-write path (`inputActions.setDraft` + `submit`) looked
