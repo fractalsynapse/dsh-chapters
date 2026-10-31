@@ -26,7 +26,7 @@ import {
   BAR_RUN_COMMAND,
   deriveRunning,
   BAR_STATE_COMMAND,
-  pollSpacingFor, mountPullDecision, stateFromCache, type PromptBarStatus,
+  pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -144,6 +144,14 @@ const PULL_TIMEOUT_MS = 15_000
 interface CacheEntry { ev: import('./prompt-bar.ts').PromptBarEvent; autorun: 'armed' | 'disarmed' | null; at: number }
 const stateCache = new Map<string, CacheEntry>()
 
+/**
+ * #208: set by the first reply reporting the plane-wide `model: unset` — the feature does not
+ * exist here, so NO dock on this page pulls again for anything: not mounts, not idle edges, not
+ * timers, not visibility. One discovery per page load is the pull transport's floor; a page reload
+ * is the only revival, and the enabling commands say so.
+ */
+let featureAbsent = false
+
 /** Retry ceiling for the FIRST pull only, in attempts and spacing. A mount-time race must not be able to
  * starve the bar forever, and a real `off` answer stops the loop on the first reply either way. */
 
@@ -213,6 +221,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
       if (ev !== null) { answered.current = true; replyStatus.current = (ev as { status?: string }).status ?? replyStatus.current; dispatch(ev) }
       const autorun = parseBarAutorun(text)
       if (autorun !== null) dispatch({ t: 'autorun', on: autorun === 'armed' })
+      // #208: a reply naming the model unset silences the whole page — relevance is plane-wide.
+      if (parseModelAbsent(text)) featureAbsent = true
       // #203: every honest reply feeds the cache the next activation renders from.
       if (ev !== null && sessionId !== undefined) {
         stateCache.set(sessionId, { ev, autorun: autorun === 'armed' || autorun === 'disarmed' ? autorun : null, at: Date.now() })
@@ -264,6 +274,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
       })
     }
     const tick = async (opts?: { mount?: boolean; force?: boolean }): Promise<void> => {
+      // #208: not relevant, not visible — an unset-model plane spends nothing, ever.
+      if (featureAbsent) return
       if (effectiveStatus() === 'off') {
         // A known `off` spends no clock and no edge — but a STALE cached off is untrustworthy:
         // `/chapters-prompt on` could have happened anywhere. The staleness guard on a mount is the

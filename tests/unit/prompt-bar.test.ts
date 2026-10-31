@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { barLabel, barVisible, initialBarState, parseBarAutorun, parseBarState, promptBarReducer, shouldAutoFire, pollSpacingFor, ACTIVE_POLL_MS, QUIET_POLL_MS, mountPullDecision, stateFromCache} from '../../src/client/prompt-bar.ts'
+import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache } from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -160,7 +160,11 @@ test('#203: the mount pull is a decision — a fresh cache renders for free, and
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'analyzing', autorun: 'disarmed' }), true, 'generation in flight: see it through')
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'armed' }), true, 'an armed loop syncs against server truth on sight')
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'off', autorun: 'disarmed' }), false, 'a FRESH cached off renders hidden for free')
-  assert.equal(mountPullDecision({ hasCache: true, ageMs: 10 * QUIET_POLL_MS, status: 'off', autorun: 'disarmed' }), true, 'a STALE off must be revisitable — /chapters-prompt on happened somewhere, and the staleness guard is the revival path')
+  // #208 SUPERSEDES the #203 revival arm on the maintainer's direction ("not relevant, not
+  // visible"): off is TERMINAL for the page lifetime. Revival is a page reload, and the commands
+  // that re-enable say so — a guarded pull per reactivation was one visible node too many for a
+  // feature that is not on.
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 10 * QUIET_POLL_MS, status: 'off', autorun: 'disarmed' }), false, 'a STALE off stays hidden — the page reload is the revival path, stated by the enabling command')
 })
 
 test('#203: stateFromCache folds cached wire events back through the SAME reducer — no second fold path to drift', () => {
@@ -186,4 +190,22 @@ test('#203: where the host publishes the running edge, a stable disarmed bar has
   assert.equal(pollSpacingFor(legacy), QUIET_POLL_MS, 'a host without the prop keeps the #193 cadence UNCHANGED')
   assert.equal(pollSpacingFor({ ...legacy, running: true }), ACTIVE_POLL_MS)
   assert.equal(pollSpacingFor({ ...legacy, hidden: true }), null)
+})
+
+test('#208: parseModelAbsent reads the plane-wide fact from the state block — unset model means the feature does not exist', () => {
+  const unset = [
+    'suggested next step: off',
+    '  model: unset (config) — the bar is absent',
+    '  autorun: disarmed',
+    '  turn: -',
+  ].join('\n')
+  assert.equal(parseModelAbsent(unset), true, 'the unset line is the one discovery that silences the page')
+  const set = [
+    'suggested next step: idle',
+    '  model: p/m (override) — one offer per completed turn',
+    '  autorun: disarmed',
+  ].join('\n')
+  assert.equal(parseModelAbsent(set), false, 'a set model is relevance, not absence')
+  assert.equal(parseModelAbsent('garbage without the line'), false, 'an unrecognised block is never guessed at')
+  assert.equal(parseModelAbsent(''), false)
 })

@@ -145,10 +145,12 @@ export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarA
  */
 export function mountPullDecision(c: { hasCache: boolean; ageMs: number; status: PromptBarStatus; autorun: PromptBarAutorun }): boolean {
   if (!c.hasCache) return true
+  // #208, the maintainer's rule — NOT RELEVANT, NOT VISIBLE: `off` is terminal for the page
+  // lifetime. The #203 staleness-revival arm cost one visible history node per reactivation of a
+  // known-off session, for a feature that is not on; revival is a page reload, and the commands
+  // that re-enable (`model`, `on`) say so in their replies.
+  if (c.status === 'off') return false
   if (c.autorun === 'armed' || c.status === 'analyzing') return true
-  // `off` deliberately rides the same staleness guard: a fresh off renders hidden for free, and a
-  // stale off pulls, because `/chapters-prompt on` could have happened anywhere and the guarded
-  // mount is the revival path short of a page reload.
   return c.ageMs > QUIET_POLL_MS
 }
 
@@ -266,4 +268,15 @@ export function deriveRunning(status: unknown): boolean | undefined {
     return deriveRunning(s.status ?? s.state ?? s.phase)
   }
   return undefined
+}
+
+
+/**
+ * #208: the plane-wide relevance fact, read from the `state` block's own model line. `model: unset`
+ * means the feature does not exist on this plane — one discovery reply carrying it silences EVERY
+ * dock on the page (the pull transport cannot do better than one discovery; the push transport
+ * (#194) removes even that). An unrecognised block is false, never a guess.
+ */
+export function parseModelAbsent(text: string): boolean {
+  return /^\s*model:\s*unset\b/m.test(text)
 }

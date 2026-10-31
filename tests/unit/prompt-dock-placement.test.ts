@@ -37,3 +37,12 @@ test('the bar speaks only to the command plane (#113, no private channel)', () =
   const dockSrc = fs.readFileSync(path.join(ROOT, 'src', 'client', 'prompt-dock.ts'), 'utf8')
   assert.match(dockSrc, /BAR_STATE_COMMAND/, 'and it pulls the same verb a human types')
 })
+
+test('#208: the dock source keeps the plane-wide silence wired — the flag is read in tick and written from the reply', () => {
+  // Source-scan row, the pattern this file already uses for client wiring: the dock has no DOM
+  // harness here, and an unwired flag is exactly the silent regression this row exists to catch.
+  // CLIENT is index.ts in this file; the flag lives in the dock module, so read it here.
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /if \(parseModelAbsent\(text\)\) featureAbsent = true/, 'the reply hook sets the flag')
+  assert.match(DOCK, /if \(featureAbsent\) return/, 'and tick honors it before any other decision')
+})
