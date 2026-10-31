@@ -219,12 +219,22 @@ service): every execution appends a `command/run` + `command/done` lifecycle pai
 session log — never model-visible, but the UI renders each pair as a history node, and
 `recordInput: false` hides only the args text, not the node. An unconditional 10-second
 keep-poll therefore wrote ~360 visible nodes per hour into every bar-enabled session — the
-litter is the transport, not a rendering bug. So the cadence is a pure, tested decision
-(`pollSpacingFor`): **10s while state can plausibly change** (generation `analyzing`, autorun
-`armed`, host-published `running`), **60s while quiet**, and **zero pulls in a hidden tab**
-while quiet — never while armed, because walking away from a running loop is the point of
-autorun. The host's idle edge, when published, triggers an immediate pull so a new offer is
-seen the moment the turn that produced it ends.
+litter is the transport, not a rendering bug. So the schedule is a pure, tested decision,
+and it follows the maintainer's rule: **generate or read after the turn ends — never when you
+activate a session** (#203). The bar keeps a module-level per-session cache; mounting renders
+from it with **zero invocations**, and a mount pulls only when the cache cannot be trusted:
+absent (first mount after a page load), older than the quiet interval (a turn could have ended
+since — this one guarded pull is what keeps Run honest, because clicking a stale offer would
+submit the row's newer text), `analyzing`, or `armed`. A cached `off` never pulls.
+
+Beyond mounts: the host's **idle edge** (a turn ending is the moment an offer is born) pulls
+immediately; the bar's **own actions** are their own invocations; and where the host publishes
+the running signal, the quiet **clock disappears entirely** for a stable, disarmed bar — every
+state change flows through an edge or an action, so a timer could only re-read truth. Hosts
+that publish no running prop keep the paced fallback (**10s** while analyzing/armed/running,
+**60s** while quiet, **zero pulls in a hidden tab** while quiet — never while armed, because
+walking away from a running loop is the point of autorun). An armed or analyzing bar keeps the
+10s belt on every host: a missed edge must not stall a loop.
 
 A real push retires the problem instead of pacing it: the plugin appends its recommendation as
 a durable plugin record and a registered projection delivers it — zero command runs in steady
