@@ -41,6 +41,7 @@ import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } fro
 import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
 import { makePromptRoundRunner } from './prompt-runner.ts'
+import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, type PushWriter } from './prompt-push.ts'
 import { goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
@@ -618,6 +619,44 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       get(sessionId: string): Promise<{ promptSuggestion?: typeof noSuggestion }>
       mutate(sessionId: string, fn: (row: never) => never): Promise<unknown>
     }
+    // #194: the push transport. The writer resolves against the HOST's own module instance (the
+    // probe-proven recipe — a plugin-side copy throws `Receiver must be an instance of class Session`
+    // even at the identical version), and the projection is registered ONLY when the writer exists:
+    // registration is the feature signal the client reads through its standard `useProjection` seat.
+    // No writer ⇒ no projection ⇒ every client keeps the #203/#208 pull schedule, unchanged.
+    let pushWriter: PushWriter | null = null
+    try {
+      pushWriter = await resolvePushWriter({ log: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`) })
+      if (pushWriter !== null) {
+        const projections = ctx.sessionProjections as unknown as { register?: (def: unknown) => unknown } | undefined
+        if (typeof projections?.register === 'function') {
+          projections.register(promptProjectionDefinition())
+          ctx.logger?.info?.('dsh-chapters: prompt push transport LIVE — the bar rides plugin records; zero command runs in steady state')
+        } else {
+          pushWriter = null // no seat to fold records into; the pull floor stands
+        }
+      }
+    } catch (error) {
+      pushWriter = null
+      ctx.logger?.warn?.(`dsh-chapters: prompt push wiring failed (${String((error as Error)?.message ?? error).slice(0, 140)}) — pull transport stands`)
+    }
+    // One serialized push per session: the fold is last-wins, so records must land in mutation
+    // order — a ready that overtakes its own analyzing would show a stale offer as fresh.
+    const pushChains = new Map<string, Promise<void>>()
+    const pushBar = (session: unknown, sessionId: string): void => {
+      if (pushWriter === null || session === undefined || session === null) return
+      const writer = pushWriter
+      const prev = pushChains.get(sessionId) ?? Promise.resolve()
+      const next = prev.then(async () => {
+        const row = (await promptRow.get(sessionId)).promptSuggestion ?? noSuggestion
+        const live = promptLoop.statusOf(sessionId)
+        writer.append(session, promptRecordPayload({
+          status: row.status, text: row.text, turnSeq: row.turnSeq, error: row.error,
+          intent: row.intent, goalRevision: row.goalRevision, autorun: live.autorun, at: row.at,
+        }))
+      }, () => undefined)
+      pushChains.set(sessionId, next.then(() => undefined, () => undefined))
+    }
     const promptBar: PromptBarAccess = {
       read: async (sessionId: string) => {
         const status = (await promptRow.get(sessionId)).promptSuggestion ?? noSuggestion
@@ -634,16 +673,22 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         submitOffer(sessionId, st.text)
         return { ok: true, text: st.text }
       },
-      setAutorun: (sessionId: string, on: boolean) => promptLoop.setArmed(sessionId, on),
-      disarmHuman: (sessionId: string) => { promptLoop.disarmForHuman(sessionId) },
+      setAutorun: (sessionId: string, on: boolean, session?: unknown) => {
+        const r = promptLoop.setArmed(sessionId, on)
+        pushBar(session, sessionId)
+        return r
+      },
+      disarmHuman: (sessionId: string, session?: unknown) => { promptLoop.disarmForHuman(sessionId); pushBar(session, sessionId) },
       // `off` stops generation for the session without touching the model, so back-on is one action; `on`
       // clears it and the NEXT completed turn offers again. Both write through mutate, never a snapshot.
-      setOff: async (sessionId: string) => {
+      setOff: async (sessionId: string, session?: unknown) => {
         promptLoop.setArmed(sessionId, false)
         await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
+        pushBar(session, sessionId)
       },
-      setOn: async (sessionId: string) => {
+      setOn: async (sessionId: string, session?: unknown) => {
         await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
+        pushBar(session, sessionId)
       },
     }
     const scheduler = createScheduler(store, domain, config, undefined, (cwd, ok) => {
@@ -810,6 +855,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         enabled: () => prompt.effective().spec !== '',
         eligible: (session) => (session as { header?: { origin?: string } }).header?.origin !== 'subagent',
         store: store as unknown as Parameters<typeof makePromptRoundRunner>[0]['store'],
+        // #194: every durable row write mirrors to the push transport (order serialized per session).
+        pushRow: (session: unknown, sessionId: string) => { pushBar(session, sessionId) },
         generate: async (session, turnSeq) => {
           // The live session object carries the events; this is the same read the archive door uses, and it
           // is payload-bearing. The GOAL is folded from those events so a suggestion cannot ignore the
@@ -846,7 +893,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       try {
         ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
           if (session?.id === undefined) return
-          if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id)
+          if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
           // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
           // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
           // captured by the boot's server log, so the answer survives the leg (#61).

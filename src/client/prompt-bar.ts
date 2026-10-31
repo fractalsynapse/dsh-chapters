@@ -281,6 +281,68 @@ export function parseModelAbsent(text: string): boolean {
   return /^\s*model:\s*unset\b/m.test(text)
 }
 
+// ---------------------------------------------------------------- #194: the push half
+
+/** The pushed payload, as the client reads it from the standard `useProjection` seat. */
+export interface PromptPushView {
+  v: number
+  status: PromptBarStatus
+  text: string
+  turnSeq: number | null
+  error: string
+  intent: 'worker-step' | 'goal-edit'
+  autorun: 'armed' | 'disarmed'
+}
+
+/**
+ * A pushed payload becomes the SAME events the pull path dispatches — one fold, one reducer, no
+ * second implementation to drift (#59). Null when the payload is not ours or not trustworthy: an
+ * unrecognised push is ignored, never guessed at, and the pull schedule underneath keeps running
+ * until a payload this function accepts actually arrives.
+ */
+export function pushEventsOf(payload: unknown): { polled: PromptBarEvent; autorun: PromptBarEvent } | null {
+  if (payload === null || payload === undefined || typeof payload !== 'object') return null
+  const p = payload as Partial<PromptPushView>
+  if (p.v !== 1 || typeof p.status !== 'string') return null
+  // text is a ready-state fact, not a payload gate: an analyzing push without text is honest
+  // progress, and rejecting it would blind the bar to the very transition it exists to show.
+  const status = p.status as PromptBarStatus
+  if (status !== 'off' && status !== 'idle' && status !== 'analyzing' && status !== 'ready' && status !== 'failed') return null
+  return {
+    polled: {
+      t: 'polled', status,
+      ...(status === 'ready' ? { text: typeof p.text === 'string' ? p.text : '', turnSeq: p.turnSeq ?? null, intent: p.intent ?? 'worker-step' } : {}),
+      ...(status === 'failed' ? { error: p.error ?? 'the suggestion call failed' } : {}),
+    },
+    autorun: { t: 'autorun', on: p.autorun === 'armed' },
+  }
+}
+
+/**
+ * The running signal's resolution order (scalar prop → `useSession` snapshot via `deriveRunning` →
+ * unknown) lives in the dock as `props.running ?? deriveRunning(sessionSnapshot)` — ONE expression,
+ * pinned by a source-scan row, folded by the deriveRunning rows that already cover every shape.
+ * A second pure helper for the same decision would be exactly the drift #59 forbids; the draft of
+ * #194 shipped one and this comment is its headstone.
+ */
+
+/** The staleness-confirm's one question: did a push arrive after the edge that scheduled it? */
+export function pushIsFresher(lastPushAt: number | null, edgeAt: number): boolean {
+  return lastPushAt !== null && lastPushAt > edgeAt
+}
+
+
+/** The projection key, from the ONE module both planes share (#194 — never retyped per plane). */
+export { PROMPT_PROJECTION_KEY } from '../prompt-keys.ts'
+
+/**
+ * The staleness-confirm's grace: after an idle edge, the pushed `analyzing` record normally lands
+ * within moments (the runner writes it BEFORE calling the model). If no push arrived this long
+ * after the edge, the push is presumed dead and ONE confirm pull runs — a silently dead push
+ * degrades to one pull per turn, never to a frozen bar.
+ */
+export const PUSH_CONFIRM_GRACE_MS = 20_000
+
 /**
  * #211 — the edge kick's delay, measured on the maintainer's host the hard way: some hosts publish
  * `running` at STEP granularity (it flickers at every tool call and thinking block), and an
