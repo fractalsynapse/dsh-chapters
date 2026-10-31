@@ -81,7 +81,12 @@ export function goalAuthorizesAutorun(goal: ActiveGoal | null): boolean {
 export function goalDirectiveOf(goal: ActiveGoal | null): string {
   if (goal === null) return 'No goal is active for this session. Recommend the next step the work itself calls for.'
   return [
-    `An ACTIVE GOAL governs this session (revision ${String(goal.revision)}): ${goal.objective.slice(0, 600)}`,
+    // #188 invariant: the objective rides WHOLE. The slice(0, 600) that stood here was itself the
+    // truncation the contract forbids — real objectives exceed 600 chars (the one this repo's own
+    // session ran under was ~1,200), and a director steering against half an objective is the exact
+    // hallucination invite zero-truncation exists to forbid. The assembly's budget handles size:
+    // the goal block is protected, and a protected set that cannot fit refuses with the numbers.
+    `An ACTIVE GOAL governs this session (revision ${String(goal.revision)}): ${goal.objective}`,
     'The recommended next step MUST advance that goal — a step that merely continues current work does not count.',
     'If the goal is already accomplished, recommend the step that closes it out (mark it complete) rather than another round.',
   ].join('\n')
