@@ -225,7 +225,16 @@ activate a session** (#203). The bar keeps a module-level per-session cache; mou
 from it with **zero invocations**, and a mount pulls only when the cache cannot be trusted:
 absent (first mount after a page load), older than the quiet interval (a turn could have ended
 since — this one guarded pull is what keeps Run honest, because clicking a stale offer would
-submit the row's newer text), `analyzing`, or `armed`. A cached `off` never pulls.
+submit the row's newer text), `analyzing`, or `armed`.
+
+**Not relevant, not visible** (#208): `off` is **terminal for the page lifetime**. A session
+that answered `off` never pulls again — no staleness guard, no edge pulls — and when any reply
+reports the plane-wide `model: unset`, every dock on the page stops pulling entirely: an
+unset-model plane pays **one discovery run per page load in total**, and zero afterward. The
+pull transport cannot do better than that one discovery (a client cannot know relevance without
+asking); the push transport (#194) removes even it. Revival is honest and stated where the human
+acts: `/chapters-prompt model <spec>` and `/chapters-prompt on` say that a hidden bar reappears
+at the next page reload — a client that learned `off` keeps no clock, by design.
 
 Beyond mounts: the host's **idle edge** (a turn ending is the moment an offer is born) pulls
 immediately; the bar's **own actions** are their own invocations; and where the host publishes
