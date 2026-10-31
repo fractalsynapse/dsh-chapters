@@ -161,14 +161,17 @@ export function goalDriverOwnsTheTurn(goal: GoalSignal | null): boolean {
  * and the row are the same contract — a client that can read it can render it.
  */
 export interface PromptBarAccess {
+  // #194: the mutation verbs take the caller's LIVE session where it has one — the push transport's
+  // append needs the host's Session object, and every mutation site (command invocation, turn
+  // listener) holds it. Absent ⇒ no record for that change; the pull floor still serves the bar.
   read(sessionId: string): Promise<PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }>
   /** `displaced` is the answer to "who starts the next turn": true when arming this loop also disarmed the
    * goal driver's continuation, so the human is told which engine they just opted into. */
-  setAutorun(sessionId: string, on: boolean): { autorun: 'armed' | 'disarmed'; fired: number; displaced: boolean }
+  setAutorun(sessionId: string, on: boolean, session?: unknown): { autorun: 'armed' | 'disarmed'; fired: number; displaced: boolean }
   /** #113: the bar's Run. Submits the offer on screen as a HUMAN-authored user turn, through the same
    * follow-up path autorun uses — one behavior for "run it", whether a keystroke or the loop came first. */
-  runNow(sessionId: string): Promise<{ ok: boolean; text?: string; reason?: string }>
-  disarmHuman(sessionId: string): void
-  setOff(sessionId: string): Promise<void>
-  setOn(sessionId: string): Promise<void>
+  runNow(sessionId: string, session?: unknown): Promise<{ ok: boolean; text?: string; reason?: string }>
+  disarmHuman(sessionId: string, session?: unknown): void
+  setOff(sessionId: string, session?: unknown): Promise<void>
+  setOn(sessionId: string, session?: unknown): Promise<void>
 }

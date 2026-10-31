@@ -42,6 +42,10 @@ export interface PromptRunnerDeps {
    * row it is supposed to be showing.
    */
   onReady?: (sessionId: string, state: PromptSuggestionState) => void
+  /** #194: mirror every durable row write to the push transport. The wiring owns payload assembly
+   * and ordering; the runner only reports (session, id) at each write. Failures here must never
+   * affect the round — the pull schedule and its staleness confirm cover a dead push. */
+  pushRow?: (session: unknown, sessionId: string) => void
   now: () => string
   log?: (message: string) => void
   warn?: (message: string) => void
@@ -80,6 +84,7 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
           return { ...row, promptSuggestion: { ...noSuggestion, status: 'analyzing', turnSeq, at: deps.now() } }
         })
         if (!claimed) { deps.log?.(`prompt: turn ${String(turnSeq)} already claimed for ${id}`); return }
+        deps.pushRow?.(session, id)
         try {
           const out = await deps.generate(session, turnSeq)
           if (out.ok && typeof out.text === 'string' && out.text !== '') {
@@ -93,21 +98,25 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
               intent: offer.intent, goalRevision: out.goalRevision ?? null,
             }
             await write(id, ready)
+            deps.pushRow?.(session, id)
             deps.log?.(`prompt: recommended next step ready for ${id} (turn ${String(turnSeq)}, ${offer.intent})`)
             deps.onReady?.(id, ready)
             return
           }
           if (out.quiet === true) {
             await write(id, { ...noSuggestion, turnSeq: null })
+            deps.pushRow?.(session, id)
             deps.log?.(`prompt: nothing to recommend for ${id} — bar stays silent`)
             return
           }
           await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: out.reason ?? 'the suggestion call returned nothing', at: deps.now() })
+          deps.pushRow?.(session, id)
           deps.warn?.(`prompt: generation failed for ${id}: ${out.reason ?? 'unknown'}`)
         } catch (error) {
           // A failed generation is a DELIVERED failure (#61): the bar shows it, it does not vanish.
           const message = String((error as Error)?.message ?? error).slice(0, 200)
           await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: message, at: deps.now() }).catch(() => undefined)
+          deps.pushRow?.(session, id)
           deps.warn?.(`prompt: generation threw for ${id}: ${message}`)
         }
       })

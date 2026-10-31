@@ -26,7 +26,8 @@ import {
   BAR_RUN_COMMAND,
   deriveRunning,
   BAR_STATE_COMMAND,
-  pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, edgeKickDelayMs, type PromptBarStatus,
+  pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, edgeKickDelayMs,
+  pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -48,6 +49,10 @@ export interface DockProps {
   useSessionStatus?: (selector?: unknown) => unknown
   /** The session snapshot hook; its snapshot carries `running`, which is Autorun's idle edge. */
   useSession?: (selector?: unknown) => unknown
+  /** #194: the standard projection seat (SessionStandardProps, measured in ui-session). Where the
+   *  server registered the push projection, this returns its value reactively — zero commands.
+   *  Absent hook or undefined value ⇒ the pull schedule stands, unchanged. */
+  useProjection?: (key: string) => unknown
   /** The host publishes running/idle through the composer kit on some builds; if it is absent, autorun
    *  refuses to fire rather than guessing that the session is idle. Fail-safe, not fail-open. */
   running?: boolean
@@ -167,12 +172,26 @@ function execWithTimeout(exec: (line: string) => Promise<string>, line: string, 
 
 export function PromptDock(props: DockProps): ReactElement | null {
   const { sessionId, inputActions, exec } = props
+  // #194 + the contract's running-signal lock: BOTH hook reads happen first, unconditionally,
+  // above every other hook — hook order must not change between renders (the #310 lesson). The
+  // measured seats: `useSession`'s snapshot carries `running` (deriveRunning folds whatever shape
+  // arrives; a scalar `running` prop wins where a build supplies one), and `useProjection` is the
+  // standard seat the push transport rides. Absent hooks degrade through stable fallbacks.
+  const useSessionHook = props.useSession ?? (() => undefined)
+  const sessionSnapshot = useSessionHook((snapshot: unknown) => snapshot)
+  const running = props.running ?? deriveRunning(sessionSnapshot)
+  const useProjectionHook = props.useProjection ?? (() => undefined)
+  const pushed = useProjectionHook(PROMPT_PROJECTION_KEY)
   const [state, dispatch] = useReducer(promptBarReducer, initialBarState(), (s) => {
     // #203: activation renders from the module cache — zero invocations — folded through the live
     // reducer path, so there is no second fold implementation to drift.
+    const pushEvs = pushEventsOf(pushed)
+    if (pushEvs !== null) {
+      return { ...promptBarReducer(promptBarReducer(s, pushEvs.polled), pushEvs.autorun), running: running ?? true }
+    }
     const c = sessionId !== undefined ? stateCache.get(sessionId) : undefined
     const base = c !== undefined ? stateFromCache(c.ev, c.autorun) : s
-    return { ...base, running: props.running ?? true }
+    return { ...base, running: running ?? true }
   })
   // #79's discipline, kept because the failure it prevents was real: one pull per mount, then per edge.
   // A fetch in an effect with no such guard re-fires on every render.
@@ -194,6 +213,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // and the pending debounced edge pull, which a rising edge cancels.
   const lastPullAt = useRef<number | null>(null)
   const edgeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // #194: push-mode bookkeeping. pushLive flips on the first ACCEPTED payload and stays true for
+  // the page lifetime — a projection that existed and went silent is the confirm-pull's job to
+  // police, not a reason to resurrect the clock.
+  const pushLiveRef = useRef<boolean>(false)
+  const lastPushAt = useRef<number | null>(null)
   const answered = useRef(false)
   const replyStatus = useRef<string>('unknown')
   const stateRef = useRef<PromptBarState>(initialBarState())
@@ -243,6 +267,19 @@ export function PromptDock(props: DockProps): ReactElement | null {
     } finally { pulling.current = false }
   }, [exec])
 
+  // #194: the pushed value dispatches through the same reducer the pulls feed. The effect sits
+  // ABOVE the mount poll so pushLive is set before the first tick decides anything. Any push also
+  // retires a pending edge timer in push mode — the record IS the answer the confirm would fetch.
+  useEffect(() => {
+    const evs = pushEventsOf(pushed)
+    if (evs === null) return
+    pushLiveRef.current = true
+    lastPushAt.current = Date.now()
+    dispatch(evs.polled)
+    dispatch(evs.autorun)
+    if (edgeTimer.current !== undefined) { clearTimeout(edgeTimer.current); edgeTimer.current = undefined }
+  }, [pushed])
+
   useEffect(() => {
     ensureCss()
     if (pulled.current) return
@@ -279,6 +316,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
       })
     }
     const tick = async (opts?: { mount?: boolean; force?: boolean }): Promise<void> => {
+      // #194: in push mode there is no clock and no mount pull — state arrives through the
+      // projection. A FORCED tick still runs: that is the staleness confirm firing because the
+      // push did NOT arrive, and the pull is then the honest fallback, not waste.
+      if (pushLiveRef.current && opts?.force !== true) return
       // #208: not relevant, not visible — an unset-model plane spends nothing, ever.
       if (featureAbsent) return
       if (effectiveStatus() === 'off') {
@@ -319,28 +360,36 @@ export function PromptDock(props: DockProps): ReactElement | null {
 
   // Autorun fires off the IDLE edge, never off a render. `running` comes from the host when it publishes it;
   // absent means unknown, and unknown means do not start a turn the human cannot see coming.
-  const prevRunning = useRef<boolean>(props.running ?? true)
+  const prevRunning = useRef<boolean>(running ?? true)
   useEffect(() => {
-    const next = props.running ?? true
+    const next = running ?? true
     const prev = prevRunning.current
     prevRunning.current = next
     dispatch({ t: 'running', running: next })
-    // #211 supersedes the #193 immediate kick, measured on the maintainer's live host: it publishes
-    // `running` at STEP granularity — every tool call and thinking block flickers it — and an
-    // immediate pull per falling edge was a rendered command node per tool call, all of it waste
-    // (the server row changes only at TURN boundaries). So a falling edge SCHEDULES its pull after
-    // edgeKickDelayMs (debounce, rate-floored against the last pull) and a rising edge CANCELS it:
-    // step flicker coalesces to zero pulls, and a real turn end — a fall with no rise after it —
-    // pulls exactly once, ~2s later. Hosts that publish no running prop never produce transitions
-    // and keep their cadence unchanged.
+    // #211 + #194, ONE schedule: a falling edge delays exactly one pull and a rising edge cancels
+    // it (step-granular flicker coalesces to zero pulls). Pull mode: the debounced kick
+    // (edgeKickDelayMs — 2s debounce, 15s floor). Push mode: the staleness CONFIRM at
+    // max(grace, floor − since) — a record landing after the edge retires it via the push effect,
+    // so a healthy push costs nothing and a dead one degrades to one pull per turn, never a
+    // frozen bar. Hosts that publish no running signal never produce transitions and keep the
+    // cadence fallback unchanged.
     if (prev && !next) {
       if (edgeTimer.current !== undefined) clearTimeout(edgeTimer.current)
       const since = lastPullAt.current === null ? Number.MAX_SAFE_INTEGER : Date.now() - lastPullAt.current
-      edgeTimer.current = setTimeout(() => { edgeTimer.current = undefined; kick.current?.() }, edgeKickDelayMs(since))
+      const delay = pushLiveRef.current
+        ? Math.max(PUSH_CONFIRM_GRACE_MS, edgeKickDelayMs(since))
+        : edgeKickDelayMs(since)
+      const edgeAt = Date.now()
+      edgeTimer.current = setTimeout(() => {
+        edgeTimer.current = undefined
+        // A push that landed after the edge already answered the confirm's question.
+        if (pushLiveRef.current && pushIsFresher(lastPushAt.current, edgeAt)) return
+        kick.current?.()
+      }, delay)
     } else if (!prev && next) {
       if (edgeTimer.current !== undefined) { clearTimeout(edgeTimer.current); edgeTimer.current = undefined }
     }
-  }, [props.running])
+  }, [running])
 
   // Run is a COMMAND, not a keystroke. The composer-write path (`inputActions.setDraft` + `submit`) looked
   // like the obvious implementation and does not work on this host build: `setDraft` is accepted, and the
@@ -384,9 +433,6 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // `useSessionStatus`, which is provided but yields no readable keys under an identity selector. `deriveRunning`
   // folds `{running}`, so this is the last mile, and the hook is called unconditionally through a stable
   // fallback because hook order must not change between renders.
-  const useSessionHook = props.useSession ?? (() => undefined)
-  const sessionSnapshot = useSessionHook((snapshot: unknown) => snapshot)
-  const running = props.running ?? deriveRunning(sessionSnapshot)
   const autorunDisabled = running === undefined
 
   if (sessionId === undefined || !barVisible(state as PromptBarState)) return null
@@ -501,7 +547,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
               const arm = state.autorun !== 'armed'
               if (exec !== undefined) await exec(`/chapters-prompt autorun ${arm ? 'on' : 'off'}`)
               dispatch({ t: 'autorun', on: arm })
-              await refresh()
+              // #194: in push mode the setAutorun append carries the truth back — a refresh here
+              // would be a command run for a fact already in flight.
+              if (!pushLiveRef.current) await refresh()
             })()
           },
         }),

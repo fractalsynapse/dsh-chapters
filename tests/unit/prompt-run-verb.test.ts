@@ -39,7 +39,11 @@ test('run refuses when there is no offer on screen, through the bar access', () 
 
 test('the interface declares runNow so no caller can invent its own shape', () => {
   const txt = read('src/prompt-state.ts')
-  assert.match(txt, /runNow\(sessionId: string\): Promise<\{ ok: boolean; text\?: string; reason\?: string \}>/,
+  // #194: the declaration gained the optional live-session parameter (the push transport's append
+  // needs the host's Session object; every mutation site holds one). The lock follows the contract,
+  // which was updated docs-first — the point of the row is that callers cannot invent shapes, and
+  // the shape it pins is the one docs/contract.md now names.
+  assert.match(txt, /runNow\(sessionId: string, session\?: unknown\): Promise<\{ ok: boolean; text\?: string; reason\?: string \}>/,
     'the declaration is part of PromptBarAccess, not a cast at the call site')
 })
 
