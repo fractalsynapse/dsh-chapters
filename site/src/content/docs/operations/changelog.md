@@ -6,6 +6,34 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.7 — 2026-10-30 · activating a session costs zero command runs
+
+`0.2.5` paced the bar's poll; the maintainer's next report named the louder half: *"every time I navigate away from a
+session and come back another `chapters-prompt` command runs… It should generate or run after the turn ends, not when
+you activate a session."* The mechanism was the remount: the dock component remounts on every SPA navigation, and its
+mount effect pulled `/chapters-prompt state` unconditionally — one rendered history-node pair per activation, however
+recently the same truth had been read. (For precision: activation never *generated* — generation is the server runner
+at `turn/end` — but a read that lands as a visible node per navigation was the litter.)
+
+That sentence is now the literal schedule, as pure tested decisions in the module that holds every bar decision:
+
+- **A module-level per-session cache** survives navigation; mounting renders from it with **zero invocations**, folded
+  through the same reducer the live path uses. A page reload pays exactly one honest pull.
+- **A mount pulls only when the cache cannot be trusted**: absent, older than the quiet interval (the staleness guard
+  is what keeps Run honest — clicking a stale offer would submit the row's newer text while showing the old),
+  `analyzing`, or `armed`. A fresh cached `off` renders hidden for free; a stale one is revisitable, so
+  `/chapters-prompt on` remains discoverable without a reload.
+- **Where the host publishes the running edge, a stable disarmed bar keeps no clock at all** — the idle edge IS the
+  schedule (a turn ending is the moment an offer is born), and the bar's own actions are their own invocations.
+  Analyzing and armed keep the 10s belt: a generation completing fires no edge, and a missed edge must not stall a
+  loop. Hosts without the signal keep the `0.2.5` cadence unchanged — the fallback is automatic.
+- The Off button writes the cache (a remount never resurrects a dismissed bar), and every honest reply feeds it.
+
+The steady-state ledger on an edge-published host: **navigate = 0 runs · return after >60s = 1 guarded pull · turn
+ends = 1 pull · Run/Autorun/Off = their own commands.** Both bar legs replayed green in Chromium on the new schedule;
+the staleness guard is mutation-checked. This is the pull transport's correct end state; #194 (push transport, host
+0.2.1+) retires even the guarded pulls when adopted.
+
 ### 0.2.6 — 2026-10-30 · the objective rides whole
 
 A one-line correctness patch, found by auditing our own shipped claims against the code. `0.2.4` documented the goal
