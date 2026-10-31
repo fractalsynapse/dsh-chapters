@@ -120,10 +120,45 @@ export function barLabel(s: PromptBarState): string | null {
 export const ACTIVE_POLL_MS = 10_000
 export const QUIET_POLL_MS = 60_000
 
-export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean }): number | null {
+export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean }): number | null {
+  // #203: where the host publishes the running signal, the idle EDGE is the schedule — a turn ending
+  // pulls, the bar's own actions pull, and a stable disarmed bar keeps NO clock at all, because a
+  // timer there could only re-read truth into rendered history nodes. Analyzing stays on the fast
+  // belt (a generation completing fires no edge), and an armed loop keeps it too (a missed edge must
+  // not stall autorun). Hosts that publish no running prop get the #193 cadence, unchanged.
+  if (s.edges) {
+    if (s.status === 'analyzing' || s.autorun === 'armed') return ACTIVE_POLL_MS
+    return null
+  }
   const active = s.status === 'analyzing' || s.autorun === 'armed' || s.running
   if (!active && s.hidden) return null
   return active ? ACTIVE_POLL_MS : QUIET_POLL_MS
+}
+
+/**
+ * #203: whether a freshly mounted bar pulls, or renders its cache and stays silent. The maintainer's
+ * rule: generate or read AFTER THE TURN ENDS, never when you activate a session. So a mount pulls
+ * only when the cache cannot be trusted — absent (first mount after a page load), stale (a turn
+ * could have ended since; this guarded pull is what keeps Run honest, because clicking a stale
+ * offer would submit the row's newer text while showing the old), mid-generation, or armed. A
+ * cached `off` never pulls: off is a human/config switch, and only an explicit `on` revisits it.
+ */
+export function mountPullDecision(c: { hasCache: boolean; ageMs: number; status: PromptBarStatus; autorun: PromptBarAutorun }): boolean {
+  if (!c.hasCache) return true
+  if (c.autorun === 'armed' || c.status === 'analyzing') return true
+  // `off` deliberately rides the same staleness guard: a fresh off renders hidden for free, and a
+  // stale off pulls, because `/chapters-prompt on` could have happened anywhere and the guarded
+  // mount is the revival path short of a page reload.
+  return c.ageMs > QUIET_POLL_MS
+}
+
+/**
+ * #203: fold a cached wire event back into row state through the SAME reducer the live path uses —
+ * one fold, no second implementation to drift (the #59 rule).
+ */
+export function stateFromCache(ev: PromptBarEvent, autorun: PromptBarAutorun | null): PromptBarState {
+  const folded = promptBarReducer(initialBarState(), ev)
+  return autorun === null ? folded : promptBarReducer(folded, { t: 'autorun', on: autorun === 'armed' })
 }
 
 export function barVisible(s: PromptBarState): boolean {
