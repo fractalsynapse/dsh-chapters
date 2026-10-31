@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { barLabel, barVisible, initialBarState, parseBarAutorun, parseBarState, promptBarReducer, shouldAutoFire, pollSpacingFor, ACTIVE_POLL_MS, QUIET_POLL_MS} from '../../src/client/prompt-bar.ts'
+import { barLabel, barVisible, initialBarState, parseBarAutorun, parseBarState, promptBarReducer, shouldAutoFire, pollSpacingFor, ACTIVE_POLL_MS, QUIET_POLL_MS, mountPullDecision, stateFromCache} from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -141,7 +141,7 @@ test('#188: a BLOCKED goal disarms autorun and blocks firing, exactly like a com
 })
 
 test('#193: cadence is a decision — active while state can change, quiet while stable, SILENT in a hidden tab unless the loop is armed', () => {
-  const base = { status: 'ready' as const, autorun: 'disarmed' as const, running: false, hidden: false }
+  const base = { status: 'ready' as const, autorun: 'disarmed' as const, running: false, hidden: false, edges: false }
   assert.equal(pollSpacingFor(base), QUIET_POLL_MS, 'a stable bar costs one pull a minute, not six — every pull is two history nodes')
   assert.equal(pollSpacingFor({ ...base, status: 'analyzing' }), ACTIVE_POLL_MS, 'generation in flight: watch it closely')
   assert.equal(pollSpacingFor({ ...base, autorun: 'armed' }), ACTIVE_POLL_MS, 'an armed loop must fire promptly')
@@ -151,4 +151,39 @@ test('#193: cadence is a decision — active while state can change, quiet while
   assert.equal(pollSpacingFor({ ...base, hidden: true, autorun: 'armed' }), ACTIVE_POLL_MS, 'walking away from an armed loop is the POINT of autorun — never pause it')
   assert.equal(pollSpacingFor({ ...base, hidden: true, status: 'analyzing' }), ACTIVE_POLL_MS, 'and never pause mid-generation')
   assert.ok(QUIET_POLL_MS > ACTIVE_POLL_MS, 'quiet must actually be quieter')
+})
+
+test('#203: the mount pull is a decision — a fresh cache renders for free, and only an untrustworthy cache pulls', () => {
+  assert.equal(mountPullDecision({ hasCache: false, ageMs: 0, status: 'idle', autorun: 'disarmed' }), true, 'a cold mount (page load) must fetch the truth once')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'disarmed' }), false, 'fresh cache + stable + disarmed: activating a session costs ZERO runs')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: QUIET_POLL_MS + 1, status: 'ready', autorun: 'disarmed' }), true, 'the staleness guard: a turn could have ended since — this is what keeps Run honest')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'analyzing', autorun: 'disarmed' }), true, 'generation in flight: see it through')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'armed' }), true, 'an armed loop syncs against server truth on sight')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'off', autorun: 'disarmed' }), false, 'a FRESH cached off renders hidden for free')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 10 * QUIET_POLL_MS, status: 'off', autorun: 'disarmed' }), true, 'a STALE off must be revisitable — /chapters-prompt on happened somewhere, and the staleness guard is the revival path')
+})
+
+test('#203: stateFromCache folds cached wire events back through the SAME reducer — no second fold path to drift', () => {
+  const st = stateFromCache({ t: 'polled', status: 'ready', text: 'ship it', turnSeq: 7, intent: 'worker-step' }, 'armed')
+  assert.equal(st.status, 'ready')
+  assert.equal(st.text, 'ship it')
+  assert.equal(st.turnSeq, 7)
+  assert.equal(st.intent, 'worker-step')
+  assert.equal(st.autorun, 'armed')
+  const off = stateFromCache({ t: 'polled', status: 'off' }, null)
+  assert.equal(off.status, 'off')
+  assert.equal(off.autorun, 'disarmed')
+})
+
+test('#203: where the host publishes the running edge, a stable disarmed bar has NO clock at all', () => {
+  const base = { status: 'ready' as const, autorun: 'disarmed' as const, running: false, hidden: false, edges: true }
+  assert.equal(pollSpacingFor(base), null, 'edges + stable: a timer could only re-read truth into history nodes — the idle edge IS the schedule')
+  assert.equal(pollSpacingFor({ ...base, running: true }), null, 'a turn in flight ends into the edge, and the edge pulls')
+  assert.equal(pollSpacingFor({ ...base, status: 'analyzing' }), ACTIVE_POLL_MS, 'a generation completing fires no edge — watch it')
+  assert.equal(pollSpacingFor({ ...base, autorun: 'armed' }), ACTIVE_POLL_MS, 'the armed belt: a missed edge must not stall the loop')
+  assert.equal(pollSpacingFor({ ...base, hidden: true }), null, 'hidden and stable: still nothing')
+  const legacy = { ...base, edges: false }
+  assert.equal(pollSpacingFor(legacy), QUIET_POLL_MS, 'a host without the prop keeps the #193 cadence UNCHANGED')
+  assert.equal(pollSpacingFor({ ...legacy, running: true }), ACTIVE_POLL_MS)
+  assert.equal(pollSpacingFor({ ...legacy, hidden: true }), null)
 })

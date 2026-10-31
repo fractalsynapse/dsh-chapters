@@ -26,7 +26,7 @@ import {
   BAR_RUN_COMMAND,
   deriveRunning,
   BAR_STATE_COMMAND,
-  pollSpacingFor, QUIET_POLL_MS, type PromptBarStatus,
+  pollSpacingFor, mountPullDecision, stateFromCache, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -133,6 +133,17 @@ const canRunHere = (state: PromptBarState): boolean => state.text !== null && st
  * answers in milliseconds when the session is attachable, and the failure it guards against is a hang. */
 const PULL_TIMEOUT_MS = 15_000
 
+/**
+ * #203: the last known truth per session, outliving the component. SPA navigation remounts the
+ * dock, and every pull is a rendered `command/run`+`command/done` history pair — so a remount
+ * that re-pulled wrote a node per activation, the waste the maintainer named ("every time I
+ * navigate away and come back"). The cache makes activation free: mount folds it through the SAME
+ * reducer (stateFromCache), and only an untrustworthy cache pulls (mountPullDecision). A page
+ * reload clears it and pays exactly one honest pull.
+ */
+interface CacheEntry { ev: import('./prompt-bar.ts').PromptBarEvent; autorun: 'armed' | 'disarmed' | null; at: number }
+const stateCache = new Map<string, CacheEntry>()
+
 /** Retry ceiling for the FIRST pull only, in attempts and spacing. A mount-time race must not be able to
  * starve the bar forever, and a real `off` answer stops the loop on the first reply either way. */
 
@@ -148,7 +159,13 @@ function execWithTimeout(exec: (line: string) => Promise<string>, line: string, 
 
 export function PromptDock(props: DockProps): ReactElement | null {
   const { sessionId, inputActions, exec } = props
-  const [state, dispatch] = useReducer(promptBarReducer, initialBarState(), (s) => ({ ...s, running: props.running ?? true }))
+  const [state, dispatch] = useReducer(promptBarReducer, initialBarState(), (s) => {
+    // #203: activation renders from the module cache — zero invocations — folded through the live
+    // reducer path, so there is no second fold implementation to drift.
+    const c = sessionId !== undefined ? stateCache.get(sessionId) : undefined
+    const base = c !== undefined ? stateFromCache(c.ev, c.autorun) : s
+    return { ...base, running: props.running ?? true }
+  })
   // #79's discipline, kept because the failure it prevents was real: one pull per mount, then per edge.
   // A fetch in an effect with no such guard re-fires on every render.
   const pulling = useRef(false)
@@ -169,6 +186,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
   const replyStatus = useRef<string>('unknown')
   const stateRef = useRef<PromptBarState>(initialBarState())
   stateRef.current = state
+  // #203: does THIS host publish the running signal? Where it does, the idle edge is the schedule
+  // and a stable bar keeps no clock; where it does not, the #193 cadence is the fallback.
+  const edgesRef = useRef<boolean>(props.running !== undefined)
+  edgesRef.current = props.running !== undefined
   if (!probed.current) {
     probed.current = true
     // One print, on the first mount: which composer verbs does THIS host actually hand a dock? The click-to-draft
@@ -192,6 +213,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
       if (ev !== null) { answered.current = true; replyStatus.current = (ev as { status?: string }).status ?? replyStatus.current; dispatch(ev) }
       const autorun = parseBarAutorun(text)
       if (autorun !== null) dispatch({ t: 'autorun', on: autorun === 'armed' })
+      // #203: every honest reply feeds the cache the next activation renders from.
+      if (ev !== null && sessionId !== undefined) {
+        stateCache.set(sessionId, { ev, autorun: autorun === 'armed' || autorun === 'disarmed' ? autorun : null, at: Date.now() })
+      }
     } catch (error) {
       // #61: a detected failure is a DELIVERED failure. Keeping the last known state is right; saying
       // nothing was not — with a bare `catch {}` a wire that never answers is indistinguishable from a
@@ -218,33 +243,55 @@ export function PromptDock(props: DockProps): ReactElement | null {
     // in a hidden tab unless the loop is armed. On hosts that publish no running prop, `running` stays
     // conservatively true and the cadence stays active — the old behavior, unchanged. `off` still ends it.
     let timer: ReturnType<typeof setTimeout> | undefined
-    const tick = async (): Promise<void> => {
-      const spacing = pollSpacingFor({
-        status: replyStatus.current as PromptBarStatus,
+    // #203: one vocabulary for "what the bar knows right now" — a reply beats the cache-folded row
+    // state, and every schedule decision reads THIS instead of keeping a fourth copy of the truth.
+    const effectiveStatus = (): PromptBarStatus =>
+      (replyStatus.current === 'unknown' ? stateRef.current.status : replyStatus.current) as PromptBarStatus
+    const spacingNow = (): number | null => pollSpacingFor({
+      status: effectiveStatus(),
+      autorun: stateRef.current.autorun,
+      running: stateRef.current.running,
+      hidden: typeof document !== 'undefined' && document.hidden === true,
+      edges: edgesRef.current,
+    })
+    const duePull = (): boolean => {
+      const c = sessionId !== undefined ? stateCache.get(sessionId) : undefined
+      return mountPullDecision({
+        hasCache: c !== undefined,
+        ageMs: c !== undefined ? Date.now() - c.at : Number.MAX_SAFE_INTEGER,
+        status: effectiveStatus(),
         autorun: stateRef.current.autorun,
-        running: stateRef.current.running,
-        hidden: typeof document !== 'undefined' && document.hidden === true,
       })
-      if (spacing !== null) await refresh()
-      if (replyStatus.current === 'off') return
-      // The reply, not the React state. The old condition read `stateRef.current`, which is only advanced by
-      // render — and while the row is hidden there is no render to wait for, so the poll stopped after its
-      // first read and the bar could never observe the offer that landed a minute later. Measured: every
-      // `state read` in the boot log precedes its `ready` write, with none following.
-      timer = setTimeout(() => { void tick() }, spacing ?? QUIET_POLL_MS)
     }
-    // The idle edge and the tab-foreground edge both mean "something just changed; look NOW" — a scheduled
-    // quiet pull is up to a minute stale, and staleness at exactly the moment an offer lands is how a bar
-    // looks dead. Kick reschedules rather than stacks: it clears the pending timer first.
+    const tick = async (opts?: { mount?: boolean; force?: boolean }): Promise<void> => {
+      if (effectiveStatus() === 'off') {
+        // A known `off` spends no clock and no edge — but a STALE cached off is untrustworthy:
+        // `/chapters-prompt on` could have happened anywhere. The staleness guard on a mount is the
+        // only revival path short of a page reload, and that matches the old within-mount rule.
+        if (!(opts?.mount === true && duePull())) return
+      }
+      const spacing = spacingNow()
+      // force = an edge the schedule sanctions (a turn ended): pull even where the steady cadence
+      // says no timer is needed. mount = the guarded first look; a fresh cache renders for free.
+      if (opts?.force === true || (spacing !== null && !(opts?.mount === true && !duePull()))) await refresh()
+      if (replyStatus.current === 'off') return
+      // The reply, not the React state: the row is hidden while `off`, and a hidden row renders
+      // nothing, so stateRef can lag. The schedule reads the wire truth whenever it exists.
+      const next = spacingNow()
+      if (next !== null) timer = setTimeout(() => { void tick() }, next)
+    }
+    // The idle edge IS the schedule (#203): a turn ending is the moment an offer is born, so it
+    // pulls with force. The tab-foreground edge pulls ONLY when the cache can no longer be
+    // trusted — flicking back to a tab you left a moment ago must not write a history node.
     kick.current = () => {
       if (timer !== undefined) clearTimeout(timer)
-      void tick()
+      void tick({ force: true })
     }
     const onVisible = (): void => {
-      if (typeof document !== 'undefined' && !document.hidden) kick.current?.()
+      if (typeof document !== 'undefined' && !document.hidden && duePull()) kick.current?.()
     }
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
-    void tick()
+    void tick({ mount: true })
     return () => {
       if (timer !== undefined) clearTimeout(timer)
       kick.current = undefined
@@ -433,7 +480,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
           label: 'Turn prompt suggestions off for this session', glyph: '✕',
           // `off` is a server write, not a local hide: generation stops, the configured model is KEPT so
           // back-on is one action, and the bar disappears instead of lingering with a stale offer.
-          onClick: () => { void (async () => { if (exec !== undefined) await exec('/chapters-prompt off'); dispatch({ t: 'off' }) })() },
+          onClick: () => { void (async () => { if (exec !== undefined) await exec('/chapters-prompt off'); dispatch({ t: 'off' }); if (sessionId !== undefined) stateCache.set(sessionId, { ev: { t: 'polled', status: 'off' }, autorun: null, at: Date.now() }) })() },
         }),
       ),
     ),
