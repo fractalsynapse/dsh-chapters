@@ -236,10 +236,16 @@ asking); the push transport (#194) removes even it. Revival is honest and stated
 acts: `/chapters-prompt model <spec>` and `/chapters-prompt on` say that a hidden bar reappears
 at the next page reload — a client that learned `off` keeps no clock, by design.
 
-Beyond mounts: the host's **idle edge** (a turn ending is the moment an offer is born) pulls
-immediately; the bar's **own actions** are their own invocations; and where the host publishes
-the running signal, the quiet **clock disappears entirely** for a stable, disarmed bar — every
-state change flows through an edge or an action, so a timer could only re-read truth. Hosts
+Beyond mounts: the host's **idle edge** (a turn ending is the moment an offer is born) pulls —
+but **debounced and rate-floored** (#211, measured the hard way on the maintainer's host: some
+hosts publish `running` at STEP granularity — it flickers at every tool call and every thinking
+block — and an edge-per-flicker was a rendered command node per tool call, all of it waste,
+because the server row changes ONLY at turn boundaries). So a falling edge schedules its pull
+2s out and a rising edge cancels it: step flickers coalesce to zero pulls, a real turn end pulls
+once. A rate floor (15s since the last pull) bounds even a host that holds `running` low through
+long tool calls. The bar's **own actions** remain their own invocations; and where the host
+publishes the running signal, the quiet **clock disappears entirely** for a stable, disarmed bar —
+every state change flows through an edge or an action, so a timer could only re-read truth. Hosts
 that publish no running prop keep the paced fallback (**10s** while analyzing/armed/running,
 **60s** while quiet, **zero pulls in a hidden tab** while quiet — never while armed, because
 walking away from a running loop is the point of autorun). An armed or analyzing bar keeps the
