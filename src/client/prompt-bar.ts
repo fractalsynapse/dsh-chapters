@@ -280,3 +280,19 @@ export function deriveRunning(status: unknown): boolean | undefined {
 export function parseModelAbsent(text: string): boolean {
   return /^\s*model:\s*unset\b/m.test(text)
 }
+
+/**
+ * #211 — the edge kick's delay, measured on the maintainer's host the hard way: some hosts publish
+ * `running` at STEP granularity (it flickers at every tool call and thinking block), and an
+ * immediate kick per falling edge was a rendered `chapters-prompt` node per tool call — all waste,
+ * because the server row changes ONLY at turn boundaries. So: a falling edge schedules its pull
+ * after the debounce, a rising edge cancels it (step flicker coalesces to zero pulls), and the rate
+ * floor bounds even a host that holds `running` low through long tool calls. A real turn end — a
+ * falling edge with no rising edge after it — pulls exactly once.
+ */
+export const EDGE_DEBOUNCE_MS = 2_000
+export const EDGE_FLOOR_MS = 15_000
+
+export function edgeKickDelayMs(msSinceLastPull: number): number {
+  return Math.max(EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS - msSinceLastPull)
+}
