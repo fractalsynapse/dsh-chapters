@@ -125,3 +125,38 @@ test('an unconfigured or ineligible session never pays the call (#113)', async (
   await new Promise((r) => setTimeout(r, 40))
   assert.equal(headless.calls(), 0, 'a subagent or headless session has no composer and must not be billed for one')
 })
+
+test('#218: pushRow mirrors every durable row write — the runner calls it at all five sites', async () => {
+  const pushed: Array<{ session: unknown; sessionId: string }> = []
+  const deps = {
+    enabled: () => true,
+    eligible: () => true,
+    store: { mutate: async (id: string, fn: (s: SessionState) => SessionState) => { rows.set(id, fn(rows.get(id) ?? freshSession(id))); return undefined } },
+    pushRow: (session: unknown, sessionId: string) => { pushed.push({ session, sessionId }) },
+    generate: async () => ({ ok: true, text: 'a next step' } as GenerateOutcome),
+    now: () => 't',
+  }
+  const rows = new Map<string, SessionState>([['S', freshSession('S')]])
+  const depsWithStore = { ...deps, store: { mutate: async (id: string, fn: (s: SessionState) => SessionState) => { rows.set(id, fn(rows.get(id) ?? freshSession(id))); return undefined } } }
+  const runner = makePromptRoundRunner(depsWithStore as Parameters<typeof makePromptRoundRunner>[0])
+  const session = { id: 'S', header: {} }
+  runner(session, { type: 'turn/end', seq: 10 })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.ok(pushed.length >= 2, `the runner pushed at the analyzing claim and the ready write (got ${String(pushed.length)})`)
+  assert.equal(pushed[0]!.sessionId, 'S')
+  assert.equal(pushed[0]!.session, session, 'the LIVE session object rides along for the append')
+  // quiet refusal: the generate returns quiet ⇒ row write ⇒ pushRow again
+  const quietDeps = { ...depsWithStore, generate: async () => ({ ok: false, quiet: true } as GenerateOutcome) }
+  rows.set('S', freshSession('S'))
+  const before = pushed.length
+  makePromptRoundRunner(quietDeps as Parameters<typeof makePromptRoundRunner>[0])(session, { type: 'turn/end', seq: 20 })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.ok(pushed.length > before, 'a quiet refusal also mirrors (the row was written)')
+  // failure: the generate throws ⇒ failed write ⇒ pushRow
+  const failDeps = { ...depsWithStore, generate: async () => { throw new Error('model down') } }
+  rows.set('S', freshSession('S'))
+  const before2 = pushed.length
+  makePromptRoundRunner(failDeps as Parameters<typeof makePromptRoundRunner>[0])(session, { type: 'turn/end', seq: 30 })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.ok(pushed.length > before2, 'a failed generation also mirrors')
+})

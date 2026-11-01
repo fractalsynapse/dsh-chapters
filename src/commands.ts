@@ -441,6 +441,15 @@ export function registerHostCommands(
         }
         if (verb === 'off') {
           await config.prompt.setModel('')
+          // #194: the global switch alone leaves a PUSHED bar showing its last offer forever — no row
+          // write means no record. The calling session's row goes off too (what `setOff` exists for),
+          // so the record carries the truth to this bar; other open sessions converge through the
+          // pull staleness guard on next activation (documented in the contract's push lock).
+          const offHolder = invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } }
+          const offSessId = offHolder.session?.id ?? offHolder.agent?.session?.id
+          if (offSessId !== undefined && config.prompt.bar !== undefined) {
+            await config.prompt.bar.setOff(offSessId, offHolder.session ?? offHolder.agent?.session)
+          }
           return { kind: 'success', text: 'prompt suggestions OFF (stored override; /chapters-prompt model clear restores the config default)' }
         }
         // #113: the bar's three pulls. `state` answers in k: v lines so ONE output serves both the human
@@ -453,6 +462,16 @@ export function registerHostCommands(
             return { kind: 'error', text: 'state needs a session scope and the chapters prompt store — run it inside a session' }
           }
           const st = await config.prompt.bar.read(sessId)
+          // #218 STATE MIRROR: the pull answered, and on a push-live host that answer becomes the
+          // record the NEXT mount reads from the projection — discovery pulls self-extinguish. The
+          // caller's live session is right here in the invocation; the mirror rides the same
+          // serialized per-session queue as every other record. A pull-mode host ignores it (the
+          // optional parameter is absent in its signature — no-op).
+          const sessObj = (invocation.agent as { session?: unknown }).session
+            ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
+          if (sessObj !== undefined && typeof (config.prompt.bar.read as { mirror?: unknown }).mirror === 'function') {
+            void (config.prompt.bar.read as unknown as { mirror: (sessionId: string, session: unknown) => void }).mirror(sessId, sessObj)
+          }
           const { spec, source } = config.prompt.effective()
           // #113: `off` must mean OFF. A session with a defining model and no stored offer is `idle` — enabled,
           // awaiting its first turn — and collapsing that into `off` is what made the bar look switched-off
@@ -504,7 +523,10 @@ export function registerHostCommands(
           if (on && spec === '') {
             return { kind: 'error', text: 'cannot arm autorun with no prompt model — the loop has nothing to generate offers. /chapters-prompt model <provider/model> first' }
           }
-          const live = config.prompt.bar.setAutorun(sessId, on)
+          // #194: the live session rides along so the autorun flip can mirror to the push transport.
+          const sessObj = (invocation.agent as { session?: unknown }).session
+            ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
+          const live = config.prompt.bar.setAutorun(sessId, on, sessObj)
           return { kind: 'success', text: on
             ? `autorun ARMED for ${sessId} — each completed turn's offer runs for you, until you stop it or send a prompt yourself.` + (live.displaced
                 ? ' The goal remains the objective; its own auto-continuation is disarmed, so the suggestion loop now drives the worker. Re-arm it with /goal resume.'
@@ -519,7 +541,7 @@ export function registerHostCommands(
           }
           const holder = invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } }
           const sessId = holder.session?.id ?? holder.agent?.session?.id
-          if (sessId !== undefined) await config.prompt.bar.setOn(sessId)
+          if (sessId !== undefined) await config.prompt.bar.setOn(sessId, holder.session ?? holder.agent?.session)
           return { kind: 'success', text: `suggestions ON (${spec}) — the next completed turn offers a next step; /chapters-prompt state shows it, /chapters-prompt autorun on runs them. If the bar is hidden, it reappears at the next page reload.` }
         }
         if (verb === 'suggest') {

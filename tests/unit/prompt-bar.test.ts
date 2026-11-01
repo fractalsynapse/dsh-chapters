@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS } from '../../src/client/prompt-bar.ts'
+import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS } from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -210,13 +210,61 @@ test('#208: parseModelAbsent reads the plane-wide fact from the state block — 
   assert.equal(parseModelAbsent(''), false)
 })
 
+test('#194: a pushed payload becomes the same reducer events the pull path uses — and nothing unrecognised ever folds', () => {
+  const good = { v: 1, status: 'ready', text: 'ship it', turnSeq: 9, error: '', intent: 'goal-edit', autorun: 'armed' }
+  const evs = pushEventsOf(good)
+  assert.ok(evs !== null)
+  const st = promptBarReducer(promptBarReducer(initialBarState(), evs.polled), evs.autorun)
+  assert.equal(st.status, 'ready')
+  assert.equal(st.text, 'ship it')
+  assert.equal(st.turnSeq, 9)
+  assert.equal(st.intent, 'goal-edit', 'a pushed GOAL: classification still holds the offer for the keystroke')
+  assert.equal(st.autorun, 'armed')
+  assert.equal(pushEventsOf({ v: 2, status: 'ready', text: 'x' }), null, 'a future version never folds')
+  assert.equal(pushEventsOf(null), null)
+  assert.equal(pushEventsOf({ v: 1, status: 'bogus', text: 'x' }), null, 'an unknown status is ignored, not guessed at')
+  // analyzing with no text is honest progress, not a malformed push — the earlier draft of this row
+  // asserted a value against ITSELF (a tautology is a row that can never fail, which is worse than no row)
+  const analyzing = pushEventsOf({ v: 1, status: 'analyzing' })
+  assert.ok(analyzing !== null)
+  assert.deepEqual(analyzing.polled, { t: 'polled', status: 'analyzing' })
+})
+
+test('#194: deriveRunning folds the useSession snapshot — the seat the contract names', () => {
+  // The precedence expression itself (scalar → snapshot → unknown) lives in the dock as ONE
+  // expression, pinned by the source-scan row in prompt-dock-placement.test.ts; these arms pin the
+  // snapshot fold. A second pure helper for the same decision was removed — #59.
+  assert.equal(deriveRunning({ running: true }), true)
+  assert.equal(deriveRunning({ running: false }), false)
+  assert.equal(deriveRunning(undefined), undefined, 'no snapshot: unknown stays unknown')
+})
+
+test('#194: the staleness-confirm fires only when the push stayed silent past the edge', () => {
+  assert.equal(pushIsFresher(150, 100), true, 'a push after the edge cancels the confirm')
+  assert.equal(pushIsFresher(50, 100), false, 'a push from before the edge confirms nothing')
+  assert.equal(pushIsFresher(null, 100), false, 'no push ever: the confirm runs and the pull covers')
+})
+
 test('#211: the edge kick is debounced and rate-floored — step-granular running flicker costs ZERO pulls', () => {
-  // The maintainer's host publishes running per STEP: a pull per flicker was a rendered command node
-  // per tool call, all waste (the server row changes only at turn boundaries). The delay formula:
-  // never sooner than the debounce; never inside the floor since the last pull.
   assert.equal(edgeKickDelayMs(Number.MAX_SAFE_INTEGER), EDGE_DEBOUNCE_MS, 'a cold edge waits just the debounce')
   assert.equal(edgeKickDelayMs(0), EDGE_FLOOR_MS, 'an edge immediately after a pull waits out the whole floor')
   assert.equal(edgeKickDelayMs(10_000), 5_000, 'mid-floor: the remainder, never less than the debounce')
   assert.equal(edgeKickDelayMs(EDGE_FLOOR_MS + 1), EDGE_DEBOUNCE_MS, 'past the floor: the debounce is the minimum')
   assert.ok(EDGE_FLOOR_MS > EDGE_DEBOUNCE_MS)
+})
+
+test('#218: pushEventsOf arms — turnSeq/error defaults and the goalRevision field ride the payload', () => {
+  const evs = pushEventsOf({ v: 1, status: 'failed', text: '', turnSeq: 5, error: 'the model call failed', intent: 'worker-step', goalRevision: 3, autorun: 'armed' })
+  assert.ok(evs !== null)
+  const st = promptBarReducer(promptBarReducer(initialBarState(), evs.polled), evs.autorun)
+  assert.equal(st.status, 'failed')
+  assert.ok((st.error ?? '').includes('model call'), 'the error rides the pushed event')
+  assert.equal(st.autorun, 'armed')
+  const noTurn = pushEventsOf({ v: 1, status: 'ready', text: 'x' })
+  assert.ok(noTurn !== null, 'a payload without turnSeq/goalRevision is still accepted (defaults)')
+  const st2 = promptBarReducer(initialBarState(), noTurn.polled)
+  assert.equal(st2.turnSeq, null, 'absent turnSeq defaults to null')
+  assert.equal(pushEventsOf(undefined), null)
+  assert.equal(pushEventsOf('string'), null)
+  assert.ok(pushEventsOf({ v: 1, status: 'ready', text: 'x', intent: 'bogus' } as unknown) !== null, 'an unknown intent defaults to worker-step — the payload gate is version + status, not every field')
 })
