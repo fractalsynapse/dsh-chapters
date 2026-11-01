@@ -647,6 +647,10 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // One serialized push per session: the fold is last-wins, so records must land in mutation
     // order — a ready that overtakes its own analyzing would show a stale offer as fresh.
     const pushChains = new Map<string, Promise<void>>()
+    // #218: sessions that already carry a birth record this process; a Set, not persistence —
+    // the record itself is durable, and a restarted process re-birthing would append a duplicate
+    // (harmless: the fold is last-wins, but a duplicate is a log write for nothing).
+    const seenBirthSessions = new Set<string>()
     const pushBar = (session: unknown, sessionId: string): void => {
       if (pushWriter === null || session === undefined || session === null) return
       const writer = pushWriter
@@ -667,6 +671,10 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         const live = promptLoop.statusOf(sessionId)
         return { ...status, ...live }
       },
+      // #218: the state verb calls this after serving a pull — the answer becomes the record the
+      // next mount reads from the projection. Pull-only surfaces never see it called (the caller
+      // feature-checks), so it lives on the same object that owns the push queue.
+      mirror: (sessionId: string, session: unknown): void => { pushBar(session, sessionId) },
       // #113: Run is a command, not a keystroke. The offer is read from the row the bar is displaying and
       // injected as a human-authored follow-up — the same path autorun uses, so what the human clicks and what
       // the loop arms cannot be two different behaviors. `no live agent` is the honest failure and reaches the
@@ -902,6 +910,16 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
           // captured by the boot's server log, so the answer survives the leg (#61).
           if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
+          // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
+          // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
+          // watched a chapters-prompt node land BEFORE their first message, and that node was the
+          // discovery. Rows only change at turn/end, so a session born before its first turn has
+          // nothing to say — `idle` is the whole truth — and saying it through the projection costs
+          // zero commands forever.
+          if (pushWriter !== null && !seenBirthSessions.has(session.id)) {
+            seenBirthSessions.add(session.id)
+            if (prompt.effective().spec !== '') pushBar(session, session.id)
+          }
           promptRunner(session as never, event as never)
         }) as never)
         console.error('[chapters-prompt] turn/end door armed')

@@ -13,6 +13,7 @@
  *    signal the client reads through the standard `useProjection` seat (undefined ⇒ pull schedule).
  */
 import { createRequire } from 'node:module'
+import { z } from 'zod'
 
 /** The record grammar: lowercase segments, each starting with a letter or digit (host grammar). */
 export const PROMPT_RECORD_TYPE = 'plugin:dsh-chapters/prompt'
@@ -52,14 +53,33 @@ export function foldPromptRecord(state: PromptPushPayload | null, event: { type?
  * register accepts `{parse}` shapes; zod is not required and would be a second schema system here).
  * Kept a value builder so the wiring can register it only when the writer resolved.
  */
+const promptPayloadSchema = z.object({
+  v: z.literal(1),
+  status: z.enum(['off', 'analyzing', 'ready', 'failed']),
+  text: z.string(),
+  turnSeq: z.number().nullable(),
+  error: z.string(),
+  intent: z.enum(['worker-step', 'goal-edit']),
+  goalRevision: z.number().nullable(),
+  autorun: z.enum(['armed', 'disarmed']),
+  at: z.string(),
+})
+
+/**
+ * #218: REAL zod schemas, like the goal projection — the duck-typed `{parse}` shapes passed the
+ * server-side fold (the probe measured `stateOf` working) but the CLIENT delivery validates
+ * through `wire.viewSchema`, and an object that is not a real schema can fail that validation
+ * silently — killing the one hop this transport exists to provide. Same shape as the goal
+ * definition: stateSchema, init, apply, wire, stateVersion.
+ */
 export function promptProjectionDefinition(): unknown {
   return {
     key: PROMPT_PROJECTION_KEY,
-    stateSchema: { parse: (v: unknown) => v },
+    stateSchema: promptPayloadSchema.nullable(),
     init: (): PromptPushPayload | null => null,
     apply: (state: PromptPushPayload | null, event: unknown) => foldPromptRecord(state, event as { type?: unknown; data?: unknown }),
-    wire: { viewSchema: { parse: (v: unknown) => v }, view: (s: PromptPushPayload | null) => s },
-    stateVersion: 1,
+    wire: { viewSchema: promptPayloadSchema.nullable(), view: (s: PromptPushPayload | null) => s },
+    stateVersion: 2,
   }
 }
 

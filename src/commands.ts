@@ -462,6 +462,16 @@ export function registerHostCommands(
             return { kind: 'error', text: 'state needs a session scope and the chapters prompt store — run it inside a session' }
           }
           const st = await config.prompt.bar.read(sessId)
+          // #218 STATE MIRROR: the pull answered, and on a push-live host that answer becomes the
+          // record the NEXT mount reads from the projection — discovery pulls self-extinguish. The
+          // caller's live session is right here in the invocation; the mirror rides the same
+          // serialized per-session queue as every other record. A pull-mode host ignores it (the
+          // optional parameter is absent in its signature — no-op).
+          const sessObj = (invocation.agent as { session?: unknown }).session
+            ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
+          if (sessObj !== undefined && typeof (config.prompt.bar.read as { mirror?: unknown }).mirror === 'function') {
+            void (config.prompt.bar.read as unknown as { mirror: (sessionId: string, session: unknown) => void }).mirror(sessId, sessObj)
+          }
           const { spec, source } = config.prompt.effective()
           // #113: `off` must mean OFF. A session with a defining model and no stored offer is `idle` — enabled,
           // awaiting its first turn — and collapsing that into `off` is what made the bar look switched-off

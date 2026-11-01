@@ -36,7 +36,15 @@ test('the projection definition is shaped like the host exemplar and folds throu
   const folded = def.apply(null, { type: PROMPT_RECORD_TYPE, data: promptRecordPayload(facts) })
   assert.deepEqual(folded, promptRecordPayload(facts))
   assert.equal(def.wire.view(folded), folded, 'the client sees the payload whole')
-  assert.equal(def.stateVersion, 1)
+  assert.equal(def.stateVersion, 2)
+  // #218: REAL zod schemas — the duck-typed `{parse}` shapes passed the server fold but were an
+  // unverified risk on the client wire validation; assert the schemas are actual zod objects.
+  const def2 = promptProjectionDefinition() as { stateSchema: { safeParse: (v: unknown) => { success: boolean } }; wire: { viewSchema: { safeParse: (v: unknown) => { success: boolean } } } }
+  const payload = promptRecordPayload(facts)
+  assert.equal(def2.stateSchema.safeParse(payload).success, true, 'the state schema accepts a real payload')
+  assert.equal(def2.stateSchema.safeParse(null).success, true, 'and a null state (init)')
+  assert.equal(def2.wire.viewSchema.safeParse(payload).success, true, 'the wire schema accepts the view')
+  assert.equal(def2.wire.viewSchema.safeParse({ v: 2, status: 'ready' }).success, false, 'and rejects a foreign shape — validation is real')
 })
 
 test('resolvePushWriter: the host-anchored recipe, and every failure degrades to null — never a throw', async () => {

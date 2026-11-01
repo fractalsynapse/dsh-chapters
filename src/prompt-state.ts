@@ -165,6 +165,11 @@ export interface PromptBarAccess {
   // append needs the host's Session object, and every mutation site (command invocation, turn
   // listener) holds it. Absent ⇒ no record for that change; the pull floor still serves the bar.
   read(sessionId: string): Promise<PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }>
+  /** #218: mirror a just-served state read into the push transport, so the NEXT mount reads the
+   *  projection instead of pulling again — discovery self-extinguishes. Optional: a pull-only
+   *  surface (no writer) simply does not implement it, and the caller's feature check makes that a
+   *  no-op rather than an error. */
+  mirror?: (sessionId: string, session: unknown) => void
   /** `displaced` is the answer to "who starts the next turn": true when arming this loop also disarmed the
    * goal driver's continuation, so the human is told which engine they just opted into. */
   setAutorun(sessionId: string, on: boolean, session?: unknown): { autorun: 'armed' | 'disarmed'; fired: number; displaced: boolean }
