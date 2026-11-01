@@ -651,6 +651,11 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // the record itself is durable, and a restarted process re-birthing would append a duplicate
     // (harmless: the fold is last-wins, but a duplicate is a log write for nothing).
     const seenBirthSessions = new Set<string>()
+    // #225: sessions whose first-boundary verdict has been printed (per process), and the total
+    // boundaries sighted — the status command prints both. "No suggestion ever" must not be a
+    // silence to interpret; it is a printed verdict per session at its first boundary.
+    const promptVerdictSighted = new Set<string>()
+    let promptBoundariesSighted = 0
     const pushBar = (session: unknown, sessionId: string): void => {
       if (pushWriter === null || session === undefined || session === null) return
       const writer = pushWriter
@@ -781,7 +786,27 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           },
         }
       },
-      prompt: { ...prompt, bar: promptBar },
+      prompt: Object.assign({ ...prompt, bar: promptBar }, {
+        // #225: `/chapters-status` answers "why is there no suggestion?" without reading files.
+        planeStatus: (): string[] => {
+          const lines: string[] = []
+          const { spec, source } = prompt.effective()
+          lines.push(`Prompt plane: model ${spec !== '' ? `${spec} (${source})` : 'UNSET — the bar is absent (§28)'}`)
+          lines.push(`  transport: ${pushWriter === null ? 'pull (this host has no appendPluginRecord — state reads are commands)' : 'push LIVE (plugin records; the bar rides the projection)'}`)
+          lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
+          return lines
+        },
+        sessionRow: async (sessionId: string): Promise<string> => {
+          try {
+            const row = await store.get(sessionId)
+            const ps = row.promptSuggestion
+            if (ps === undefined) return '  this session: NO ROW YET — the runner never persisted a verdict (if the door sighted boundaries above, check server stderr for [chapters-prompt] lines)'
+            return `  this session: status=${ps.status}, turn=${String(ps.turnSeq ?? '-')}${ps.error !== '' ? `, error=${ps.error.slice(0, 90)}` : ''}, at=${ps.at}`
+          } catch (error) {
+            return `  this session: row unreadable (${String((error as Error)?.message ?? error).slice(0, 80)})`
+          }
+        },
+      }),
       rules: (cwd, args, sessionId) => rulesCommand({
         cwd: () => cwd,
         storeRoot: config.artifactStoreRoot,
@@ -910,6 +935,13 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
           // captured by the boot's server log, so the answer survives the leg (#61).
           if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
+          if (event?.type === 'turn/end') promptBoundariesSighted += 1
+          if (event?.type === 'turn/end' && !promptVerdictSighted.has(String(session.id))) {
+            promptVerdictSighted.add(String(session.id))
+            const specV = prompt.effective().spec
+            const originV = (session as { header?: { origin?: string } }).header?.origin
+            console.error(`[chapters-prompt] first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`)
+          }
           // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
           // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
           // watched a chapters-prompt node land BEFORE their first message, and that node was the

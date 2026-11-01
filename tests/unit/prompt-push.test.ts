@@ -113,3 +113,11 @@ test('#218: the anchor fallback and the no-seams production path both resolve or
   const silent = await resolvePushWriter({ requireFn: () => { throw new Error('nope') } })
   assert.equal(silent, null, 'a resolution failure with no log seam degrades to null silently')
 })
+
+test('#225: the fold refuses a record whose payload is not an object, and a v-mismatched one', () => {
+  assert.equal(foldPromptRecord(null, { type: PROMPT_RECORD_TYPE, data: 'string-payload' }), null, 'a non-object payload never folds')
+  assert.equal(foldPromptRecord(null, { type: PROMPT_RECORD_TYPE, data: { v: 2, status: 'ready' } }), null, 'a foreign version is ignored — forward-compat discipline')
+  const good = foldPromptRecord(null, { type: PROMPT_RECORD_TYPE, data: promptRecordPayload(facts) })
+  assert.ok(good !== null)
+  assert.equal(foldPromptRecord(good, { type: 'other/kind', data: {} }), good, 'unrelated events pass through untouched')
+})

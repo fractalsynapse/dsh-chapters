@@ -160,3 +160,36 @@ test('#218: pushRow mirrors every durable row write — the runner calls it at a
   await new Promise((r) => setTimeout(r, 50))
   assert.ok(pushed.length > before2, 'a failed generation also mirrors')
 })
+
+test('#225: the eligible predicate is consulted at the boundary and its refusal is logged', async () => {
+  const logs: string[] = []
+  const rows = new Map<string, SessionState>([['S', freshSession('S')]])
+  let eligibleCalls = 0
+  const runner = makePromptRoundRunner({
+    enabled: () => true,
+    eligible: () => { eligibleCalls += 1; return false },
+    store: { mutate: async (id: string, fn: (s: SessionState) => SessionState) => { rows.set(id, fn(rows.get(id) ?? freshSession(id))); return undefined } },
+    generate: async () => ({ ok: true, text: 'x' } as GenerateOutcome),
+    now: () => 't',
+    log: (m) => { logs.push(m) },
+  })
+  runner({ id: 'S', header: { origin: 'subagent' } }, { type: 'turn/end', seq: 3 })
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(eligibleCalls, 1, 'the gate runs at every boundary')
+  assert.ok(logs.some((l) => /not eligible/.test(l)), 'and its refusal is NAMED in the log — #225 delivers the silence')
+})
+
+test('#225: a throwing listener is caught and WARNED, never propagated into the host event loop', async () => {
+  const warns: string[] = []
+  const runner = makePromptRoundRunner({
+    enabled: () => { throw new Error('config exploded') },
+    eligible: () => true,
+    store: { mutate: async () => undefined },
+    generate: async () => ({ ok: true, text: 'x' } as GenerateOutcome),
+    now: () => 't',
+    warn: (m) => { warns.push(m) },
+  })
+  runner({ id: 'S', header: {} }, { type: 'turn/end', seq: 1 })
+  await new Promise((r) => setTimeout(r, 30))
+  assert.ok(warns.some((w) => /turn listener failed/.test(w)), 'the outer catch names the failure class on the warn channel')
+})
