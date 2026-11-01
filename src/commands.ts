@@ -315,6 +315,18 @@ export function registerHostCommands(
       // ran" hides for three days behind a logger nobody reads.
       lines.push(config.enrich !== undefined ? config.enrich.statusLine() : 'Enrichment: not wired on this plane (no model route registered)')
       lines.push(config.prompt !== undefined ? config.prompt.statusLine() : 'Prompt suggestions: not wired on this plane')
+      // #225: the prompt PLANE block — model, transport, door sightings, and THIS session's last
+      // persisted verdict. The maintainer asked why hundreds of pulls never produced an offer;
+      // from here that question is one command wide, answered by facts instead of archaeology.
+      if (config.prompt !== undefined) {
+        const plane = config.prompt as typeof config.prompt & Partial<import('./prompt.ts').PromptStatusExtras>
+        if (typeof plane.planeStatus === 'function') for (const l of plane.planeStatus()) lines.push(l)
+        if (typeof plane.sessionRow === 'function') {
+          const sessId = (invocation.agent as { session?: { id?: string } })?.session?.id
+            ?? (invocation.agent as { agent?: { session?: { id?: string } } })?.agent?.session?.id
+          if (sessId !== undefined) { try { lines.push(await plane.sessionRow(sessId)) } catch { /* the block degrades to what it has */ } }
+        }
+      }
       lines.push(diagnosticStatusLine())
       lines.push(AUTO_SAVE_LINE(config))
       // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
@@ -384,6 +396,36 @@ export function registerHostCommands(
 
   // #173: the discovery surface for the three model settings. Pure core in models-command.ts;
   // this shell only refuses when the catalog is not wired and re-reads the io per invocation.
+  // #221 ANCHOR RPC: the door buttons need the durable seq of the assistant message they were
+  // clicked under. The client only ever sees `messageId` (a uuid — measured in the host's own
+  // TurnTailNodeView); the seq lives in the session log, which only the server reads. This command
+  // is that lookup: `chapters-anchor <messageId>` answers with the bare seq, nothing else. It is
+  // plugin-private by naming (no slash menu pretension beyond its purpose) and idempotent.
+  const anchorCommand = {
+    name: 'chapters-anchor',
+    description: 'Resolve an assistant messageId to its durable seq (the continuation doors use it to anchor at the clicked message).',
+    input: { hint: '<messageId>' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
+      const messageId = (invocation.rawInput ?? '').trim()
+      if (messageId === '') return { kind: 'error', text: 'chapters-anchor: usage /chapters-anchor <messageId>' }
+      const session = (invocation.agent as { session?: { snapshotEvents?: () => readonly unknown[] } })?.session
+        ?? (invocation.agent as { agent?: { session?: { snapshotEvents?: () => readonly unknown[] } } })?.agent?.session
+      if (session === undefined || typeof session.snapshotEvents !== 'function') {
+        return { kind: 'error', text: 'chapters-anchor: no session context — run it in a session' }
+      }
+      try {
+        for (const ev of session.snapshotEvents()) {
+          const e = ev as { type?: string; seq?: number; data?: { message?: { id?: string } } }
+          if (e.type !== 'assistant/message') continue
+          if (e.data?.message?.id === messageId && typeof e.seq === 'number') return { kind: 'success', text: String(e.seq) }
+        }
+        return { kind: 'error', text: `chapters-anchor: messageId ${messageId.slice(0, 12)}… not found in this session` }
+      } catch (error) {
+        return { kind: 'error', text: `chapters-anchor failed: ${String((error as Error)?.message ?? error).slice(0, 120)}` }
+      }
+    },
+  }
+
   const modelsCatalogCommand = {
     name: 'chapters-models',
     description: 'Discover the provider/model identifiers the enrichment, rules-mining, and prompt settings accept, with capabilities and current values: /chapters-models [<provider> [<model>]]',
@@ -595,6 +637,8 @@ export function registerHostCommands(
     if (typeof d3 === 'function') disposers.push(d3 as () => void)
     const d3b = commands.register(promptCommand)
     if (typeof d3b === 'function') disposers.push(d3b as () => void)
+    const d3d = commands.register(anchorCommand)
+    if (typeof d3d === 'function') disposers.push(d3d as () => void)
     const d3c = commands.register(modelsCatalogCommand)
     if (typeof d3c === 'function') disposers.push(d3c as () => void)
     if (config.rules !== undefined) {

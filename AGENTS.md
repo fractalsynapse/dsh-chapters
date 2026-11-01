@@ -580,6 +580,15 @@ Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/v
   blocked goal. So an armed goal has no rest state at any budget: 256 floods, 1 ends it. A mechanism whose only
   terminal state destroys the thing under test is not a bound — the claims move to a live leg under a wall-clock
   ceiling (`prompt-goal-live.spec.ts`), and the acceptance job is documented as NOT covering them.
+- **Environment parity is a release step, not a discovery (`node scripts/check-env-parity.mjs`).** The
+  maintainer's standing order — test and development environments must ALWAYS match the local one — was
+  bought with an incident: their box runs TWO harnesses (their GUI: a root-owned long-lived `dsh web`;
+  this dev session: adrian's), and fixes verified in one environment "did not work" in the other because
+  the plugin copy the first server loads was ~ten releases stale. Before shipping any fix the maintainer
+  is living with: run the parity script; it names every installed copy vs the repo version and exits
+  nonzero on drift. A restart of the servers using an old copy is part of the release, never an
+  afterthought. The rig pin vs live host ADVISORY line is the #221 class of gap (acceptance replayed a
+  different host shape than the user runs) — closing it fully is the pin bump + corpus re-record.
 - **Node ≥ 24 runs the deterministic suites** (`engines`); on an older node EVERY test file fails in a way
   that looks like your change. Check `node --version` before believing a red suite.
 

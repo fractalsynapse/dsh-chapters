@@ -463,6 +463,16 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
 }
 
 /** Narrow slice: what `registerHostCommands` needs from the surface. */
+/**
+ * #225: the STATUS plane may ask for more than the command surface carries — `planeStatus` and
+ * `sessionRow` are provided by the wiring (index.ts) when it owns the transport/door facts. Typed
+ * as an extension so the commands layer can feature-check them honestly.
+ */
+export interface PromptStatusExtras {
+  planeStatus(): string[]
+  sessionRow(sessionId: string): Promise<string>
+}
+
 export type PromptCommandSurface = PromptSurface
 
 /** Active chapters of one registry row, mapped to the facts the input uses. */

@@ -174,7 +174,26 @@ export function apply(ctx: Ctx): void {
       // 0.2.0-rc.2 rendered them fine. Declaring the label is contract-blessed on BOTH ("Register
       // options are id, order, and label" — docs/contract.md) and costs nothing.
       label: door.label,
-      inject: (sessionId: string) => ({ run: () => run(sessionId) }),
+      // #221: the framework hands the action row its OWNER props — `{ messageId }`, the uuid of the
+      // assistant message under the buttons (measured in dsh-client-ui-chat TurnTailNodeView). The
+      // door resolves that uuid to its durable seq through the plugin's own RPC and passes it as the
+      // anchor, so clicking Continue on an earlier message archives through THAT message's turn, not
+      // the end of the session. Resolution failure falls back to no-anchor (old behavior) and says so
+      // in the note — a door that silently ignores which row you clicked is the bug being fixed.
+      inject: (sessionId: string, owner?: { messageId?: string }) => ({
+        run: async () => {
+          let anchor: number | null = null
+          const mid = typeof owner?.messageId === 'string' ? owner.messageId : ''
+          if (mid !== '') {
+            try {
+              const out = await runCommandText(remote, sessionId, `/chapters-anchor ${mid}`)
+              const n = Number.parseInt(out.trim(), 10)
+              if (Number.isFinite(n) && n > 0) anchor = n
+            } catch { /* fall back to unanchored — old behavior */ }
+          }
+          return run(sessionId, anchor)
+        },
+      }),
     }, component))
     console.info(`[client:chapters] door factory ran: ${String(effects.length)} register effect(s), types: ${effects.map((e) => typeof e).join(',')}`)
     return effects

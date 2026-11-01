@@ -27,7 +27,7 @@ import {
   deriveRunning,
   BAR_STATE_COMMAND,
   pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, edgeKickDelayMs,
-  pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, type PromptBarStatus,
+  pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, turnEndPulse, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -182,6 +182,13 @@ export function PromptDock(props: DockProps): ReactElement | null {
   const running = props.running ?? deriveRunning(sessionSnapshot)
   const useProjectionHook = props.useProjection ?? (() => undefined)
   const pushed = useProjectionHook(PROMPT_PROJECTION_KEY)
+  // #221: the host's OWN turn-boundary projection. Reading it costs nothing (the agent loop already
+  // maintains it), works on EVERY host with projections including 0.2.0-rc.2 — where appendPluginRecord
+  // is absent and the record transport cannot exist. A new turn end is the only moment our row can
+  // change without a user action, so this pulse replaces the clock: one sanctioned follow-up pull per
+  // boundary instead of a 10-second drumbeat (measured on the maintainer's live log: 158 pulls at exact
+  // 10.0s intervals). Absent hook or projection ⇒ no pulse ⇒ the quiet heartbeat stands.
+  const turnBoundary = useProjectionHook('turnBoundary') as { lastTurn?: number } | null | undefined
   const [state, dispatch] = useReducer(promptBarReducer, initialBarState(), (s) => {
     // #203: activation renders from the module cache — zero invocations — folded through the live
     // reducer path, so there is no second fold implementation to drift.
@@ -217,6 +224,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // the page lifetime — a projection that existed and went silent is the confirm-pull's job to
   // police, not a reason to resurrect the clock.
   const pushLiveRef = useRef<boolean>(false)
+  // #221: the last turn-end seq observed; the pulse fires when the host advances past it.
+  const seenTurnRef = useRef<number>(0)
   const lastPushAt = useRef<number | null>(null)
   const answered = useRef(false)
   const replyStatus = useRef<string>('unknown')
@@ -299,13 +308,19 @@ export function PromptDock(props: DockProps): ReactElement | null {
     // state, and every schedule decision reads THIS instead of keeping a fourth copy of the truth.
     const effectiveStatus = (): PromptBarStatus =>
       (replyStatus.current === 'unknown' ? stateRef.current.status : replyStatus.current) as PromptBarStatus
-    const spacingNow = (): number | null => pollSpacingFor({
-      status: effectiveStatus(),
-      autorun: stateRef.current.autorun,
-      running: stateRef.current.running,
-      hidden: typeof document !== 'undefined' && document.hidden === true,
-      edges: edgesRef.current,
-    })
+    const spacingNow = (): number | null => {
+      // #221: consume the pulse exactly once per boundary.
+      const pe = turnEndPulse(turnBoundary?.lastTurn, seenTurnRef.current)
+      if (pe.pulse) seenTurnRef.current = pe.seen
+      return pollSpacingFor({
+        status: effectiveStatus(),
+        autorun: stateRef.current.autorun,
+        running: stateRef.current.running,
+        hidden: typeof document !== 'undefined' && document.hidden === true,
+        edges: edgesRef.current,
+        turnEndPulse: pe.pulse,
+      })
+    }
     const duePull = (): boolean => {
       const c = sessionId !== undefined ? stateCache.get(sessionId) : undefined
       return mountPullDecision({

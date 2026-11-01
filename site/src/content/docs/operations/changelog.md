@@ -6,6 +6,32 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.11 — 2026-11-01 · the silence speaks; and environments match or the build says so
+
+**Why no suggestion ever arrived (#225):** the maintainer's live system settled it from disk — 349 completed turns in one session's log, and the plugin registry held **zero rows**: the runner never persisted a verdict, not even the claim that precedes a model call. Every gate that could explain that (model unset, eligibility, an exception at the boundary) logged through channels nobody reads on a long-lived host. Now: the door prints its **first-boundary verdict per session on stderr** — model, origin, transport, named at the moment it first sees `turn/end` — and `/chapters-status` gained a **prompt-plane block**: effective model + source, push-vs-pull transport, boundaries sighted this process, and THIS session's last persisted row. "Why is there no suggestion?" is one command wide, answered by facts instead of archaeology. The root cause stays open under #225 with the candidate list narrowed by these witnesses.
+
+**Environment parity as a standing check (#228):** the order — test and development environments must ALWAYS match the local one — was bought with an incident: two harnesses run on the maintainer's box (their GUI: a root-owned long-lived server; this dev session: restarted per change), and the plugin copy the first loads lagged ~ten releases, so fixes proven in one environment read as failures in the other. `scripts/check-env-parity.mjs` reports repo version / rig pin / live host trees / every installed profile copy and **exits nonzero on drift** (mutation-checked); CI runs it as a named job; AGENTS.md makes it part of shipping any fix a human is living with. Restarting servers on an old copy is the release, not an afterthought.
+
+### 0.2.10 — 2026-11-01 · the pull floor stops drumming; doors anchor at the clicked message
+
+Measured on the maintainer's live system from disk: one session's log held **158 `chapters-prompt` state pulls at exact 10.0-second
+intervals** across 349 turns — including while idle. The cause was a conservative default with no brake: hosts that publish no usable
+`running` signal (the pinned 0.2.0-rc.2 among them) left `running ?? true` pinning the bar into its FAST clock forever. Every earlier
+pacing fix keyed off turn edges that never fire on such hosts, and the push transport cannot cover them either (`appendPluginRecord`
+is absent below 0.2.1). Now: unknown-running is unknown, not running — the fast clock serves only real work (generation in flight or
+an armed loop), and the host's own `turnBoundary` projection supplies a turn-end pulse that costs nothing and works everywhere
+projections do. One sanctioned follow-up per completed turn; a schedule-simulation row proves ≤61 pulls an hour where the old code
+did 360.
+
+**Doors anchor at the message you clicked (#221):** `/chapters-continue [messageSeq] [title]` archives through the last completed turn
+at or before that seq — clicking Continue on an earlier assistant message finally means what it says. The button resolves the clicked
+row's messageId to its durable seq through a plugin-private RPC; out-of-range anchors refuse with the numbers; title-only invocations
+are byte-identical to before. Resolution failure falls back to end-of-session behavior, never to a guess.
+
+**The parity rule (#221):** the rig matched host *versions* but never counted pulls over a long session or clicked a non-final
+message — both shapes are standing guards now. The corpus re-stamped for the changed door hints; eight legs replay green, and the
+one leg that failed was proved failing on the pre-change baseline and filed separately (#222), not carried silently.
+
 ### 0.2.9 — 2026-10-31 · ZERO chapters-prompt nodes on hosts 0.2.1+
 
 The maintainer's report, verbatim: *"10 chapters-prompt calls in a row after I submitted my first instruction — I think they even
