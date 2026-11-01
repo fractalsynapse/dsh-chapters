@@ -178,3 +178,18 @@ test('#225: the eligible predicate is consulted at the boundary and its refusal 
   assert.equal(eligibleCalls, 1, 'the gate runs at every boundary')
   assert.ok(logs.some((l) => /not eligible/.test(l)), 'and its refusal is NAMED in the log — #225 delivers the silence')
 })
+
+test('#225: a throwing listener is caught and WARNED, never propagated into the host event loop', async () => {
+  const warns: string[] = []
+  const runner = makePromptRoundRunner({
+    enabled: () => { throw new Error('config exploded') },
+    eligible: () => true,
+    store: { mutate: async () => undefined },
+    generate: async () => ({ ok: true, text: 'x' } as GenerateOutcome),
+    now: () => 't',
+    warn: (m) => { warns.push(m) },
+  })
+  runner({ id: 'S', header: {} }, { type: 'turn/end', seq: 1 })
+  await new Promise((r) => setTimeout(r, 30))
+  assert.ok(warns.some((w) => /turn listener failed/.test(w)), 'the outer catch names the failure class on the warn channel')
+})

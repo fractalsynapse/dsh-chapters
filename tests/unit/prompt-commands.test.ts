@@ -397,3 +397,27 @@ test('#225: /chapters-status prints the prompt plane block when the surface carr
   assert.ok(text.includes('transport:'), 'with its transport line')
   assert.ok(text.includes('this session: status='), 'and the per-session verdict row')
 })
+
+test('#225: `off` with a session scope routes through bar.setOff; without one it still stores the override', async () => {
+  const offs: Array<{ id: string; session: unknown }> = []
+  let effective = { spec: 'p/m', source: 'override' as const }
+  const h = harness({
+    effective: () => effective,
+    statusLine: () => 'x',
+    setModel: async (spec) => { if (spec === null) effective = { spec: '', source: 'override' as const } },
+    bar: {
+      read: async () => ({ status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      runNow: async () => ({ ok: true }),
+      disarmHuman: () => undefined,
+      setOff: async (id: string, session?: unknown) => { offs.push({ id, session }) },
+      setOn: async () => undefined,
+    },
+  })
+  const withSession = await h.run('off', { session: { id: 's1' } })
+  assert.equal(withSession.kind, 'success')
+  assert.equal(offs.length, 1, 'the scoped off reached the bar')
+  assert.equal(offs[0]!.id, 's1')
+  const bare = await h.run('off', {})
+  assert.equal(bare.kind, 'success', 'a caller with no session still flips the stored override — the plane-wide half of off')
+})
