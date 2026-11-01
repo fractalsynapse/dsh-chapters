@@ -69,3 +69,9 @@ test('#218: the dock source carries the birth-record-driven idle render and the 
   assert.match(INDEX, /seenBirthSessions/, 'birth records: the first-event guard is in the listener')
   assert.match(INDEX, /mirror: \(sessionId: string, session: unknown\)/, 'the state mirror is on the bar access object')
 })
+
+test('#231: the mount discovery is a sanctioned pull, independent of the ambient schedule', () => {
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /const mountDiscovery = opts\?\.mount === true && duePull\(\)/, 'the mount look names itself')
+  assert.match(DOCK, /opts\?\.force === true \|\| mountDiscovery \|\| \(spacing !== null/, 'and fires without any spacing — killing the clock must not kill discovery')
+})
