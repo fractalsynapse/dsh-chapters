@@ -1,0 +1,119 @@
+plugin add: rc=0 Lockfile is up to date, resolution step is skipped | Done in 14ms using pnpm v12.4.2 
+{
+  "at": "2026-10-31T18:45:52.566Z",
+  "node": "v24.22.0",
+  "argv1": "/home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/.bin/dsh",
+  "steps": [
+    {
+      "name": "projection.register",
+      "ok": true,
+      "value": "registered"
+    },
+    {
+      "name": "ctx.census",
+      "ok": true,
+      "value": {
+        "agents": "present",
+        "sessions": "threw: cannot get property \"sessions\" without inject",
+        "sessionProjections": "present",
+        "goals": "threw: cannot get property \"goals\" without inject",
+        "llm": "threw: cannot get property \"llm\" without inject",
+        "commands": "threw: cannot get property \"commands\" without inject",
+        "storageDomain": "threw: cannot get property \"storageDomain\" without inject",
+        "tools": "threw: cannot get property \"tools\" without inject",
+        "agentPresets": "threw: cannot get property \"agentPresets\" without inject"
+      }
+    },
+    {
+      "name": "agents.create",
+      "ok": true,
+      "value": "session push-probe-1793472363134-2 on attempt 2"
+    },
+    {
+      "name": "strategyA.bareImport",
+      "ok": true,
+      "value": {
+        "verdict": "ABSENT",
+        "resolved": "file:///home/adrian/Projects/dsh-chapters/node_modules/@deepseek-ai/dsh-session/lib/index.js"
+      }
+    },
+    {
+      "name": "strategyB.createRequireImport",
+      "ok": true,
+      "value": {
+        "verdict": "APPENDED",
+        "seq": 3,
+        "resolved": "/home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-session/lib/index.js"
+      }
+    },
+    {
+      "name": "strategyC.createRequireSync",
+      "ok": true,
+      "value": {
+        "verdict": "APPENDED",
+        "seq": 4
+      }
+    },
+    {
+      "name": "strategyD.mainModuleGraph",
+      "ok": true,
+      "value": {
+        "verdict": "APPENDED",
+        "seq": 5,
+        "resolved": "/home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-session/lib/index.js",
+        "anchor": "/home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh/lib/bin.js"
+      }
+    },
+    {
+      "name": "record.readback",
+      "ok": true,
+      "value": {
+        "total": 6,
+        "ours": [
+          {
+            "seq": 3,
+            "ignorable": true,
+            "data": {
+              "text": "via-B",
+              "strategy": "B"
+            }
+          },
+          {
+            "seq": 4,
+            "ignorable": true,
+            "data": {
+              "text": "via-C",
+              "strategy": "C"
+            }
+          },
+          {
+            "seq": 5,
+            "ignorable": true,
+            "data": {
+              "text": "via-D",
+              "strategy": "D"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "projection.stateOf",
+      "ok": true,
+      "value": {
+        "notes": [
+          "via-B",
+          "via-C",
+          "via-D"
+        ],
+        "count": 3
+      }
+    },
+    {
+      "name": "surface.check",
+      "ok": true,
+      "value": "surface shape unknown (keys: log,baseSeq,projections,_state,_lastProcessedSeq,_pendingPlan)"
+    }
+  ],
+  "done": true
+}

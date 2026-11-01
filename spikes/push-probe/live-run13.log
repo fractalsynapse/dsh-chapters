@@ -1,0 +1,24 @@
+[live-proof] provisioning home (first boot)
+[live-proof] dsh plugin add link:repo + link:probe-plugin
+[live-proof] config rows written (provider, default model, promptModel)
+[live-proof] booted: http://127.0.0.1:4299/?token=HarMcVRp4-7…
+[live-proof] boot log carries push witness: true; door witness: true
+[live-proof] boot: [chapters-push] transport LIVE — the bar rides plugin records; zero command runs in steady state
+[live-proof] boot: [chapters-prompt] turn/end door armed
+[live-proof] boot: dsh-chapters: could not verify the preset roster (agentPresets service absent) — treat chapter-form compaction as unconfirmed
+[live-proof] boot: dsh: warning: 6 entries did not activate
+[live-proof] boot:     at resolveConfig (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/cordis/lib/index.js:960:27)
+[live-proof] boot:     at Fiber._resolveConfig (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/cordis/lib/index.js:
+[live-proof] boot:     at Fiber._reload (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/cordis/lib/index.js:1355:24
+[live-proof] boot: preset-chapters (@treeseed/dsh-chapters/preset): pending (waiting for service: agentPresets)
+[live-proof] server says push transport LIVE: false
+[live-proof] dismissed dialog via: Continue
+[live-proof] probe session: NONE
+VERDICT FAILED: locator.waitFor: Timeout 15000ms exceeded.
+Call log:
+[2m  - waiting for locator('div[aria-label*="/ commands, @ files or sessions"]').first()[22m
+
+CONSOLE TAIL:
+info: [client:chapters] injecting 2 assistant-actions door(s)
+info: [client:chapters] assistant-actions inject returned function
+info: [client:chapters] door factory ran: 2 register effect(s), types: function,function

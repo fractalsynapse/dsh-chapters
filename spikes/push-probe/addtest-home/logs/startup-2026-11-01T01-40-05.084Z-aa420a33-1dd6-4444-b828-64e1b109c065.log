@@ -1,0 +1,187 @@
+WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing.
+
+{
+  timestamp: '2026-11-01T01:40:05.084Z',
+  dshVersion: '0.2.1-rc.5',
+  nodeVersion: 'v24.22.0',
+  platform: 'linux',
+  arch: 'x64',
+  profile: 'web',
+  error: StartupError: dsh: startup failed: 2 required plugins did not activate
+  
+  Failed plugins (1):
+    webserver (required)
+      Package: @deepseek-ai/dsh-host-webserver
+      Error: listen EADDRINUSE: address already in use 127.0.0.1:4396
+          at Server.setupListenHandle [as _listen2] (node:net:2390:16)
+          at listenInCluster (node:net:2499:12)
+          at node:net:2728:7
+          at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+  
+  Plugins waiting for services (5):
+    Plugin                  Missing services
+    web-runtime (required)  webServer
+    open-in-app             webServer
+    directory-picker        webServer
+    harness-dev-context     webApp
+    client-hmr              webServer
+      at auditStartupEntries (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:4467:31)
+      ... 3 lines matching cause stack trace ...
+      at async file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh/lib/bin.js:252:23 {
+    [stack]: [Getter/Setter],
+    [message]: 'dsh: startup failed: 2 required plugins did not activate\n' +
+      '\n' +
+      'Failed plugins (1):\n' +
+      '  webserver (required)\n' +
+      '    Package: @deepseek-ai/dsh-host-webserver\n' +
+      '    Error: listen EADDRINUSE: address already in use 127.0.0.1:4396\n' +
+      '        at Server.setupListenHandle [as _listen2] (node:net:2390:16)\n' +
+      '        at listenInCluster (node:net:2499:12)\n' +
+      '        at node:net:2728:7\n' +
+      '        at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\n' +
+      '\n' +
+      'Plugins waiting for services (5):\n' +
+      '  Plugin                  Missing services\n' +
+      '  web-runtime (required)  webServer\n' +
+      '  open-in-app             webServer\n' +
+      '  directory-picker        webServer\n' +
+      '  harness-dev-context     webApp\n' +
+      '  client-hmr              webServer',
+    [cause]: AggregateError: Plugin activation failures
+        at new StartupError (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:4309:49)
+        at auditStartupEntries (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:4467:31)
+        at async boot (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-app-boot/lib/index.js:4541:3)
+        at async runProfile (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh/lib/profile-boot-C14i-8IN.js:302:15)
+        at async runCli (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh/lib/bin.js:215:5)
+        at async file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh/lib/bin.js:252:23 {
+      [stack]: [Getter/Setter],
+      [message]: 'Plugin activation failures',
+      [errors]: [
+        Error: listen EADDRINUSE: address already in use 127.0.0.1:4396
+            at Server.setupListenHandle [as _listen2] (node:net:2390:16)
+            at listenInCluster (node:net:2499:12)
+            at node:net:2728:7
+            at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+          [stack]: [Getter/Setter],
+          [message]: 'listen EADDRINUSE: address already in use 127.0.0.1:4396',
+          code: 'EADDRINUSE',
+          errno: -98,
+          syscall: 'listen',
+          address: '127.0.0.1',
+          port: 4396
+        },
+        [length]: 1
+      ]
+    },
+    [entries]: [
+      {
+        id: 'open-in-app',
+        module: '@deepseek-ai/dsh-host-open-in-app',
+        required: false,
+        fiberState: 0,
+        outcome: { kind: 'pending', missing: [ 'webServer', [length]: 1 ] }
+      },
+      {
+        id: 'directory-picker',
+        module: '@deepseek-ai/dsh-host-directory-picker-auto',
+        required: false,
+        fiberState: 0,
+        outcome: { kind: 'pending', missing: [ 'webServer', [length]: 1 ] }
+      },
+      {
+        id: 'webserver',
+        module: '@deepseek-ai/dsh-host-webserver',
+        required: true,
+        fiberState: 3,
+        outcome: {
+          kind: 'failed',
+          error: Error: listen EADDRINUSE: address already in use 127.0.0.1:4396
+              at Server.setupListenHandle [as _listen2] (node:net:2390:16)
+              at listenInCluster (node:net:2499:12)
+              at node:net:2728:7
+              at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+            [stack]: [Getter/Setter],
+            [message]: 'listen EADDRINUSE: address already in use 127.0.0.1:4396',
+            code: 'EADDRINUSE',
+            errno: -98,
+            syscall: 'listen',
+            address: '127.0.0.1',
+            port: 4396
+          }
+        }
+      },
+      {
+        id: 'web-runtime',
+        module: '@deepseek-ai/dsh-web-app',
+        required: true,
+        fiberState: 0,
+        outcome: { kind: 'pending', missing: [ 'webServer', [length]: 1 ] }
+      },
+      {
+        id: 'harness-dev-context',
+        module: '@deepseek-ai/dsh-harness-dev-context',
+        required: false,
+        fiberState: 0,
+        outcome: { kind: 'pending', missing: [ 'webApp', [length]: 1 ] }
+      },
+      {
+        id: 'client-hmr',
+        module: '@deepseek-ai/dsh-client-hmr',
+        required: false,
+        fiberState: 0,
+        outcome: { kind: 'pending', missing: [ 'webServer', [length]: 1 ] }
+      },
+      [length]: 6
+    ],
+    [startup]: {
+      configurationPath: '/home/adrian/Projects/dsh-chapters/spikes/push-probe/addtest-home/profiles/web/cordis.yml',
+      messages: [
+        {
+          ts: 1793497204899,
+          name: 'web-server',
+          type: 'error',
+          args: [
+            Error: listen EADDRINUSE: address already in use 127.0.0.1:4396
+                at Server.setupListenHandle [as _listen2] (node:net:2390:16)
+                at listenInCluster (node:net:2499:12)
+                at node:net:2728:7
+                at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+              [stack]: [Getter/Setter],
+              [message]: 'listen EADDRINUSE: address already in use 127.0.0.1:4396',
+              code: 'EADDRINUSE',
+              errno: -98,
+              syscall: 'listen',
+              address: '127.0.0.1',
+              port: 4396
+            },
+            [length]: 1
+          ]
+        },
+        {
+          ts: 1793497205048,
+          name: 'hmr',
+          type: 'warn',
+          args: [
+            'config reload at %C failed',
+            '/home/adrian/Projects/dsh-chapters/spikes/push-probe/addtest-home/profiles/web/package.json',
+            [length]: 2
+          ]
+        },
+        {
+          ts: 1793497205048,
+          name: 'hmr',
+          type: 'warn',
+          args: [
+            Error: HMR is disposed
+                at file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/dsh-hmr/lib/index.js:751:29 {
+              [stack]: [Getter/Setter],
+              [message]: 'HMR is disposed'
+            },
+            [length]: 1
+          ]
+        },
+        [length]: 3
+      ]
+    }
+  }
+}
