@@ -315,6 +315,18 @@ export function registerHostCommands(
       // ran" hides for three days behind a logger nobody reads.
       lines.push(config.enrich !== undefined ? config.enrich.statusLine() : 'Enrichment: not wired on this plane (no model route registered)')
       lines.push(config.prompt !== undefined ? config.prompt.statusLine() : 'Prompt suggestions: not wired on this plane')
+      // #225: the prompt PLANE block — model, transport, door sightings, and THIS session's last
+      // persisted verdict. The maintainer asked why hundreds of pulls never produced an offer;
+      // from here that question is one command wide, answered by facts instead of archaeology.
+      if (config.prompt !== undefined) {
+        const plane = config.prompt as typeof config.prompt & Partial<import('./prompt.ts').PromptStatusExtras>
+        if (typeof plane.planeStatus === 'function') for (const l of plane.planeStatus()) lines.push(l)
+        if (typeof plane.sessionRow === 'function') {
+          const sessId = (invocation.agent as { session?: { id?: string } })?.session?.id
+            ?? (invocation.agent as { agent?: { session?: { id?: string } } })?.agent?.session?.id
+          if (sessId !== undefined) { try { lines.push(await plane.sessionRow(sessId)) } catch { /* the block degrades to what it has */ } }
+        }
+      }
       lines.push(diagnosticStatusLine())
       lines.push(AUTO_SAVE_LINE(config))
       // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
