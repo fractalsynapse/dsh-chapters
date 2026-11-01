@@ -1,0 +1,3 @@
+- insert:
+    - id: '@probe/push-probe'
+      name: '@probe/push-probe'

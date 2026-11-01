@@ -1,0 +1,15 @@
+[chapters-push] transport LIVE — the bar rides plugin records; zero command runs in steady state
+[chapters-prompt] turn/end door armed
+dsh-chapters: could not verify the preset roster (agentPresets service absent) — treat chapter-form compaction as unconfirmed
+dsh: warning: 6 entries did not activate
+agent-preset-registry (@deepseek-ai/dsh-agent-preset-registry): ValidationError: invalid config:
+  - $.default missing required value (at default)
+    at resolveConfig (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/cordis/lib/index.js:960:27)
+    at Fiber._resolveConfig (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/cordis/lib/index.js:1347:25)
+    at Fiber._reload (file:///home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/@deepseek-ai/cordis/lib/index.js:1355:24)
+preset-standard (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+preset-ptc (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+preset-minimal (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+preset-cordis (@deepseek-ai/dsh-agent-preset): pending (waiting for service: agentPresets)
+preset-chapters (@treeseed/dsh-chapters/preset): pending (waiting for service: agentPresets)
+dsh web: http://127.0.0.1:4299/?token=ZR0uw4GKrJBXrVmXiQ5Wr-z9Q6JNRKespnAFn24XLQw

@@ -160,12 +160,26 @@ export function apply(ctx: Ctx): void {
     }, { ...(uiWorkspace !== undefined ? { navigator: uiWorkspace } : {} ) }),
     component: makeDoorAction(door),
   }))
-  slots.inject('conversation.chat.assistant-actions', () => rows.map(({ door, run, component }) => slots.register({
-    name: 'conversation.chat.assistant-actions',
-    id: door.id,
-    order: door.order,
-    inject: (sessionId: string) => ({ run: () => run(sessionId) }),
-  }, component)))
+  // Boot-witness instrumentation (#194's 0.2.1 compatibility hunt made this permanent): the door
+  // registration is a two-step dance with the host's slot runtime, and a silent drop at either step
+  // is indistinguishable from "the region renders nothing" — three console lines make the difference
+  // one page reload away. Same discipline as the dock's inputActions witness.
+  console.info(`[client:chapters] injecting ${String(rows.length)} assistant-actions door(s)`)
+  const disposeDoors = slots.inject('conversation.chat.assistant-actions', () => {
+    const effects = rows.map(({ door, run, component }) => slots.register({
+      name: 'conversation.chat.assistant-actions',
+      id: door.id,
+      // #194-compat probe: the host's own entries in this region (feedback, goal's dock sibling)
+      // all carry `label`/`locale`; 0.2.1-rc.5 renders NOTHING for entries without a label while
+      // 0.2.0-rc.2 rendered them fine. Declaring the label is contract-blessed on BOTH ("Register
+      // options are id, order, and label" — docs/contract.md) and costs nothing.
+      label: door.label,
+      inject: (sessionId: string) => ({ run: () => run(sessionId) }),
+    }, component))
+    console.info(`[client:chapters] door factory ran: ${String(effects.length)} register effect(s), types: ${effects.map((e) => typeof e).join(',')}`)
+    return effects
+  })
+  console.info(`[client:chapters] assistant-actions inject returned ${typeof disposeDoors}`)
   slots.inject('conversation.input.dock', () => slots.register({
     name: 'conversation.input.dock',
     id: 'chapters-prompt',
