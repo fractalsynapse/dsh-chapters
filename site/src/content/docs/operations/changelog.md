@@ -6,6 +6,26 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.10 — 2026-11-01 · the pull floor stops drumming; doors anchor at the clicked message
+
+Measured on the maintainer's live system from disk: one session's log held **158 `chapters-prompt` state pulls at exact 10.0-second
+intervals** across 349 turns — including while idle. The cause was a conservative default with no brake: hosts that publish no usable
+`running` signal (the pinned 0.2.0-rc.2 among them) left `running ?? true` pinning the bar into its FAST clock forever. Every earlier
+pacing fix keyed off turn edges that never fire on such hosts, and the push transport cannot cover them either (`appendPluginRecord`
+is absent below 0.2.1). Now: unknown-running is unknown, not running — the fast clock serves only real work (generation in flight or
+an armed loop), and the host's own `turnBoundary` projection supplies a turn-end pulse that costs nothing and works everywhere
+projections do. One sanctioned follow-up per completed turn; a schedule-simulation row proves ≤61 pulls an hour where the old code
+did 360.
+
+**Doors anchor at the message you clicked (#221):** `/chapters-continue [messageSeq] [title]` archives through the last completed turn
+at or before that seq — clicking Continue on an earlier assistant message finally means what it says. The button resolves the clicked
+row's messageId to its durable seq through a plugin-private RPC; out-of-range anchors refuse with the numbers; title-only invocations
+are byte-identical to before. Resolution failure falls back to end-of-session behavior, never to a guess.
+
+**The parity rule (#221):** the rig matched host *versions* but never counted pulls over a long session or clicked a non-final
+message — both shapes are standing guards now. The corpus re-stamped for the changed door hints; eight legs replay green, and the
+one leg that failed was proved failing on the pre-change baseline and filed separately (#222), not carried silently.
+
 ### 0.2.9 — 2026-10-31 · ZERO chapters-prompt nodes on hosts 0.2.1+
 
 The maintainer's report, verbatim: *"10 chapters-prompt calls in a row after I submitted my first instruction — I think they even
