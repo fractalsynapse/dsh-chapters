@@ -126,6 +126,22 @@ export async function apply(ctx) {
     return { verdict: 'APPENDED', seq, resolved, anchor }
   })
 
+  // #194 client-proof feed: append OUR record type (the grammar is plugin-owned names; any plugin
+  // may commit them — the projection folds by type, not by writer) with a ready payload, so the GUI
+  // bar for this session must render it through useProjection with ZERO command pulls.
+  await step('chaptersRecord.append', async () => {
+    const anchor = process.argv[1] ?? process.execPath
+    const req = createRequire(anchor)
+    const mod = await import(req.resolve('@deepseek-ai/dsh-session'))
+    const fn = mod.appendPluginRecord
+    const seq = fn(session, 'plugin:dsh-chapters/prompt', {
+      v: 1, status: 'ready', text: 'PROOF-PUSHED-OFFER', turnSeq: 1, error: '',
+      intent: 'worker-step', goalRevision: null, autorun: 'disarmed', at: new Date().toISOString(),
+    })
+    out.sessionId = session.id ?? null
+    return { seq, sessionId: out.sessionId }
+  })
+
   await step('record.readback', () => {
     if (session === null) return 'skipped: no session'
 
