@@ -155,6 +155,7 @@ test('`state` answers with the facts the bar renders, in one parseable block', a
     statusLine: () => 'prompt: ON (local/qwen)',
     bar: {
       read: async () => ({ ...barState, autorun: 'armed', fired: 2 }),
+      peekRow: async () => ({ ...barState, autorun: 'armed', fired: 2 }) as never,
       setAutorun: (_id: string, on: boolean) => { calls.push({ on }); return { autorun: on ? 'armed' as const : 'disarmed' as const, fired: 2, displaced: true } },
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
     },
@@ -180,6 +181,7 @@ test('a failure state prints its reason, and an unwired bar says so instead of g
     effective: () => ({ spec: 'local/qwen', source: 'config' }),
     bar: {
       read: async () => ({ status: 'failed', text: '', turnSeq: 12, error: 'no route for the suggestion model', at: '', autorun: 'disarmed', fired: 0 }),
+      peekRow: async () => ({ status: 'failed', text: '', turnSeq: 12, error: 'no route for the suggestion model', at: '', autorun: 'disarmed', fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }), disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
     },
   })
@@ -200,6 +202,7 @@ test('`autorun` arms only with a model to generate from, and refuses by naming b
     effective: () => ({ spec, source: spec === '' ? 'unset' : 'config' }),
     bar: {
       read: async () => ({ ...barState, autorun: spec === '' ? 'disarmed' : 'armed', fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: spec === '' ? 'disarmed' : 'armed', fired: 0 }) as never,
       setAutorun: (_id, on) => { calls.push(on); return { autorun: on ? 'armed' as const : 'disarmed' as const, fired: 0, displaced: true } },
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
     },
@@ -234,6 +237,7 @@ test('`on` restores generation but cannot invent a model that was never set', as
     effective: () => ({ spec, source: spec === '' ? 'unset' : 'config' }),
     bar: {
       read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }), disarmHuman: () => undefined, setOff: async () => undefined,
       setOn: async () => { setOn += 1 },
     },
@@ -262,6 +266,7 @@ test('run submits the offer through the shared follow-up path when the session s
     statusLine: () => 'prompt: ON',
     bar: {
       read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
       runNow: async (id: string) => { seen.push(id); return { ok: true, text: 'Land #114, then cut 0.2.2.' } },
@@ -281,6 +286,7 @@ test('run refuses with the reason when there is nothing on screen to run', async
     statusLine: () => 'prompt: ON',
     bar: {
       read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
       runNow: async () => ({ ok: false, reason: 'there is no offer on screen to run' }),
@@ -297,6 +303,7 @@ test('run needs a session scope and says so rather than guessing a session', asy
     statusLine: () => 'prompt: ON',
     bar: {
       read: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: 'disarmed', fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
       runNow: async () => { throw new Error('must not be reached without a session') },
@@ -340,6 +347,7 @@ test('#208: the enabling replies state the revival path — a hidden bar reappea
     statusLine: () => 'x',
     bar: {
       read: async () => ({ status: 'off' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }),
+      peekRow: async () => ({ status: 'off' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
       runNow: async () => ({ ok: true }),
       disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
@@ -361,6 +369,7 @@ test('#218: the state verb mirrors its answer when the surface supports it', asy
     effective: () => effective,
     statusLine: () => 'x',
     bar: {
+      peekRow: async () => null,
       read: Object.assign(async () => ({ status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }), { mirror: (sessionId: string, session: unknown) => { mirrors.push({ sessionId, session }) } }),
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
       runNow: async () => ({ ok: true }),
@@ -407,6 +416,7 @@ test('#225: `off` with a session scope routes through bar.setOff; without one it
     setModel: async (spec) => { if (spec === null) effective = { spec: '', source: 'override' as const } },
     bar: {
       read: async () => ({ status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }),
+      peekRow: async () => ({ status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }) as never,
       setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
       runNow: async () => ({ ok: true }),
       disarmHuman: () => undefined,
@@ -420,4 +430,25 @@ test('#225: `off` with a session scope routes through bar.setOff; without one it
   assert.equal(offs[0]!.id, 's1')
   const bare = await h.run('off', {})
   assert.equal(bare.kind, 'success', 'a caller with no session still flips the stored override — the plane-wide half of off')
+})
+
+test('#231: a session WITH a row answers from the row and never touches read or mirror', async () => {
+  let reads = 0, mirrors = 0
+  const h = harness({
+    effective: () => ({ spec: 'p/m', source: 'override' as const }),
+    statusLine: () => 'x',
+    bar: {
+      peekRow: async () => ({ status: 'ready' as const, text: 'the standing offer', turnSeq: 9, error: '', at: 't', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }),
+      read: async () => { reads += 1; return { status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 } },
+      mirror: () => { mirrors += 1 },
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      runNow: async () => ({ ok: true }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+    },
+  })
+  const r = await h.run('state', { session: { id: 's1' } })
+  assert.equal(r.kind, 'success')
+  assert.ok((r.text ?? '').includes('the standing offer'), 'the reply carries the ROW text')
+  assert.equal(reads, 0, 'a served session costs NO full read')
+  assert.equal(mirrors, 0, 'and NO duplicate record mirror — this path ran every minute for hours on the maintainer\u2019s host')
 })
