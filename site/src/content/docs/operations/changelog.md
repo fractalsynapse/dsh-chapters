@@ -6,6 +6,33 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.9 — 2026-10-31 · ZERO chapters-prompt nodes on hosts 0.2.1+
+
+The maintainer's report, verbatim: *"10 chapters-prompt calls in a row after I submitted my first instruction — I think they even
+appeared before the original message. chapters-prompt isn't even on. Our testing should have caught this."* It did not, and the reason
+is now a recorded fact: the acceptance rig pins host 0.2.0-rc.2 while the maintainer runs 0.2.1-rc.5, and every one of these noise
+sources lives in the delta. The fix is structural, not pacing: **the bar stops issuing commands entirely** where the host allows.
+
+**The push transport, completed (#194 + #218):** on hosts with `appendPluginRecord` (0.2.1+ — server-side PROVEN live by the spike),
+the bar's state rides durable plugin records + a host projection, the same mechanism the goal bar uses. The projection carries REAL
+zod schemas now — the duck-typed `{parse}` shapes were an unverified risk on the client wire validation path, the one hop this
+transport exists to provide.
+
+**Birth records:** the session/event listener appends an `idle` record on a session's first event — a new chat's first mount reads
+a PUSHED value, and the "before the original message" discovery node cannot happen.
+
+**The state mirror:** the state verb, after serving a pull, mirrors its answer into a record (the caller's live session is in the
+invocation) — discovery pulls self-extinguish: the first pull on an old session writes the record every later mount reads from the
+projection.
+
+**A 5-minute dead-push heartbeat, not a 20s confirm:** a 20s confirm fired mid-turn before the turn's record could exist (turns
+outlast 20s) — confirm spam wearing a safety hat. 5 minutes: a healthy push cancels it every turn; only a push silent for a whole
+5 minutes pulls once.
+
+Pull mode (0.2.0 hosts, or a writer-dead 0.2.1) keeps the debounced+floored floor from 0.2.8, unchanged. The rig's move to the
+maintainer's host version is the immediate follow-up — the spike has the install, the three schema differences are measured, and
+the corpus re-record is the gate's decision, not ours.
+
 ### 0.2.8 — 2026-10-31 · the dock stops talking over itself
 
 Three live reports from the maintainer's upgraded host, each measured to its mechanism before any code moved:
