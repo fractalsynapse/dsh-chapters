@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache } from '../../src/client/prompt-bar.ts'
+import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS } from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -208,4 +208,15 @@ test('#208: parseModelAbsent reads the plane-wide fact from the state block — 
   assert.equal(parseModelAbsent(set), false, 'a set model is relevance, not absence')
   assert.equal(parseModelAbsent('garbage without the line'), false, 'an unrecognised block is never guessed at')
   assert.equal(parseModelAbsent(''), false)
+})
+
+test('#211: the edge kick is debounced and rate-floored — step-granular running flicker costs ZERO pulls', () => {
+  // The maintainer's host publishes running per STEP: a pull per flicker was a rendered command node
+  // per tool call, all waste (the server row changes only at turn boundaries). The delay formula:
+  // never sooner than the debounce; never inside the floor since the last pull.
+  assert.equal(edgeKickDelayMs(Number.MAX_SAFE_INTEGER), EDGE_DEBOUNCE_MS, 'a cold edge waits just the debounce')
+  assert.equal(edgeKickDelayMs(0), EDGE_FLOOR_MS, 'an edge immediately after a pull waits out the whole floor')
+  assert.equal(edgeKickDelayMs(10_000), 5_000, 'mid-floor: the remainder, never less than the debounce')
+  assert.equal(edgeKickDelayMs(EDGE_FLOOR_MS + 1), EDGE_DEBOUNCE_MS, 'past the floor: the debounce is the minimum')
+  assert.ok(EDGE_FLOOR_MS > EDGE_DEBOUNCE_MS)
 })
