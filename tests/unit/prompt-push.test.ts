@@ -77,3 +77,39 @@ test('resolvePushWriter: the host-anchored recipe, and every failure degrades to
   assert.ok(badAppend !== null)
   assert.equal(badAppend!.append({}, promptRecordPayload(facts)), false, 'a rejected append reports false; the row write already landed and the confirm-pull covers the gap')
 })
+
+test('#218: the writer recipe covers the default-export arm and the append-failure log', async () => {
+  // the default-export arm: some hosts re-export appendPluginRecord under mod.default
+  const viaDefault = await resolvePushWriter({
+    anchor: '/host/bin/dsh',
+    requireFn: () => ({ resolve: () => '/host/dsh-session.js' }),
+    importFn: async () => ({ default: { appendPluginRecord: () => 99 } }) as unknown as Record<string, unknown>,
+  })
+  assert.ok(viaDefault !== null, 'a default-exported appendPluginRecord is accepted')
+  assert.equal(viaDefault!.append({}, promptRecordPayload(facts)), true)
+
+  // the append-failure arm logs (seams.log) — the #61 discipline for a degraded push
+  const logs: string[] = []
+  const badAppend = await resolvePushWriter({
+    anchor: '/host/bin/dsh',
+    requireFn: () => ({ resolve: () => '/host/dsh-session.js' }),
+    importFn: async () => ({ appendPluginRecord: () => { throw new Error('boom') } }),
+    log: (m) => { logs.push(m) },
+  })
+  assert.ok(badAppend !== null)
+  assert.equal(badAppend!.append({}, promptRecordPayload(facts)), false)
+  assert.ok(logs.some((m) => /append failed/.test(m)), 'the append failure is logged, not swallowed')
+})
+
+test('#218: the anchor fallback and the no-seams production path both resolve or degrade', async () => {
+  // anchor fallback: process.execPath when argv[1] is absent (some embedded hosts)
+  const viaExecPath = await resolvePushWriter({
+    anchor: undefined,
+    requireFn: () => ({ resolve: () => '/host/dsh-session.js' }),
+    importFn: async () => ({ appendPluginRecord: () => 1 }),
+  })
+  assert.ok(viaExecPath !== null, 'an undefined anchor falls back to the exec path seam')
+  // absent-log: a caller that passes no log is not crashed on the failure arm
+  const silent = await resolvePushWriter({ requireFn: () => { throw new Error('nope') } })
+  assert.equal(silent, null, 'a resolution failure with no log seam degrades to null silently')
+})
