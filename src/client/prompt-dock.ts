@@ -27,7 +27,7 @@ import {
   deriveRunning,
   BAR_STATE_COMMAND,
   pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, edgeKickDelayMs,
-  pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, turnEndPulse, type PromptBarStatus,
+  pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, turnEndPulse, ACTIVE_POLL_MS, type PromptBarStatus,
   barLabel,
   barVisible,
   initialBarState,
@@ -69,11 +69,16 @@ const CSS = [
   '.dsh-chapters_promptBar{isolation:isolate;box-sizing:border-box;width:100%;border-radius:var(--dsw-radius-md);height:36px;box-shadow:var(--dsw-elevation-panel);border:0;align-items:center;gap:10px;padding:4px 5px 4px 12px;display:flex;position:relative}',
   '.dsh-chapters_promptBar::before{z-index:-1;border-radius:inherit;background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);content:"";pointer-events:none;position:absolute;inset:0}',
   '.dsh-chapters_promptExpanded::before{align-items:flex-start;position:absolute;inset:0}',
+  // #229: the EXPANDED bar is a solid card that grows with its content — the maintainer's report was
+  // an offer opening "on a transparent background right over the bar, impossible to read". The ::before
+  // paint layer (menu token) already backs the collapsed row; expansion now also lifts height:auto so
+  // the whole text sits ON the card, in flow, not floating over anything.
+  '.dsh-chapters_promptExpanded{height:auto;min-height:36px;padding-top:8px;padding-bottom:8px}',
   '.dsh-chapters_promptGlyph{color:var(--dsw-alias-label-tertiary);flex:none;display:inline-flex}',
   '.dsh-chapters_promptLabel{color:var(--dsw-alias-label-primary);flex:none;font-size:13px;font-weight:500;line-height:24px}',
   '.dsh-chapters_promptText{min-width:0;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;line-height:20px;cursor:pointer;border:0;background:0 0;padding:0;text-align:left;flex:1}',
   '.dsh-chapters_promptEllipsis{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;display:block}',
-  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow:auto;max-height:9rem;display:block}',
+  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:anywhere;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block}',
   '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',
   '.dsh-chapters_promptIntent{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}',
 
@@ -309,6 +314,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
     const effectiveStatus = (): PromptBarStatus =>
       (replyStatus.current === 'unknown' ? stateRef.current.status : replyStatus.current) as PromptBarStatus
     const spacingNow = (): number | null => {
+      // #229: an ARMED autorun loop is the one state that genuinely needs follow-up polling — after
+      // a fired round the offer changes without a human action, and the turn-end pulse may already
+      // have been consumed before generation finished. While armed, keep the old quiet floor (60s)
+      // even when the ambient heartbeat is off; disarmed bars poll nothing.
+      if (stateRef.current.autorun === 'armed') return ACTIVE_POLL_MS
       // #221: consume the pulse exactly once per boundary.
       const pe = turnEndPulse(turnBoundary?.lastTurn, seenTurnRef.current)
       if (pe.pulse) seenTurnRef.current = pe.seen
@@ -535,7 +545,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
         onClick: populate,
       }, state.expanded
         ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
-        : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
+        : h('span', { className: 'dsh-chapters_promptEllipsis', title: state.text ?? undefined }, lineFor(state))),
       ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptNote', role: 'status' }, state.note)]),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },

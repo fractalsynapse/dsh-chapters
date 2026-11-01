@@ -185,6 +185,11 @@ export interface Config {
   promptMaxChars: number
   /** #188: share of the prompt model's context window the derived input budget takes. */
   promptContextRatio: number
+  /** #229: seconds between ambient state pulls while the bar is idle — the heartbeat that produced a
+   * durable command pair per tick (measured: exact 60.0s gaps on the maintainer's live log). Default
+   * ZERO: no ambient clock exists; sanctioned moments (mount discovery, turn-end pulse, visibility)
+   * remain. A nonzero value re-arms the heartbeat for hosts that want freshness over silence. */
+  promptQuietHeartbeatSec: number
   /** #113: how many turns an armed autorun may start before it stops and says so. Re-arming does NOT
    * refresh it, so arming cannot become an infinite loop; the budget is per process, like the flag. */
   promptMaxRounds: number
@@ -309,6 +314,9 @@ export const Config = Schema.object({
   promptContextChars: Schema.number().default(32000),
   promptMaxChars: Schema.number().default(4096),
   promptContextRatio: Schema.number().default(0.5),
+  // #229: the ambient heartbeat is OFF by default — "never repeated chapters-prompt executions" is
+  // the user's absolute rule, and every pull is two visible history nodes on every host so far.
+  promptQuietHeartbeatSec: Schema.number().default(0),
   promptMaxRounds: Schema.number().default(24),
   /** #117: how many lines a `/chapters-repair` report may print. The finding COUNT always leads; */
   repairReportMaxLines: Schema.number().default(60),
@@ -671,6 +679,13 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       pushChains.set(sessionId, next.then(() => undefined, () => undefined))
     }
     const promptBar: PromptBarAccess = {
+      // #229: the ambient heartbeat is config-gated and defaults to ZERO — the maintainer's rule is
+      // absolute ("never want to see repeated chapters-prompt executions in a session again"), and
+      // the measurement that proved it: exact 60.0s pull gaps on their live log even with 0.2.11
+      // installed correctly. The value rides EVERY state reply (quietHeartbeatSec) so the client's
+      // schedule is the server's setting, not a compile-time guess; the same number lands in the
+      // /chapters-prompt state text for humans.
+      quietHeartbeatSec: config.promptQuietHeartbeatSec,
       read: async (sessionId: string) => {
         const status = (await promptRow.get(sessionId)).promptSuggestion ?? noSuggestion
         const live = promptLoop.statusOf(sessionId)

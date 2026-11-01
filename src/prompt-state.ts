@@ -165,6 +165,10 @@ export interface PromptBarAccess {
   // append needs the host's Session object, and every mutation site (command invocation, turn
   // listener) holds it. Absent ⇒ no record for that change; the pull floor still serves the bar.
   read(sessionId: string): Promise<PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }>
+  /** #229: the heartbeat the SERVER has configured, carried on every state reply so the client's
+   * schedule matches the operator's setting without a second channel. Absent ⇒ the client treats
+   * it as zero (no ambient clock). */
+  quietHeartbeatSec?: number
   /** #218: mirror a just-served state read into the push transport, so the NEXT mount reads the
    *  projection instead of pulling again — discovery self-extinguishes. Optional: a pull-only
    *  surface (no writer) simply does not implement it, and the caller's feature check makes that a
