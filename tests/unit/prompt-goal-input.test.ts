@@ -69,3 +69,29 @@ test('#188 invariant, enforced: the objective rides WHOLE — a 600-char slice w
   assert.ok(directive.includes(long), 'the objective is in the directive VERBATIM and COMPLETE')
   assert.ok(!directive.includes('…') && !/[.]{3}$/.test(long), 'and nothing wears an ellipsis')
 })
+
+test('readActiveGoal: the malformed-row and sticky-complete branches', () => {
+  // a goal/change row with a missing objective is SKIPPED, not crashed
+  const skip = readActiveGoal([
+    { seq: 1, type: 'goal/change', data: { operation: 'create', goal: { id: 'g1' } } } as never,
+    { seq: 2, type: 'goal/change', data: { operation: 'create', goal: { id: 'g1', objective: 'ship', phase: 'active' } } } as never,
+  ])
+  assert.ok(skip !== null && skip.objective === 'ship', 'the malformed row is skipped; the good one stands')
+  // a non-finite revision falls back to the current goal's revision
+  const revFallback = readActiveGoal([
+    { seq: 1, type: 'goal/change', data: { operation: 'create', goal: { id: 'g1', objective: 'a', revision: 5, phase: 'active' } } } as never,
+    { seq: 2, type: 'goal/change', data: { operation: 'edit', goal: { id: 'g1', objective: 'b', revision: 'x', phase: 'paused' } } } as never,
+  ])
+  assert.ok(revFallback !== null && revFallback.revision === 5, 'a non-finite revision falls back to the current one')
+  // delete/remove clear the goal
+  const removed = readActiveGoal([
+    { seq: 1, type: 'goal/change', data: { operation: 'create', goal: { id: 'g1', objective: 'a', phase: 'active' } } } as never,
+    { seq: 2, type: 'goal/change', data: { operation: 'remove' } } as never,
+  ])
+  assert.equal(removed, null, 'remove clears the active goal')
+  // the phase defaults to active when the field is absent
+  const noPhase = readActiveGoal([
+    { seq: 1, type: 'goal/change', data: { operation: 'create', goal: { id: 'g1', objective: 'a' } } } as never,
+  ])
+  assert.ok(noPhase !== null && noPhase.phase === 'active', 'an absent phase defaults to active')
+})

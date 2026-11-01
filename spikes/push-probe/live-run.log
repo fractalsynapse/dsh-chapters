@@ -1,0 +1,16 @@
+[live-proof] provisioning home (first boot)
+[live-proof] dsh plugin add link:repo
+[live-proof] config rows written (provider, default model, promptModel)
+[live-proof] booted: http://127.0.0.1:4299/?token=CeDvHcgaecn…
+[live-proof] server says push transport LIVE: false
+[live-proof] insertText did not reach the editor; retrying focus
+[live-proof] insertText did not reach the editor; retrying focus
+[live-proof] insertText did not reach the editor; retrying focus
+[live-proof] page after send: New Session | Plugins | Automation tasks | More | Workspaces | Default workspace | New Session | More | Into the Unknown | Preview | Default workspace | No suggestion yet — I will recommend one after your next turn | ▶ | ⟲ | ✕ | Describe what you want to build, / commands, @ file
+[live-proof] turn sent; waiting for the bar offer (up to 240s)
+VERDICT FAILED: page.waitForFunction: Timeout 240000ms exceeded.
+CONSOLE TAIL:
+info: [client:chapters] injecting 2 assistant-actions door(s)
+info: [client:chapters] assistant-actions inject returned function
+info: [client:chapters] door factory ran: 2 register effect(s), types: function,function
+info: [client:prompt] inputActions keys: captureInsertion,insertText,setDraft,persistDraft,addAttachments,removeAttachment,pruneAttachments,submit

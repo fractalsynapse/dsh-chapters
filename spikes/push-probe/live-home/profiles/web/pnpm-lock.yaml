@@ -1,0 +1,16 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: false
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@probe/push-probe':
+        specifier: link:/home/adrian/Projects/dsh-chapters/spikes/push-probe/plugin
+        version: link:../../../plugin
+      '@treeseed/dsh-chapters':
+        specifier: link:/home/adrian/Projects/dsh-chapters
+        version: link:../../../../..

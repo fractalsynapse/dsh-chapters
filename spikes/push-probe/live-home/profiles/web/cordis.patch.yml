@@ -1,0 +1,33 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+
+- id: llm-pi-ai
+  config:
+    providers:
+      local:
+        displayName: Local
+        api: openai-completions
+        baseURL: http://127.0.0.1:8080/v1
+        models:
+          - id: qwen3-4b-instruct
+            name: qwen3-4b-instruct
+            contextWindow: 32768
+            maxTokens: 4096
+        apiKeyEnv: LOCAL_API_KEY
+- id: agent-default-model
+  config:
+    provider: local
+    model: qwen3-4b-instruct
+    reasoningEffort: medium
+- id: agent-preset-registry
+  config:
+    selectedDefault: chapters
+- id: '@treeseed/dsh-chapters'
+  config:
+    promptModel: local/qwen3-4b-instruct
+    artifactStoreRoot: /home/adrian/Projects/dsh-chapters/spikes/push-probe/live-home/store
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1

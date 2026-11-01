@@ -706,6 +706,46 @@ version supplies, so Autorun reported itself unavailable on a host that exposes 
 `{ captureInsertion, insertText, setDraft, addAttachments, removeAttachment, pruneAttachments, submit }`, and
 the composer-write limitation in #126 is measured against that same kit.
 
+**The running signal has seats, and the scalar is only one of them (measured 2026-10-31, #194).**
+`SessionSnapshot.running: boolean` (`packages/api/session-controller/src/client/contract/snapshot.ts:69-73`)
+arrives through the dock's standard prop `useSession` — a `MaybeSnapshotSelectorHook<SessionSnapshot>`
+(`useSession((s) => s.running)`), the same seat `ui-session` documents in `SessionStandardProps`.
+Some builds ALSO hand a scalar `running` prop. The shipped dock declared both hook channels
+(`useSessionStatus?`, `useSession?`) and consumed only the scalar — so on a hook-only host the #193
+idle edge never fired and the cadence silently degraded to the conservative 10s-active fallback
+(`props.running ?? true`). Resolution order, locked here: scalar `running` → `useSession((s) =>
+s.running)` → unknown (conservative true, legacy cadence). Conditional invocation of an optional
+hook prop is deliberate: the prop face is fixed per host build, so hook order is stable across
+renders within any one deployment, which is the invariant React actually keeps.
+
+**Push transport (interface lock, #194 — probe-verified on host 0.2.1-rc.5, `spikes/push-probe/FINDINGS.md`).**
+Where the host has `appendPluginRecord` (0.2.1+; absent from 0.2.0-rc.2 — grep-verified on both tags),
+the bar's state rides a plugin record and a projection, and the steady state costs ZERO command runs:
+
+- Record type: `plugin:dsh-chapters/prompt`. Payload = the bar's durable facts, versioned:
+  `{ v: 1, status, text, turnSeq, error, intent, goalRevision, autorun, at }`.
+- Append sites: every durable row write — the runner's `analyzing`/`ready`/`failed`/quiet-`off`
+  transitions (it holds the live session) and the bar-access mutations (`setAutorun`, `setOff`,
+  `setOn`, `runNow`'s consumption), which gain an optional live-session parameter for the purpose.
+- The function comes ONLY from the host's own module instance — `createRequire(process.argv[1])
+  → resolve('@deepseek-ai/dsh-session') → await import(resolved)`. The plugin's OWN copy at the
+  IDENTICAL version throws `Receiver must be an instance of class Session` against a host session
+  (measured), and a bare import from a `link:` install resolves by realpath into the source tree —
+  on a dev machine, into a DIFFERENT host checkout than the running server. No plugin dependency is
+  declared for it; detection is `typeof appendPluginRecord === 'function'`, one try behind try/catch,
+  and any failure marks push unavailable for the process.
+- Projection: key `chaptersPrompt`, registered ONLY when the writer resolved — registration is the
+  feature signal. `apply` folds records last-wins; `wire.view` passes the payload through.
+- Client: the dock reads the standard prop `useProjection('chaptersPrompt')`. A live value renders
+  through the SAME reducer (one fold path); `undefined` ⇒ the #203/#208 pull schedule stands,
+  unchanged — the fallback is the floor. In push mode the only pulls are the bar's own actions and
+  ONE staleness-confirm per idle edge, scheduled at +20s and cancelled when a fresher record arrives
+  (the runner writes `analyzing` within moments of turn/end, so a healthy push cancels every confirm):
+  a silently dead push degrades to one pull per turn, never to a frozen bar.
+- Records are `ignorable: true` with an unknown `plugin:` type — skipped by readers, rendered by
+  nothing; the projection value travels the host's own push channel. Verbs, state block, and the
+  pull schedule below are unchanged and remain the contract for pre-0.2.1 hosts.
+
 **Verbs (interface lock, #113).** `/chapters-prompt` accepts `model …|clear`, `off`, `on`, `state`, `autorun on|off`,
 and **`run`** — submit the offer currently on screen as a **human-authored user turn**, through the same follow-up
 path autorun uses (`agent.followup(suggestPromptMessage(…))`). Run goes through the command plane rather than the

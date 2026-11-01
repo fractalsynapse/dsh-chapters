@@ -251,12 +251,20 @@ that publish no running prop keep the paced fallback (**10s** while analyzing/ar
 walking away from a running loop is the point of autorun). An armed or analyzing bar keeps the
 10s belt on every host: a missed edge must not stall a loop.
 
-A real push retires the problem instead of pacing it: the plugin appends its recommendation as
-a durable plugin record and a registered projection delivers it — zero command runs in steady
-state. Measured gate: `appendPluginRecord` is **absent from host 0.2.0-rc.2 and present in
-0.2.1-rc.2** (`git show dsh-v0.2.0-rc.2:packages/core/session/src/index.ts | grep -c
-appendPluginRecord` → 0), so the swap needs a host-pin bump plus feature detection with pull
-fallback — tracked as #194.
+**The push transport retires the problem instead of pacing it** (#194, host 0.2.1+): every state
+change is appended as a durable plugin record (`ignorable`, never model-visible, rendered by
+nothing) and a registered projection delivers it to the bar through the host's own push channel —
+the steady state costs **zero command runs**, on any navigation, any tab, any cadence. The bar
+renders pushed values through the same reducer the pulls feed, so there is one fold path and no
+second implementation to drift. Detection is honest in both directions: the projection is
+registered only when the record writer resolved against the host's own module instance (a
+plugin-side copy cannot be used even at the identical version — class identity is per instance,
+measured), and a client that sees no projection keeps the pull schedule above, unchanged. In push
+mode the only pulls left are the bar's own actions and one staleness-confirm per turn-end,
+scheduled at +20s and cancelled the moment a fresher record arrives — a silently dead push
+degrades to one pull per turn, never to a frozen bar. Hosts before 0.2.1 (`appendPluginRecord`
+absent from 0.2.0-rc.2, grep-verified on the tags) get the pull schedule as their steady state —
+the fallback is the floor.
 
 ## What proves it, in which class
 

@@ -353,3 +353,28 @@ test('#208: the enabling replies state the revival path — a hidden bar reappea
   assert.match(model.text!, /page reload/, 'model states it too')
   assert.match(model.text!, /this ENABLES the composer ghost/, 'and the pinned sentence is untouched')
 })
+
+test('#218: the state verb mirrors its answer when the surface supports it', async () => {
+  const mirrors: Array<{ sessionId: string; session: unknown }> = []
+  let effective = { spec: 'p/m', source: 'override' as const }
+  const h = harness({
+    effective: () => effective,
+    statusLine: () => 'x',
+    bar: {
+      read: Object.assign(async () => ({ status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }), { mirror: (sessionId: string, session: unknown) => { mirrors.push({ sessionId, session }) } }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      runNow: async () => ({ ok: true }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+    },
+  })
+  const state = await h.run('state', { session: { id: 's1' } })
+  assert.equal(state.kind, 'success')
+  assert.equal(mirrors.length, 1, 'the state verb mirrored exactly once')
+  assert.equal(mirrors[0]!.sessionId, 's1')
+  const stateNoMirror = await h.run('state', { session: { id: 's2' }, agent: { session: { } } })
+  assert.equal(stateNoMirror.kind, 'success', 'a surface without mirror still serves the read')
+  const stateNoSession = await h.run('state', {})
+  assert.equal(stateNoSession.kind, 'error', 'no session scope is an honest error')
+  const stateBare = await h.run('state', { session: { id: 's3' } })
+  assert.equal(stateBare.kind, 'success', 'a caller with no live session object still gets state; the mirror just skips')
+})

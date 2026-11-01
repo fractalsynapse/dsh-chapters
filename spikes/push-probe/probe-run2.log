@@ -1,0 +1,69 @@
+plugin add: rc=0 Lockfile is up to date, resolution step is skipped | Done in 13ms using pnpm v12.4.2 
+{
+  "at": "2026-10-31T18:42:55.288Z",
+  "node": "v24.22.0",
+  "argv1": "/home/adrian/Projects/dsh-chapters/spikes/push-probe/host/node_modules/.bin/dsh",
+  "steps": [
+    {
+      "name": "projection.register",
+      "ok": true,
+      "value": "registered"
+    },
+    {
+      "name": "ctx.census",
+      "ok": true,
+      "value": {
+        "agents": "present",
+        "sessions": "threw: cannot get property \"sessions\" without inject",
+        "sessionProjections": "present",
+        "goals": "threw: cannot get property \"goals\" without inject",
+        "llm": "threw: cannot get property \"llm\" without inject",
+        "commands": "threw: cannot get property \"commands\" without inject",
+        "storageDomain": "threw: cannot get property \"storageDomain\" without inject",
+        "tools": "threw: cannot get property \"tools\" without inject",
+        "agentPresets": "threw: cannot get property \"agentPresets\" without inject"
+      }
+    },
+    {
+      "name": "agents.create",
+      "ok": false,
+      "error": "no agent factory registered (load an agent-loop plugin)"
+    },
+    {
+      "name": "strategyA.bareImport",
+      "ok": false,
+      "error": "Cannot read properties of null (reading 'Session')"
+    },
+    {
+      "name": "strategyB.createRequireImport",
+      "ok": false,
+      "error": "Cannot read properties of null (reading 'Session')"
+    },
+    {
+      "name": "strategyC.createRequireSync",
+      "ok": false,
+      "error": "Cannot read properties of null (reading 'Session')"
+    },
+    {
+      "name": "strategyD.mainModuleGraph",
+      "ok": false,
+      "error": "Cannot read properties of null (reading 'Session')"
+    },
+    {
+      "name": "record.readback",
+      "ok": true,
+      "value": "skipped: no session"
+    },
+    {
+      "name": "projection.stateOf",
+      "ok": true,
+      "value": "skipped: no session"
+    },
+    {
+      "name": "surface.check",
+      "ok": true,
+      "value": "skipped: no session"
+    }
+  ],
+  "done": true
+}
