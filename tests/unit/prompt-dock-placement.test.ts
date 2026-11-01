@@ -75,3 +75,10 @@ test('#231: the mount discovery is a sanctioned pull, independent of the ambient
   assert.match(DOCK, /const mountDiscovery = opts\?\.mount === true && duePull\(\)/, 'the mount look names itself')
   assert.match(DOCK, /opts\?\.force === true \|\| mountDiscovery \|\| \(spacing !== null/, 'and fires without any spacing — killing the clock must not kill discovery')
 })
+
+test('#236: the expanded card claims its width and bounds its height — no one-character-per-line squeeze', () => {
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /\.dsh-chapters_promptText\{[^}]*flex:1 1 100%/, 'the text button carries a real flex-basis (#236)')
+  assert.match(DOCK, /\.dsh-chapters_promptFull\{[^}]*max-height:9rem[^}]*overflow-y:auto/, 'the expanded block scrolls internally instead of covering the screen')
+  assert.match(DOCK, /\.dsh-chapters_promptFull\{[^}]*overflow-wrap:break-word/, 'words stay whole on full-width lines')
+})
