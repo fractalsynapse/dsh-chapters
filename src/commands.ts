@@ -530,6 +530,10 @@ export function registerHostCommands(
             // and the bar must be able to say that without re-parsing the prompt.
             `  intent: ${st.intent}${st.intent === 'goal-edit' ? ' — re-cuts the goal, so Run it yourself; autorun will not' : ''}`,
             `  goal: ${st.goalRevision === null ? 'none' : `revision ${String(st.goalRevision)}`}`,
+            // #229: the heartbeat the server has configured rides EVERY state reply — the client's
+            // schedule is the operator's setting, not a compile-time guess. Zero (the default) means
+            // no ambient clock exists at all; the sanctioned moments still do.
+            `  heartbeat: ${String((config.prompt.bar as { quietHeartbeatSec?: number }).quietHeartbeatSec ?? 0)}s`,
             ...(st.error === '' ? [] : [`  error: ${st.error}`]),
             ...(st.text === '' ? [] : ['  prompt:', ...st.text.split('\n').map((l) => `    ${l}`)]),
           ].join('\n') }
