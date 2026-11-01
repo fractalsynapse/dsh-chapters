@@ -247,3 +247,19 @@ jobs:
             /tmp/dsh-e2e/e2e-home-*/storages/
             /tmp/dsh-e2e/e2e-home-*/settings.yaml
           if-no-files-found: ignore
+
+  # #228: environment parity — the maintainer's standing order ("test and development environments
+  # must always match the local one") made a fact instead of a memory. On CI runners there are no
+  # installed profiles (the check says so and exits 0); it gates on THIS repo's own consistency:
+  # rig pin readable, host trees probed without crashing, and exit code sane. The drift that
+  # burned us — a stale plugin copy under a live ~/.dsh — is caught by running this locally as
+  # part of every release step (documented in AGENTS.md).
+  environment-parity:
+    name: environment parity — live hosts vs rig pin vs installed copies (#228)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - run: npm ci
+      - run: node scripts/check-env-parity.mjs
