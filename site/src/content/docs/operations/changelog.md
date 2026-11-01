@@ -6,6 +6,12 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.13 — 2026-11-01 · the expanded prompt card reads like a card
+
+The maintainer, on 0.2.12 with suggestions back on: clicking a generated prompt displayed *"illegible text that has one character and whitespace per line."* The bug was six releases old and lived in our own CSS: the bar is a flex row and the text button carried `flex:1` — whose basis computes to AUTO, sized from content. Collapsed (single line) that reads fine; **expanded**, the tall multi-line block squeezed toward its minimum width while glyph/label/actions held their ground, and aggressive word-shredding finished the job. One character per line, exactly as reported.
+
+Now the expanded offer spans the full card width with normal wrapping, caps at 9rem with an internal scrollbar (their requested shape: *"maximum height… with a scrollbar so it does not cover the entire screen"*), and sits on the opaque menu-token background like the goal bar's family. The collapsed row keeps the full text as hover title — reading without expanding. Injecting into the chat input remains blocked by the host's own defect (#126/#162: programmatic composer writes throw `draftRev` identically on 0.2.0-rc.2 and 0.2.1); Run submits the offer directly, which works today. A DOM-shape row pins all three rules so no future restyle can re-squeeze the card.
+
 ### 0.2.12 — 2026-11-01 · the ambient clock is gone — zero repeated chapters-prompt executions by default
 
 The seventh attempt, and this time the maintainer's own live log named the culprit: after 0.2.11 installed correctly (parity clean), the pull gaps moved from exact 10.0s to **exact 60.0s**. My #221 "quiet heartbeat" WAS the drumbeat they stepped away from and came back to. Six attempts had re-PACED the clock; none removed it. Their rule is now the shipped default: **never repeated chapters-prompt executions in a session.**
