@@ -336,12 +336,17 @@ export function pushIsFresher(lastPushAt: number | null, edgeAt: number): boolea
 export { PROMPT_PROJECTION_KEY } from '../prompt-keys.ts'
 
 /**
- * The staleness-confirm's grace: after an idle edge, the pushed `analyzing` record normally lands
+ * #218: a DEAD-PUSH HEARTBEAT, not a staleness confirm — 20s fired mid-turn before the turn's
+ * record could exist (turns outlast 20s), which was confirm spam wearing a safety hat. 5 minutes:
+ * during normal work a record arrives every turn and the push effect retires the pending timer, so
+ * a healthy push NEVER fires it; only a push silent for a whole 5 minutes pulls once — a frozen
+ * bar is the failure this bounds, and it is worth one node every 5 minutes, not one every 20
+ * seconds.
  * within moments (the runner writes it BEFORE calling the model). If no push arrived this long
  * after the edge, the push is presumed dead and ONE confirm pull runs — a silently dead push
  * degrades to one pull per turn, never to a frozen bar.
  */
-export const PUSH_CONFIRM_GRACE_MS = 20_000
+export const PUSH_CONFIRM_GRACE_MS = 300_000
 
 /**
  * #211 — the edge kick's delay, measured on the maintainer's host the hard way: some hosts publish
