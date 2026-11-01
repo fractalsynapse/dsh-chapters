@@ -626,11 +626,15 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // No writer ⇒ no projection ⇒ every client keeps the #203/#208 pull schedule, unchanged.
     let pushWriter: PushWriter | null = null
     try {
-      pushWriter = await resolvePushWriter({ log: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`) })
+      pushWriter = await resolvePushWriter({ log: (m) => { console.error(`[chapters-push] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) } })
       if (pushWriter !== null) {
         const projections = ctx.sessionProjections as unknown as { register?: (def: unknown) => unknown } | undefined
         if (typeof projections?.register === 'function') {
           projections.register(promptProjectionDefinition())
+          // stderr witness, same discipline as the turn/end door's armed line: ctx.logger.info never
+          // reaches a boot log a probe can read, and "is push live?" is exactly the question a
+          // failed proof must answer first (#194).
+          console.error('[chapters-push] transport LIVE — the bar rides plugin records; zero command runs in steady state')
           ctx.logger?.info?.('dsh-chapters: prompt push transport LIVE — the bar rides plugin records; zero command runs in steady state')
         } else {
           pushWriter = null // no seat to fold records into; the pull floor stands
