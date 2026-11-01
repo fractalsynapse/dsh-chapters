@@ -337,11 +337,15 @@ export function makeDoorRunner(
    * we cannot re-pull would be theater.
    */
   opts?: { attempts?: number, attemptPauseMs?: number, navigator?: { openSession?: (id: string) => unknown } },
-): (sessionId: string) => Promise<DoorResult> {
-  return async function run(sessionId: string): Promise<DoorResult> {
+): (sessionId: string, anchorSeq?: number | null) => Promise<DoorResult> {
+  return async function run(sessionId: string, anchorSeq?: number | null): Promise<DoorResult> {
     try {
       if (remote.commands?.execute === undefined) return { ok: false, message: 'commands remote unavailable' }
-      const res = await remote.commands.execute(sessionId, door.command, [])
+      // #221: the clicked message's seq rides the command as its first token — the server anchors
+      // the archive at the last completed turn AT OR BEFORE it. Absent ⇒ today's behavior (the end
+      // of the session), byte-identical to the pre-#221 line.
+      const line = typeof anchorSeq === 'number' && Number.isFinite(anchorSeq) ? `${door.command} ${String(Math.trunc(anchorSeq))}` : door.command
+      const res = await remote.commands.execute(sessionId, line, [])
       if (res.ok !== true) return { ok: false, message: (res.error?.message ?? `the ${door.noun} call failed`).slice(0, 90) }
       const result = res.value?.result
       const text = typeof result?.text === 'string' ? result.text : ''
