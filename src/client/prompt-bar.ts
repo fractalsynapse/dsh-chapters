@@ -145,10 +145,12 @@ export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarA
  */
 export function mountPullDecision(c: { hasCache: boolean; ageMs: number; status: PromptBarStatus; autorun: PromptBarAutorun }): boolean {
   if (!c.hasCache) return true
+  // #208, the maintainer's rule — NOT RELEVANT, NOT VISIBLE: `off` is terminal for the page
+  // lifetime. The #203 staleness-revival arm cost one visible history node per reactivation of a
+  // known-off session, for a feature that is not on; revival is a page reload, and the commands
+  // that re-enable (`model`, `on`) say so in their replies.
+  if (c.status === 'off') return false
   if (c.autorun === 'armed' || c.status === 'analyzing') return true
-  // `off` deliberately rides the same staleness guard: a fresh off renders hidden for free, and a
-  // stale off pulls, because `/chapters-prompt on` could have happened anywhere and the guarded
-  // mount is the revival path short of a page reload.
   return c.ageMs > QUIET_POLL_MS
 }
 
@@ -266,4 +268,31 @@ export function deriveRunning(status: unknown): boolean | undefined {
     return deriveRunning(s.status ?? s.state ?? s.phase)
   }
   return undefined
+}
+
+
+/**
+ * #208: the plane-wide relevance fact, read from the `state` block's own model line. `model: unset`
+ * means the feature does not exist on this plane — one discovery reply carrying it silences EVERY
+ * dock on the page (the pull transport cannot do better than one discovery; the push transport
+ * (#194) removes even that). An unrecognised block is false, never a guess.
+ */
+export function parseModelAbsent(text: string): boolean {
+  return /^\s*model:\s*unset\b/m.test(text)
+}
+
+/**
+ * #211 — the edge kick's delay, measured on the maintainer's host the hard way: some hosts publish
+ * `running` at STEP granularity (it flickers at every tool call and thinking block), and an
+ * immediate kick per falling edge was a rendered `chapters-prompt` node per tool call — all waste,
+ * because the server row changes ONLY at turn boundaries. So: a falling edge schedules its pull
+ * after the debounce, a rising edge cancels it (step flicker coalesces to zero pulls), and the rate
+ * floor bounds even a host that holds `running` low through long tool calls. A real turn end — a
+ * falling edge with no rising edge after it — pulls exactly once.
+ */
+export const EDGE_DEBOUNCE_MS = 2_000
+export const EDGE_FLOOR_MS = 15_000
+
+export function edgeKickDelayMs(msSinceLastPull: number): number {
+  return Math.max(EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS - msSinceLastPull)
 }

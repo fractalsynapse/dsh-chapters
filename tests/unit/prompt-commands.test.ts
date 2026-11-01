@@ -331,3 +331,25 @@ test('#188: model <id> [maxChars [contextChars]] stores the caps beside the mode
   const extra = await h.run('model p/m 1 2 3')
   assert.equal(extra.kind, 'error', 'a fourth token is not a cap')
 })
+
+test('#208: the enabling replies state the revival path — a hidden bar reappears at the next page reload', async () => {
+  let effective = { spec: 'p/m', source: 'override' as const }
+  const h = harness({
+    effective: () => effective,
+    setModel: async (s) => { effective = s === null ? { spec: '', source: 'unset' } : { spec: s, source: 'override' } },
+    statusLine: () => 'x',
+    bar: {
+      read: async () => ({ status: 'off' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      runNow: async () => ({ ok: true }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+    },
+  })
+  const on = await h.run('on', { session: { id: 's1' } })
+  assert.equal(on.kind, 'success', String(on.text))
+  assert.match(on.text!, /page reload/, 'on states the revival path')
+  const model = await h.run('model p/m', { session: { id: 's1' } })
+  assert.equal(model.kind, 'success', String(model.text))
+  assert.match(model.text!, /page reload/, 'model states it too')
+  assert.match(model.text!, /this ENABLES the composer ghost/, 'and the pinned sentence is untouched')
+})

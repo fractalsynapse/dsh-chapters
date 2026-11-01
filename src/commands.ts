@@ -437,7 +437,7 @@ export function registerHostCommands(
           const capsNote = maxArg !== undefined || ctxArg !== undefined
             ? ` Caps stored beside the model${maxArg !== undefined ? `: suggestion ${maxArg} chars` : ''}${ctxArg !== undefined ? `${maxArg !== undefined ? ',' : ':'} context budget ${ctxArg} chars` : ''}.`
             : " Caps derive from this model's context window (window × promptContextRatio); pass numbers to pin them."
-          return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables).${capsNote}` }
+          return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables).${capsNote} If the bar is hidden, it reappears at the next page reload.` }
         }
         if (verb === 'off') {
           await config.prompt.setModel('')
@@ -520,7 +520,7 @@ export function registerHostCommands(
           const holder = invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } }
           const sessId = holder.session?.id ?? holder.agent?.session?.id
           if (sessId !== undefined) await config.prompt.bar.setOn(sessId)
-          return { kind: 'success', text: `suggestions ON (${spec}) — the next completed turn offers a next step; /chapters-prompt state shows it, /chapters-prompt autorun on runs them` }
+          return { kind: 'success', text: `suggestions ON (${spec}) — the next completed turn offers a next step; /chapters-prompt state shows it, /chapters-prompt autorun on runs them. If the bar is hidden, it reappears at the next page reload.` }
         }
         if (verb === 'suggest') {
           const holder = invocation.agent as { agent?: { session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }; session?: { id?: string; snapshotEvents?: () => readonly unknown[] } }

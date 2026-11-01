@@ -37,3 +37,21 @@ test('the bar speaks only to the command plane (#113, no private channel)', () =
   const dockSrc = fs.readFileSync(path.join(ROOT, 'src', 'client', 'prompt-dock.ts'), 'utf8')
   assert.match(dockSrc, /BAR_STATE_COMMAND/, 'and it pulls the same verb a human types')
 })
+
+test('#208: the dock source keeps the plane-wide silence wired — the flag is read in tick and written from the reply', () => {
+  // Source-scan row, the pattern this file already uses for client wiring: the dock has no DOM
+  // harness here, and an unwired flag is exactly the silent regression this row exists to catch.
+  // CLIENT is index.ts in this file; the flag lives in the dock module, so read it here.
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /if \(parseModelAbsent\(text\)\) featureAbsent = true/, 'the reply hook sets the flag')
+  assert.match(DOCK, /if \(featureAbsent\) return/, 'and tick honors it before any other decision')
+})
+
+test('#211/#212: the dock debounces the falling edge, cancels on the rising one, and wears the goal bar\'s width', () => {
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /edgeKickDelayMs\(since\)/, 'the falling edge schedules through the pure delay decision')
+  assert.match(DOCK, /\} else if \(!prev && next\) \{\n      if \(edgeTimer\.current !== undefined\) \{ clearTimeout\(edgeTimer\.current\); edgeTimer\.current = undefined \}/, 'the rising edge CANCELS — step flicker must coalesce to zero pulls')
+  assert.match(DOCK, /lastPullAt\.current = Date\.now\(\)/, 'every pull attempt stamps the floor — a failed pull is still a rendered node')
+  assert.match(DOCK, /width:calc\(100% - 2 \* var\(--dsh-composer-side-clearance\) - 4 \* var\(--dsh-composer-dock-inset\)\)/, 'the dock width matches the goal bar module term for term (#212)')
+  assert.ok(!/if \(prev && !next\) kick\.current\?\.\(\)\n/.test(DOCK), 'the #193 immediate kick is GONE — it was the per-tool-call spam')
+})
