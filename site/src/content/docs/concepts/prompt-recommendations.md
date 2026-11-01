@@ -225,12 +225,27 @@ activate a session** (#203). The bar keeps a module-level per-session cache; mou
 from it with **zero invocations**, and a mount pulls only when the cache cannot be trusted:
 absent (first mount after a page load), older than the quiet interval (a turn could have ended
 since — this one guarded pull is what keeps Run honest, because clicking a stale offer would
-submit the row's newer text), `analyzing`, or `armed`. A cached `off` never pulls.
+submit the row's newer text), `analyzing`, or `armed`.
 
-Beyond mounts: the host's **idle edge** (a turn ending is the moment an offer is born) pulls
-immediately; the bar's **own actions** are their own invocations; and where the host publishes
-the running signal, the quiet **clock disappears entirely** for a stable, disarmed bar — every
-state change flows through an edge or an action, so a timer could only re-read truth. Hosts
+**Not relevant, not visible** (#208): `off` is **terminal for the page lifetime**. A session
+that answered `off` never pulls again — no staleness guard, no edge pulls — and when any reply
+reports the plane-wide `model: unset`, every dock on the page stops pulling entirely: an
+unset-model plane pays **one discovery run per page load in total**, and zero afterward. The
+pull transport cannot do better than that one discovery (a client cannot know relevance without
+asking); the push transport (#194) removes even it. Revival is honest and stated where the human
+acts: `/chapters-prompt model <spec>` and `/chapters-prompt on` say that a hidden bar reappears
+at the next page reload — a client that learned `off` keeps no clock, by design.
+
+Beyond mounts: the host's **idle edge** (a turn ending is the moment an offer is born) pulls —
+but **debounced and rate-floored** (#211, measured the hard way on the maintainer's host: some
+hosts publish `running` at STEP granularity — it flickers at every tool call and every thinking
+block — and an edge-per-flicker was a rendered command node per tool call, all of it waste,
+because the server row changes ONLY at turn boundaries). So a falling edge schedules its pull
+2s out and a rising edge cancels it: step flickers coalesce to zero pulls, a real turn end pulls
+once. A rate floor (15s since the last pull) bounds even a host that holds `running` low through
+long tool calls. The bar's **own actions** remain their own invocations; and where the host
+publishes the running signal, the quiet **clock disappears entirely** for a stable, disarmed bar —
+every state change flows through an edge or an action, so a timer could only re-read truth. Hosts
 that publish no running prop keep the paced fallback (**10s** while analyzing/armed/running,
 **60s** while quiet, **zero pulls in a hidden tab** while quiet — never while armed, because
 walking away from a running loop is the point of autorun). An armed or analyzing bar keeps the
