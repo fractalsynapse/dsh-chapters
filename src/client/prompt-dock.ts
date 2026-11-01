@@ -76,9 +76,17 @@ const CSS = [
   '.dsh-chapters_promptExpanded{height:auto;min-height:36px;padding-top:8px;padding-bottom:8px}',
   '.dsh-chapters_promptGlyph{color:var(--dsw-alias-label-tertiary);flex:none;display:inline-flex}',
   '.dsh-chapters_promptLabel{color:var(--dsw-alias-label-primary);flex:none;font-size:13px;font-weight:500;line-height:24px}',
-  '.dsh-chapters_promptText{min-width:0;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;line-height:20px;cursor:pointer;border:0;background:0 0;padding:0;text-align:left;flex:1}',
+  // #236: `flex:1` alone means flex-basis AUTO — sized from content. Collapsed (nowrap) that reads
+  // fine; EXPANDED, a tall multi-line block drives the item toward its minimum width while the
+  // glyph/label/actions keep flex:none, so the text column squeezed to ~one character per line (the
+  // maintainer's "illegible text that has one character and whitespace per line"). The fix is the
+  // basis: claim the full remaining card width in both states.
+  '.dsh-chapters_promptText{min-width:0;color:var(--dsw-alias-label-primary-dimmed);font-size:13px;line-height:20px;cursor:pointer;border:0;background:0 0;padding:0;text-align:left;flex:1 1 100%}',
   '.dsh-chapters_promptEllipsis{white-space:nowrap;text-overflow:ellipsis;overflow:hidden;display:block}',
-  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:anywhere;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block}',
+  // #236: the expanded offer is a bounded reading pane — max-height with an internal scrollbar, so
+  // a long suggestion can never cover the screen (the maintainer asked for exactly this). Normal
+  // wrapping (`break-word`, not `anywhere`) keeps words whole on full-width lines.
+  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block;max-height:9rem;overflow-y:auto}',
   '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',
   '.dsh-chapters_promptIntent{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}',
 
