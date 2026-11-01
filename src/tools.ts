@@ -496,7 +496,7 @@ export function buildChaptersTools(
     description: door.intent === 'branch'
       ? 'Fork this conversation into a new session: archive everything so far into verbatim chapters and open a child whose history is the table of contents. Optional argument: a title for the branch.'
       : 'Continue this conversation in a new session: archive everything so far into verbatim chapters and open a child that carries the same stream of work — its notice names the operative plan, if one is still standing. Optional argument: a title for the continuation.',
-    input: { hint: '[title]' },
+    input: { hint: '[messageSeq] [title]' },
     async handler(invocation: { agent: unknown; rawInput?: string; signal?: AbortSignal }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
       const agent = invocation.agent as CallerAgent
       if (agent?.session === undefined) return { kind: 'error' as const, text: `${door.name}: no session context for this invocation` }
@@ -507,12 +507,37 @@ export function buildChaptersTools(
           await config.scheduler.pullFor(cwd0).catch(() => undefined)
         }
         const events = await ports.readCallerEvents()
-        const anchor = [...events].reverse().find((e) => e.type === 'turn/end')?.seq
+        // #221 ANCHORED DOORS: an optional numeric first argument selects the message to continue
+        // FROM — the last completed turn at or before it. The maintainer clicked Continue on an
+        // earlier assistant message and got end-of-session anyway; the affordance promised
+        // "continue from here" and delivered "continue from the end". No argument keeps today's
+        // behavior exactly (end of session). Parsing is strict: a non-numeric first token stays the
+        // title, so `/chapters-continue my title` is untouched, and only a bare integer anchors.
+        // Out-of-range anchors REFUSE with the numbers rather than silently archiving more or less.
+        const trimmedRaw = (invocation.rawInput ?? '').trim()
+        const anchorMatch = /^(\d+)\s*([\s\S]*)$/.exec(trimmedRaw)
+        let requestedAnchor: number | null = null
+        let titleRest = trimmedRaw
+        if (anchorMatch !== null && anchorMatch[1] !== undefined) {
+          requestedAnchor = Number(anchorMatch[1])
+          titleRest = (anchorMatch[2] ?? '').trim()
+        }
+        const turnEnds = [...events].filter((e) => e.type === 'turn/end')
+        let anchor: number | undefined
+        if (requestedAnchor !== null) {
+          const chosen = turnEnds.filter((e) => (e.seq ?? 0) <= requestedAnchor).at(-1)
+          if (chosen === undefined) {
+            const first = turnEnds[0]?.seq
+            return { kind: 'error' as const, text: `${door.name}: seq ${String(requestedAnchor)} has no completed turn beneath it — the earliest turn boundary is ${String(first ?? '-')}; try again without the number to archive everything` }
+          }
+          anchor = chosen.seq
+        } else {
+          anchor = turnEnds.at(-1)?.seq
+        }
         if (anchor === undefined) return { kind: 'error' as const, text: `${door.name}: nothing to archive yet — the conversation has no completed turn` }
-        const trimmed = (invocation.rawInput ?? '').trim()
         const parentTitle = [...events].reverse()
           .find((e) => e.type === 'session/title')?.data?.title as string | undefined
-        const title = trimmed !== '' ? trimmed : `${parentTitle ?? `Chapters ${door.noun}`} \u2014 ${door.noun}`
+        const title = titleRest !== '' ? titleRest : `${parentTitle ?? `Chapters ${door.noun}`} \u2014 ${door.noun}`
         const rsCmd = await rulesSectionFor(agent, door.intent)
         if (rsCmd.refusal !== undefined) return { kind: 'error' as const, text: `${door.name} refused: ${rsCmd.refusal}` }
         const callerArgs = {
@@ -604,7 +629,7 @@ export function buildChaptersTools(
   const saveCommand: HostCommand = {
     name: 'chapters-save',
     description: 'Save completed turns as searchable chapters without creating a new session. Archives verbatim, updates the search index, and triggers enrichment. Idempotent — re-running saves only what has not yet been archived.',
-    input: { hint: '[title]' },
+    input: { hint: '[messageSeq] [title]' },
     async handler(invocation: { agent: unknown; rawInput?: string; signal?: AbortSignal }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
       const agent = invocation.agent as CallerAgent
       if (agent?.session === undefined) return { kind: 'error' as const, text: 'chapters-save: no session context for this invocation' }

@@ -120,17 +120,27 @@ export function barLabel(s: PromptBarState): string | null {
 export const ACTIVE_POLL_MS = 10_000
 export const QUIET_POLL_MS = 60_000
 
-export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean }): number | null {
+export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean; turnEndPulse?: boolean }): number | null {
   // #203: where the host publishes the running signal, the idle EDGE is the schedule — a turn ending
   // pulls, the bar's own actions pull, and a stable disarmed bar keeps NO clock at all, because a
   // timer there could only re-read truth into rendered history nodes. Analyzing stays on the fast
   // belt (a generation completing fires no edge), and an armed loop keeps it too (a missed edge must
   // not stall autorun). Hosts that publish no running prop get the #193 cadence, unchanged.
+  // #221: a turn-end pulse from the host projection deserves an immediate follow-up — the offer
+  // was just born. Applies in BOTH modes; it is the sanctioned moment, not a clock.
+  if (s.turnEndPulse === true) return ACTIVE_POLL_MS
   if (s.edges) {
     if (s.status === 'analyzing' || s.autorun === 'armed') return ACTIVE_POLL_MS
     return null
   }
-  const active = s.status === 'analyzing' || s.autorun === 'armed' || s.running
+  // #221: unknown-running is UNKNOWN, not running. The maintainer's live host (0.2.0-rc.2) publishes
+  // no usable running signal to docks; `running` defaulted to true and pinned this bar into the FAST
+  // clock forever — measured 158 state pulls at exact 10.0s intervals across one session's log, even
+  // while idle. Only two states justify a fast clock: generation in flight (analyzing) and an armed
+  // loop that must see offers promptly. A KNOWN running turn (edges=false hosts that do supply the
+  // signal... which by definition have edges=true) never needed the clock either way. So: analyzing
+  // or armed ⇒ fast; otherwise quiet, hidden-quiet ⇒ silent.
+  const active = s.status === 'analyzing' || s.autorun === 'armed'
   if (!active && s.hidden) return null
   return active ? ACTIVE_POLL_MS : QUIET_POLL_MS
 }
@@ -362,4 +372,20 @@ export const EDGE_FLOOR_MS = 15_000
 
 export function edgeKickDelayMs(msSinceLastPull: number): number {
   return Math.max(EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS - msSinceLastPull)
+}
+
+
+/**
+ * #221: the turn-end pulse, derived from the host's own turn-boundary projection — no plugin
+ * record API needed, so it works on 0.2.0 hosts (where appendPluginRecord is absent) exactly as
+ * on newer ones. The host maintains a `turnBoundary` projection (the agent loop reads its
+ * lastTurn for its own bookkeeping); reading what the host already folds costs zero writes and
+ * delivers reactively through the same standard useProjection seat as any other projection.
+ * Returns true when a NEW turn ended since the last observation; the dock calls it once per
+ * render and stores the returned stamp back into `seen`.
+ */
+export function turnEndPulse(lastTurn: number | null | undefined, seen: number): { pulse: boolean, seen: number } {
+  const cur = typeof lastTurn === 'number' && Number.isFinite(lastTurn) ? lastTurn : 0
+  if (cur > seen) return { pulse: true, seen: cur }
+  return { pulse: false, seen }
 }
