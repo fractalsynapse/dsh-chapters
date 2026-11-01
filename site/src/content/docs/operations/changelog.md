@@ -6,6 +6,32 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.8 — 2026-10-31 · the dock stops talking over itself
+
+Three live reports from the maintainer's upgraded host, each measured to its mechanism before any code moved:
+
+**The spam (#211).** "We are getting a chapters-prompt command call after every tool call and thinking. This is REALLY
+BAD!!!" — with the paste to prove it: a wall of `suggested next step: idle` state nodes between their messages. Their
+host publishes the `running` signal at **step** granularity (every tool call, every thinking block flickers it), and
+the 0.2.5 idle-edge kick pulled on every flicker — each pull a rendered history node, all of it waste, because the
+server's suggestion row changes ONLY at turn boundaries. The kick is now **debounced and rate-floored**: a falling
+edge schedules its pull 2s out (15s floor since the last pull — a failed pull counts, it is still a node) and a rising
+edge cancels it. Step flicker coalesces to zero pulls; a real turn end pulls exactly once. Hosts that publish no
+signal keep the documented cadence fallback.
+
+**The tooltips (#210).** "The hoverover tooltips are covered by the main chat input container." The goal bar — same
+dock strip, same seat — renders its tooltips `portal side="bottom" delayMs={500}` and is not covered; ours omitted
+`portal` because the 0.1.5-era compile-time types rejected it at the overload while the runtime host always accepted
+it. The recipe is now one pinned function, field for field the goal bar's, with a native-`title` fallback where the
+seat is absent.
+
+**The margin (#212).** "The steered prompt I just entered went under the prompt bar a little bit." The dock width now
+matches the goal bar's module term for term — including the two side-clearance insets we omitted — so the card sits in
+the strip's standard band.
+
+And **#208**, already on staging: an unset-model plane costs **one discovery pull per page load, total**, and a known
+`off` is terminal — not relevant, not visible. Revival is a page reload, and the enabling commands say so.
+
 ### 0.2.7 — 2026-10-30 · activating a session costs zero command runs
 
 `0.2.5` paced the bar's poll; the maintainer's next report named the louder half: *"every time I navigate away from a
