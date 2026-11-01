@@ -61,3 +61,11 @@ test('#211/#212: the dock debounces the falling edge, cancels on the rising one,
   assert.match(DOCK, /lastPullAt\.current = Date\.now\(\)/, 'every pull attempt stamps the floor — a failed pull is still a rendered node')
   assert.match(DOCK, /width:calc\(100% - 2 \* var\(--dsh-composer-side-clearance\) - 4 \* var\(--dsh-composer-dock-inset\)\)/, 'the dock width matches the goal bar module term for term (#212)')
 })
+
+test('#218: the dock source carries the birth-record-driven idle render and the state-mirror path', () => {
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /pushLiveRef\.current && opts\?\.force !== true/, 'the push gate reads the force flag')
+  const INDEX = fs.readFileSync(path.join(ROOT, 'src/index.ts'), 'utf8')
+  assert.match(INDEX, /seenBirthSessions/, 'birth records: the first-event guard is in the listener')
+  assert.match(INDEX, /mirror: \(sessionId: string, session: unknown\)/, 'the state mirror is on the bar access object')
+})
