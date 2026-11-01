@@ -118,7 +118,19 @@ export function barLabel(s: PromptBarState): string | null {
  * autorun and pausing it silently would be the loop dying with nobody told.
  */
 export const ACTIVE_POLL_MS = 10_000
-export const QUIET_POLL_MS = 60_000
+/**
+ * #229: the quiet heartbeat is CONFIG-GATED (`promptQuietHeartbeatSec`) and defaults to ZERO.
+ * Measured on the maintainer's live log after 0.2.11 installed correctly (gaps exactly 60.0s): every
+ * pull is two durable nodes — a host `command/run` + `command/done` pair — and the user's rule is
+ * absolute: never repeated chapters-prompt executions. The sanctioned moments (mount discovery once
+ * per page load, the turn-end pulse, visibility return with an untrusted cache, forced confirms)
+ * remain; the ambient drumbeat does not exist unless configured. This module is client-safe (no node
+ * builtins), so the wiring injects the config value at boot via `configureQuietHeartbeat`.
+ */
+export let QUIET_POLL_MS = 0
+export function configureQuietHeartbeat(seconds: number | undefined): void {
+  QUIET_POLL_MS = typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? Math.trunc(seconds * 1000) : 0
+}
 
 export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean; turnEndPulse?: boolean }): number | null {
   // #203: where the host publishes the running signal, the idle EDGE is the schedule — a turn ending
@@ -142,7 +154,8 @@ export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarA
   // or armed ⇒ fast; otherwise quiet, hidden-quiet ⇒ silent.
   const active = s.status === 'analyzing' || s.autorun === 'armed'
   if (!active && s.hidden) return null
-  return active ? ACTIVE_POLL_MS : QUIET_POLL_MS
+  if (!active) return QUIET_POLL_MS > 0 ? QUIET_POLL_MS : null
+  return ACTIVE_POLL_MS
 }
 
 /**
@@ -161,7 +174,10 @@ export function mountPullDecision(c: { hasCache: boolean; ageMs: number; status:
   // that re-enable (`model`, `on`) say so in their replies.
   if (c.status === 'off') return false
   if (c.autorun === 'armed' || c.status === 'analyzing') return true
-  return c.ageMs > QUIET_POLL_MS
+  // #229: with no heartbeat configured, staleness alone never pulls — a tab left open for ten
+  // minutes must not resurrect the drumbeat through the mount path. Freshness returns via the
+  // turn-end pulse, visibility edges, and the confirm arms, all of which are real events.
+  return QUIET_POLL_MS > 0 && c.ageMs > QUIET_POLL_MS
 }
 
 /**
@@ -235,6 +251,9 @@ export function parseBarState(text: string): PromptBarEvent | null {
     if (key === 'prompt') { inPrompt = true; continue }
     scalars[key] !== undefined ? (scalars[key] += ` ${value}`) : (scalars[key] = value)
   }
+  // #229: the server's configured ambient heartbeat rides every state reply; learn it here so the
+  // module-level gate matches the operator's setting before any schedule decision reads it.
+  configureQuietHeartbeat(Number.parseInt((scalars['heartbeat'] ?? '').trim(), 10) || 0)
   const turnRaw = scalars['turn'] ?? ''
   const turnSeq = /^\d+$/.test(turnRaw) ? Number(turnRaw) : null
   const errorRaw = scalars['error'] ?? ''
