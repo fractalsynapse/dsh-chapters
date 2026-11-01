@@ -503,16 +503,20 @@ export function registerHostCommands(
           if (sessId === undefined || config.prompt.bar === undefined) {
             return { kind: 'error', text: 'state needs a session scope and the chapters prompt store — run it inside a session' }
           }
-          const st = await config.prompt.bar.read(sessId)
-          // #218 STATE MIRROR: the pull answered, and on a push-live host that answer becomes the
-          // record the NEXT mount reads from the projection — discovery pulls self-extinguish. The
-          // caller's live session is right here in the invocation; the mirror rides the same
-          // serialized per-session queue as every other record. A pull-mode host ignores it (the
-          // optional parameter is absent in its signature — no-op).
-          const sessObj = (invocation.agent as { session?: unknown }).session
-            ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
-          if (sessObj !== undefined && typeof (config.prompt.bar.read as { mirror?: unknown }).mirror === 'function') {
-            void (config.prompt.bar.read as unknown as { mirror: (sessionId: string, session: unknown) => void }).mirror(sessId, sessObj)
+          // #231: the state reply comes from the ROW — a durable read with no side effects. The full
+          // `bar.read` (row + live loop status) is consulted ONLY when the row is absent, which is also
+          // the one moment worth mirroring: an empty row means "this session has never been served",
+          // so the mirror writes the record that makes future mounts push-fed. A ready offer was NEVER
+          // re-read or re-mirrored here before — every pull cost a store read and (on push hosts) a
+          // duplicate record append. On the maintainer's host that path ran every minute for hours.
+          let st = await config.prompt.bar.peekRow(sessId)
+          if (st === null) {
+            st = await config.prompt.bar.read(sessId)
+            const sessObj = (invocation.agent as { session?: unknown }).session
+              ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
+            if (sessObj !== undefined && typeof (config.prompt.bar.read as { mirror?: unknown }).mirror === 'function') {
+              void (config.prompt.bar.read as unknown as { mirror: (sessionId: string, session: unknown) => void }).mirror(sessId, sessObj)
+            }
           }
           const { spec, source } = config.prompt.effective()
           // #113: `off` must mean OFF. A session with a defining model and no stored offer is `idle` — enabled,
