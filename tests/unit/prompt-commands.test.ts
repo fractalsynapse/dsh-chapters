@@ -378,3 +378,46 @@ test('#218: the state verb mirrors its answer when the surface supports it', asy
   const stateBare = await h.run('state', { session: { id: 's3' } })
   assert.equal(stateBare.kind, 'success', 'a caller with no live session object still gets state; the mirror just skips')
 })
+
+test('#225: /chapters-status prints the prompt plane block when the surface carries extras', async () => {
+  // The harness forwards `prompt` verbatim into registerHostCommands, so passing the extras here is
+  // exactly the shape index.ts builds with Object.assign — the row exercises the REAL status handler.
+  const h = harness({
+    effective: () => ({ spec: 'p/m', source: 'override' as const }),
+    statusLine: () => 'Prompt suggestions: ON — p/m',
+    planeStatus: () => ['Prompt plane: model p/m (override)', '  transport: pull (this host has no appendPluginRecord — state reads are commands)', '  turn/end door: 12 boundary event(s) sighted this process across 3 session(s)'],
+    sessionRow: async () => '  this session: status=idle, turn=-',
+  } as never)
+  const statusDef = h.defs.get('chapters-status')
+  assert.ok(statusDef !== undefined, 'the status command is registered')
+  const r = await statusDef!.handler({ agent: AGENT, rawInput: '' })
+  assert.equal(r.kind, 'success')
+  const text = r.text ?? ''
+  assert.ok(text.includes('Prompt plane'), 'the plane block printed')
+  assert.ok(text.includes('transport:'), 'with its transport line')
+  assert.ok(text.includes('this session: status='), 'and the per-session verdict row')
+})
+
+test('#225: `off` with a session scope routes through bar.setOff; without one it still stores the override', async () => {
+  const offs: Array<{ id: string; session: unknown }> = []
+  let effective = { spec: 'p/m', source: 'override' as const }
+  const h = harness({
+    effective: () => effective,
+    statusLine: () => 'x',
+    setModel: async (spec) => { if (spec === null) effective = { spec: '', source: 'override' as const } },
+    bar: {
+      read: async () => ({ status: 'idle' as const, text: '', turnSeq: null, error: '', at: '', intent: 'worker-step' as const, goalRevision: null, autorun: 'disarmed' as const, fired: 0 }),
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      runNow: async () => ({ ok: true }),
+      disarmHuman: () => undefined,
+      setOff: async (id: string, session?: unknown) => { offs.push({ id, session }) },
+      setOn: async () => undefined,
+    },
+  })
+  const withSession = await h.run('off', { session: { id: 's1' } })
+  assert.equal(withSession.kind, 'success')
+  assert.equal(offs.length, 1, 'the scoped off reached the bar')
+  assert.equal(offs[0]!.id, 's1')
+  const bare = await h.run('off', {})
+  assert.equal(bare.kind, 'success', 'a caller with no session still flips the stored override — the plane-wide half of off')
+})
