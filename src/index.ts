@@ -691,6 +691,14 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         const live = promptLoop.statusOf(sessionId)
         return { ...status, ...live }
       },
+      // #231: the row without the loop — cheap, pure, and the answer to almost every pull. The
+      // maintainer's host pulled once a minute for hours; each of those hit the full read + mirror.
+      peekRow: async (sessionId: string) => {
+        const ps = (await promptRow.get(sessionId)).promptSuggestion
+        if (ps === undefined || ps.status === 'off') return null
+        const live = promptLoop.statusOf(sessionId)
+        return { ...ps, ...live }
+      },
       // #218: the state verb calls this after serving a pull — the answer becomes the record the
       // next mount reads from the projection. Pull-only surfaces never see it called (the caller
       // feature-checks), so it lives on the same object that owns the push queue.
