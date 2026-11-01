@@ -165,6 +165,9 @@ export interface PromptBarAccess {
   // append needs the host's Session object, and every mutation site (command invocation, turn
   // listener) holds it. Absent ⇒ no record for that change; the pull floor still serves the bar.
   read(sessionId: string): Promise<PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }>
+  /** #231: the DURABLE row alone, no loop status, no side effects — the state verb answers from this
+   * whenever a row exists. Null when the session has never been served (the mirror-worthy moment). */
+  peekRow(sessionId: string): Promise<(PromptSuggestionState & { autorun: 'armed' | 'disarmed'; fired: number }) | null>
   /** #229: the heartbeat the SERVER has configured, carried on every state reply so the client's
    * schedule matches the operator's setting without a second channel. Absent ⇒ the client treats
    * it as zero (no ambient clock). */
