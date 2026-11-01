@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS, turnEndPulse } from '../../src/client/prompt-bar.ts'
+import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS, turnEndPulse, configureQuietHeartbeat } from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -142,23 +142,31 @@ test('#188: a BLOCKED goal disarms autorun and blocks firing, exactly like a com
 
 test('#193: cadence is a decision — active while state can change, quiet while stable, SILENT in a hidden tab unless the loop is armed', () => {
   const base = { status: 'ready' as const, autorun: 'disarmed' as const, running: false, hidden: false, edges: false }
-  assert.equal(pollSpacingFor(base), QUIET_POLL_MS, 'a stable bar costs one pull a minute, not six — every pull is two history nodes')
+  // #229 supersedes the minute-heartbeat: with no ambient clock configured, a stable disarmed bar
+  // schedules NOTHING. The sanctioned moments (pulse, visibility, mount) are the freshness paths.
+  assert.equal(pollSpacingFor(base), null, '#229: a stable disarmed bar schedules nothing')
   assert.equal(pollSpacingFor({ ...base, status: 'analyzing' }), ACTIVE_POLL_MS, 'generation in flight: watch it closely')
   assert.equal(pollSpacingFor({ ...base, autorun: 'armed' }), ACTIVE_POLL_MS, 'an armed loop must fire promptly')
   // #221 supersedes: a KNOWN running turn needs no clock — the idle edge (or the quiet heartbeat)
   // on signal-less hosts) catches what follows. The fast clock is for analyzing/armed only.
-  assert.equal(pollSpacingFor({ ...base, running: true }), QUIET_POLL_MS, '#221: running alone does not pin the fast clock')
-  assert.equal(pollSpacingFor({ ...base, status: 'idle' }), QUIET_POLL_MS, 'idle-and-stable is the quiet case')
+  assert.equal(pollSpacingFor({ ...base, running: true }), null, '#221+#229: running alone buys no clock at all by default')
+  assert.equal(pollSpacingFor({ ...base, status: 'idle' }), null, '#229: idle-and-stable schedules nothing')
   assert.equal(pollSpacingFor({ ...base, hidden: true }), null, 'a hidden quiet tab writes NO history nodes at all')
   assert.equal(pollSpacingFor({ ...base, hidden: true, autorun: 'armed' }), ACTIVE_POLL_MS, 'walking away from an armed loop is the POINT of autorun — never pause it')
   assert.equal(pollSpacingFor({ ...base, hidden: true, status: 'analyzing' }), ACTIVE_POLL_MS, 'and never pause mid-generation')
-  assert.ok(QUIET_POLL_MS > ACTIVE_POLL_MS, 'quiet must actually be quieter')
+  // #229: the default IS silence (QUIET = 0); when an operator re-arms a heartbeat it must still be
+  // slower than the active clock — that ordering is what "quiet" ever meant.
+  configureQuietHeartbeat(60)
+  assert.ok(QUIET_POLL_MS > ACTIVE_POLL_MS, 'a configured heartbeat is still slower than the active clock')
+  configureQuietHeartbeat(0)
 })
 
 test('#203: the mount pull is a decision — a fresh cache renders for free, and only an untrustworthy cache pulls', () => {
   assert.equal(mountPullDecision({ hasCache: false, ageMs: 0, status: 'idle', autorun: 'disarmed' }), true, 'a cold mount (page load) must fetch the truth once')
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'disarmed' }), false, 'fresh cache + stable + disarmed: activating a session costs ZERO runs')
-  assert.equal(mountPullDecision({ hasCache: true, ageMs: QUIET_POLL_MS + 1, status: 'ready', autorun: 'disarmed' }), true, 'the staleness guard: a turn could have ended since — this is what keeps Run honest')
+  // #229: staleness ALONE never pulls without a heartbeat — their tab left open for ten minutes must
+  // not resurrect the drumbeat through the mount path; the pulse and visibility edges answer instead.
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 7 * 60_000, status: 'ready', autorun: 'disarmed' }), false, '#229: stale cache + no heartbeat ⇒ no pull')
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'analyzing', autorun: 'disarmed' }), true, 'generation in flight: see it through')
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'armed' }), true, 'an armed loop syncs against server truth on sight')
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'off', autorun: 'disarmed' }), false, 'a FRESH cached off renders hidden for free')
@@ -189,8 +197,8 @@ test('#203: where the host publishes the running edge, a stable disarmed bar has
   assert.equal(pollSpacingFor({ ...base, autorun: 'armed' }), ACTIVE_POLL_MS, 'the armed belt: a missed edge must not stall the loop')
   assert.equal(pollSpacingFor({ ...base, hidden: true }), null, 'hidden and stable: still nothing')
   const legacy = { ...base, edges: false }
-  assert.equal(pollSpacingFor(legacy), QUIET_POLL_MS, 'a host without the prop keeps the #193 cadence UNCHANGED')
-  assert.equal(pollSpacingFor({ ...legacy, running: true }), QUIET_POLL_MS, '#221 supersedes the legacy running→ACTIVE arm too')
+  assert.equal(pollSpacingFor(legacy), null, '#229 supersedes even the legacy quiet arm: signal-less hosts get NO ambient clock by default')
+  assert.equal(pollSpacingFor({ ...legacy, running: true }), null, '#221+#229: the legacy running arm is gone too')
   assert.equal(pollSpacingFor({ ...legacy, hidden: true }), null)
 })
 
@@ -273,31 +281,28 @@ test('#218: pushEventsOf arms — turnSeq/error defaults and the goalRevision fi
 
 test('#221: the fast clock serves only real work — analyzing or armed; unknown-running never pins it', () => {
   const base = { status: 'idle' as const, autorun: 'disarmed' as const, running: false, hidden: false, edges: false }
-  assert.equal(pollSpacingFor(base), QUIET_POLL_MS, 'idle + disarmed + no signal: the quiet heartbeat, not the fast clock')
-  assert.equal(pollSpacingFor({ ...base, running: true }), QUIET_POLL_MS, 'a host that reports running=true forever (unknown treated as running) still gets quiet')
+  assert.equal(pollSpacingFor(base), null, 'idle + disarmed + no signal: silence — #229 killed the ambient clock')
+  assert.equal(pollSpacingFor({ ...base, running: true }), null, 'a stuck-true running signal gets NOTHING by default (#229)')
   assert.equal(pollSpacingFor({ ...base, status: 'analyzing' }), ACTIVE_POLL_MS, 'generation in flight deserves the fast clock')
   assert.equal(pollSpacingFor({ ...base, autorun: 'armed' }), ACTIVE_POLL_MS, 'an armed loop deserves it too')
   assert.equal(pollSpacingFor({ ...base, status: 'ready', autorun: 'armed' }), ACTIVE_POLL_MS)
 })
 
-test('#221: schedule simulation over the maintainer\'s measured session shape — no 10s clock, bounded pulls', () => {
-  // Their log: 349 turns, pulls at exact 10.0s intervals while the model ran long turns with NO edges.
-  // Simulate 60 minutes of that host: running always true, edges absent, status mostly idle/ready.
-  // Count pulls under the FIXED rule vs the old one.
-  let pulls = 0
+test('#229: schedule simulation over the maintainer\'s measured session shape — ZERO ambient pulls', () => {
+  // Their log after 0.2.11: exact 60.0s gaps while a tab sat open doing nothing. The fixed rule has
+  // no ambient arm at all: simulate 60 minutes of idle (status ready/idle, disarmed, no pulse) and
+  // count scheduled pulls through pollSpacingFor — the honest answer is zero.
   let t = 0
-  let nextQuiet = QUIET_POLL_MS
-  while (t < 60 * 60_000) {
-    if (t >= nextQuiet) { pulls += 1; nextQuiet = t + QUIET_POLL_MS }
-    t += 10_000 // the old clock would fire here, every single tick
-  }
-  assert.ok(pulls <= 61, `fixed rule: at most one quiet pull per minute (${String(pulls)}), never the 10s drumbeat`)
-  assert.ok(pulls > 0, 'the heartbeat exists — total silence was never the design')
+  let pulls = 0
+  const spacing = pollSpacingFor({ status: 'ready', autorun: 'disarmed', running: true, hidden: false, edges: false })
+  assert.equal(spacing, null, 'the default schedule for an idle bar is NO TIMER')
+  while (t < 60 * 60_000) { t += 10_000 } // the old drumbeat's period; nothing fires against a null timer
+  assert.equal(pulls, 0, `zero ambient pulls in an hour (counted ${String(pulls)})`)
 })
 
 test('#221: a turn-end pulse pulls fast in BOTH modes — it is the sanctioned moment, not a clock', () => {
   const calm = { status: 'idle' as const, autorun: 'disarmed' as const, running: false, hidden: false }
-  assert.equal(pollSpacingFor({ ...calm, edges: false }), QUIET_POLL_MS, 'no pulse: quiet heartbeat on a signal-less host')
+  assert.equal(pollSpacingFor({ ...calm, edges: false }), null, 'no pulse: silence on a signal-less host (#229 default)')
   assert.equal(pollSpacingFor({ ...calm, edges: false, turnEndPulse: true }), ACTIVE_POLL_MS, 'pulse: follow up fast until the offer lands')
   assert.equal(pollSpacingFor({ ...calm, edges: true, turnEndPulse: true }), ACTIVE_POLL_MS, 'edge hosts get the same courtesy')
 })
@@ -308,4 +313,32 @@ test('#221: turnEndPulse fires exactly once per new turn boundary, never on abse
   assert.deepEqual(turnEndPulse(undefined, 0), { pulse: false, seen: 0 }, 'absent projection: silence, not a storm')
   assert.deepEqual(turnEndPulse(null, 7), { pulse: false, seen: 7 }, 'null is absence')
   assert.deepEqual(turnEndPulse(3, 9), { pulse: false, seen: 9 }, 'a smaller seq (session swap) never rewinds the stamp')
+})
+
+test('#229: the ambient heartbeat is OFF by default — a disarmed idle bar schedules NOTHING', () => {
+  // The maintainer's rule, absolute after six incidents: never repeated chapters-prompt executions.
+  // Measured on their live log even with 0.2.11 installed correctly: exact 60.0s pull gaps — the
+  // quiet heartbeat WAS the drumbeat. Default QUIET_POLL_MS = 0 ⇒ no clock while disarmed+stable.
+  assert.equal(QUIET_POLL_MS, 0, 'the shipped default has no ambient clock')
+  const calm = { status: 'idle' as const, autorun: 'disarmed' as const, running: false, hidden: false }
+  assert.equal(pollSpacingFor({ ...calm, edges: false }), null, 'signal-less host, disarmed: silence, not a minute-timer')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 10 * 60_000, status: 'idle', autorun: 'disarmed' }), false, 'staleness alone never pulls without a heartbeat (#229)')
+  assert.equal(mountPullDecision({ hasCache: false, ageMs: 0, status: 'idle', autorun: 'disarmed' }), true, 'mount discovery still happens once per page load')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 10 * 60_000, status: 'analyzing', autorun: 'disarmed' }), true, 'in-flight generation stays trustworthy-pullable')
+})
+
+test('#229: configureQuietHeartbeat re-arms only from a real positive setting; parse learns it from the reply', () => {
+  configureQuietHeartbeat(30)
+  assert.equal(QUIET_POLL_MS, 30_000, 'an operator CAN ask for a heartbeat')
+  const calm = { status: 'idle' as const, autorun: 'disarmed' as const, running: false, hidden: false }
+  assert.equal(pollSpacingFor({ ...calm, edges: false }), 30_000, 'and it behaves exactly like the old quiet arm')
+  configureQuietHeartbeat(0)
+  assert.equal(QUIET_POLL_MS, 0, 'zero means none')
+  configureQuietHeartbeat(undefined)
+  assert.equal(QUIET_POLL_MS, 0, 'absent means none')
+  // the state reply carries it end-to-end
+  const ev = parseBarState(['suggested next step: idle', '  model: p/m (override) — one offer per completed turn', '  autorun: disarmed', '  turn: -', '  intent: worker-step', '  goal: none', '  heartbeat: 45s'].join('\n'))
+  assert.ok(ev !== null, 'a reply WITH the heartbeat line parses')
+  assert.equal(QUIET_POLL_MS, 45_000, 'and configures the client schedule from the SERVER setting')
+  configureQuietHeartbeat(0)
 })
