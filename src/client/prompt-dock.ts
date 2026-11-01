@@ -356,7 +356,12 @@ export function PromptDock(props: DockProps): ReactElement | null {
       const spacing = spacingNow()
       // force = an edge the schedule sanctions (a turn ended): pull even where the steady cadence
       // says no timer is needed. mount = the guarded first look; a fresh cache renders for free.
-      if (opts?.force === true || (spacing !== null && !(opts?.mount === true && !duePull()))) await refresh()
+      // #231: the MOUNT discovery is a sanctioned moment in its own right — it must NOT be gated on
+      // `spacing`, or removing the ambient clock (the whole point of #231) removes the one pull that
+      // tells the bar whether the feature exists at all. Measured cost of getting this wrong: the
+      // rig's prompt leg failed four-for-four because no pull ever fired and the dock stayed hidden.
+      const mountDiscovery = opts?.mount === true && duePull()
+      if (opts?.force === true || mountDiscovery || (spacing !== null && opts?.mount !== true)) await refresh()
       if (replyStatus.current === 'off') return
       // The reply, not the React state: the row is hidden while `off`, and a hidden row renders
       // nothing, so stateRef can lag. The schedule reads the wire truth whenever it exists.
