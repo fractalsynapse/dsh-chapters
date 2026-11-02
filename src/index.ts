@@ -42,7 +42,7 @@ import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
 import { makePromptRoundRunner } from './prompt-runner.ts'
 import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, type PushWriter } from './prompt-push.ts'
-import { goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
+import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
 import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } from './diag.ts'
@@ -726,6 +726,20 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
         pushBar(session, sessionId)
       },
+      // #225: the suggest verb's answer becomes the durable offer — same row shape the runner writes
+      // (status ready, this turn's seq unknown for manual suggests ⇒ turnSeq null-safe via Date.now
+      // identity), then the mirror makes it visible without any pull.
+      setSuggested: async (sessionId: string, text: string, session?: unknown) => {
+        promptLoop.setArmed(sessionId, false)
+        await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: {
+          // A manual suggest has no turn boundary of its own; `turnSeq: null` marks it as such — the
+          // bar renders ready offers regardless, and autorun never fires on a null-turnSeq row (its
+          // own gate refuses), so a human-requested suggestion can never start a turn by itself.
+          status: 'ready', text: classifyOffer(text).text, turnSeq: null,
+          error: '', at: new Date().toISOString(), intent: classifyOffer(text).intent, goalRevision: null,
+        } })) as never)
+        if (session !== undefined) pushBar(session, sessionId)
+      },
       setOn: async (sessionId: string, session?: unknown) => {
         await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
         pushBar(session, sessionId)
@@ -959,6 +973,17 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           // captured by the boot's server log, so the answer survives the leg (#61).
           if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
           if (event?.type === 'turn/end') promptBoundariesSighted += 1
+          // #225: the re-enable path needs a witness too. The maintainer ran `/chapters-prompt model
+          // …` at 18:16 and NO first-boundary line ever followed — meaning either no turn ended after
+          // it in this process, or the setting did not reach the plane. One line per enable tells
+          // which: `enable seen` with the effective spec immediately after the write.
+          if (event?.type === 'user/message' && event.data?.source?.kind === 'command') {
+            const argsV = String((event.data as { args?: unknown }).args ?? '')
+            if (/^\s*model\s+\S/.test(argsV) || /^\s*suggest\b/.test(argsV)) {
+              const specN = prompt.effective().spec
+              console.error(`[chapters-prompt] enable/suggest command seen for ${String(session.id)}: model now ${specN !== '' ? specN : 'STILL UNSET(→ writes landed elsewhere)'}`)
+            }
+          }
           if (event?.type === 'turn/end' && !promptVerdictSighted.has(String(session.id))) {
             promptVerdictSighted.add(String(session.id))
             const specV = prompt.effective().spec
