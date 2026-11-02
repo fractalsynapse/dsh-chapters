@@ -266,7 +266,7 @@ export interface SuggestFacts {
  */
 export function buildSuggestInput(facts: SuggestFacts, budgetChars: number, maxChars: number): { input: string } | { refusal: string } {
   const head = 'You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.'
-  const replyRules = `Write the ONE next prompt the human should send — addressed TO THE MODEL as a directive the human would type into the composer ('run the tests', 'fix the flake in X first'), never advice TO THE USER ('you should consider', 'I recommend that you'). A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt. If it changes the standing objective, prefix it with GOAL: (the human sends those; autorun will not). Do not use the prefix for an ordinary next step.`
+  const replyRules = `Write the ONE next prompt the human should send, ADDRESSED TO THE MODEL as a directive the human would type into the composer ('run the tests', 'fix the flake in X first') — never advice to the user ('you should consider', 'I recommend that you'). A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and propose nothing already done. Reply with ONLY that prompt. If it changes the standing objective, prefix it with GOAL: (the human sends those; autorun will not). Do not use the prefix for an ordinary next step.`
   const chapterBlock = (dropOldest: number): string[] => {
     const cs = facts.chapters.slice(dropOldest)
     if (cs.length === 0) return ['## Where it has been (no chapters yet)']
