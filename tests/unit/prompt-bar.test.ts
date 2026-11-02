@@ -342,3 +342,19 @@ test('#229: configureQuietHeartbeat re-arms only from a real positive setting; p
   assert.equal(QUIET_POLL_MS, 45_000, 'and configures the client schedule from the SERVER setting')
   configureQuietHeartbeat(0)
 })
+
+test('#243: the click-to-expand contract — expand never hides, and a re-pull of the same row keeps it visible', () => {
+  // The maintainer's report: clicking the prompt text made the WHOLE bar disappear. Ruled in here:
+  // the reducer path must be innocent — expand flips a flag; `polled` with the SAME facts keeps the
+  // row visible; only off/dismiss-empty-ready hide. If this stays green while the field fails, the
+  // fault is render-side (stale bundle or a throw), which is what #243's reproduction plan checks.
+  const ready = { t: 'polled', status: 'ready', text: 'run the tests', turnSeq: 12 } as const
+  let s = promptBarReducer(initialBarState(), ready)
+  assert.equal(barVisible(s), true, 'a ready offer renders')
+  s = promptBarReducer(s, { t: 'expand' })
+  assert.equal(barVisible(s), true, 'expanding keeps it rendering')
+  // a sanctioned re-read of the same durable row after the click (the state verb answers from peekRow)
+  s = promptBarReducer(s, ready)
+  assert.equal(barVisible(s), true, 're-folding the identical row does not hide the bar')
+  assert.equal(s.text, 'run the tests', 'and the offer survives the click intact')
+})
