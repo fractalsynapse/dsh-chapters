@@ -507,7 +507,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // last six runs, so the refusal now appears on the bar and points at Run, which does work.
       const refuse = (why: string): void => {
         console.warn(`[client:prompt] click-to-draft refused: ${why}`)
-        dispatch({ t: 'note', note: 'This host does not let a plugin write the composer, so the prompt cannot be edited before sending — Run submits it as your turn' })
+        dispatch({ t: 'note', note: 'Editing before sending is blocked by a known DSH bug (#126): a plugin\u2019s write to the composer throws `draftRev` on every host version measured so far. Run \u25B6 submits this offer as your turn; or copy the text above into the composer yourself.' })
       }
       try {
         inputActions.insertText(state.text)
