@@ -183,6 +183,9 @@ export interface PromptBarAccess {
   /** #113: the bar's Run. Submits the offer on screen as a HUMAN-authored user turn, through the same
    * follow-up path autorun uses — one behavior for "run it", whether a keystroke or the loop came first. */
   runNow(sessionId: string, session?: unknown): Promise<{ ok: boolean; text?: string; reason?: string }>
+  /** #225: `/chapters-prompt suggest` writes its answer INTO the row (and mirrors the record where
+   *  push exists), so an explicit request lands on the bar instead of a fenced block to copy by hand. */
+  setSuggested?(sessionId: string, text: string, session?: unknown): Promise<void>
   disarmHuman(sessionId: string, session?: unknown): void
   setOff(sessionId: string, session?: unknown): Promise<void>
   setOn(sessionId: string, session?: unknown): Promise<void>

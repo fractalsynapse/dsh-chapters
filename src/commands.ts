@@ -18,6 +18,7 @@ import {
   DEFAULT_CLONE_DIR, planStoreToRepo, projectForCwd, readSyncStatus, readToken, runSync, writeToken,
   type ProjectRecord, type SyncScheduler,
 } from './sync.ts'
+import { classifyOffer } from './prompt-state.ts'
 import { isLocalUpstreamUrl, readOrigin, resolveLocalUpstreamPath } from './gitops.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, projectKeyFromRemote, resolveProject } from './repo.ts'
 import { createTreeDxClient } from './treedx/client.ts'
@@ -479,6 +480,17 @@ export function registerHostCommands(
           const capsNote = maxArg !== undefined || ctxArg !== undefined
             ? ` Caps stored beside the model${maxArg !== undefined ? `: suggestion ${maxArg} chars` : ''}${ctxArg !== undefined ? `${maxArg !== undefined ? ',' : ':'} context budget ${ctxArg} chars` : ''}.`
             : " Caps derive from this model's context window (window × promptContextRatio); pass numbers to pin them."
+          // #225: enabling is a PLANE-WIDE write; the bar for THIS session only learns about it by
+          // pulling (and with the ambient clock gone by default, that means next page load). The
+          // maintainer enabled at 18:16 and saw nothing appear — correct per schedule, terrible per
+          // experience. So the enable path writes the row and mirrors the record right here, making
+          // the bar visible immediately where push exists; pull hosts get the same answer from the
+          // state verb on their next sanctioned moment.
+          const enHolder = invocation.agent as { agent?: { session?: unknown }; session?: unknown }
+          const enSess = (enHolder.session ?? enHolder.agent?.session) as { id?: string } | undefined
+          if (enSess?.id !== undefined && config.prompt.bar !== undefined) {
+            try { await config.prompt.bar.setOn(enSess.id, enSess) } catch { /* the enable itself succeeded */ }
+          }
           return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables).${capsNote} If the bar is hidden, it reappears at the next page reload.` }
         }
         if (verb === 'off') {
@@ -616,9 +628,22 @@ export function registerHostCommands(
             : '  caps: (not reported by this surface)'
           const meta = `  model: ${spec !== '' ? spec : 'unset'} (${source})\n${capLine}`
           if (r.ok) {
+            // #225: `suggest` used to print the offer inside a fence with instructions to COPY IT
+            // INTO THE COMPOSER by hand — an affordance dead since the ghost chip was removed. The
+            // human asked for a suggestion; the answer is the BAR SHOWING IT, so this writes the
+            // offer through the same row + mirror path the turn-end runner uses and reports the
+            // facts compactly. Run stays the one way an offer becomes a turn (host rule: no plugin
+            // submits without a keystroke).
+            const sugHolder = invocation.agent as { agent?: { session?: unknown }; session?: unknown }
+            const sugSess = (sugHolder.session ?? sugHolder.agent?.session) as { id?: string } | undefined
+            const offer = classifyOffer(r.text)
+            if (sugSess?.id !== undefined && config.prompt.bar !== undefined) {
+              try { await config.prompt.bar.setSuggested?.(sugSess.id, r.text, sugSess) } catch { /* the answer still prints below */ }
+            }
             return { kind: 'success', text: [
-              `/chapters-prompt suggest — the next prompt for ${who}`, '', F, r.text, F, '', meta,
-              '  use it: copy the text above into the composer (the ghost chip was removed by maintainer decision, #113)',
+              `/chapters-prompt suggest — the next prompt for ${who} is on the bar:`,
+              `  ${offer.text.split('\n')[0]!.slice(0, 140)}`,
+              meta,
             ].join('\n') }
           }
           if (r.quiet === true) {
