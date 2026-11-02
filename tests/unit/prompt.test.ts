@@ -329,7 +329,7 @@ test('a budget smaller than the protected frame REFUSES with numbers instead of 
 test('#243: the suggestion rules demand a DIRECTIVE TO THE MODEL, not advice to the user', () => {
   const built = buildSuggestInput(facts([{ number: 1, title: 'Setup', summary: 'installed the rig', plots: [] }], [{ role: 'assistant' as const, text: 'done for now' }]), 4000, 240)
   const a = inputOf(built)
-  assert.ok(a.includes('addressed TO THE MODEL'), 'the voice constraint is in the instruction')
-  assert.ok(a.includes('never advice TO THE USER'), 'and names the failure mode it forbids')
+  assert.ok(a.includes('ADDRESSED TO THE MODEL'), 'the voice constraint is in the instruction')
+  assert.ok(a.includes('never advice to the user'), 'and names the failure mode it forbids')
   assert.ok(a.includes("'run the tests'"), 'with a positive example of the right shape')
 })
