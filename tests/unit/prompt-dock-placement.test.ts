@@ -95,3 +95,18 @@ test('#243: click-to-draft follows the real contract — captureInsertion THEN i
   assert.match(DOCK, /if \(!wrote\) \{ refuse\('neither insertText nor setDraft was accepted'\)/, 'both failing is a NAMED refusal, never silence')
   assert.match(DOCK, /navigator\.clipboard\?\.writeText/, 'and the refusal falls back to COPY (the maintainer\u2019s design), never to a bare error note')
 })
+
+test("#251: the bar's last-known state persists across page loads — a reload costs zero commands", () => {
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.match(DOCK, /const PERSIST_PREFIX = 'dsh\.chapters\.promptState\.'/, 'a namespaced per-session key (the host\u2019s own convention)')
+  assert.ok(DOCK.includes('function readPersisted') && DOCK.includes('function writePersisted'), 'both directions exist')
+  // memory first, then disk — ONE reader so no decision sees a different truth (#59)
+  assert.match(DOCK, /function cachedState\(sessionId/, 'one combined reader')
+  // the ONE legal raw read is inside cachedState itself; no call site may bypass it
+  const uses = DOCK.split('\n').filter((l) => /stateCache\.get\(sessionId\)/.test(l) && !l.includes('const mem'))
+  assert.equal(uses.length, 0, `no decision bypasses the combined reader (${String(uses.length)} raw reads left)`)
+  // every honest reply writes through; the off button persists too
+  assert.ok((DOCK.match(/writePersisted\(sessionId/g) ?? []).length >= 2, 'refresh AND off both persist')
+  // bounded storage
+  assert.match(DOCK, /PERSIST_MAX = 50/, 'the store is pruned, never unbounded')
+})
