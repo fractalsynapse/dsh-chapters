@@ -82,3 +82,16 @@ test('#236: the expanded card claims its width and bounds its height — no one-
   assert.match(DOCK, /\.dsh-chapters_promptFull\{[^}]*max-height:9rem[^}]*overflow-y:auto/, 'the expanded block scrolls internally instead of covering the screen')
   assert.match(DOCK, /\.dsh-chapters_promptFull\{[^}]*overflow-wrap:break-word/, 'words stay whole on full-width lines')
 })
+
+test('#243: click-to-draft follows the real contract — captureInsertion THEN insertText(text, span)', () => {
+  const DOCK = fs.readFileSync(path.join(ROOT, 'src/client/prompt-dock.ts'), 'utf8')
+  assert.ok(DOCK.includes('captureInsertion?: () => unknown') && DOCK.includes('insertText?: (text: string, span: unknown) => boolean'), 'the prop type carries the span parameter (#243: our one-arg guess WAS the draftRev throw)')
+  assert.match(DOCK, /const span = typeof inputActions\.captureInsertion === .function. \? inputActions\.captureInsertion\(\)/, 'the call sequence captures first')
+  assert.match(DOCK, /wrote = inputActions\.insertText\(state\.text, span/, 'then inserts WITH the span and reads the verdict')
+  // The contract call can be unreachable from a dock on some builds (measured: the span guard sees
+  // undefined even with a real span), so setDraft is the second attempt and BOTH failing is the only
+  // refusal — silence remains the forbidden outcome.
+  assert.match(DOCK, /if \(!wrote && typeof inputActions\.setDraft === 'function'\)/, 'setDraft is the second honest attempt')
+  assert.match(DOCK, /if \(!wrote\) \{ refuse\('neither insertText nor setDraft was accepted'\)/, 'both failing is a NAMED refusal, never silence')
+  assert.match(DOCK, /navigator\.clipboard\?\.writeText/, 'and the refusal falls back to COPY (the maintainer\u2019s design), never to a bare error note')
+})
