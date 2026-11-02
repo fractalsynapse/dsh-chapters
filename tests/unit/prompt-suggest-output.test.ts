@@ -16,6 +16,7 @@ import { registerHostCommands } from '../../src/commands.ts'
 const PROMPT_TEXT = 'Add a regression row that fails before the fix and passes after, then re-run the plane.'
 
 function harness (over: Partial<{
+  bar?: { setSuggested?: (id: string, text: string, session?: unknown) => Promise<void> }
   suggest: (s: unknown) => Promise<{ ok: boolean; text: string; quiet?: boolean }>
   effective: () => { spec: string; source: 'override' | 'config' | 'unset' }
   limits: (route: unknown) => Promise<{ maxChars: number; contextChars: number; sources: { maxChars: string; contextChars: string } }>
@@ -33,6 +34,7 @@ function harness (over: Partial<{
       suggest: over.suggest ?? (async () => ({ ok: true, text: PROMPT_TEXT })),
       statusLine: () => 'Prompt suggestions: ON',
       limits: over.limits ?? (async () => ({ maxChars: 240, contextChars: 4000, sources: { maxChars: 'config', contextChars: 'config' } })),
+      bar: over.bar as never,
     } as never,
   })
   const AGENT = { session: { id: 's-9', snapshotEvents: () => [
@@ -43,13 +45,16 @@ function harness (over: Partial<{
   return async (input: string) => await defs.get('chapters-prompt')!.handler({ agent: AGENT, rawInput: input })
 }
 
-test('suggest returns a multi-line block with the prompt verbatim in a fence (#113)', async () => {
-  const out = await harness()('suggest')
+test('#225: suggest writes the offer INTO the bar and says so — no fenced copy-by-hand block', async () => {
+  const written: Array<{ id: string; text: string }> = []
+  const out = await harness({ bar: { setSuggested: async (id: string, text: string) => { written.push({ id, text }) } } })('suggest')
   assert.equal(out.kind, 'success')
   const text = out.text ?? ''
-  assert.ok(text.split('\n').length >= 4, `a bare line is what got ellipsized; got:\n${text}`)
-  assert.ok(text.includes(PROMPT_TEXT), 'the generated prompt must appear whole, not truncated')
-  assert.match(text, /```[\s\S]*```/, 'fenced so the reader can tell the offer from its framing')
+  assert.ok(text.includes(PROMPT_TEXT.split('\n')[0]!), `the reply quotes the offer's first line; got:\n${text}`)
+  assert.match(text, /is on the bar/, 'and names where it landed')
+  assert.equal(written.length, 1, 'the row write happened exactly once')
+  assert.equal(written[0]!.id, 's-9', 'for THIS session')
+  assert.ok(written[0]!.text.includes(PROMPT_TEXT.split('\n')[0]!), 'with the generated text whole')
 })
 
 test('the block names what produced it and what bounded it (#113)', async () => {

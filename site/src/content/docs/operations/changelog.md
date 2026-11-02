@@ -6,6 +6,15 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.14 — 2026-11-01 · enabling lights the bar; `suggest` puts its answer ON the bar
+
+The maintainer turned prompt suggestions back on (18:16) and nothing appeared — correct per schedule, terrible per experience: with the ambient clock gone by default (0.2.12), no pull existed to carry the news until a page reload. And `/chapters-prompt suggest` was still printing a fenced block asking a human to copy the offer into the composer by hand — an affordance dead since the ghost chip was removed. Both command paths now act instead of advise:
+
+- **`model <spec>` writes the row + mirrors the record for the calling session** — the bar appears immediately where push exists; pull hosts converge at their next mount.
+- **`suggest` lands its answer on the bar** through the same row+mirror path the turn-end runner uses (`turnSeq: null` marks a manual suggestion — the loop's own gate refuses to fire on it, so Run stays the only way an offer becomes a turn). The reply quotes the first line and names where it landed.
+
+Rows pin both paths; the fence-contract row rewritten for the new shape. Plane 1,373/1,373; nine-leg acceptance green on PR #240.
+
 ### 0.2.13 — 2026-11-01 · the expanded prompt card reads like a card
 
 The maintainer, on 0.2.12 with suggestions back on: clicking a generated prompt displayed *"illegible text that has one character and whitespace per line."* The bug was six releases old and lived in our own CSS: the bar is a flex row and the text button carried `flex:1` — whose basis computes to AUTO, sized from content. Collapsed (single line) that reads fine; **expanded**, the tall multi-line block squeezed toward its minimum width while glyph/label/actions held their ground, and aggressive word-shredding finished the job. One character per line, exactly as reported.
