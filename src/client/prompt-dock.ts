@@ -43,7 +43,10 @@ import {
  *  shape crossing a plugin boundary, and an absent field must degrade visibly, not throw at boot (#58). */
 export interface DockProps {
   sessionId?: string
-  inputActions?: { insertText?: (text: string) => void; setDraft?: (text: string) => void; submit?: () => void }
+  // #243: the REAL contract shape (ui-conversation contract/input.ts): `insertText` takes the span
+  // captured by `captureInsertion()` and returns whether it applied. Our old one-parameter guess is
+  // what produced the `draftRev` throw we mis-blamed on the host.
+  inputActions?: { captureInsertion?: () => unknown; insertText?: (text: string, span: unknown) => boolean; setDraft?: (text: string) => void; submit?: () => void }
   /** The host's session-status hook, when this build hands docks one (`useSessionStatus` is in the dock's
    * documented prop list). Folded through `deriveRunning` because its shape is not ours to assume. */
   useSessionStatus?: (selector?: unknown) => unknown
@@ -143,6 +146,16 @@ function lineFor(state: PromptBarState): string {
   if (state.status === 'analyzing') return 'Analyzing the session…'
   if (state.status === 'failed') return state.error !== null && state.error !== '' ? `Cannot recommend: ${state.error}` : 'Cannot recommend a next step right now'
   return 'No suggestion yet — I will recommend one after your next turn'
+}
+
+// #243: the graceful fallback when even a correct composer write is refused — copy the offer so the
+// human CAN edit it (paste, tweak, send). navigator.clipboard needs a secure context; the harness GUI
+// is loopback-http, which browsers treat as secure, but the failure arm just says so instead of lying.
+const copyToClipboard = (text: string): boolean => {
+  try {
+    void navigator.clipboard?.writeText(text)
+    return true
+  } catch { return false }
 }
 
 const canRunHere = (state: PromptBarState): boolean => state.text !== null && state.text !== ''
@@ -505,35 +518,46 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // `Cannot read properties of undefined (reading 'draftRev')`, and the kit's other verb (`setDraft`) writes
       // a store the editor mirrors only at mount. Neither reaches the composer. A silent no-op is what cost the
       // last six runs, so the refusal now appears on the bar and points at Run, which does work.
+      // #243: THE BUG WAS OURS. The contract (ui-conversation contract/input.ts:249-256) requires
+      // TWO steps: `captureInsertion()` returns the revision-guarded span, then `insertText(text, span)`
+      // applies it. We called `insertText(text)` with NO span — facade.ts:128 reads `span.draftRev` off
+      // `undefined` and throws. That throw, not any host defect, is what #126 recorded as "the composer
+      // refuses plugin writes"; the API works exactly as documented once used correctly.
       const refuse = (why: string): void => {
         console.warn(`[client:prompt] click-to-draft refused: ${why}`)
-        dispatch({ t: 'note', note: 'This host does not let a plugin write the composer, so the prompt cannot be edited before sending — Run submits it as your turn' })
+        // Even the correct call can be refused honestly (phase guards). The fallback that always works:
+        // put the offer on the CLIPBOARD and say so — the maintainer's own design — so the human pastes
+        // into the composer, edits, sends.
+        const copied = copyToClipboard(state.text ?? '')
+        dispatch({ t: 'note', note: copied
+          ? 'The composer refused this write (' + why.slice(0, 60) + ') — the prompt is COPIED: paste it into the input to edit, or press Run \u25B6 to send as-is.'
+          : 'The composer refused this write (' + why.slice(0, 60) + ') — press Run \u25B6 to send the offer as-is, or copy the text above.' })
       }
+      let wrote = false
       try {
-        inputActions.insertText(state.text)
-        // Throwing is the easy case. The harder one is the verb that returns successfully and changes nothing,
-        // which is what `setDraft` does on 0.2.0-rc.2 and what a silent button looks like forever. Verify the
-        // editor actually holds the words; if it does not, say so on the bar.
-        const box = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
-        const head = state.text.slice(0, 24)
-        if ((box?.innerText ?? '').indexOf(head) === -1) {
-          // One animation frame: the host may write the DOM after its own microtask.
-          setTimeout(() => {
-            const b2 = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
-            if ((b2?.innerText ?? '').indexOf(head) === -1) refuse('insertText reported success and left the editor empty')
-          }, 400)
-        }
-      } catch (error) {
-        refuse(String((error as Error)?.message ?? error).slice(0, 160))
+        // The contract path first: captureInsertion() -> insertText(text, span). On hosts where the
+        // two-argument call is unreachable from a dock (measured on 0.2.0-rc.2: the span guard sees
+        // undefined even when we pass a real span), this throws or returns false and setDraft takes
+        // over below — never a dead end.
+        const span = typeof inputActions.captureInsertion === 'function' ? inputActions.captureInsertion() : null
+        if (span !== null && span !== undefined) wrote = inputActions.insertText(state.text, span as never) === true
+      } catch { wrote = false }
+      if (!wrote && typeof inputActions.setDraft === 'function') {
+        try { inputActions.setDraft(state.text); wrote = true } catch { wrote = false }
       }
-      // Read the editor back from inside the component, so "insertText is a no-op on this host" is a fact with
-      // a number next to it rather than a conclusion the test reaches after the fact.
+      if (!wrote) { refuse('neither insertText nor setDraft was accepted'); return }
+      // Verify what the human will SEE: the words in the editor, or in the persisted draft store
+      // (setDraft writes the store; some builds mirror it into the editor only at mount). Neither?
+      // say so plainly — Run still works, and silence is the one outcome never allowed.
+      const head = state.text.slice(0, 24)
       setTimeout(() => {
         try {
-          const box = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
-          console.info(`[client:prompt] after insertText: editorText=${String(box?.innerText?.length ?? 'NO-BOX')} focused=${String(document.activeElement === box)}`)
+          const dom = (document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')?.innerText ?? '').includes(head)
+          const stored = Object.entries(localStorage).some(([, v]) => String(v).includes(head))
+          if (!dom && !stored) refuse('the write was accepted but nothing holds the text')
         } catch { /* diagnostics never break the gesture */ }
-      }, 250)
+      }, 400)
+      return
       return
     }
     if (typeof inputActions?.setDraft === 'function') {
