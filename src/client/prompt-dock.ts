@@ -176,6 +176,61 @@ interface CacheEntry { ev: import('./prompt-bar.ts').PromptBarEvent; autorun: 'a
 const stateCache = new Map<string, CacheEntry>()
 
 /**
+ * #251: the memory cache dies with the page, and the maintainer's rule is absolute — a reload must
+ * cost ZERO chapters-prompt commands. Two page loads producing two visible `state` nodes still reads
+ * as "the same shit" from the chair, sanctioned or not. So the last-known truth persists per session
+ * in localStorage (the host's own convention for composer state — `dsh.sessions.current`, persisted
+ * drafts), and activation reads memory first, then storage. A cold tab renders the last offer with
+ * no command at all; turn boundaries refresh it through the pulse/confirm paths that already exist.
+ */
+const PERSIST_PREFIX = 'dsh.chapters.promptState.'
+const PERSIST_MAX = 50
+
+const persistKey = (sessionId: string): string => `${PERSIST_PREFIX}${sessionId}`
+
+function readPersisted(sessionId: string): CacheEntry | null {
+  try {
+    const raw = window.localStorage.getItem(persistKey(sessionId))
+    if (raw === null) return null
+    const p = JSON.parse(raw) as { ev?: unknown; autorun?: unknown; at?: unknown }
+    if (typeof p.at !== 'number' || p.ev === null || typeof p.ev !== 'object') return null
+    const t = (p.ev as { t?: unknown }).t
+    if (t !== 'polled') return null
+    const autorun = p.autorun === 'armed' || p.autorun === 'disarmed' ? p.autorun : null
+    return { ev: p.ev as CacheEntry['ev'], autorun, at: p.at }
+  } catch { return null }
+}
+
+function writePersisted(sessionId: string, entry: CacheEntry): void {
+  try {
+    window.localStorage.setItem(persistKey(sessionId), JSON.stringify(entry))
+    // bounded: prune the oldest beyond PERSIST_MAX by their recorded time
+    const keys: string[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i)
+      if (k !== null && k.startsWith(PERSIST_PREFIX)) keys.push(k)
+    }
+    if (keys.length <= PERSIST_MAX) return
+    const aged = keys.map((k) => {
+      let at = 0
+      try { at = Number(((JSON.parse(window.localStorage.getItem(k) ?? '{}') as { at?: number }).at) ?? 0) } catch { at = 0 }
+      return { k, at }
+    }).sort((x, y) => x.at - y.at)
+    for (const old of aged.slice(0, keys.length - PERSIST_MAX)) window.localStorage.removeItem(old.k)
+  } catch { /* private mode / quota: the memory cache still does its job */ }
+}
+
+/** Memory first, then disk — one reader so every decision sees the same truth (#59). */
+function cachedState(sessionId: string | undefined): CacheEntry | undefined {
+  if (sessionId === undefined) return undefined
+  const mem = stateCache.get(sessionId)
+  if (mem !== undefined) return mem
+  const disk = readPersisted(sessionId)
+  if (disk !== null) { stateCache.set(sessionId, disk); return disk }
+  return undefined
+}
+
+/**
  * #208: set by the first reply reporting the plane-wide `model: unset` — the feature does not
  * exist here, so NO dock on this page pulls again for anything: not mounts, not idle edges, not
  * timers, not visibility. One discovery per page load is the pull transport's floor; a page reload
@@ -222,7 +277,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
     if (pushEvs !== null) {
       return { ...promptBarReducer(promptBarReducer(s, pushEvs.polled), pushEvs.autorun), running: running ?? true }
     }
-    const c = sessionId !== undefined ? stateCache.get(sessionId) : undefined
+    const c = cachedState(sessionId)
     const base = c !== undefined ? stateFromCache(c.ev, c.autorun) : s
     return { ...base, running: running ?? true }
   })
@@ -290,6 +345,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // #203: every honest reply feeds the cache the next activation renders from.
       if (ev !== null && sessionId !== undefined) {
         stateCache.set(sessionId, { ev, autorun: autorun === 'armed' || autorun === 'disarmed' ? autorun : null, at: Date.now() })
+        // #251: write-through — this reply now outlives the page.
+        writePersisted(sessionId, { ev, autorun: autorun === 'armed' || autorun === 'disarmed' ? autorun : null, at: Date.now() })
       }
     } catch (error) {
       // #61: a detected failure is a DELIVERED failure. Keeping the last known state is right; saying
@@ -353,7 +410,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
       })
     }
     const duePull = (): boolean => {
-      const c = sessionId !== undefined ? stateCache.get(sessionId) : undefined
+      const c = cachedState(sessionId)
       return mountPullDecision({
         hasCache: c !== undefined,
         ageMs: c !== undefined ? Date.now() - c.at : Number.MAX_SAFE_INTEGER,
@@ -619,7 +676,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
           label: 'Turn prompt suggestions off for this session', glyph: '✕',
           // `off` is a server write, not a local hide: generation stops, the configured model is KEPT so
           // back-on is one action, and the bar disappears instead of lingering with a stale offer.
-          onClick: () => { void (async () => { if (exec !== undefined) await exec('/chapters-prompt off'); dispatch({ t: 'off' }); if (sessionId !== undefined) stateCache.set(sessionId, { ev: { t: 'polled', status: 'off' }, autorun: null, at: Date.now() }) })() },
+          onClick: () => { void (async () => { if (exec !== undefined) await exec('/chapters-prompt off'); dispatch({ t: 'off' }); if (sessionId !== undefined) { const offEntry = { ev: { t: 'polled', status: 'off' } as CacheEntry['ev'], autorun: null, at: Date.now() }; stateCache.set(sessionId, offEntry); writePersisted(sessionId, offEntry) } })() },
         }),
       ),
     ),
