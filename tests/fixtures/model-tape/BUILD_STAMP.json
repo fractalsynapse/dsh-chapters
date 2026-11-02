@@ -1,7 +1,7 @@
 {
-  "lib": "1734e7431b437e2f",
+  "lib": "3eb1eedc40d072c0",
   "promptAnchor": "710e0052829e2b50",
-  "gitSha": "e7937fa00b2047df9359fa23609e18385ee2971a",
-  "at": "2026-11-02T17:54:52.666Z",
+  "gitSha": "025c0bde55e9e5b56358580199ddf7423c2af438",
+  "at": "2026-11-02T18:07:49.390Z",
   "note": "written by `npm run corpus:stamp`; a replay refuses when lib/ no longer matches"
 }
