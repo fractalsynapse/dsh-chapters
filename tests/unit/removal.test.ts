@@ -13,7 +13,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { appendChapters, freshSession, type SessionState } from '../../src/registry.ts'
 import type { ChapterRecord } from '../../src/archive.ts'
-import { applyRemoval, planRemoval, resolveRemovalId, readMissingAccess, type RemovalTarget } from '../../src/removal.ts'
+import { applyRemoval, planRemoval, readMissingAccess, removedGuard, resolveRemovalId, type RemovalTarget } from '../../src/removal.ts'
 
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 
@@ -197,4 +197,39 @@ test('apply: chapter + orphan blobs unlinked, stub keeps number/span/sha and hol
   const plan2 = planRemoval({ targets: [target('A', stub)], rows, cwd: f.cwd })
   assert.equal(plan2.dangling.length, 1, 'the referrer shows on the operator report')
   assert.equal(plan2.dangling[0]!.referrer, a.path)
+})
+
+// ---------------------------------------------------------------- guard + clone
+
+test('removedGuard: stub rows mint the mirror-side skip lists (session#file + blob basenames)', () => {
+  const f = fixture()
+  const a = appendChapters(freshSession('A'), [
+    rec('A', 1),
+    rec('A', 2, {
+      status: 'removed',
+      artifacts: [{ path: '.dsh-chapters/artifacts/cd/blob.txt', sha256: sha('x'), bytes: 1 }],
+      planDocs: [{ seq: 5, path: '.dsh-chapters/A/chapters/plan-001-p.md', sha256: sha('p') }],
+    }),
+  ])
+  const g = removedGuard([['A', a]])
+  assert.ok(g.chapterKeys.has('A#002-x.md'))
+  assert.ok(g.chapterKeys.has('A#plan-001-p.md'))
+  assert.ok(g.blobKeys.has('blob.txt'))
+  assert.equal(g.chapterKeys.has('A#001-x.md'), false, 'active chapters never enter the guard')
+})
+
+test('apply with a wired clone unlinks the mirror copy too — the pool commit carries the deletion', async () => {
+  const f = fixture()
+  const b = rec('A', 2)
+  const bAbs = f.write(b.path, 'doomed')
+  b.sha256 = sha(fs.readFileSync(bAbs, 'utf8'))
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [b])]]
+  const plan = planRemoval({ targets: [target('A', b)], rows, cwd: f.cwd })
+  const clone = path.join(f.cwd, '.dsh-knowledge')
+  f.write('.dsh-knowledge/chapters/K/A/002-x.md', 'doomed mirrored')
+  const store = makeStore(rows)
+  const out = await applyRemoval({ store, cwd: f.cwd, rows, storeDir: f.storeDir, cloneDir: clone, projectKey: 'K', now: () => '2026-11-02T19:00:00.000Z' }, plan)
+  assert.equal(out.problems.length, 0, out.problems.join('; '))
+  assert.equal(fs.existsSync(path.join(f.cwd, b.path)), false, 'store bytes gone')
+  assert.equal(fs.existsSync(path.join(clone, 'chapters', 'K', 'A', '002-x.md')), false, 'mirror bytes gone before the commit')
 })

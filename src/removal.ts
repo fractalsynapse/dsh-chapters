@@ -25,6 +25,9 @@ import path from 'node:path'
 import { resolveStoredPath, sameStoredPath, type ChapterRecord } from './archive.ts'
 import { ancestorPath, buildIndex, isActiveChapter, isRemovedChapter, type SessionState } from './registry.ts'
 import type { RegistryStore } from './store.ts'
+// One dialect, one direction: the removal imports the store→pool mapping from sync (it never
+// re-implements it — a second mapping is a second truth), and sync never imports removal.
+import { planStoreToRepo, type RemovedGuard } from './sync.ts'
 
 export type RemovalRows = readonly (readonly [string, SessionState])[]
 
@@ -68,6 +71,11 @@ export interface ApplyPorts {
   now: () => string
   /** The resolved store ROOT (the directory holding session trees). Defaults to `<cwd>/.dsh-chapters`. */
   storeDir?: string | undefined
+  /** Linked project: the removal also unlinks the mirror copies, so the sync commit carries the
+   * deletion (`publishIntoClone` copies — it can never propagate a deletion by itself). Absent ⇒
+   * store-only removal (an unlinked project), which is the normal state, not an error. */
+  cloneDir?: string | undefined
+  projectKey?: string | undefined
 }
 
 export interface ApplyOutcome {
@@ -330,6 +338,17 @@ export async function applyRemoval(ports: ApplyPorts, plan: RemovalPlan): Promis
   // be half-lost, and a "missing" note in the plan said so).
   const removed: string[] = []
   const goneAbs = new Set<string>()
+  // Mirror rels are listed from the CURRENT store state (planStoreToRepo) BEFORE any unlink —
+  // one mapping, the sync module's own (#255: publishIntoClone only copies; the removal must
+  // unlink the clone paths itself so stageAllAndCommit sees a deletion).
+  const cloneRels = new Map<string, string>()
+  if (ports.cloneDir !== undefined && ports.projectKey !== undefined) {
+    try {
+      for (const { abs, rel } of planStoreToRepo(pathStoreDir(ports), ports.projectKey)) cloneRels.set(abs, rel)
+    } catch (error) {
+      problems.push(`mirror listing failed (${String((error as Error)?.message ?? error)}): clone copies stay this run — the guard still keeps them out of the store`)
+    }
+  }
   for (const f of [...plan.chapterFiles, ...plan.blobFiles]) {
     try {
       if (fs.existsSync(f.abs)) fs.unlinkSync(f.abs)
@@ -337,6 +356,26 @@ export async function applyRemoval(ports: ApplyPorts, plan: RemovalPlan): Promis
       removed.push(f.stored)
     } catch (error) {
       problems.push(`unlink ${f.stored} failed: ${String((error as Error)?.message ?? error)}`)
+    }
+  }
+
+  // 2b. mirror copies — only for files whose store side is actually gone (a failed store unlink means
+  // the chapter is still knowledge on disk; deleting its mirror copy alone would strand the truth).
+  if (ports.cloneDir !== undefined && ports.projectKey !== undefined) {
+    for (const f of [...plan.chapterFiles, ...plan.blobFiles]) {
+      if (!goneAbs.has(f.abs)) continue
+      const rel = cloneRels.get(f.abs) ?? cloneRelOf(f.stored, ports.projectKey)
+      if (rel === null) {
+        problems.push(`no mirror path derivable for ${f.stored} — the pool copy (if any) was NOT unlinked`)
+        continue
+      }
+      const abs = path.join(ports.cloneDir, rel)
+      try {
+        if (fs.existsSync(abs)) fs.unlinkSync(abs)
+        removed.push(`mirror:${rel}`)
+      } catch (error) {
+        problems.push(`mirror unlink ${rel} failed: ${String((error as Error)?.message ?? error)}`)
+      }
     }
   }
 
@@ -417,4 +456,43 @@ export function readMissingAccess(storeDir: string, maxLines: number): { lines: 
   } catch { /* no log yet is an EMPTY state, stated — not an error */ }
   const tail = all.slice(Math.max(0, all.length - maxLines))
   return { lines: tail, total: all.length, withheld: Math.max(0, all.length - tail.length), file }
+}
+
+// ------------------------------------------------------------------ removed guard
+
+/**
+ * The rehydrate guard (#255): every name a `removed` stub owns, in the mirror walk's identity
+ * (`<sessionDir>#<file>` for chapters and plan documents; blob basename for content-addressed
+ * artifacts). Rehydration that skips these cannot resurrect a decision; the count lands in the
+ * sync steps. Keys are session-id-scoped and content-addressed-scoped, so they cannot collide
+ * across projects on one machine.
+ */
+export function removedGuard(rows: Iterable<readonly [string, SessionState]>): RemovedGuard {
+  const chapterKeys = new Set<string>()
+  const blobKeys = new Set<string>()
+  const keyFor = (stored: string): void => {
+    const segs = stored.split('/').filter((s) => s !== '')
+    const ci = segs.lastIndexOf('chapters')
+    if (ci >= 1 && ci < segs.length - 1) chapterKeys.add(`${segs[ci - 1]}#${segs[ci + 1]}`)
+    else blobKeys.add(segs[segs.length - 1]!)
+  }
+  for (const [, state] of rows) {
+    for (const c of state.chapters ?? []) {
+      if (!isRemovedChapter(c)) continue
+      keyFor(c.path)
+      for (const d of c.planDocs ?? []) keyFor(d.path)
+      for (const a of c.artifacts ?? []) blobKeys.add(a.path.split('/').pop() ?? '')
+    }
+  }
+  return { chapterKeys, blobKeys }
+}
+
+/** Deterministic fallback mapping for a stored path when the pre-unlink listing lacks the entry. */
+function cloneRelOf(stored: string, projectKey: string): string | null {
+  const segs = stored.split('/').filter((s) => s !== '')
+  const ci = segs.lastIndexOf('chapters')
+  if (ci >= 1 && ci < segs.length - 1) return path.join('chapters', projectKey, segs[ci - 1]!, segs[ci + 1]!)
+  const ai = segs.indexOf('artifacts')
+  if (ai >= 0 && ai < segs.length - 1) return path.join('artifacts', projectKey, ...segs.slice(ai + 1))
+  return null
 }
