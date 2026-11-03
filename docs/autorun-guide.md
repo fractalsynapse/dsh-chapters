@@ -90,7 +90,7 @@ The two-by-two that orients everything else:
 ## 3. Before you start
 
 1. **Install/update** the plugin in your harness profile and restart the harness:
-   `npm i @treeseed/dsh-chapters@latest` (site §23 covers every path).
+   `npm i @fractalsynapse/dsh-chapters@latest` (site §23 covers every path).
 2. **Optionally link a knowledge pool** so chapters and project rules are shared across machines:
    `/chapters-link <path-or-url>`. Everything in this guide works without it; with it, project
    rules and the archive travel.

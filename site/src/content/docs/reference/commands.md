@@ -67,7 +67,7 @@ model). Approving a rule you have not read is approving nothing; `view` is what 
 judgment instead of a guess (#174, at the maintainer's direction).
 
 The session tier and the audit surface, so automatic capture is never opaque
-([#50](https://github.com/treeseed-ai/dsh-chapters/issues/50)):
+([#50](https://github.com/fractalsynapse/dsh-chapters/issues/50)):
 
 ```
 /chapters-rule list --scope project|session               # which tier a rule belongs to

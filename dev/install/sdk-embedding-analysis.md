@@ -105,7 +105,7 @@ at old lines (the rc/dev cadence in the repo's own release history). Consequence
    pulls a consistent closure.
 2. **Admission gates cut both ways.** Profile/bundle loading enforces `engines.dsh` /
    `@deepseek-ai/dsh*` peer ranges against `getDshRuntimeVersion()` (app-boot README §Profiles).
-   Our own `@treeseed/dsh-chapters` declares `*` peers → admits anything; host packages at the same
+   Our own `@fractalsynapse/dsh-chapters` declares `*` peers → admits anything; host packages at the same
    version admit themselves. Keep the pin uniform and nothing is refused.
 3. The SDK client's same-version manifest check (`sdk/client/src/launch.ts:57-63`) is the *spawn*
    path's guard — irrelevant once you embed (no client, no spawn), which quietly removes one
@@ -133,7 +133,7 @@ Boot the tree yourself and expose Hono routes over the native services:
 ```ts
 import { boot } from '@deepseek-ai/dsh-app-boot'
 // config = a cordis.yml whose Include lists YOUR patch layers:
-//   [dsh-base rows] + [your api rows] + [@treeseed/dsh-chapters] + [preset rows]
+//   [dsh-base rows] + [your api rows] + [@fractalsynapse/dsh-chapters] + [preset rows]
 const ctx = await boot('cordis-api', cfgPath, patches, (host) => { host.provide('profileContext', pc); … })
 
 app.post('/sessions/:id/prompt', async (c) => {
@@ -172,5 +172,5 @@ right artifact is an npm package owned by the other system, installing dsh packa
    template; the other system should copy the pattern, not assume `latest`).
 
 Open decision for the user: whether the chapters plugin rides in the embedded tree too (Shape C
-mounts `@treeseed/dsh-chapters` directly — it is a normal Cordis plugin; its web client plane simply
+mounts `@fractalsynapse/dsh-chapters` directly — it is a normal Cordis plugin; its web client plane simply
 does not load without a web surface). Nothing blocks it; it is a scope choice.

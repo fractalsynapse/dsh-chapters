@@ -4,7 +4,7 @@ description: What the model can call, when it reaches for each, and the receipts
 lastUpdated: true
 ---
 
-Six tools ship today, all schema-typed with output schemas (mandatory in this plugin). The field study: agents called these — plus plain `read` on archive paths — **49 times, all successful**. A seventh, `chapters_rules`, is specified in [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50) and marked below as such.
+Six tools ship today, all schema-typed with output schemas (mandatory in this plugin). The field study: agents called these — plus plain `read` on archive paths — **49 times, all successful**. A seventh, `chapters_rules`, is specified in [#50](https://github.com/fractalsynapse/dsh-chapters/issues/50) and marked below as such.
 
 | Tool | What it does | When the model reaches |
 |---|---|---|

@@ -13,7 +13,7 @@ The archive is already on disk and already searchable *by you*. Linking a **know
 **A local git repo (easiest; no network, no credentials):**
 
 ```
-/chapters-link /home/you/treeseed-kb.git
+/chapters-link /home/you/fractalsynapse-kb.git
 ```
 
 **A networked git pool over smart-HTTP:**

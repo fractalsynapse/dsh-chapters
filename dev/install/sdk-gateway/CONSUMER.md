@@ -150,6 +150,6 @@ RAM scales with CONCURRENTLY RUNNING turns, not session count; finished sessions
 ## 8. Test doubles
 
 Your CI shouldn't need a GPU. The connector's fake-socket pattern in
-[`tests/unit/sdk-connector.test.ts`](https://github.com/treeseed-ai/dsh-chapters/blob/main/tests/unit/sdk-connector.test.ts)
+[`tests/unit/sdk-connector.test.ts`](https://github.com/fractalsynapse/dsh-chapters/blob/main/tests/unit/sdk-connector.test.ts)
 (scripted JSON-RPC responder over an in-memory socket) is ~60 lines to copy — it drives the same
 public API offline, including the flat/nested envelope shapes.

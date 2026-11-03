@@ -9,14 +9,14 @@ const cmds = [
 /chapters-link https://github.com/you/team-kb.git  <tok>  # smart-HTTP pool; token stored 0600 in the DSH home
 /chapters-link treedx+https://kb.example.com/team  <tok>  # TreeDX service backend
 /chapters-link                                            # show the current binding`,
-    out: `Linked: project treeseed-ai/kb · transport git · mirror .dsh-knowledge/
+    out: `Linked: project fractalsynapse/kb · transport git · mirror .dsh-knowledge/
 Published 30 chapter(s), 2 artifact(s) · Sync: pending first push`,
   },
   {
     tab: '/chapters-status',
     desc: 'The state of the memory system for this workspace: sync mode with the steps behind it, pending counts, vocabulary mode — or an honest local-only with the failed step named.',
     usage: `/chapters-status`,
-    out: `mode: synced (git · treeseed-ai/kb)
+    out: `mode: synced (git · fractalsynapse/kb)
 steps: cloned ✓ → published 2 new file(s), 28 already mirrored ✓ → pushed ✓
 pending: 0 · last sync 2026-09-27 21:14 · vocabulary: shadow (17 candidates, apply off)`,
   },

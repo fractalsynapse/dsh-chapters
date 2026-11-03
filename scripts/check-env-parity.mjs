@@ -39,6 +39,10 @@ const hostTrees = [
 const hosts = hostTrees.map((p) => ({ p, v: readVersion(p) })).filter((h) => h.v !== null)
 
 // Installed plugin copies under every profile of every DSH home we can see.
+// #261: the package moved to '@fractalsynapse'; '@treeseed' is the LEGACY scope. A legacy
+// copy is reported by name (a server still loading it is the drift class this script exists
+// for), but the version GATE runs on the current scope — loud note, no hostage.
+const SCOPES = ['@fractalsynapse', '@treeseed']
 const homes = [process.env.DSH_HOME, path.join(os.homedir(), '.dsh')].filter((x) => x !== undefined && x !== '')
 const copies = []
 for (const home of homes) {
@@ -46,10 +50,12 @@ for (const home of homes) {
   let profiles = []
   try { profiles = fs.readdirSync(profRoot) } catch { continue }
   for (const prof of profiles) {
-    const pkg = path.join(profRoot, prof, 'node_modules', '@treeseed', 'dsh-chapters', 'package.json')
-    const v = readVersion(pkg)
-    // Dedupe: a symlinked profile tree can surface the same file twice.
-    if (v !== null && !copies.some((c) => c.pkg === pkg)) copies.push({ pkg, v, profile: prof })
+    for (const scope of SCOPES) {
+      const pkg = path.join(profRoot, prof, 'node_modules', scope, 'dsh-chapters', 'package.json')
+      const v = readVersion(pkg)
+      // Dedupe: a symlinked profile tree can surface the same file twice.
+      if (v !== null && !copies.some((c) => c.pkg === pkg)) copies.push({ pkg, v, profile: prof, legacy: scope === '@treeseed' })
+    }
   }
 }
 
@@ -57,11 +63,12 @@ console.log(`repo package version:      ${String(repoV)}`)
 console.log(`rig host pin:              ${String(rigPin)}`)
 for (const h of hosts) console.log(`live host:               ${h.v}  (${h.p})`)
 if (hosts.length === 0) console.log('live host:               none found at the known trees')
-for (const c of copies) console.log(`installed plugin copy:   ${c.v}  [profile ${c.profile}] — ${c.pkg}`)
+for (const c of copies) console.log(`installed plugin copy:   ${c.v}  [profile ${c.profile}${c.legacy ? ' — LEGACY SCOPE @treeseed; the package moved to @fractalsynapse (#261): install the new scope, then remove this copy' : ''}] — ${c.pkg}`)
 if (copies.length === 0) console.log('installed plugin copy:   NONE under any profile — the plugin is not installed where these homes look')
 
 let drift = false
 for (const c of copies) {
+  if (c.legacy) continue // noted above; the gate belongs to the current scope
   if (c.v !== repoV) { console.log(`DRIFT: installed copy ${c.v} != repo ${repoV} — restart the servers using it after publishing/installing`); drift = true }
 }
 if (!drift && copies.length === 0) { console.log('NOTE: no installed copies to compare'); }
