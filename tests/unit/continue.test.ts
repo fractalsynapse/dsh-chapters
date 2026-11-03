@@ -167,11 +167,30 @@ test('a tampered prior chapter is marked in the notice, not silently trusted', a
   }
   h.states.set('A', appendChapters(freshSession('A'), [forged]))
   h.fs.files.set(forged.path, 'tampered content')
+  const seen: string[][] = []
+  h.ports.onIntegrity = (ref, p, v) => { seen.push([ref, p, v]) }
   const result = await runContinue(h.ports, baseArgs as never, CONFIG)
   assert.equal(result.ok, true)
   assert.ok(result.warnings?.some((w) => w.includes('000-old.md') && w.includes('modified since archived')))
   const notice = h.created[0]!.noticeEvent.data as { content: [{ text: string }] }
   assert.ok(notice.content[0].text.includes('⚠ modified since archived'))
+  // #255: the same verdict, structured, for the plane's missing-access log — delivery, not re-deciding.
+  assert.deepEqual(seen, [['A', forged.path, 'modified']])
+})
+
+test('#255: an ACTIVE record whose bytes vanished fires onIntegrity(missing) — the dead-citation ledger input', async () => {
+  const h = harness()
+  const orphan = {
+    number: 1, path: '.dsh-chapters/A/chapters/000-gone.md', title: 'Gone', summary: 's',
+    startSeq: 0, endSeq: 0, sha256: 'a'.repeat(64), estimatedTokens: 10, artifacts: [],
+  }
+  h.states.set('A', appendChapters(freshSession('A'), [orphan]))
+  // deliberately NO h.fs.files entry: the store lost what the registry still cites (2026-10-11 shape)
+  const seen: string[][] = []
+  h.ports.onIntegrity = (ref, p, v) => { seen.push([ref, p, v]) }
+  const r = await runContinue(h.ports, baseArgs as never, CONFIG)
+  assert.equal(r.ok, true)
+  assert.ok(seen.some((s) => s[1] === orphan.path && s[2] === 'missing'), 'missing is delivered with its referrer')
 })
 
 test('ancestor chapters precede the caller\u2019s in reading order; root inherited', async () => {
