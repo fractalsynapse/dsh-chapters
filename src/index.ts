@@ -29,7 +29,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { appendChapters, reserve } from './registry.ts'
 import { acquireChapterStore, makeDomainStore, resolveStoreRoot} from './store.ts'
 import type { ChapterRecord } from './archive.ts'
-import { registerChaptersTools } from './tools.ts'
+import { registerChaptersTools, type ToolsConfig } from './tools.ts'
 import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLike } from './preset.ts'
 import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
@@ -750,7 +750,10 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       enrich.rememberCwd(cwd)
       if (ok) enrich.queue.onSyncDone('afterPush')
     }, (m) => ctx.logger?.warn?.(m))
-    registerChaptersTools(ctx as never, store, {
+    // ONE assembly feeds both planes (#90 drift trap): the doors' ToolsConfig doubles as the
+    // commands' SaveSessionConfig for /chapters-remove restore — a second literal would be a
+    // second truth about thresholds.
+    const toolsConfig: ToolsConfig = {
       artifactStoreRoot: config.artifactStoreRoot,
       chapterTokenTarget: config.chapterTokenTarget,
       repairReportMaxLines: config.repairReportMaxLines,
@@ -784,7 +787,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         void store.putSetting('enrichment.route', `${r.provider}/${r.model}`).catch(() => undefined)
       },
       enrich,
-    })
+    }
+    registerChaptersTools(ctx as never, store, toolsConfig)
     registerHostCommands(ctx as never, domain, {
       artifactStoreRoot: config.artifactStoreRoot,
       subagentAutoSave: config.subagentAutoSave,
@@ -794,6 +798,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       // and its print arms share the repair report cap — one knob, not two.
       store,
       reportMaxLines: config.repairReportMaxLines,
+      save: toolsConfig,
       scheduler,
       enrich,
       // #173: discovery surface for the three model settings. The factory re-reads per
