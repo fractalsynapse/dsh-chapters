@@ -33,6 +33,7 @@ import type { SessionEventLike } from './types.ts'
 import { resolveStoreRoot } from './store.ts'
 import { diagnosticStatusLine } from './diag.ts'
 import { registryHealth } from './repair.ts'
+import { removedGuard } from './removal.ts'
 import type { SessionState } from './registry.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
@@ -264,6 +265,9 @@ export function registerHostCommands(
     return runSync({
       cwd, storeRoot: config.artifactStoreRoot, cloneDir: DEFAULT_CLONE_DIR,
       project: record, ...(token !== undefined && token !== null ? { token } : {}),
+      // #255: the guard reads removed stubs from the registry rows this command already holds —
+      // a deletion must never be rehydrated back into the store on the pass that publishes it.
+      removed: removedGuard(domain.table('sessions').entries() as Iterable<[string, SessionState]>),
       force: true,
     })
   }

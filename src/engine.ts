@@ -44,6 +44,7 @@ import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } fro
 import type { SessionState } from './registry.ts'
 import { acquireChapterStore, makeAllocator, makeArchiveFs, type ChapterStoreHandle, resolveStoreRoot } from './store.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR } from './sync.ts'
+import { removedGuard } from './removal.ts'
 import { registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
 import { createEnrichWiring, type EnrichWiring } from './enrich-wire.ts'
@@ -518,6 +519,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       resolveProject: (cwd) => projectForCwd(store.projects(), cwd),
       tokenFor: (cwd, projectKey) => readToken(cwd, this.chaptersConfig.artifactStoreRoot, projectKey),
       collectionsFor: makeCollectionsReader(store.sessions.bind(store), this.chaptersConfig.artifactStoreRoot),
+      // #255: rehydration must not resurrect removed chapters; the guard reads the stub rows.
+      removedFor: () => removedGuard(store.sessions()),
       vocab: this.vocabCfg,
       // P2: a completed sync pass is the enrichment afterPush idle point.
       onSyncDone: (cwd, ok) => {

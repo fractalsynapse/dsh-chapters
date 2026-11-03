@@ -49,6 +49,7 @@ import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } f
 import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
+import { removedGuard } from './removal.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
 import { providerKindFor, registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
@@ -1129,6 +1130,8 @@ export function createScheduler(
     },
     tokenFor: (cwd, projectKey) => readToken(cwd, config.artifactStoreRoot, projectKey), // joins via resolveStoreRoot internally (#33)
     collectionsFor: makeCollectionsReader(store.sessions.bind(store), config.artifactStoreRoot),
+    // #255: rehydration must not resurrect removed chapters; the guard reads the stub rows.
+    removedFor: () => removedGuard(store.sessions()),
   })
 }
 
