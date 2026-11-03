@@ -66,6 +66,14 @@ const chapterRecordSchema = z.object({
     path: z.string().min(1),
     sha256: z.string().min(16),
   })).optional(),
+  // Tombstone status (#60 supersede, #255 operator removal) and its bookkeeping. Optional so rows
+  // written before these fields parse unchanged — and WITHOUT them here, zod STRIPS them on parse:
+  // the removed-stub round-trip test in registry.test.ts is the guard that the watermark-carrying
+  // fields survive every schema seam (repair's `repairs:` provenance rode the same hole).
+  status: z.enum(['superseded', 'removed']).optional(),
+  supersededBy: z.number().int().positive().optional(),
+  removedAt: z.string().min(10).optional(),
+  repairs: z.array(z.object({ class: z.string(), over: z.number().int(), at: z.number().int() })).optional(),
 })
 
 const collectionSchema = z.object({
