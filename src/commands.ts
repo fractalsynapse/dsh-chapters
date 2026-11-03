@@ -706,7 +706,11 @@ export function registerHostCommands(
       const cap = config.reportMaxLines ?? 40
       const err = (t: string): CommandResult => ({ kind: 'error', text: t })
       if (cwd === '') return err('chapters-remove: this session has no workspace cwd — nowhere to act')
-      if (config.store === undefined) return err('chapters-remove: this plane carries no registry handle — nothing was written')
+      // The store handle is required only by MUTATING arms (`apply`, `restore`). `list`, `find`,
+      // `report` and the dry-run resolve are reads of rows and files the plane already exposes —
+      // refusing them for a plumbing detail would hide the operator's own memory behind it.
+      // Each mutating arm guards `config.store === undefined` inline, which also narrows the type.
+      const noStore = (): CommandResult => ({ kind: 'error', text: 'chapters-remove: this plane carries no registry handle — nothing was written' })
       const wrapped = invocation.agent as { session?: { id?: string }; agent?: { session?: { id?: string } } }
       const callerId = wrapped.session?.id ?? wrapped.agent?.session?.id
       const storeDir = resolveStoreRoot(cwd, config.artifactStoreRoot)
@@ -809,6 +813,9 @@ export function registerHostCommands(
             ...(plan.dangling.length > cap ? [`    … ${plan.dangling.length - cap} more (all of them land in /chapters-remove report)`] : [])]
           : ['  no surviving chapter cites these files']
         if (verb !== 'apply') return { kind: 'success', text: [...header, ...set, ...dang, '  NOTHING WRITTEN. apply: /chapters-remove apply <the same ids>'].join('\n') }
+        // the mutating seam: narrowing this way (a lone guard at the use site) is what keeps
+        // `config.store` typed below — the compound `verb && !store` guard never narrowed.
+        if (config.store === undefined) return noStore()
         const project = projectForCwd(domain.table('projects').entries(), cwd)
         const mirrorAbs = path.join(cwd, DEFAULT_CLONE_DIR)
         const out = await applyRemoval({
@@ -851,6 +858,7 @@ export function registerHostCommands(
 
       if (verb === 'restore') {
         if (argTail[0] === undefined) return err('chapters-remove restore: needs a journal id (printed by apply; journals live under <store>/<tree>/removals/)')
+        if (config.store === undefined) return noStore()
         if (config.save === undefined) return err('chapters-remove restore: this plane carries no render config — restore re-derives through the save core and cannot guess its thresholds')
         const get = (name: string): unknown => { try { return (ctx as { get?: (n: string) => unknown }).get?.(name) } catch { return undefined } }
         const out = await restoreRemoval({

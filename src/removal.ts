@@ -168,12 +168,18 @@ export function resolveRemovalId(
     for (const c of state.chapters) {
       const isMatch = ordinal
         ? ordinalHit !== null && ordinalHit.sessionId === sessionId && ordinalHit.number === c.number
-        : colonHit !== null
-          ? colonHit.sessionId === sessionId && colonHit.number === c.number
-          : sameStoredPath(norm, c.path, cwd)
-            || sameStoredPath(resolveStoredPath(cwd, norm), c.path, cwd)
-            || (poolSession !== '' && poolBase.endsWith('.md') && c.path.endsWith(`/${poolSession}/chapters/${poolBase}`))
-            || (parts.length === 1 && (c.path.split('/').pop() ?? '') === poolBase)
+          // the ordinal of a REMOVED chapter can exist on a stale page — name the tombstone honestly
+          || (ordinalHit === null && sessionId === callerSessionId && c.number === Number(norm))
+          : colonHit !== null
+            ? colonHit.sessionId === sessionId && colonHit.number === c.number
+            : sameStoredPath(norm, c.path, cwd)
+              || sameStoredPath(resolveStoredPath(cwd, norm), c.path, cwd)
+              || (poolSession !== '' && poolBase.endsWith('.md') && c.path.endsWith(`/${poolSession}/chapters/${poolBase}`))
+              // third dialect (#255): searchLocalStore answers paths relative to the STORE ROOT
+              // (`<session>/chapters/<file>`); any raw that is a boundary-suffix of a record path
+              // resolves — ambiguity across records still refuses.
+              || (norm.includes('/') && c.path.endsWith(`/${norm}`))
+              || (parts.length === 1 && (c.path.split('/').pop() ?? '') === poolBase)
       if (!isMatch) continue
       if (!isActiveChapter(c)) {
         if (isRemovedChapter(c)) tombstone = `${sessionId}:${c.number} (${c.path})`
@@ -221,6 +227,10 @@ export function planRemoval(opts: {
     for (const c of state.chapters) {
       if (!isActiveChapter(c) || targetKeys.has(`${sessionId}#${c.number}`)) continue
       survivingChapters.push({ path: c.path })
+      // A survivor's OWN file is a live reference too: a record may name another chapter's path as
+      // an artifact (measured by the path-collision test — the orphan math must not schedule the
+      // neighbor's bytes for deletion).
+      activeRefs.push(c.path)
       for (const a of c.artifacts) activeRefs.push(a.path)
       for (const p of c.plans ?? []) activeRefs.push(p.artifactPath)
       for (const d of c.planDocs ?? []) activeRefs.push(d.path)

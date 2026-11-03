@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto'
 import { registerHostCommands } from '../../src/commands.ts'
 import { appendChapters, freshSession, type SessionState } from '../../src/registry.ts'
 import type { ChapterRecord } from '../../src/archive.ts'
+import { saveSession } from '../../src/save-core.ts'
 
 type Cmd = { handler: (inv: { agent: unknown; rawInput?: string }) => Promise<{ kind: string; text?: string }> }
 
@@ -32,12 +33,14 @@ const rec = (sessionId: string, number: number, over: Partial<ChapterRecord> = {
   ...over,
 })
 
-function harness(opts: { linked?: boolean } = {}) {
+function harness(opts: { linked?: boolean; cap?: number; durableEvents?: unknown[] | null } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdrem-'))
   const defs = new Map<string, Cmd>()
   const ctx = {
     logger: { warn: () => undefined, info: () => undefined },
-    get: () => ({ register: (d: Cmd & { name: string }) => { defs.set(d.name, d); return () => undefined } }),
+    get: (name: string) => name === 'sessionQuery'
+      ? { readSession: async (id: string) => ({ session: { id, cwd: tmp }, events: opts.durableEvents ?? null }) }
+      : { register: (d: Cmd & { name: string }) => { defs.set(d.name, d); return () => undefined } },
   }
   const tables = new Map<string, Map<string, unknown>>()
   const table = (name: string) => {
@@ -76,7 +79,8 @@ function harness(opts: { linked?: boolean } = {}) {
   registerHostCommands(ctx as never, { table } as never, {
     artifactStoreRoot: '.dsh-chapters', harnessId: 'hC',
     store: store as never,
-    ...(opts.linked === true ? { scheduler: scheduler as never } : {}),
+    ...(opts.cap !== undefined ? { reportMaxLines: opts.cap } : {}),
+    ...(opts.linked === true ? { scheduler: scheduler as never, save: SAVE_CONFIG } : {}),
   })
   const agent = { session: { header: { cwd: tmp }, id: 'A' } }
   const dispose = () => fs.rmSync(tmp, { recursive: true, force: true })
@@ -188,5 +192,207 @@ test('/chapters-status prints the removals line in the UNLINKED, zero-chapter st
     const r = await h.defs.get('chapters-status')!.handler({ agent: h.agent })
     assert.equal(r.kind, 'success')
     assert.match(r.text ?? '', /Removals \(this project\): 0 removed stub\(s\); missing-access ledger: empty/)
+  } finally { h.dispose() }
+})
+
+test('every refusal arm speaks a remedy: usage, no-args find, bare apply, foreign list, missing ids', async () => {
+  const h = harness({ linked: true })
+  try {
+    fs.mkdirSync(path.join(h.tmp, '.dsh-chapters', 'A'), { recursive: true })
+    const remove = h.defs.get('chapters-remove')!
+    assert.match((await remove.handler({ agent: h.agent, rawInput: 'apply' })).text ?? '', /usage: \/chapters-remove/)
+    assert.match((await remove.handler({ agent: h.agent, rawInput: 'find' })).text ?? '', /needs a query/)
+    assert.match((await remove.handler({ agent: h.agent, rawInput: 'report' })).text ?? '', /ledger is empty/, 'empty state is ANSWERED')
+    assert.match((await remove.handler({ agent: h.agent, rawInput: 'list ZZZ' })).text ?? '', /no row under this project/, 'foreign session list refuses with the store path')
+    assert.match((await remove.handler({ agent: h.agent, rawInput: 'restore' })).text ?? '', /needs a journal id/)
+    const a1 = rec('A', 1)
+    writeChapter(h.tmp, 'A', a1, 'body')
+    h.sessions.put('A', appendChapters(freshSession('A'), [a1]))
+    assert.match((await remove.handler({ agent: h.agent, rawInput: 'list' })).text ?? '', /1 active chapter/, 'list works on the linked harness once a row exists')
+  } finally { h.dispose() }
+})
+
+test('find answers from the local store when unlinked and maps a chapter hit to a removable id', async () => {
+  const h = harness()
+  try {
+    const chDir = path.join(h.tmp, '.dsh-chapters', 'A', 'chapters')
+    fs.mkdirSync(chDir, { recursive: true })
+    fs.writeFileSync(path.join(chDir, '001-jwt-work.md'), '---\ntitle: "jwt refresh work"\ntopics: ["jwt-auth"]\n---\n# jwt refresh work\n\nbody about jwt\n')
+    h.sessions.put('A', appendChapters(freshSession('A'), [{
+      number: 1, path: '.dsh-chapters/A/chapters/001-jwt-work.md', title: 'jwt refresh work', summary: 's',
+      startSeq: 0, endSeq: 5, topics: ['jwt-auth'], sha256: 'a'.repeat(64), estimatedTokens: 10, artifacts: [],
+    }]))
+    const r = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: 'find jwt' })
+    const t = r.text ?? ''
+    assert.match(t, /LOCAL store/, 'unlinked project searches the local store')
+    assert.match(t, /removable id A:1/, 'a chapter hit maps to a removable id')
+  } finally { h.dispose() }
+})
+
+test('report caps its tail and names the withheld lines; the cap is config, not a constant', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdrem-cap-'))
+  try {
+    const removals = path.join(tmp, '.dsh-chapters', 'removals')
+    fs.mkdirSync(removals, { recursive: true })
+    fs.writeFileSync(path.join(removals, 'missing-access.log'), [1, 2, 3, 4].map((n) => `line ${n}`).join('\n') + '\n')
+    const defs = new Map<string, Cmd>()
+    const ctx = { logger: { warn: () => undefined, info: () => undefined }, get: () => ({ register: (d: Cmd & { name: string }) => { defs.set(d.name, d); return () => undefined } }) }
+    const tables = new Map<string, Map<string, unknown>>()
+    const table = (name: string) => { let m = tables.get(name); if (m === undefined) { m = new Map(); tables.set(name, m) } return { get: (k: string) => m!.get(k), put: async (k: string, v: unknown) => { m!.set(k, v) }, entries: () => m!.entries(), size: 0 } }
+    registerHostCommands(ctx as never, { table } as never, { artifactStoreRoot: '.dsh-chapters', harnessId: 'h', reportMaxLines: 2 })
+    const r = await defs.get('chapters-remove')!.handler({ agent: { session: { header: { cwd: tmp }, id: 'A' } }, rawInput: 'report' })
+    assert.match(r.text ?? '', /last 2/, 'tail respects the cap row')
+    assert.match(r.text ?? '', /2 earlier line\(s\) withheld/, 'withheld is NAMED (#117)')
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }) }
+})
+
+test('a scheduler that throws during apply-sync is REPORTED and the local removal stands complete', async () => {
+  const h = harness({ linked: true })
+  try {
+    const a = rec('A', 1)
+    writeChapter(h.tmp, 'A', a, 'body')
+    h.sessions.put('A', appendChapters(freshSession('A'), [a]))
+    // make the fake scheduler throw: replace run
+    const broken = { schedule: () => undefined, run: async () => { throw new Error('scheduler offline') }, pullFor: async () => ({ ok: true, detail: '' }), hasPending: () => false, drain: async () => undefined }
+    // rebuild registrations with the broken scheduler
+    const defs = new Map<string, Cmd>()
+    const ctx = { logger: { warn: () => undefined, info: () => undefined }, get: () => ({ register: (d: Cmd & { name: string }) => { defs.set(d.name, d); return () => undefined } }) }
+    const tables = new Map<string, Map<string, unknown>>()
+    const sessions = new Map<string, unknown>()
+    const table = (name: string) => {
+      let m = tables.get(name)
+      if (m === undefined) { m = name === 'sessions' ? new Map(sessions) : new Map(); tables.set(name, m) }
+      return { get: (k: string) => m!.get(k), put: async (k: string, v: unknown) => { m!.set(k, v) }, entries: () => m!.entries(), size: 0 }
+    }
+    table('projects').put('PKC', { projectKey: 'PKC', slug: 'kb', remote: 'x', harnessId: 'hC', linkedAt: 'now', cwd: h.tmp })
+    for (const [k, v] of h.sessions.entries() as Iterable<[string, unknown]>) sessions.set(k, v)
+    const store = {
+      get: async (id: string) => (sessions.get(id) as SessionState | undefined) ?? freshSession(id),
+      mutate: async (id: string, fn: (s: SessionState) => SessionState) => {
+        const before = (sessions.get(id) as SessionState | undefined) ?? freshSession(id)
+        const next = { ...fn(before), rev: (before.rev ?? 0) + 1 }
+        sessions.set(id, next)
+        return next
+      },
+    }
+    registerHostCommands(ctx as never, { table } as never, { artifactStoreRoot: '.dsh-chapters', harnessId: 'hC', store: store as never, scheduler: broken as never })
+    const r = await defs.get('chapters-remove')!.handler({ agent: { session: { header: { cwd: h.tmp }, id: 'A' } }, rawInput: 'apply A:1' })
+    assert.match(r.text ?? '', /sync: pass threw \(scheduler offline\)/, 'the throw is narrated, not fatal')
+    assert.equal(fs.existsSync(path.join(h.tmp, a.path)), false, 'local removal stands')
+  } finally { h.dispose() }
+})
+
+test('planes without a store handle or a cwd refuse cleanly, nothing guessed', async () => {
+  const defs = new Map<string, Cmd>()
+  const ctx = { logger: { warn: () => undefined, info: () => undefined }, get: () => ({ register: (d: Cmd & { name: string }) => { defs.set(d.name, d); return () => undefined } }) }
+  const table = () => ({ get: () => undefined, put: async () => undefined, entries: () => new Map<string, unknown>().entries(), size: 0 })
+  registerHostCommands(ctx as never, { table } as never, { artifactStoreRoot: '.dsh-chapters', harnessId: 'h' })
+  // READS need no store handle: an empty registry answers honestly rather than refusing on plumbing.
+  const probe = { session: { header: { cwd: '/tmp/whatever-removal-probe' }, id: 'A' } }
+  const r = await defs.get('chapters-remove')!.handler({ agent: probe, rawInput: 'list' })
+  assert.match(r.text ?? '', /no row under this project/, 'list: the empty registry is STATED, not gate-refused')
+  const rep = await defs.get('chapters-remove')!.handler({ agent: probe, rawInput: 'report' })
+  assert.equal(rep.kind, 'success', 'report works without a store handle')
+  const app = await defs.get('chapters-remove')!.handler({ agent: probe, rawInput: 'restore 2026-11-02T00-00-00-000Z' })
+  assert.match(app.text ?? '', /no registry handle/, 'the MUTATING arms are the ones that refuse')
+})
+
+// ---------------------------------------------------------------- restore through the command
+
+const turn = (t: number, base: number, subject: string) => [
+  { type: 'turn/start', seq: base, data: { turn: t } },
+  { type: 'user/message', seq: base + 1, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: `please ${subject}` }] } },
+  { type: 'assistant/message', seq: base + 2, data: { message: { role: 'assistant', content: [{ type: 'text', text: `I will now ${subject}, and this reply is long enough to render real chapter bytes for the archive.` }] } } },
+  { type: 'turn/end', seq: base + 3, data: { turn: t, reason: { kind: 'completed' } } },
+]
+const EV = [...turn(1, 0, 'alpha'), ...turn(2, 4, 'beta'), ...turn(3, 8, 'gamma')]
+const SAVE_CONFIG = {
+  artifactStoreRoot: '.dsh-chapters',
+  chapterTokenTarget: 8000,
+  chapterOversizeFactor: 2,
+  toolResultDeferFloorTokens: 200,
+  mergeThreshold: 0.3,
+  chapterLimit: 8000,
+} as const
+
+test('restore through the command: apply ⇒ journal id ⇒ restore re-derives, prints new numbers, and pushes via the scheduler', async () => {
+  const h = harness({ linked: true, durableEvents: EV })
+  try {
+    const saved = await saveSession({ events: EV as never, sessionId: 'A', cwd: h.tmp, store: h.store, config: SAVE_CONFIG, span: { fromSeq: 4, toSeq: 7 }, attemptSalt: 'seed' })
+    assert.equal(saved.records.length, 1)
+    const num = saved.records[0]!.number
+    const applied = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: `apply A:${num}` })
+    assert.equal(applied.kind, 'success', applied.text)
+    const m = /journal: (\S+) —/.exec(applied.text ?? '')
+    assert.ok(m !== null, `journal id printed by apply: ${applied.text}`)
+    const restored = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: `restore ${m![1]}` })
+    assert.match(restored.text ?? '', /re-derived under new numbers/)
+    assert.match(restored.text ?? '', /sync: fake removal-restore/, 'the restored bytes push through the scheduler')
+    assert.ok(h.schedRuns.some(([, why]) => why === 'removal-restore'))
+    const st = h.sessions.get('A') as SessionState
+    assert.equal(st.chapters.filter((c) => c.status === undefined).length, 1, 'one live chapter again')
+    assert.equal(st.chapters.find((c) => c.number === num)!.status, 'superseded', 'the spent number stays marked')
+  } finally { h.dispose() }
+})
+
+test('restore refuses cleanly when the durable log cannot be read — the ledger says UNRECOVERABLE', async () => {
+  const h = harness({ linked: true, durableEvents: null })
+  try {
+    const saved = await saveSession({ events: EV as never, sessionId: 'A', cwd: h.tmp, store: h.store, config: SAVE_CONFIG, span: { fromSeq: 4, toSeq: 7 }, attemptSalt: 'seed' })
+    const num = saved.records[0]!.number
+    const applied = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: `apply A:${num}` })
+    const m = /journal: (\S+) —/.exec(applied.text ?? '')
+    const restored = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: `restore ${m![1]}` })
+    assert.equal(restored.kind, 'error', 'a restore that derived nothing is an error, not a success theater')
+    assert.match(restored.text ?? '', /UNRECOVERABLE/)
+  } finally { h.dispose() }
+})
+
+test('find with a tight cap names the withheld hits; a failing pool push is narrated as local-complete', async () => {
+  const h = harness({ cap: 1 })
+  try {
+    for (const n of [1, 2]) {
+      const r = rec('A', n, { path: `.dsh-chapters/A/chapters/00${n}-jwt-${n}.md` })
+      writeChapter(h.tmp, 'A', r, 'jwt jwt')
+      h.sessions.put('A', appendChapters((h.sessions.get('A') as SessionState | undefined) ?? freshSession('A'), [r]))
+    }
+    const found = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: 'find jwt' })
+    assert.match(found.text ?? '', /withheld by the report cap \(1\)/, 'withheld count is NAMED (#117)')
+  } finally { h.dispose() }
+})
+
+test('linked find searches the POOL mirror, maps hits to ids, and an empty ancestor path is ANSWERED not blank', async () => {
+  const h = harness({ linked: true })
+  try {
+    fs.mkdirSync(path.join(h.tmp, '.dsh-knowledge', 'chapters', 'PKC', 'A'), { recursive: true })
+    fs.writeFileSync(path.join(h.tmp, '.dsh-knowledge', 'chapters', 'PKC', 'A', '001-x.md'), '---\ntitle: "jwt work"\ntopics: ["jwt"]\n---\nbody\n')
+    const r = rec('A', 1, { path: '.dsh-chapters/A/chapters/001-x.md' })
+    writeChapter(h.tmp, 'A', r, 'body')
+    h.sessions.put('A', appendChapters(freshSession('A'), [r]))
+    const found = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: 'find jwt' })
+    assert.match(found.text ?? '', /pool mirror/, 'the linked corpus is the one searched')
+    assert.match(found.text ?? '', /removable id A:1/, 'mirror path resolves through the pool dialect')
+    // empty ancestor path on a row that EXISTS but has no chapters:
+    h.sessions.put('E', freshSession('E'))
+    fs.mkdirSync(path.join(h.tmp, '.dsh-chapters', 'E'), { recursive: true })
+    const empty = await h.defs.get('chapters-remove')!.handler({ agent: { session: { header: { cwd: h.tmp }, id: 'E' } }, rawInput: 'list' })
+    assert.match(empty.text ?? '', /no ACTIVE chapters/, 'an empty TOC is an answer, not an error')
+  } finally { h.dispose() }
+})
+
+test('apply whose journal cannot be written prints NOT WRITTEN and stubbed NONE — and restore without a render config refuses by name', async () => {
+  const h = harness()
+  try {
+    const a = rec('A', 1)
+    writeChapter(h.tmp, 'A', a, 'body')
+    h.sessions.put('A', appendChapters(freshSession('A'), [a]))
+    fs.mkdirSync(path.join(h.tmp, '.dsh-chapters', 'A'), { recursive: true })
+    fs.writeFileSync(path.join(h.tmp, '.dsh-chapters', 'A', 'removals'), 'blocker') // journal dir blocked
+    const applied = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: 'apply A:1' })
+    assert.match(applied.text ?? '', /journal: NOT WRITTEN/)
+    assert.match(applied.text ?? '', /stubbed NONE/, 'nothing flipped when the journal refused')
+    assert.equal(fs.existsSync(path.join(h.tmp, a.path)), true, 'zero deletions — the guard held')
+    const rest = await h.defs.get('chapters-remove')!.handler({ agent: h.agent, rawInput: 'restore some-journal' })
+    assert.match(rest.text ?? '', /no render config/, 'restore names the missing seam, not a guess')
   } finally { h.dispose() }
 })
