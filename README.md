@@ -3,17 +3,17 @@
 **Long memory for local AI: a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 plugin that archives agent conversations as verbatim chapters, continues sessions from a Table of
 Contents at zero inference-token cost, and turns that archive into a shared, searchable knowledge
-pool.** Published on npm as [`@treeseed/dsh-chapters`](https://www.npmjs.com/package/@treeseed/dsh-chapters);
-source at [treeseed-ai/dsh-chapters](https://github.com/treeseed-ai/dsh-chapters).
+pool.** Published on npm as [`@fractalsynapse/dsh-chapters`](https://www.npmjs.com/package/@fractalsynapse/dsh-chapters);
+source at [fractalsynapse/dsh-chapters](https://github.com/fractalsynapse/dsh-chapters).
 
 > **All documentation lives on the documentation site — this README is a doorway, not a duplicate.**
-> ### 📖 https://treeseed-ai.github.io/dsh-chapters/
+> ### 📖 https://fractalsynapse.github.io/dsh-chapters/
 
 ## Install (the whole setup)
 
 ```bash
-dsh plugin --profile web add @treeseed/dsh-chapters      # install into your harness profile
-dsh plugin --profile web update @treeseed/dsh-chapters   # keep current — restart `dsh web` after
+dsh plugin --profile web add @fractalsynapse/dsh-chapters      # install into your harness profile
+dsh plugin --profile web update @fractalsynapse/dsh-chapters   # keep current — restart `dsh web` after
 ```
 
 `--profile <name>` is required on every `dsh plugin` command (`web` = the browser harness profile).
@@ -25,26 +25,26 @@ through the zero-token engine.
 
 | You want to… | Go to |
 |---|---|
-| understand what this is / why (the ten benefits) | [Home → “What it gives you”](https://treeseed-ai.github.io/dsh-chapters/) |
-| install, upgrade, uninstall, verify provenance | [§23 Install, upgrade, provenance](https://treeseed-ai.github.io/dsh-chapters/operations/install/) |
-| run your first compaction/continuation | [§1 Quickstart](https://treeseed-ai.github.io/dsh-chapters/start/quickstart/) → [§2 Your first continuation](https://treeseed-ai.github.io/dsh-chapters/start/first-continuation/) |
-| link a shared knowledge pool (git or TreeDX) | [§3 Link a knowledge pool](https://treeseed-ai.github.io/dsh-chapters/start/link-pool/) · [§10 The pool](https://treeseed-ai.github.io/dsh-chapters/knowledge/pool/) |
-| run any command — exact syntax, scope, outputs | [§15 Commands](https://treeseed-ai.github.io/dsh-chapters/reference/commands/) |
-| delete a bad chapter (the wrong-project prompt) | [§15 Commands → `/chapters-remove`](https://treeseed-ai.github.io/dsh-chapters/reference/commands/#chapters-remove--delete-a-bad-chapter-for-real) |
-| know what the agent-facing tools do | [§16 Agent tools](https://treeseed-ai.github.io/dsh-chapters/reference/tools/) |
-| tune a threshold, budget, or trigger | [§17 Configuration](https://treeseed-ai.github.io/dsh-chapters/reference/configuration/) |
-| understand *why not summaries* / the economics | [§5 Why not summaries?](https://treeseed-ai.github.io/dsh-chapters/concepts/why-not-summaries/) |
-| read the design rules the system won't break | [§6 The four invariants](https://treeseed-ai.github.io/dsh-chapters/concepts/invariants/) |
-| the theory behind retrieval-over-compression (RLM) | [§8 Recursive context theory](https://treeseed-ai.github.io/dsh-chapters/concepts/recursive-context/) |
-| propose/approve rules for agents | [§13 Rules & governance](https://treeseed-ai.github.io/dsh-chapters/knowledge/rules/) |
-| let a second model propose your next prompt | [§28 Prompt recommendations](https://treeseed-ai.github.io/dsh-chapters/concepts/prompt-recommendations/) |
-| debug something (“seems broken, is it?”) | [§4 FAQ & troubleshooting](https://treeseed-ai.github.io/dsh-chapters/start/faq/) |
-| prompt-cache / llama.cpp behavior | [§21 Cache behavior on llama.cpp](https://treeseed-ai.github.io/dsh-chapters/evidence/llamacpp-cache/) |
-| see measured results (production run + benchmarks) | [§19 Benchmarks](https://treeseed-ai.github.io/dsh-chapters/evidence/benchmarks/) · [§20 Field study](https://treeseed-ai.github.io/dsh-chapters/evidence/field-study/) |
-| compare with other memory approaches | [§22 The alternatives, compared](https://treeseed-ai.github.io/dsh-chapters/evidence/comparison/) |
-| check security/privacy boundaries | [§27 Security & privacy](https://treeseed-ai.github.io/dsh-chapters/operations/security/) |
-| release history & known-fixed incidents | [§26 Changelog](https://treeseed-ai.github.io/dsh-chapters/operations/changelog/) |
-| **develop the plugin itself** | [§24 Developing](https://treeseed-ai.github.io/dsh-chapters/operations/development/) → the engineering specs below |
+| understand what this is / why (the ten benefits) | [Home → “What it gives you”](https://fractalsynapse.github.io/dsh-chapters/) |
+| install, upgrade, uninstall, verify provenance | [§23 Install, upgrade, provenance](https://fractalsynapse.github.io/dsh-chapters/operations/install/) |
+| run your first compaction/continuation | [§1 Quickstart](https://fractalsynapse.github.io/dsh-chapters/start/quickstart/) → [§2 Your first continuation](https://fractalsynapse.github.io/dsh-chapters/start/first-continuation/) |
+| link a shared knowledge pool (git or TreeDX) | [§3 Link a knowledge pool](https://fractalsynapse.github.io/dsh-chapters/start/link-pool/) · [§10 The pool](https://fractalsynapse.github.io/dsh-chapters/knowledge/pool/) |
+| run any command — exact syntax, scope, outputs | [§15 Commands](https://fractalsynapse.github.io/dsh-chapters/reference/commands/) |
+| delete a bad chapter (the wrong-project prompt) | [§15 Commands → `/chapters-remove`](https://fractalsynapse.github.io/dsh-chapters/reference/commands/#chapters-remove--delete-a-bad-chapter-for-real) |
+| know what the agent-facing tools do | [§16 Agent tools](https://fractalsynapse.github.io/dsh-chapters/reference/tools/) |
+| tune a threshold, budget, or trigger | [§17 Configuration](https://fractalsynapse.github.io/dsh-chapters/reference/configuration/) |
+| understand *why not summaries* / the economics | [§5 Why not summaries?](https://fractalsynapse.github.io/dsh-chapters/concepts/why-not-summaries/) |
+| read the design rules the system won't break | [§6 The four invariants](https://fractalsynapse.github.io/dsh-chapters/concepts/invariants/) |
+| the theory behind retrieval-over-compression (RLM) | [§8 Recursive context theory](https://fractalsynapse.github.io/dsh-chapters/concepts/recursive-context/) |
+| propose/approve rules for agents | [§13 Rules & governance](https://fractalsynapse.github.io/dsh-chapters/knowledge/rules/) |
+| let a second model propose your next prompt | [§28 Prompt recommendations](https://fractalsynapse.github.io/dsh-chapters/concepts/prompt-recommendations/) |
+| debug something (“seems broken, is it?”) | [§4 FAQ & troubleshooting](https://fractalsynapse.github.io/dsh-chapters/start/faq/) |
+| prompt-cache / llama.cpp behavior | [§21 Cache behavior on llama.cpp](https://fractalsynapse.github.io/dsh-chapters/evidence/llamacpp-cache/) |
+| see measured results (production run + benchmarks) | [§19 Benchmarks](https://fractalsynapse.github.io/dsh-chapters/evidence/benchmarks/) · [§20 Field study](https://fractalsynapse.github.io/dsh-chapters/evidence/field-study/) |
+| compare with other memory approaches | [§22 The alternatives, compared](https://fractalsynapse.github.io/dsh-chapters/evidence/comparison/) |
+| check security/privacy boundaries | [§27 Security & privacy](https://fractalsynapse.github.io/dsh-chapters/operations/security/) |
+| release history & known-fixed incidents | [§26 Changelog](https://fractalsynapse.github.io/dsh-chapters/operations/changelog/) |
+| **develop the plugin itself** | [§24 Developing](https://fractalsynapse.github.io/dsh-chapters/operations/development/) → the engineering specs below |
 
 ## Developing / contributing
 
@@ -69,7 +69,7 @@ The site's Part VI covers the daily loop; the repository itself holds the engine
 - **[`dev/install/`](dev/install/)** — installer, containerized platform, and local-llm skill
 - **benchmarks**: `npm run bench` — three arms, local model, never CI ([protocol](benchmarks/README.md))
 
-Feature requests and bugs: [open an issue](https://github.com/treeseed-ai/dsh-chapters/issues) —
+Feature requests and bugs: [open an issue](https://github.com/fractalsynapse/dsh-chapters/issues) —
 measured reports get measured answers.
 
 ## License

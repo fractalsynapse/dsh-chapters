@@ -69,7 +69,7 @@ export const CHAPTERS_PRESET_ID = 'chapters'
  *  Loader always provides; our own package is by definition present — its realm row is the
  *  whole point of the preset, and pruning it would quietly delete the feature. */
 function needsProbe(row: PresetRow): boolean {
-  return !row.name.startsWith('cordis:') && !row.name.startsWith('@treeseed/dsh-chapters')
+  return !row.name.startsWith('cordis:') && !row.name.startsWith('@fractalsynapse/dsh-chapters')
 }
 
 /**

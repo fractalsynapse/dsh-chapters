@@ -1,0 +1,225 @@
+{
+  "version": 7,
+  "record": {
+    "identity": {
+      "formatVersion": 4,
+      "createdAt": 1793503188430,
+      "isSeeded": false,
+      "inheritedEventCount": 0
+    },
+    "rows": {
+      "pushProbe": {
+        "ver": 1,
+        "seq": 7,
+        "val": {
+          "notes": [
+            "via-B",
+            "via-C",
+            "via-D"
+          ],
+          "count": 3
+        }
+      },
+      "title": {
+        "ver": 1,
+        "seq": 7,
+        "val": null
+      },
+      "titleInput": {
+        "ver": 3,
+        "seq": 7,
+        "val": {
+          "first": null,
+          "count": 0,
+          "lastSeq": null
+        }
+      },
+      "llmRetry": {
+        "ver": 1,
+        "seq": 7,
+        "val": {}
+      },
+      "sandboxMode": {
+        "ver": 1,
+        "seq": 7,
+        "val": "workspace-write"
+      },
+      "goal": {
+        "ver": 6,
+        "seq": 7,
+        "val": {
+          "current": null,
+          "seenGoalIds": [],
+          "failure": null
+        }
+      },
+      "tokenUsage": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "totals": {
+            "uncachedInputTokens": 0,
+            "outputTokens": 0,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "last": null
+        }
+      },
+      "contextPressure": {
+        "ver": 5,
+        "seq": 7,
+        "val": {
+          "surfaceTokens": 0
+        }
+      },
+      "contextBreakdown": {
+        "ver": 6,
+        "seq": 7,
+        "val": {
+          "systems": [],
+          "surfaceTokens": 0,
+          "breakdown": {
+            "systemTokens": 0,
+            "toolsTokens": 0,
+            "messageTokens": 0
+          }
+        }
+      },
+      "turnBoundary": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "openTurnStartSeq": null,
+          "lastStepStartSeq": null,
+          "lastStepBoundary": null,
+          "lastTurn": 0
+        }
+      },
+      "inbox": {
+        "ver": 1,
+        "seq": 7,
+        "val": {
+          "next-turn": [],
+          "next-step": []
+        }
+      },
+      "sessionStats": {
+        "ver": 1,
+        "seq": 7,
+        "val": {
+          "turns": 0,
+          "steps": 0,
+          "llmMs": 0,
+          "toolMs": 0,
+          "ttftMs": 0,
+          "ttftSteps": 0,
+          "decodeMs": 0,
+          "decodeTokens": 0,
+          "lastTurn": null,
+          "openStep": null,
+          "pendingCalls": {}
+        }
+      },
+      "turnOutline": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "turns": [],
+          "draft": ""
+        }
+      },
+      "userQuestions": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "inheritedEventCount": 0,
+          "timed": false,
+          "questions": {
+            "active": [],
+            "settled": []
+          }
+        }
+      },
+      "permissions": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "preset": "workspace-write",
+          "sandbox": "workspace-write",
+          "approval": "ask",
+          "seeded": false
+        }
+      },
+      "workingDirectory": {
+        "ver": 1,
+        "seq": 7,
+        "val": null
+      },
+      "subagentCatalog": {
+        "ver": 6,
+        "seq": 7,
+        "val": {
+          "inheritedEventCount": 0
+        }
+      },
+      "subagentTiming": {
+        "ver": 3,
+        "seq": 7,
+        "val": {
+          "descriptorSeen": false,
+          "settledMs": 0
+        }
+      },
+      "subagent": {
+        "ver": 2,
+        "seq": 7,
+        "val": {}
+      },
+      "harnessDevLegacyPrompt": {
+        "ver": 1,
+        "seq": 7,
+        "val": {
+          "source": null,
+          "web": null
+        }
+      },
+      "chaptersPrompt": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "v": 1,
+          "status": "ready",
+          "text": "PROOF-PUSHED-OFFER",
+          "turnSeq": 1,
+          "error": "",
+          "intent": "worker-step",
+          "goalRevision": null,
+          "autorun": "disarmed",
+          "at": "2026-11-01T03:19:48.572Z"
+        }
+      },
+      "modelSelection": {
+        "ver": 2,
+        "seq": 7,
+        "val": {
+          "lastUsed": null,
+          "pending": null
+        }
+      },
+      "sessionListMetadata": {
+        "ver": 1,
+        "seq": 7,
+        "val": {
+          "blank": true,
+          "lastPromptAt": null
+        }
+      },
+      "imageLimits": {
+        "ver": 1,
+        "seq": 7,
+        "val": null
+      }
+    }
+  }
+}

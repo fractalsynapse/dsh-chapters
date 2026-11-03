@@ -33,7 +33,7 @@ has an icon, a status label, the suggested prompt, and three actions:
   measured on **both** `0.2.0-rc.2` and `0.2.1-rc.4`, with the `rc.4` draft machinery rebuilt in ways that looked like
   the fix (`mirrorFn` gone, a `cancelCommandRestore()` added, the method's own comment now claiming "programmatic
   writes") — and the refusal is byte-identical on both, because `draftRev` is not read in that module at all
-  ([#126](https://github.com/treeseed-ai/dsh-chapters/issues/126)).
+  ([#126](https://github.com/fractalsynapse/dsh-chapters/issues/126)).
 - **Run** submits the offer as your own turn, through the same follow-up path autorun uses —
   one code path for "run it", whether you clicked it or the loop armed it.
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
@@ -70,7 +70,7 @@ text — where it read as a sticker and could not be styled out of the way.
 
 The dock fixes the geometry rather than restyling it. A docked row reserves its own space, so
 it **cannot** cover the placeholder or collide with the send buttons; and the placeholder is
-not plugin-writable anyway ([measured](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/contract.md)):
+not plugin-writable anyway ([measured](https://github.com/fractalsynapse/dsh-chapters/blob/main/docs/contract.md)):
 the host computes it from its own states and locale dictionaries, and no config key, slot, or
 projection feeds a plugin value into that chain. The bar next to the input is the honest
 surface; the text inside the input was never ours.

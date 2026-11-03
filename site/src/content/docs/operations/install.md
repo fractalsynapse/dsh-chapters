@@ -6,7 +6,7 @@ lastUpdated: true
 
 ## Requirements
 
-DeepSeek Harness (`@deepseek-ai/dsh`) ≥ 0.1.5-rc.x, Node ≥ 24. The plugin ships as one npm package: [`@treeseed/dsh-chapters`](https://www.npmjs.com/package/@treeseed/dsh-chapters).
+DeepSeek Harness (`@deepseek-ai/dsh`) ≥ 0.1.5-rc.x, Node ≥ 24. The plugin ships as one npm package: [`@fractalsynapse/dsh-chapters`](https://www.npmjs.com/package/@fractalsynapse/dsh-chapters).
 
 ## Install / update — the path this project uses
 
@@ -16,8 +16,8 @@ its own `node_modules`, under `<DSH home>/profiles/<profile>/`. So installing or
 
 ```bash
 cd ~/.dsh/profiles/web
-npm i @treeseed/dsh-chapters@latest     # install, or bump to whatever npm calls latest
-npm ls @treeseed/dsh-chapters           # what is actually in this profile
+npm i @fractalsynapse/dsh-chapters@latest     # install, or bump to whatever npm calls latest
+npm ls @fractalsynapse/dsh-chapters           # what is actually in this profile
 # restart dsh web — the running process holds the old bundle until then
 ```
 
@@ -26,7 +26,7 @@ a sentence that silently becomes wrong the moment a release ships. Pin deliberat
 reproducing someone else's profile.
 
 If the profile has never carried this plugin, `npm i` puts it on disk but the profile must also *name* it:
-its `package.json` lists the bundles to load under `dsh.profile.bundles`, and `@treeseed/dsh-chapters` has
+its `package.json` lists the bundles to load under `dsh.profile.bundles`, and `@fractalsynapse/dsh-chapters` has
 to appear there. That is exactly what this repo's own `scripts/bootstrap-dev-profile.sh` writes for a dev
 profile (same mechanism, with a `file:` dependency pointed at the working tree instead of a published
 version).
@@ -36,9 +36,9 @@ version).
 `dsh plugin` exists and is the host's surface for this job:
 
 ```bash
-dsh plugin --profile web add @treeseed/dsh-chapters     # host forwards the arguments to its own installer
+dsh plugin --profile web add @fractalsynapse/dsh-chapters     # host forwards the arguments to its own installer
 dsh plugin --profile web list                           # enabled state for that profile
-dsh plugin --profile web remove @treeseed/dsh-chapters
+dsh plugin --profile web remove @fractalsynapse/dsh-chapters
 ```
 
 **Honest note, stated as what works rather than as a defect report:** in this project's own use, the npm
@@ -119,7 +119,8 @@ shadowing the upgraded global install. Two steps, in order:
 
 ## Supply chain, auditable
 
-- every CI-published version carries an **npm provenance attestation** (SLSA v1, via OIDC trusted publishing — no long-lived tokens) linking the tarball to the exact repo, workflow, commit, and CI run that built it;
+- every CI-published version carries an **npm provenance attestation** (SLSA v1, signed from the CI run's OIDC identity) linking the tarball to the exact repo, workflow, commit, and CI run that built it — publish auth itself is an npm org token in the `Production` environment since #261 (before that, trusted publishing), and no long-lived token is ever stored in the repo;
+- the package moved org with the repository: **`@fractalsynapse/dsh-chapters`** from 0.2.18. The old `@treeseed/dsh-chapters` stays at 0.2.16 permanently — an install from before the move updates once, then goes stale; switch it with `dsh plugin --profile web add @fractalsynapse/dsh-chapters` (remove the old one after);
 - `npm audit signatures` on an installed tree verifies it;
 - releases publish from a green `main`: the release workflow itself blocks on the **full deterministic suite — unit + integration, under the ≥85% coverage gate** — and CI runs the **browser acceptance chain replayed from committed model tapes** on every push to `main`, so a release is always cut from a green acceptance run — no LLM, no GPU, no key, and a *loud* failure (503 on tape miss) rather than a skip. The current row count lives in the release ledger ([§26](/operations/changelog/)), not here: a count typed into a page goes stale exactly like a version does;
 
@@ -141,8 +142,8 @@ avoid or upgrade past.
 
 ## Uninstall
 
-`npm uninstall @treeseed/dsh-chapters` in the profile directory — or `dsh plugin --profile web remove
-@treeseed/dsh-chapters` if that path works for you. Either way the archive it wrote is plain Markdown under
+`npm uninstall @fractalsynapse/dsh-chapters` in the profile directory — or `dsh plugin --profile web remove
+@fractalsynapse/dsh-chapters` if that path works for you. Either way the archive it wrote is plain Markdown under
 `.dsh-chapters/` and any pool you linked; removing the plugin never removes your data, by design.
 
 Next: [24. Developing the plugin](/operations/development/).

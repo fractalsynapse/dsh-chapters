@@ -115,7 +115,7 @@ export function resolveHostBinary(
 }
 
 export function applyRigPluginPatch(existing: string, opts: { storeRoot: string; promptModel?: string | undefined }): string {
-  const row = `- id: '@treeseed/dsh-chapters'
+  const row = `- id: '@fractalsynapse/dsh-chapters'
   config:
     # per-boot absolute store root (#61): the acceptance chain must never write
     # into the project's real .dsh-chapters/ tree. The host merges a patch row by id.
@@ -131,7 +131,7 @@ ${opts.promptModel !== undefined ? `    # #71: the ghost journey boots WITH a de
   const out: string[] = []
   let skipping = false
   for (const line of existing.split('\n')) {
-    if (/^- id: '@treeseed\/dsh-chapters'/.test(line)) { skipping = true; continue }
+    if (/^- id: '@fractalsynapse\/dsh-chapters'/.test(line)) { skipping = true; continue }
     if (skipping && !/^\s/.test(line) && line !== '') skipping = false
     if (!skipping) out.push(line)
   }
@@ -307,7 +307,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // dependency means the plugin is symlinked, so a rebuilt `dist/` is picked up without reinstalling.
   {
     const base = path.join(ROOT, 'var', 'e2e-profile-base')
-    const marker = path.join(base, 'profiles', 'web', 'node_modules', '@treeseed')
+    const marker = path.join(base, 'profiles', 'web', 'node_modules', '@fractalsynapse')
     if (!fs.existsSync(marker)) {
       const r = spawnSync('bash', [path.join(ROOT, 'scripts', 'bootstrap-dev-profile.sh'), '--home', path.relative(ROOT, base)],
         { cwd: ROOT, encoding: 'utf8' })
@@ -565,17 +565,17 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // that predated the feature under test. The docs said "the plugin is link-installed, so
   // every boot runs the CURRENT build in lib/" and nothing checked it. A copy is not a link.
   {
-    const mounted = path.join(E2E_HOME, 'profiles', 'web', 'node_modules', '@treeseed', 'dsh-chapters')
+    const mounted = path.join(E2E_HOME, 'profiles', 'web', 'node_modules', '@fractalsynapse', 'dsh-chapters')
     let resolved: string | null = null
     try { resolved = fs.realpathSync(mounted) } catch { resolved = null }
     if (resolved === null) {
-      throw new Error(`e2e boot: no @treeseed/dsh-chapters in the dev home profile (${mounted}). `
+      throw new Error(`e2e boot: no @fractalsynapse/dsh-chapters in the dev home profile (${mounted}). `
         + 'Install the CURRENT build: DSH_HOME=$PWD/.dshdev-local dsh plugin --profile web add "link:" + process.cwd()')
     }
     if (path.resolve(resolved) !== ROOT) {
       throw new Error(`e2e boot: the dev home mounts a COPIED plugin tree (${resolved}), not this working copy (${ROOT}). `
         + 'A copy silently ages: assertions would be measuring an old build. Re-link: '
-        + 'rm -rf .dshdev-local/profiles/web/node_modules/@treeseed/dsh-chapters && '
+        + 'rm -rf .dshdev-local/profiles/web/node_modules/@fractalsynapse/dsh-chapters && '
         + 'DSH_HOME=$PWD/.dshdev-local dsh plugin --profile web add "link:" + process.cwd()')
     }
   }

@@ -228,8 +228,8 @@ WCROW
     # without a web-app bundle (the web UI manages its own per-project stores).
     if ! grep -q "dsh-web-app" "$profile_dir/package.json" 2>/dev/null; then
       cat <<STOREROW
-- id: '@treeseed/dsh-chapters'
-  name: '@treeseed/dsh-chapters'
+- id: '@fractalsynapse/dsh-chapters'
+  name: '@fractalsynapse/dsh-chapters'
   config:
     artifactStoreRoot: ${DSH_CHAPTERS_STORE_ROOT}
 STOREROW
