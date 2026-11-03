@@ -790,6 +790,10 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       subagentAutoSave: config.subagentAutoSave,
       harnessId: config.harnessId,
       projectKeyOverride: config.projectKeyOverride,
+      // #255: /chapters-remove mutates through the plane's OWN store handle (one #59 section),
+      // and its print arms share the repair report cap — one knob, not two.
+      store,
+      reportMaxLines: config.repairReportMaxLines,
       scheduler,
       enrich,
       // #173: discovery surface for the three model settings. The factory re-reads per
