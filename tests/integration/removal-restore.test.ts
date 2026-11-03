@@ -180,3 +180,35 @@ test('unknown journal id refuses with the searched path; restore lands in the mi
     assert.match(log, /restored \| root-1:1/)
   } finally { w.dispose() }
 })
+
+test('restore failure taxonomy: corrupt journal, vanished record, ACTIVE target, unreadable store root — each named, none guessed', async () => {
+  const w = world()
+  try {
+    const storeDir = path.join(w.cwd, '.dsh-chapters')
+    const dir = path.join(storeDir, 'root-1', 'removals')
+    fs.mkdirSync(dir, { recursive: true })
+    const ports = { store: w.store, cwd: w.cwd, storeDir, readLog: async () => EVENTS, config: CONFIG, now: () => '2026-11-02T21:00:00.000Z' }
+
+    fs.writeFileSync(path.join(dir, 'bad-journal.json'), '{not json')
+    const corrupt = await restoreRemoval(ports, 'bad-journal')
+    assert.match(corrupt.problems.join(' '), /unreadable/, 'a corrupt journal is named and skipped, never applied')
+
+    fs.writeFileSync(path.join(dir, 'vanished.json'), JSON.stringify({
+      journalId: 'vanished', at: 'x', cwd: w.cwd, status: 'applied',
+      entries: [{ sessionId: 'ghost-sess', number: 1, title: 't', startSeq: 0, endSeq: 3, path: 'p', sha256: 's', removedFiles: [] }],
+    }))
+    const vanished = await restoreRemoval(ports, 'vanished')
+    assert.match(vanished.problems.join(' '), /record vanished/, 'no registry row to attach the re-derivation to')
+
+    const saved = await saveSession({ events: EVENTS, sessionId: 'root-1', cwd: w.cwd, store: w.store, config: CONFIG, span: { fromSeq: 4, toSeq: 7 }, attemptSalt: 't2' })
+    fs.writeFileSync(path.join(dir, 'active.json'), JSON.stringify({
+      journalId: 'active', at: 'x', cwd: w.cwd, status: 'applied',
+      entries: [{ sessionId: 'root-1', number: saved.records[0]!.number, title: 't', startSeq: 4, endSeq: 7, path: saved.records[0]!.path, sha256: saved.records[0]!.sha256, removedFiles: [] }],
+    }))
+    const active = await restoreRemoval(ports, 'active')
+    assert.match(active.skipped.join(' '), /still ACTIVE/, 'refusing to restore OVER live knowledge')
+
+    const noRoot = await restoreRemoval({ ...ports, storeDir: path.join(w.cwd, 'nowhere') }, 'anything')
+    assert.match(noRoot.problems.join(' '), /store root unreadable/, 'a missing store root is a clean refusal')
+  } finally { w.dispose() }
+})

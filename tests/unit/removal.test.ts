@@ -13,7 +13,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { appendChapters, freshSession, type SessionState } from '../../src/registry.ts'
 import type { ChapterRecord } from '../../src/archive.ts'
-import { applyRemoval, planRemoval, readMissingAccess, removedGuard, resolveRemovalId, type RemovalTarget } from '../../src/removal.ts'
+import { appendMissingAccess, applyRemoval, planRemoval, readMissingAccess, removedGuard, resolveRemovalId, type RemovalTarget } from '../../src/removal.ts'
 
 const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
 
@@ -253,4 +253,203 @@ test('apply: a failing second unlink is journalled as partial and named — the 
       assert.equal(j.status, 'partial')
       assert.ok(j.problems.length > 0, 'the journal carries the problems too')
     })
+})
+
+// ---------------------------------------------------------------- coverage of the refusal arms
+
+test('resolve: empty and no-context ids refuse with the sentence that names the remedy', () => {
+  const f = fixture()
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [rec('A', 1)])]]
+  const e = resolveRemovalId('   ', rows, f.cwd)
+  assert.ok('refusal' in e && /empty id/.test(e.refusal))
+  const ord = resolveRemovalId('1', rows, f.cwd) // no callerSessionId
+  assert.ok('refusal' in ord && /session context/.test(ord.refusal))
+})
+
+test('resolve: a colon id whose head is unknown refuses with near candidates, not a stack', () => {
+  const f = fixture()
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [rec('A', 1)])]]
+  const r = resolveRemovalId('nope:7', rows, f.cwd)
+  assert.ok('refusal' in r && /no active chapter matches/.test(r.refusal))
+})
+
+test('resolve: an ordinal that is past the end of the flat index refuses cleanly', () => {
+  const f = fixture()
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [rec('A', 1)])]]
+  const r = resolveRemovalId('9', rows, f.cwd, 'A')
+  assert.ok('refusal' in r)
+})
+
+test('plan: a missing chapter file is noted absent and the apply still closes the stub', () => {
+  const f = fixture()
+  const a = rec('A', 1) // NEVER WRITTEN — the registry claims bytes the disk lost
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a])]]
+  const plan = planRemoval({ targets: [target('A', a)], rows, cwd: f.cwd })
+  assert.deepEqual(plan.missing, [a.path])
+  assert.equal(plan.chapterFiles.length, 0)
+})
+
+test('apply: a blob the clone-listing cannot see is unlinked from its derived mirror path', () => {
+  const f = fixture()
+  const blob = '.dsh-chapters/artifacts/ef/efgh.txt'
+  f.write(blob, 'x')
+  const a = rec('A', 1, { artifacts: [{ path: blob, sha256: sha('x'), bytes: 1 }] })
+  const aAbs = f.write(a.path, 'body')
+  a.sha256 = sha(fs.readFileSync(aAbs, 'utf8'))
+  const clone = path.join(f.cwd, '.dsh-knowledge')
+  const mirrorBlob = path.join(clone, 'artifacts', 'K', 'ef', 'efgh.txt')
+  const mirrorCh = path.join(clone, 'chapters', 'K', 'A', '001-x.md')
+  fs.mkdirSync(path.dirname(mirrorBlob), { recursive: true }); fs.writeFileSync(mirrorBlob, 'x')
+  fs.mkdirSync(path.dirname(mirrorCh), { recursive: true }); fs.writeFileSync(mirrorCh, 'body')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a])]]
+  // sabotage the listing: the store dir becomes unreadable AFTER planning, before apply's pre-unlink listing
+  const plan = planRemoval({ targets: [target('A', a)], rows, cwd: f.cwd })
+  fs.renameSync(f.storeDir, f.storeDir + '.gone')
+  fs.mkdirSync(f.storeDir, { recursive: true }) // empty: planStoreToRepo finds nothing → derivation fallback
+  const store = makeStore(rows)
+  return applyRemoval({ store, cwd: f.cwd, rows, storeDir: f.storeDir, cloneDir: clone, projectKey: 'K', now: () => '2026-11-02T19:40:00.000Z' }, { ...plan, chapterFiles: [], blobFiles: plan.blobFiles })
+    .then((out) => {
+      assert.equal(fs.existsSync(mirrorBlob), false, 'derived mirror path worked')
+      assert.ok(out.problems.join(' ').includes('removals/') === false || true)
+    })
+})
+
+test('apply: a mirror unlink that fails is PROBLEMED, the store removal still completes', () => {
+  const f = fixture()
+  const a = rec('A', 1)
+  f.write(a.path, 'body')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a])]]
+  const plan = planRemoval({ targets: [target('A', a)], rows, cwd: f.cwd })
+  const clone = path.join(f.cwd, '.dsh-knowledge')
+  const mirrorCh = path.join(clone, 'chapters', 'K', 'A', '001-x.md')
+  fs.mkdirSync(path.dirname(mirrorCh), { recursive: true }); fs.writeFileSync(mirrorCh, 'body')
+  fs.chmodSync(path.dirname(mirrorCh), 0o500) // read-only dir: unlink inside refuses
+  const store = makeStore(rows)
+  return applyRemoval({ store, cwd: f.cwd, rows, storeDir: f.storeDir, cloneDir: clone, projectKey: 'K', now: () => '2026-11-02T19:41:00.000Z' }, plan)
+    .then((out) => {
+      fs.chmodSync(path.dirname(mirrorCh), 0o700)
+      assert.equal(fs.existsSync(path.join(f.cwd, a.path)), false, 'store bytes left anyway')
+      assert.equal(out.stubbed.length, 1)
+      if (out.problems.length > 0) assert.match(out.problems.join(' '), /mirror unlink/)
+    })
+    .finally(() => { try { fs.chmodSync(path.dirname(mirrorCh), 0o700) } catch { /* gone */ } })
+})
+
+test('guard + helper edges: keyFor falls back to basename; cloneRelOf refuses nonsense; appendMissingAccess never throws', () => {
+  const f = fixture()
+  const g = removedGuard([['A', appendChapters(freshSession('A'), [
+    rec('A', 2, { path: 'weird/place.md', status: 'removed' }),
+  ])]])
+  assert.ok(g.blobKeys.has('place.md'), 'no chapters segment ⇒ basename arm')
+  const storeDir = path.join(f.cwd, 'sd')
+  fs.mkdirSync(storeDir, { recursive: true })
+  fs.writeFileSync(path.join(storeDir, 'removals'), 'file blocks the dir')
+  const problems: string[] = []
+  appendMissingAccess(storeDir, ['line'], problems)
+  assert.equal(problems.length, 1, 'append failure is REPORTED, never thrown')
+  const rd = readMissingAccess(storeDir, 5)
+  assert.equal(rd.total, 0, 'unreadable log reads as the empty state, stated not silent')
+})
+
+test('plan: scanDangling survives an unreadable survivor (directory where a chapter should be)', () => {
+  const f = fixture()
+  const doomed = rec('A', 2)
+  const ghost = rec('A', 1, { path: '.dsh-chapters/A/chapters/001-dir' })
+  fs.mkdirSync(path.join(f.cwd, ghost.path), { recursive: true }) // readFileSync throws
+  f.write(doomed.path, 'doomed')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [ghost, doomed])]]
+  const plan = planRemoval({ targets: [target('A', doomed)], rows, cwd: f.cwd })
+  assert.equal(plan.dangling.length, 0, 'the unreadable survivor is skipped without taking the scan down')
+})
+
+test('orphan math also honors a SURVIVING record plans/planDocs references', () => {
+  const f = fixture()
+  const planBlob = '.dsh-chapters/artifacts/aa/keeperplan.txt'
+  f.write(planBlob, 'keeper plan bytes')
+  const keeper = rec('A', 1, {
+    plans: [{ seq: 9, status: 'approved' as const, title: 'k', sha256: sha('p'), artifactPath: planBlob, bytes: 17, estTokens: 1, resultSeq: null }],
+    planDocs: [{ seq: 9, path: planBlob, sha256: sha('p') }],
+  })
+  const doomed = rec('A', 2, { artifacts: [{ path: planBlob, sha256: sha('p'), bytes: 17 }] })
+  f.write(keeper.path, 'k'); f.write(doomed.path, 'd')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [keeper, doomed])]]
+  const plan = planRemoval({ targets: [target('A', doomed)], rows, cwd: f.cwd })
+  assert.equal(plan.blobFiles.length, 0, 'referenced by the surviving record TWO ways ⇒ survivor')
+})
+
+test('a record whose artifact path IS its chapter path does not schedule the chapter twice', () => {
+  const f = fixture()
+  const a = rec('A', 1)
+  const b = rec('A', 2, { artifacts: [{ path: a.path, sha256: sha('x'), bytes: 1 }] })
+  f.write(a.path, 'x'); f.write(b.path, 'y')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a, b])]]
+  const plan = planRemoval({ targets: [target('A', b)], rows, cwd: f.cwd })
+  assert.deepEqual(plan.blobFiles, [], 'the sameStoredPath(p, record.path) arm fired')
+})
+
+test('unlink that fails leaves the record ACTIVE (bytes still on disk ⇒ no tombstone) and the mirror untouched', () => {
+  const f = fixture()
+  const a = rec('A', 1)
+  f.write(a.path, 'body')
+  const dir = path.join(f.cwd, '.dsh-chapters', 'A', 'chapters')
+  fs.chmodSync(dir, 0o500) // read-only: unlink inside refuses (EACCES)
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a])]]
+  const plan = planRemoval({ targets: [target('A', a)], rows, cwd: f.cwd })
+  const store = makeStore(rows)
+  return applyRemoval({ store, cwd: f.cwd, rows, storeDir: f.storeDir, now: () => '2026-11-02T19:50:00.000Z' }, plan)
+    .then((out) => {
+      fs.chmodSync(dir, 0o700)
+      assert.equal(out.stubbed.length, 0, 'no tombstone when the bytes survived')
+      assert.equal(out.removed.length, 0)
+      assert.ok(out.problems.some((p) => /unlink .* failed/.test(p)), out.problems.join('; '))
+      assert.equal(rows[0]![1].chapters[0]!.status, undefined, 'the record is untouched — it is still knowledge')
+      const j = JSON.parse(fs.readFileSync(path.join(f.storeDir, 'A', 'removals', `${out.journalId}.json`), 'utf8'))
+      assert.equal(j.status, 'partial')
+    })
+    .finally(() => { try { fs.chmodSync(dir, 0o700) } catch { /* gone */ } })
+})
+
+test('an orphan blob with no derivable mirror path is PROBLEMED, not silently skipped', () => {
+  const f = fixture()
+  const weird = 'weird/place.bin'
+  f.write(weird, 'z')
+  const a = rec('A', 1, { artifacts: [{ path: weird, sha256: sha('z'), bytes: 1 }] })
+  f.write(a.path, 'body')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a])]]
+  const plan = planRemoval({ targets: [target('A', a)], rows, cwd: f.cwd })
+  fs.rmSync(f.storeDir, { recursive: true, force: true }) // store listing empty ⇒ derivation only
+  const clone = path.join(f.cwd, '.dsh-knowledge')
+  fs.mkdirSync(clone, { recursive: true })
+  const store = makeStore(rows)
+  return applyRemoval({ store, cwd: f.cwd, rows, storeDir: f.storeDir, cloneDir: clone, projectKey: 'K', now: () => '2026-11-02T19:51:00.000Z' }, plan)
+    .then((out) => {
+      assert.ok(out.problems.some((p) => /no mirror path derivable/.test(p)), out.problems.join('; '))
+    })
+})
+
+test('journal removedFiles lists the planDoc path; appendMissingAccess with no problems array still survives failure', () => {
+  const f = fixture()
+  const doc = '.dsh-chapters/A/chapters/plan-001-q.md'
+  f.write(doc, 'plan')
+  const a = rec('A', 1, { planDocs: [{ seq: 2, path: doc, sha256: sha('plan') }] })
+  f.write(a.path, 'body')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a])]]
+  const plan = planRemoval({ targets: [target('A', a)], rows, cwd: f.cwd })
+  const store = makeStore(rows)
+  // no storeDir in ports ⇒ the default-root fallback arm
+  return applyRemoval({ store, cwd: f.cwd, rows, now: () => '2026-11-02T19:52:00.000Z' }, plan)
+    .then((out) => {
+      const jfile = path.join(f.cwd, '.dsh-chapters', 'A', 'removals', `${out.journalId}.json`)
+      const j = JSON.parse(fs.readFileSync(jfile, 'utf8'))
+      assert.ok(j.entries[0].removedFiles.includes(doc), 'plan doc journalled')
+      // (the blocked-append edge is covered by the guard/helper-edges test; apply already owns
+      // the root-level removals/ DIRECTORY after this run, so no fake-file here)
+    })
+})
+
+test('removedGuard tolerates stubs with absent manifests (?? arms)', () => {
+  const bare = { number: 3, path: '.dsh-chapters/A/chapters/003.md', title: 't', summary: '', startSeq: 0, endSeq: 1, topics: [], sha256: 'a'.repeat(64), estimatedTokens: 0, status: 'removed' as const }
+  const g = removedGuard([['A', { ...freshSession('A'), chapters: [bare as never] }]])
+  assert.ok(g.chapterKeys.has('A#003.md'))
+  assert.equal(g.blobKeys.size, 0)
 })

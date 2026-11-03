@@ -347,3 +347,13 @@ test('#255-found pre-existing bug, pinned: an UNCHANGED rebuild keeps every live
   assert.equal(buildIndexInClone(clone), false, 'identical corpus is an unchanged build')
   assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.md')), first, 'an unchanged rebuild deletes NOTHING')
 })
+
+test('#255 guard state (restored=0, skipped>0) still speaks in the steps', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'rehyd-skiponly-'))
+  const clone = path.join(base, 'clone')
+  const store = path.join(base, 'store')
+  const wf = (p: string, t: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t) }
+  wf(path.join(clone, 'chapters', 'K1', 'sessA', '002-y.md'), 'X')
+  const r = rehydrateStoreFromMirror(clone, store, 'K1', { chapterKeys: new Set(['sessA#002-y.md']), blobKeys: new Set() })
+  assert.deepEqual(r, { restored: 0, skippedRemoved: 1 }, 'the skip-only state is its own honest number')
+})
