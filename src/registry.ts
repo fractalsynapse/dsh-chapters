@@ -204,14 +204,25 @@ export function reservePlan(
  * stayed on disk — a chapter no TOC cites and no tool can find. Refusing is the only honest option.
  */
 /**
- * The ONE test for "may this chapter be shown as knowledge?" (#60). Every derived layer — the TOC a
- * child is seeded with, the enrichment queue, anything else that reads `state.chapters` — goes through
- * this predicate, because a repair that left a husk in the corpus would be a lie a later reader cannot
- * see past. Records written before this field existed are `undefined`, i.e. active: legacy archives
- * are never silently hidden by a new filter.
+ * The ONE test for "may this chapter be shown as knowledge?" (#60, widened by #255). Both tombstone
+ * statuses fail it: a `superseded` husk left by repair, and a `removed` stub whose bytes the operator
+ * deleted. Every derived layer — the TOC a child is seeded with, the flat index, the enrichment queue,
+ * anything else that reads `state.chapters` — goes through this predicate, because a second hand-rolled
+ * comparison is how a widened meaning silently fails to reach one layer (#59; the gate is
+ * tests/unit/one-predicate.test.ts). Records written before this field existed are `undefined`, i.e.
+ * active: legacy archives are never silently hidden by a new filter.
  */
-export function isActiveChapter(c: { status?: 'superseded' | undefined }): boolean {
-  return c.status !== 'superseded'
+export function isActiveChapter(c: { status?: 'superseded' | 'removed' | undefined }): boolean {
+  return c.status !== 'superseded' && c.status !== 'removed'
+}
+
+/**
+ * The ONE positive arm for the #255 tombstone (chapter-only status value — plan statuses share the
+ * word `superseded` but not this one). For auditors that must COUNT removed stubs, not hide them:
+ * the knowledge gate above, the count below, one status read each, both here (#59).
+ */
+export function isRemovedChapter(c: { status?: 'superseded' | 'removed' | undefined }): boolean {
+  return c.status === 'removed'
 }
 
 export function appendChapters(state: SessionState, records: readonly ChapterRecord[]): SessionState {
@@ -318,7 +329,9 @@ export function buildIndex(
   for (const sessionId of path) {
     const state = get(sessionId)
     if (state === undefined) continue
-    for (const chapter of [...state.chapters].sort((a, b) => a.number - b.number)) {
+    // #255: the flat index shows ONLY knowledge — tombstones (superseded, removed) fail the one
+    // predicate. This is what lets `/chapters-remove list` be the same view a child is seeded from.
+    for (const chapter of [...state.chapters].filter(isActiveChapter).sort((a, b) => a.number - b.number)) {
       entries.push({
         authorSession: sessionId,
         number: chapter.number,

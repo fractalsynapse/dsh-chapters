@@ -27,6 +27,7 @@
  */
 import { diagnosticWarn } from './diag.ts'
 import { formatWarnings } from './warnings.ts'
+import { isActiveChapter } from './registry.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import { lineageOf, type SessionEventLike } from './types.ts'
 import type { RegistryStore } from './store.ts'
@@ -326,7 +327,9 @@ export function makeChildArchiveListener(deps: ChildArchiveDeps): (session: unkn
         const gate = shouldForceChildArchive({
           header,
           lineageParent: (state0 as { parentSession?: string | null }).parentSession ?? (id.startsWith('ch-') ? 'continuation-id' : undefined),
-          chapterCount: state0.chapters.filter((c) => c.status !== 'superseded').length,
+          // #255: removed stubs are not knowledge either — the gate counts what IS knowledge,
+          // through the ONE predicate (the watermark line above still reads ALL records by design).
+          chapterCount: state0.chapters.filter(isActiveChapter).length,
           lastArchivedSeq: lastArchived,
           anchor,
           completedTurnsAboveWatermark: completed,

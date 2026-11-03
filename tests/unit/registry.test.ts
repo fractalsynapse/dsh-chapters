@@ -164,3 +164,37 @@ test('legacy records (no collections key) backfill to [] through the schema', as
   // a bad signature is rejected, not silently stored
   assert.throws(() => parseSessionState({ ...legacy, collections: [{ seqs: [], paths: [], commands: [], terms: [], size: 1, by: 'deterministic' }] }))
 })
+
+// ---------------------------------------------------------------- removal (#255) — the one predicate
+
+test('isActiveChapter excludes superseded AND removed; a legacy record (no status) stays active', async () => {
+  const { isActiveChapter } = await import('../../src/registry.ts')
+  assert.equal(isActiveChapter({}), true)
+  assert.equal(isActiveChapter({ status: 'superseded' }), false)
+  assert.equal(isActiveChapter({ status: 'removed' }), false)
+})
+
+test('buildIndex omits removed stubs — the list a human removes from IS the index a child is seeded with', () => {
+  const a = appendChapters(freshSession('A'), [chapter(1), chapter(2, { status: 'removed' }), chapter(3)])
+  const get = table({ A: a })
+  const entries = buildIndex(['A'], get, () => 'ok')
+  assert.deepEqual(entries.map((e) => e.number), [1, 3])
+})
+
+test('archiveWatermark counts removed stubs — deleting bytes never rewinds the watermark (#255 vs the #59 poison)', async () => {
+  const { archiveWatermark } = await import('../../src/continue-core.ts')
+  assert.equal(archiveWatermark([chapter(1), chapter(5, { status: 'removed', endSeq: 55 })]), 55)
+  assert.equal(archiveWatermark([chapter(1)]), 15)
+})
+
+test('a removed stub record round-trips through the registry schema (status and removedAt survive)', async () => {
+  const { parseSessionState } = await import('../../src/store.ts')
+  const row = {
+    parentSession: null, rootSession: 's1', nextChapterNumber: 6,
+    chapters: [chapter(5, { status: 'removed', removedAt: '2026-11-02T19:00:00.000Z' })],
+    reservations: {}, plans: {}, finalized: {},
+  }
+  const parsed = parseSessionState(row)
+  assert.equal(parsed.chapters[0]!.status, 'removed')
+  assert.equal(parsed.chapters[0]!.removedAt, '2026-11-02T19:00:00.000Z')
+})
