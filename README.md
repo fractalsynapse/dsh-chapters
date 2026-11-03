@@ -17,8 +17,9 @@ dsh plugin --profile web update @treeseed/dsh-chapters   # keep current — rest
 ```
 
 `--profile <name>` is required on every `dsh plugin` command (`web` = the browser harness profile).
-After restart you have the fork button, seven agent tools, nine `/chapters-*` commands — and the
-optional `chapters` preset that routes `/compact` through the zero-token engine.
+After restart you have the fork button, seven agent tools, twelve `/chapters-*` commands (through
+`0.2.17`, including `/chapters-remove`) — and the optional `chapters` preset that routes `/compact`
+through the zero-token engine.
 
 ## Find the right page for your question
 
@@ -29,6 +30,7 @@ optional `chapters` preset that routes `/compact` through the zero-token engine.
 | run your first compaction/continuation | [§1 Quickstart](https://treeseed-ai.github.io/dsh-chapters/start/quickstart/) → [§2 Your first continuation](https://treeseed-ai.github.io/dsh-chapters/start/first-continuation/) |
 | link a shared knowledge pool (git or TreeDX) | [§3 Link a knowledge pool](https://treeseed-ai.github.io/dsh-chapters/start/link-pool/) · [§10 The pool](https://treeseed-ai.github.io/dsh-chapters/knowledge/pool/) |
 | run any command — exact syntax, scope, outputs | [§15 Commands](https://treeseed-ai.github.io/dsh-chapters/reference/commands/) |
+| delete a bad chapter (the wrong-project prompt) | [§15 Commands → `/chapters-remove`](https://treeseed-ai.github.io/dsh-chapters/reference/commands/#chapters-remove--delete-a-bad-chapter-for-real) |
 | know what the agent-facing tools do | [§16 Agent tools](https://treeseed-ai.github.io/dsh-chapters/reference/tools/) |
 | tune a threshold, budget, or trigger | [§17 Configuration](https://treeseed-ai.github.io/dsh-chapters/reference/configuration/) |
 | understand *why not summaries* / the economics | [§5 Why not summaries?](https://treeseed-ai.github.io/dsh-chapters/concepts/why-not-summaries/) |
