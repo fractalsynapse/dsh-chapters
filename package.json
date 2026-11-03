@@ -1,6 +1,6 @@
 {
   "name": "@fractalsynapse/dsh-chapters",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "description": "dsh plugin: verbatim chapter archive + zero-token index for small-context models",
   "type": "module",
   "license": "Apache-2.0",
@@ -66,7 +66,8 @@
     "docs:dev": "npm --prefix site run dev",
     "docs:build": "npm --prefix site run build",
     "mining:probe": "node scripts/mining-probe.mjs",
-    "llm:where": "node -e \"import('./scripts/llm.mjs').then(async m=>{const t=await m.resolve({});console.log(t.base,t.model,t.regime,'| credential:',m.apiKeySource(),'| key found:',m.apiKey()!==null)})\""
+    "llm:where": "node -e \"import('./scripts/llm.mjs').then(async m=>{const t=await m.resolve({});console.log(t.base,t.model,t.regime,'| credential:',m.apiKeySource(),'| key found:',m.apiKey()!==null)})\"",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.0",
