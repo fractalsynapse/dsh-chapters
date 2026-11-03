@@ -43,10 +43,10 @@ node -e '
   try { pkg = JSON.parse(fs.readFileSync(file, "utf8")) } catch { /* fresh profile */ }
   pkg.name ??= "dsh-profile-web"; pkg.private = true
   pkg.dependencies ??= {}
-  pkg.dependencies["@treeseed/dsh-chapters"] = "file:" + root
+  pkg.dependencies["@fractalsynapse/dsh-chapters"] = "file:" + root
   pkg.dsh ??= {}
   pkg.dsh.profile ??= {}
-  pkg.dsh.profile.bundles = [...new Set(["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@treeseed/dsh-chapters", ...(pkg.dsh.profile.bundles || [])])]
+  pkg.dsh.profile.bundles = [...new Set(["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "@fractalsynapse/dsh-chapters", ...(pkg.dsh.profile.bundles || [])])]
   pkg.dsh.profile.patchReload ??= "live"
   fs.writeFileSync(file, JSON.stringify(pkg, null, 2))
 ' "$ROOT" "$HOME_ARG"

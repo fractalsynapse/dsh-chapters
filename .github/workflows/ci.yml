@@ -145,7 +145,7 @@ jobs:
     # gates it in the deterministic job. The cost of staying advisory was measured tonight: a poisoned
     # suite corpus (#178) failed this job, the run-level conclusion still read `success`, and a merge
     # proceeded on that reading. Restoring the gate is #92's own recorded consequence, not a reversal.
-    # See https://github.com/treeseed-ai/dsh-chapters/
+    # See https://github.com/fractalsynapse/dsh-chapters/
     # issues/92, which also records the condition that restores it (the `suite`/`enrich`/`heavy` subset
     # green in replay on staging, with `npm run corpus:check` matching the build). The deterministic
     # plane above stays blocking, so code that does not compile or does not pass tests still cannot land.

@@ -11,14 +11,14 @@ with its own `package.json` and `node_modules` (`~/.dsh/profiles/<profile>/`), s
 the path this project documents and uses:
 
 ```bash
-cd ~/.dsh/profiles/web && npm i @treeseed/dsh-chapters@latest
+cd ~/.dsh/profiles/web && npm i @fractalsynapse/dsh-chapters@latest
 ```
 
 `@latest` is deliberate: it is the only instruction that cannot go stale. The host also ships
-`dsh plugin --profile <name> add @treeseed/dsh-chapters` — see [§23](/operations/install/) for both paths
+`dsh plugin --profile <name> add @fractalsynapse/dsh-chapters` — see [§23](/operations/install/) for both paths
 and for what this project relies on.
 
-The current release is the one the [npm page](https://www.npmjs.com/package/@treeseed/dsh-chapters) calls
+The current release is the one the [npm page](https://www.npmjs.com/package/@fractalsynapse/dsh-chapters) calls
 `latest` — every version ships with a build provenance attestation and a green deterministic + tape-replay
 CI run behind it ([§26](/operations/changelog/)).
 
@@ -54,7 +54,7 @@ project". Linking a pool widens that door to every machine's work ([Part III](/k
 ## Two traps we documented so you don't rediscover them
 
 - **Slash commands need a started conversation.** On the brand-new session *draft* screen, the composer sends text as the first message rather than running a command — send any short opener first (or just ask: *"check our chapters status"*), then commands behave. This is a harness draft-screen behavior, and the plugin's docs are candid about it.
-- **Restart after upgrade.** Reinstalling swaps files on disk; the running process holds the old bundle until restart (`npm i @treeseed/dsh-chapters@latest` in the profile, then restart `dsh web` — [§23](/operations/install/)).
+- **Restart after upgrade.** Reinstalling swaps files on disk; the running process holds the old bundle until restart (`npm i @fractalsynapse/dsh-chapters@latest` in the profile, then restart `dsh web` — [§23](/operations/install/)).
 
 ## What's next
 

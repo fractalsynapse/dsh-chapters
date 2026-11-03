@@ -19,7 +19,7 @@
 #   file, its `config` IS the preset definition (`id/name/description/order/plugins`), and
 #   because it is an ordinary Loader entry you can see it in the plugin list and the config
 #   editor, override it from your profile patch, or `disabled: true` it.
-#     Its row module is ours — '@treeseed/dsh-chapters/preset' (src/preset.ts) — not the
+#     Its row module is ours — '@fractalsynapse/dsh-chapters/preset' (src/preset.ts) — not the
 #   host's '@deepseek-ai/dsh-agent-preset'. It mirrors that plugin line for line (injects
 #   `agentPresets`, preserves child `!!js` expressions, yields the registry disposer to
 #   Cordis) and adds one thing: rows this host cannot import are dropped at boot and NAMED,
@@ -172,15 +172,15 @@
 # ---------------------------------------------------------------------------
 
 - insert:
-    - id: '@treeseed/dsh-chapters'
-      name: '@treeseed/dsh-chapters'
+    - id: '@fractalsynapse/dsh-chapters'
+      name: '@fractalsynapse/dsh-chapters'
 
 # ── the `chapters` agent preset — a DECLARATION ROW, exactly as @deepseek-ai/dsh-web-app
 #    ships its own presets/standard.patch.yml. Row id `preset-chapters` follows the host's
 #    `preset-<id>` convention; `config.id: chapters` is DURABLE STATE (every continuation
 #    child records it as `agent-preset/selected`, so renaming it orphans those sessions).
 #
-#    The row's `name` is OUR plugin (`@treeseed/dsh-chapters/preset`), which mirrors
+#    The row's `name` is OUR plugin (`@fractalsynapse/dsh-chapters/preset`), which mirrors
 #    @deepseek-ai/dsh-agent-preset line for line — `inject: ['agentPresets']`,
 #    `static [EntryGroup.key] = true` so child `!!js` expressions survive until the child
 #    activates, `[Service.init]` yields the registry disposer so Cordis owns its lifetime —
@@ -205,7 +205,7 @@
 #    are not carried here (toolFilter was one — alpha.4 throws on it).
 - insert:
     - id: preset-chapters
-      name: '@treeseed/dsh-chapters/preset'
+      name: '@fractalsynapse/dsh-chapters/preset'
       config:
         id: chapters
         name: Chapters
@@ -277,7 +277,7 @@
               toolResultPruner: true
             config:
               - id: chapters-engine
-                name: '@treeseed/dsh-chapters/engine'
+                name: '@fractalsynapse/dsh-chapters/engine'
                 config:
                   thresholdRatio: 0.9
                   # #140: bound the base engine's pressure headroom. Its default (65,536) is a reservation for a routed

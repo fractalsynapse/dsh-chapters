@@ -103,7 +103,7 @@ current.** Nothing reads `$DSH_HOME/.agent-presets` any more; a preset is an `@d
 *declaration row*, and the chapters preset IS one now: `preset-chapters`, inserted by our own bundle patch,
 with the preset definition in its `config` — so it is a visible Loader entry you can inspect, override, or
 `disabled: true` from a profile patch, exactly like the host's `preset-standard`. **Its row module is ours**
-(`@treeseed/dsh-chapters/preset`, `src/preset.ts`), not the host package: it mirrors the host's plugin line
+(`@fractalsynapse/dsh-chapters/preset`, `src/preset.ts`), not the host package: it mirrors the host's plugin line
 for line (`inject: ['agentPresets']`, `static [EntryGroup.key] = true` so child `!!js` expressions survive
 until the child activates, `[Service.init]` yielding the registry disposer so **Cordis** owns the
 registration's lifetime) and adds drop-what-will-not-load. Why not name the host package: one unresolvable
@@ -590,7 +590,7 @@ behaviour is filed as its own bug with per-pass numbers as the first acceptance 
 
 ### 2026-10-28 (late night) — a release shipped, an anchor gate became real, and a tally stopped being a claim (#139–#158)
 
-**The release.** `@treeseed/dsh-chapters@0.2.2-dev.2` is on npm — registry says `versions: [… 0.2.1, 0.2.2-dev.2]`,
+**The release.** `@fractalsynapse/dsh-chapters@0.2.2-dev.2` is on npm — registry says `versions: [… 0.2.1, 0.2.2-dev.2]`,
 `dist-tags: {latest: 0.2.1, dev.2: 0.2.2-dev.2}`, so the prerelease rides its own tag and `latest` stays stable. Verified
 against `registry.npmjs.org` directly, because a local `npm view` claimed the version was missing: the CLI was serving
 stale data and the registry is the source of record. It carries #140 (32K hosts had *no* relief — the base engine's

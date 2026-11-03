@@ -10,7 +10,7 @@
  *                                package.json (`src/data/plugin-version.mjs`)
  *   the changelog (§26)        → literal versions, forever: it is the record
  *
- * So a pinned `@treeseed/dsh-chapters@1.2.3` or a "latest is 1.2.3" anywhere
+ * So a pinned `@fractalsynapse/dsh-chapters@1.2.3` or a "latest is 1.2.3" anywhere
  * outside the changelog is a defect, and the build says so with the file and
  * line rather than shipping the lie. Patterns are narrow on purpose: a historical
  * attribution ("since 0.1.4 …") in a concepts or evidence page is a true record
@@ -25,7 +25,7 @@ const DOCS = join(HERE, '..', 'src', 'content', 'docs')
 const EXEMPT = [join(DOCS, 'operations', 'changelog.md')]
 
 const RULES = [
-  { re: /@treeseed\/dsh-chapters@\d/, why: 'a pinned install/update instruction — say `@latest`, or interpolate the build-time version' },
+  { re: /@(?:fractalsynapse|treeseed)\/dsh-chapters@\d/, why: 'a pinned install/update instruction — say `@latest`, or interpolate the build-time version' },
   { re: /\b(?:latest|current) (?:release|version) is [v\d]/i, why: 'a hand-typed "latest is X" claim — it goes stale on the next ship' },
 ]
 
