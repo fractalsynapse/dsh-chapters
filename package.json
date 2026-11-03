@@ -1,6 +1,6 @@
 {
-  "name": "@treeseed/dsh-chapters",
-  "version": "0.2.17",
+  "name": "@fractalsynapse/dsh-chapters",
+  "version": "0.2.18",
   "description": "dsh plugin: verbatim chapter archive + zero-token index for small-context models",
   "type": "module",
   "license": "Apache-2.0",
@@ -137,11 +137,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/treeseed-ai/dsh-chapters.git"
+    "url": "git+https://github.com/fractalsynapse/dsh-chapters.git"
   },
-  "homepage": "https://github.com/treeseed-ai/dsh-chapters#readme",
+  "homepage": "https://github.com/fractalsynapse/dsh-chapters#readme",
   "bugs": {
-    "url": "https://github.com/treeseed-ai/dsh-chapters/issues"
+    "url": "https://github.com/fractalsynapse/dsh-chapters/issues"
   },
   "engines": {
     "node": ">=24"

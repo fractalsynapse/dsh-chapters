@@ -37,7 +37,7 @@ That is llama.cpp KV **capacity**, not dsh-chapters. On a single-slot server, in
 ### I updated the plugin but nothing changed
 
 Restart `dsh web` — bundles load at boot, so a swap on disk is invisible until then:
-`npm i @treeseed/dsh-chapters@latest` in the profile directory, restart, and `npm ls @treeseed/dsh-chapters`
+`npm i @fractalsynapse/dsh-chapters@latest` in the profile directory, restart, and `npm ls @fractalsynapse/dsh-chapters`
 in that same directory tells you which version the next boot will load. Same applies after an upgrade that
 changes `cordis.patch.yml` defaults ([§23](/operations/install/)).
 

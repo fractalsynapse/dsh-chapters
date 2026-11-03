@@ -30,7 +30,7 @@ test('the REAL shipped bundle patch still declares the preset as a row we can pi
   const out = renderPinnedPreset(SHIPPED, { thresholdRatio: '0.75', artifactStoreRoot: '/tmp/store-41731' })
   assert.match(out, /^- id: preset-chapters/, 'rendered at PROFILE level (no leading indent)')
   assert.ok(!out.includes('\n    - id: preset-chapters'), 'the shipped 4-space indent must be dedented')
-  assert.match(out, /name: '@treeseed\/dsh-chapters\/preset'/, 'the row keeps its module — a config-only row would not register')
+  assert.match(out, /name: '@fractalsynapse\/dsh-chapters\/preset'/, 'the row keeps its module — a config-only row would not register')
   assert.match(out, /- id: chapters-engine/, 'the realm engine row survives the copy')
   assert.match(out, /- id: persona/, 'and so does the rest of the preset — a partial row would delete the plugins')
   assert.match(out, /thresholdRatio: 0\.75/, 'the pin lands')

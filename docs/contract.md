@@ -471,7 +471,7 @@ running", the preset is simply absent — and a session's preset id is **durable
 to OPEN while its log sits there intact.
 
 **This bundle DOES ship the row — in its one existing patch layer, with our own row module.**
-`cordis.patch.yml` ends with `- insert: [{id: preset-chapters, name: '@treeseed/dsh-chapters/preset',
+`cordis.patch.yml` ends with `- insert: [{id: preset-chapters, name: '@fractalsynapse/dsh-chapters/preset',
 config: <the preset definition>}]`, so the preset is an ordinary Loader entry: visible in the plugin
 list and `dsh --dump-default-config`, overridable or disable-able from a profile patch, positioned by
 `config.order`. The row module (`src/preset.ts`) mirrors `@deepseek-ai/dsh-agent-preset`'s plugin line

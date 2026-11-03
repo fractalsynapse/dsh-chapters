@@ -4,9 +4,9 @@ description: Every version, what it fixed, and the incidents that found them —
 lastUpdated: true
 ---
 
-Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
+Releases publish automatically from a bare-semver tag. Since **#261** the publish authenticates with an npm org token held in the `Production` environment (before it: OIDC trusted publishing); every CI-published version still carries a **provenance attestation**, signed from the run's OIDC identity, tying the tarball to the exact repo, workflow run, and commit. The publish itself is gated on the full deterministic suite under the coverage gate; the tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. The package name moved with the org: **`@fractalsynapse/dsh-chapters`** from 0.2.18 — `@treeseed/dsh-chapters` freezes at 0.2.16 and answers to `npm deprecate` pointing at the new scope. **0.2.17 is a dead tag**: it was cut mid-migration, its publish was refused by the old trusted-publisher binding (nothing ever shipped under it), and pushed tags are immutable — the number names that commit forever, so the ship skips to 0.2.18. 0.1.0, the one manual ship, predates attestation.
 
-### 0.2.17 — 2026-11-02 · `/chapters-remove`: bad bytes leave the memory
+### 0.2.18 — 2026-11-02 · `/chapters-remove`: bad bytes leave the memory — and the home is `fractalsynapse`
 
 The failure this ships against is human and precise: a prompt meant for another project, typed into
 this project's session. The contaminated turns archive, and from that boundary on **every** derived

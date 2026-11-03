@@ -97,13 +97,13 @@ COPY dev/install/profile-sdk-cordis.patch.yml ./
 # every container then dies at JSON.parse in a restart loop (#19). printf is
 # one logical line and survives both builders; %s is filled by the shell from
 # $PROFILE_DIR (the Dockerfile ${} was expanded before /bin/sh ever saw it).
-RUN printf '{\n  "name": "dsh-profile-web",\n  "private": true,\n  "dependencies": {\n    "@jiangzhenguo/dsh-codegraph": "github:jiangzhenguo/dsh-codegraph",\n    "@treeseed/dsh-chapters": "file:/app",\n    "dsh-tinyfish-search": "0.15.0"\n  },\n  "dsh": {\n    "profile": {\n      "bundles": [\n        "@deepseek-ai/dsh-base",\n        "@deepseek-ai/dsh-web-app",\n        "dsh-tinyfish-search",\n        "@treeseed/dsh-chapters",\n        "@jiangzhenguo/dsh-codegraph"\n      ]\n    }\n  }\n}\n' > "${PROFILE_DIR}/package.json"
+RUN printf '{\n  "name": "dsh-profile-web",\n  "private": true,\n  "dependencies": {\n    "@jiangzhenguo/dsh-codegraph": "github:jiangzhenguo/dsh-codegraph",\n    "@fractalsynapse/dsh-chapters": "file:/app",\n    "dsh-tinyfish-search": "0.15.0"\n  },\n  "dsh": {\n    "profile": {\n      "bundles": [\n        "@deepseek-ai/dsh-base",\n        "@deepseek-ai/dsh-web-app",\n        "dsh-tinyfish-search",\n        "@fractalsynapse/dsh-chapters",\n        "@jiangzhenguo/dsh-codegraph"\n      ]\n    }\n  }\n}\n' > "${PROFILE_DIR}/package.json"
 
 # SDK profile manifest (#25): same plugin set as web, sdk-app bundle instead of
 # web-app — hosted agents keep chapters/codegraph/tinyfish AND the chapters
 # preset (preset-chapters rides our bundle patch, mounted via agent-presets).
 # Same printf discipline as above — no heredoc on this builder.
-RUN mkdir -p "$DSH_HOME/profiles/sdk" && printf '{\n  "name": "dsh-profile-sdk",\n  "private": true,\n  "dependencies": {\n    "@jiangzhenguo/dsh-codegraph": "github:jiangzhenguo/dsh-codegraph",\n    "@treeseed/dsh-chapters": "file:/app",\n    "dsh-tinyfish-search": "0.15.0"\n  },\n  "dsh": {\n    "profile": {\n      "bundles": [\n        "@deepseek-ai/dsh-base",\n        "@deepseek-ai/dsh-sdk-app",\n        "dsh-tinyfish-search",\n        "@treeseed/dsh-chapters",\n        "@jiangzhenguo/dsh-codegraph"\n      ]\n    }\n  }\n}\n' > "$DSH_HOME/profiles/sdk/package.json"
+RUN mkdir -p "$DSH_HOME/profiles/sdk" && printf '{\n  "name": "dsh-profile-sdk",\n  "private": true,\n  "dependencies": {\n    "@jiangzhenguo/dsh-codegraph": "github:jiangzhenguo/dsh-codegraph",\n    "@fractalsynapse/dsh-chapters": "file:/app",\n    "dsh-tinyfish-search": "0.15.0"\n  },\n  "dsh": {\n    "profile": {\n      "bundles": [\n        "@deepseek-ai/dsh-base",\n        "@deepseek-ai/dsh-sdk-app",\n        "dsh-tinyfish-search",\n        "@fractalsynapse/dsh-chapters",\n        "@jiangzhenguo/dsh-codegraph"\n      ]\n    }\n  }\n}\n' > "$DSH_HOME/profiles/sdk/package.json"
 
 # Create empty cordis roots (patches arrive per boot via the entrypoint)
 RUN echo '[]' > "${PROFILE_DIR}/cordis.yml" && echo '[]' > "$DSH_HOME/profiles/sdk/cordis.yml"
@@ -115,9 +115,9 @@ RUN echo '[]' > "${PROFILE_DIR}/cordis.yml" && echo '[]' > "$DSH_HOME/profiles/s
 # every dev plugin skipped at boot (#19). No swallow: a broken install fails the
 # image build loudly. The sdk profile (#25) gets the identical plugin closure.
 WORKDIR ${PROFILE_DIR}
-RUN npm install --omit=dev --legacy-peer-deps && test -d node_modules/@treeseed/dsh-chapters
+RUN npm install --omit=dev --legacy-peer-deps && test -d node_modules/@fractalsynapse/dsh-chapters
 WORKDIR $DSH_HOME/profiles/sdk
-RUN npm install --omit=dev --legacy-peer-deps && test -d node_modules/@treeseed/dsh-chapters
+RUN npm install --omit=dev --legacy-peer-deps && test -d node_modules/@fractalsynapse/dsh-chapters
 
 # The plugin imports its @deepseek-ai/* peers from ITS OWN tree first: a bare
 # `import('@deepseek-ai/schemastery')` inside /app/lib resolves relative to

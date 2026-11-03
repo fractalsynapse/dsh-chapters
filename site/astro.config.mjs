@@ -2,7 +2,7 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const SITE = 'https://treeseed-ai.github.io/dsh-chapters/';
+const SITE = 'https://fractalsynapse.github.io/dsh-chapters/';
 const BASE = new URL(SITE).pathname; // '/dsh-chapters/' — one source for base + link rewriting
 
 // Cookie-first theme sync: reads dsh-theme before paint, seeds Starlight's
@@ -89,10 +89,10 @@ export default defineConfig({
       ],
       favicon: '/favicon.svg',
       lastUpdated: true,
-      editLink: { pattern: 'https://github.com/treeseed-ai/dsh-chapters/edit/main/site/$filepath' },
+      editLink: { pattern: 'https://github.com/fractalsynapse/dsh-chapters/edit/main/site/$filepath' },
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/treeseed-ai/dsh-chapters' },
-        { icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/@treeseed/dsh-chapters' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/fractalsynapse/dsh-chapters' },
+        { icon: 'npm', label: 'npm', href: 'https://www.npmjs.com/package/@fractalsynapse/dsh-chapters' },
       ],
       sidebar: [
         { label: 'Part I · First Contact', items: [
