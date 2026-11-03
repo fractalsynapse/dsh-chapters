@@ -126,6 +126,26 @@ jobs:
             exit 1
           fi
 
+      # The published artifact must be the build it claims. Measured cost of NOT
+      # checking: a manual `npm publish` from a stale working tree shipped 0.2.20
+      # whose lib/version.js still said 0.2.18 — a version-manifest lie sat as
+      # `latest` until a human noticed. CI cannot have that failure mode (it builds
+      # clean), so this step proves it for every ship: fetch the tarball npm stored,
+      # assert manifest and bundle agree with the tag.
+      - name: verify the published bundle is the build it claims
+        if: ${{ !inputs.dry_run }}
+        run: |
+          V="$(node -p "require('./package.json').version")"
+          ok=""
+          for i in 1 2 3 4 5 6; do
+            if curl -fsSL "https://registry.npmjs.org/@fractalsynapse/dsh-chapters/-/dsh-chapters-${V}.tgz" -o /tmp/published.tgz; then ok=1; break; fi
+            sleep 10
+          done
+          [ -n "$ok" ] || { echo "::error::published tarball for ${V} not fetchable after 6 tries"; exit 1; }
+          tar -xzf /tmp/published.tgz package/lib/version.js -O | grep -F "'${V}'" >/dev/null || { echo "::error::published ${V} tarball carries a stale lib/version.js — deprecate this version and re-cut"; exit 1; }
+          tar -xzf /tmp/published.tgz package/package.json -O | grep -F "\"version\": \"${V}\"" >/dev/null || { echo "::error::published tarball manifest does not carry ${V}"; exit 1; }
+          echo "bundle self-check OK: manifest and lib/version.js both say ${V}"
+
       - name: shipped
         if: ${{ !inputs.dry_run }}
         run: |
