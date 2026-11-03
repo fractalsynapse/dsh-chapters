@@ -6,6 +6,48 @@ lastUpdated: true
 
 Releases publish automatically from a bare-semver tag via **npm trusted publishing (OIDC)**. The publish itself is gated on the full deterministic suite under the coverage gate; the eight-segment tape-replay acceptance chain runs in CI on every push to `main`, so a release is always cut from a green acceptance run. Each CI-published version carries a provenance attestation tying it back to this repo, that workflow run, and that commit — 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.17 — 2026-11-02 · `/chapters-remove`: bad bytes leave the memory
+
+The failure this ships against is human and precise: a prompt meant for another project, typed into
+this project's session. The contaminated turns archive, and from that boundary on **every** derived
+surface — TOC notices, index shards, `chapters_search`, enrichment — carries the wrong project's
+context. Repair (#60) supersedes damage and keeps the bytes; nothing before this release could
+remove contamination for real. The maintainer's decision moved the guidance with the feature: the
+store is append-only **toward damage**, and the one sanctioned deletion is operator removal of
+**bad data**. *Bad bytes leave the memory; the log is what lets you admit you were wrong.*
+
+`/chapters-remove` (operator-only, dry-run by default — the human made the mistake, the human pulls
+the trigger): `list` shows exactly the TOC a child would be seeded with, ids included; `find`
+searches the pool (or the local store when unlinked) and maps hits to removable ids; the dry-run
+prints the deletion set by file and byte plus the dangling report — surviving chapters that still
+cite the doomed file, the operator's "does the referrer stay?" list; `apply` journals under
+`<tree>/removals/` **before** the first unlink, deletes chapter + orphaned artifacts + plan docs
+from store AND mirror (shared content-addressed blobs survive — orphan math), flips the registry
+record to a `status: 'removed'` stub that holds the watermark so no auto-archive moment can
+re-capture the poisoned span, and pushes through the plane scheduler; `report` reads the
+missing-access ledger; `restore <journal-id>` RE-DERIVES the span from the durable log through the
+same save core every door uses — a new number, byte-identical content, `repairs[].class =
+operator-restore`. The durable log is never touched; already-seeded child TOCs keep their recorded
+text (their dead citations are reported, not rewritten); git history of the pool may retain bytes —
+accepted, in the maintainer's words. Scope limit stated rather than hidden: v1 is single-machine
+correct — #256 carries cross-machine tombstones.
+
+Two defects surfaced by building it, both fixed here. **`docs/architecture.md` had been truncated
+to a 20-byte self-referential stub** by commit `638c3bc` (#76) eleven days earlier — every AGENTS.md
+pointer into it had been pointing at nothing; restored from `4d08eef`. And the index's stale-shard
+cleanup compared bare slugs against `*.md` filenames — matched nothing — so every *unchanged* sync
+pass **deleted all topic shards**, while manifest pruning never flipped `changed` and a shrinking
+corpus rebuilt nothing. One filename-correct sweep now runs on both branches, and pruning is a
+change. The registry's zod schema, meanwhile, was silently STRIPPING `status`, `supersededBy` and
+`repairs` on parse — repair provenance rode that hole; all four fields round-trip now and a
+source-shape gate (`one-predicate.test.ts`) makes a second status predicate anywhere in `src/` a
+red build.
+
+The prompt-byte anchor moved by exactly ONE token — the new command catalog `description` — and no
+recorded request byte changed: tape prefixes carry messages, not command text. The nine-leg
+acceptance chain replayed green on the untouched corpus and the stamp was re-taken on that
+measurement; zero re-records. Deterministic: 1,431 rows, both typechecks, the coverage gate cleared at 85.04% branches.
+
 ### 0.2.16 — 2026-11-02 · a page reload costs zero chapters-prompt commands
 
 The drumbeat was already gone — the maintainer's own live log: 5 pulls in 8 hours, every one tied to something real (turn-end confirms, mount discovery after reloads). But their rule is absolute and they chose the strictest policy by name: **two reloads producing two visible `state` nodes still reads as the same problem from the chair.** The last-known state lived only in memory; now it persists per session in localStorage (`dsh.chapters.promptState.<id>` — the host's own namespacing convention), written through by every honest reply and by the off button. A cold tab renders the last offer with ZERO commands. Reads are shape-validated, bounded to the newest 50 sessions, and silent-fallback on private-mode/quota failure; freshness semantics are unchanged — turn boundaries still refresh through the pulse paths that exist. First-ever visit to a session still discovers once: nothing invents state from nothing.
