@@ -496,3 +496,110 @@ function cloneRelOf(stored: string, projectKey: string): string | null {
   if (ai >= 0 && ai < segs.length - 1) return path.join('artifacts', projectKey, ...segs.slice(ai + 1))
   return null
 }
+
+// ------------------------------------------------------------------ restore (re-derivation)
+
+import { saveSession, type SaveSessionConfig } from './save-core.ts'
+import { coveringChapter, markSupersededBy } from './repair.ts'
+import type { SessionEventLike } from './types.ts'
+
+export interface RestorePorts {
+  store: RegistryStore
+  cwd: string
+  storeDir: string
+  /** The payload-bearing durable-log read (#58's contract) — never a metadata-only record list. */
+  readLog(sessionId: string): Promise<SessionEventLike[] | null>
+  config: SaveSessionConfig
+  now: () => string
+}
+
+export interface RestoreOutcome {
+  journalId: string
+  /** `sid:number → ch.N` per entry whose span re-rendered and committed under a NEW number. */
+  restored: string[]
+  /** Legitimate no-ops, stated: already superseded, still-active, span already covered. */
+  skipped: string[]
+  /** Failures with names: no journal, no log, rendered nothing, vanished record. */
+  problems: string[]
+}
+
+/**
+ * Reversal is RE-DERIVATION (#255): the journaled span is re-rendered from the session's durable
+ * log through the SAME save core every door calls — a repaired chapter is byte-for-byte a normal
+ * chapter, and so is a restored one. The number is NEW (a spent number stays spent; identity is
+ * `(number, sha256)`); the removed stub flips to `superseded` with `repairs[].class =
+ * 'operator-restore'`, which is how an audit tells a restore from a repair. The log is never
+ * touched. A span that renders nothing REFUSES (never commit an empty archive); an unreadable log
+ * is UNRECOVERABLE and said so. One journal id can span trees: apply wrote one per affected tree,
+ * so restore collects entries from every `<tree>/removals/<id>.json`.
+ */
+export async function restoreRemoval(ports: RestorePorts, journalId: string): Promise<RestoreOutcome> {
+  const restored: string[] = []
+  const skipped: string[] = []
+  const problems: string[] = []
+  type Entry = { sessionId: string; e: Journal['entries'][number] }
+  const entries: Entry[] = []
+  let trees: string[] = []
+  try {
+    trees = fs.readdirSync(ports.storeDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)
+  } catch (error) {
+    return { journalId, restored, skipped, problems: [`store root unreadable (${String((error as Error)?.message ?? error)}) — no journal can be read`] }
+  }
+  let found = 0
+  for (const tree of trees) {
+    const file = path.join(ports.storeDir, tree, 'removals', `${journalId}.json`)
+    if (!fs.existsSync(file)) continue
+    found += 1
+    try {
+      const j = JSON.parse(fs.readFileSync(file, 'utf8')) as Journal
+      for (const e of j.entries ?? []) entries.push({ sessionId: e.sessionId, e })
+    } catch (error) {
+      problems.push(`journal ${journalId} in ${tree} is unreadable (${String((error as Error)?.message ?? error)}) — its entries were NOT restored`)
+    }
+  }
+  if (found === 0) return { journalId, restored, skipped, problems: [`no journal ${journalId} under ${ports.storeDir}/*/removals/ — apply printed the id it wrote; nothing was restored`] }
+
+  for (const { sessionId, e } of entries) {
+    const st = await ports.store.get(sessionId)
+    const stub = st.chapters.find((c) => c.number === e.number)
+    if (stub === undefined) { problems.push(`${sessionId}:${e.number}: the record vanished from the registry — nowhere to attach the re-derivation`); continue }
+    if (isActiveChapter(stub)) { skipped.push(`${sessionId}:${e.number}: still ACTIVE knowledge — removal never applied to it; refusing to restore over it`); continue }
+    if (!isRemovedChapter(stub)) { skipped.push(`${sessionId}:${e.number}: stub is already ${String(stub.status)} — a repair or an earlier restore spent this number (idempotent)`) ; continue }
+    const events = await ports.readLog(sessionId)
+    if (events === null || events.length === 0) { problems.push(`${sessionId}:${e.number}: UNRECOVERABLE — the durable log for this session cannot be read, so span ${e.startSeq}-${e.endSeq} cannot be re-derived; the stub stays`); continue }
+    try {
+      const out = await saveSession({
+        events, sessionId, cwd: ports.cwd, store: ports.store, config: ports.config,
+        span: { fromSeq: e.startSeq, toSeq: e.endSeq },
+        supersede: { over: e.number, reason: 'operator-restore' },
+        attemptSalt: `restore:${journalId}:${sessionId}:${e.number}`,
+      })
+      if (out.records.length === 0) {
+        problems.push(`${sessionId}:${e.number}: the re-render produced nothing (${out.skipped ?? 'no records'}) — stub left in place; an empty archive is never committed`)
+        continue
+      }
+      restored.push(`${sessionId}:${e.number} → ch.${out.records.map((r) => r.number).join(', ch.')}`)
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error)
+      if (!/already archived|already in the archive/i.test(msg)) { problems.push(`${sessionId}:${e.number}: restore failed: ${msg.slice(0, 160)}`); continue }
+      // #60's lesson reborn: an earlier pass archived this span. Point the stub at what covers it
+      // rather than stranding it — nothing is rewritten, the covered fact is recorded.
+      const fresh = await ports.store.get(sessionId)
+      const cover = coveringChapter(fresh, e.startSeq, e.endSeq, e.number)
+      if (cover.length === 0) { problems.push(`${sessionId}:${e.number}: the re-read said "already archived" but no active chapter covers ${e.startSeq}-${e.endSeq} — stub left in place`); continue }
+      let markProblem: string | undefined
+      await ports.store.mutate(sessionId, (s) => {
+        const m = markSupersededBy(s, e.number, cover[0]!.number, 'operator-restore')
+        markProblem = m.problem
+        return m.state
+      })
+      if (markProblem !== undefined) { problems.push(`${sessionId}:${e.number}: ${markProblem}`); continue }
+      skipped.push(`${sessionId}:${e.number}: span already covered by ch.${cover[0]!.number}; stub marked superseded, nothing was rewritten`)
+    }
+  }
+
+  if (restored.length > 0) {
+    appendMissingAccess(ports.storeDir, restored.map((r) => `${ports.now()} | restored | ${r} | journal=${journalId}`))
+  }
+  return { journalId, restored, skipped, problems }
+}

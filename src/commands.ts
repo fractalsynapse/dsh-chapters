@@ -34,7 +34,9 @@ import { resolveStoreRoot } from './store.ts'
 import { diagnosticStatusLine } from './diag.ts'
 import { registryHealth } from './repair.ts'
 import { removedGuard } from './removal.ts'
-import { applyRemoval, planRemoval, readMissingAccess, resolveRemovalId, type RemovalTarget } from './removal.ts'
+import { applyRemoval, planRemoval, readMissingAccess, resolveRemovalId, restoreRemoval, type RemovalTarget } from './removal.ts'
+import { readDurableSession } from './auto-save.ts'
+import type { SaveSessionConfig } from './save-core.ts'
 import { ancestorPath, buildIndex, isRemovedChapter } from './registry.ts'
 import { resolveStoredPath, verifyChapter } from './archive.ts'
 import { searchKnowledge, searchLocalStore } from './search.ts'
@@ -76,6 +78,9 @@ export interface HostCommandsConfig {
   /** #255: cap for removal report/print arms. Reuses the repair report row — one
    * knob for "how many lines may a command print", not two (#117 family). */
   reportMaxLines?: number
+  /** #255: the door plane's assembled render/save config — `restore` re-derives spans through
+   * the SAME save core with the SAME thresholds (one assembly, index.ts shares it; #90). */
+  save?: SaveSessionConfig
 }
 
 type CommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string }
@@ -846,7 +851,36 @@ export function registerHostCommands(
 
       if (verb === 'restore') {
         if (argTail[0] === undefined) return err('chapters-remove restore: needs a journal id (printed by apply; journals live under <store>/<tree>/removals/)')
-        return err('restore: not wired on this build yet') // replaced by the re-derivation arm (Task 7)
+        if (config.save === undefined) return err('chapters-remove restore: this plane carries no render config — restore re-derives through the save core and cannot guess its thresholds')
+        const get = (name: string): unknown => { try { return (ctx as { get?: (n: string) => unknown }).get?.(name) } catch { return undefined } }
+        const out = await restoreRemoval({
+          store: config.store, cwd, storeDir,
+          readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null,
+          config: config.save,
+          now: () => new Date().toISOString(),
+        }, argTail[0])
+        const lines = [
+          `chapters-remove restore — journal ${out.journalId}:`,
+          ...(out.restored.length > 0 ? [`  re-derived under new numbers: ${out.restored.join(' · ')}`] : ['  nothing was re-derived']),
+          ...out.skipped.map((s) => `  skipped: ${s}`),
+          ...out.problems.map((p) => `  PROBLEM: ${p}`),
+          '  the log was read, never written; removed numbers stay spent; the re-rendered chapters are normal chapters from here on',
+        ]
+        let syncLine = '  pool: unlinked — the restored chapters live in the local store'
+        if (out.restored.length > 0) {
+          const project = projectForCwd(domain.table('projects').entries(), cwd)
+          if (project !== undefined) {
+            try {
+              const res = config.scheduler !== undefined
+                ? await config.scheduler.run(cwd, 'removal-restore', project)
+                : await syncNow(cwd, project, readToken(cwd, config.artifactStoreRoot, project.projectKey))
+              syncLine = `  sync: ${res.steps.join(' → ') !== '' ? res.steps.join(' → ') : res.detail}${res.ok ? '' : ' ⚠ restored locally; the pool push failed — /chapters-status carries the detail'}`
+            } catch (error) {
+              syncLine = `  sync: pass threw (${String((error as Error)?.message ?? error)}) — restored chapters are safe in the store`
+            }
+          }
+        }
+        return { kind: out.problems.length > 0 && out.restored.length === 0 ? 'error' : 'success', text: [...lines, syncLine].join('\n') }
       }
 
       return err(`chapters-remove: unknown verb "${verb}" — usage: list [sessionId] | find <query> | [dry-run] <id…> | apply <id…> | report | restore <journal-id>`)

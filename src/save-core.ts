@@ -36,7 +36,7 @@ async function reserveNumbers(
   return { numbers }
 }
 import { writeArchive, attemptKey } from './archive.ts'
-import { supersedeChapter, type FindingClass } from './repair.ts'
+import { supersedeChapter, type SupersedeReason } from './repair.ts'
 import type { ChapterRecord } from './archive.ts'
 import type { ChapterRange } from './types.ts'
 import type { RenderConfig, SessionEventLike } from './types.ts'
@@ -75,7 +75,7 @@ export interface SaveSessionArgs {
    * REPAIR ONLY (#60): mark chapter `over` superseded by what this call writes, in the SAME registry
    * section that commits the replacement — so a record and its replacement can never be observed apart.
    */
-  supersede?: { over: number; reason: FindingClass } | undefined
+  supersede?: { over: number; reason: SupersedeReason } | undefined
   /** REPAIR ONLY: a distinct idempotence key per repair run, so a repair is not eaten by the original save's key. */
   attemptSalt?: string | undefined
 }

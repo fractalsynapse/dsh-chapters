@@ -334,6 +334,14 @@ export const FINDING_CLASSES: readonly FindingClass[] = [
   'dead-citation', 'tampered-file', 'test-litter', 'unrecoverable',
 ]
 
+/**
+ * What may write `repairs[].class`: the auditor's classes, plus the one non-finding reason —
+ * an operator restored a removed chapter (#255). The registry field is a `string` (rows predate
+ * the enum); typing the WRITE here is what stops doors inventing classes, and lets an audit
+ * tell a repair move from a restore move.
+ */
+export type SupersedeReason = FindingClass | 'operator-restore'
+
 // ─────────────────────────────────────────────────── supersede (pure)
 
 /**
@@ -347,7 +355,7 @@ export function supersedeChapter(
   state: SessionState,
   overNumber: number,
   replacements: readonly ChapterRecord[],
-  reason: FindingClass,
+  reason: SupersedeReason,
   at: number = Date.now(),
 ): SessionState {
   const stamped = replacements.map((r) => ({ ...r, repairs: [...(r.repairs ?? []), { class: reason, over: overNumber, at }] }))
@@ -374,7 +382,7 @@ export function markSupersededBy(
   state: SessionState,
   overNumber: number,
   byNumber: number,
-  reason: FindingClass,
+  reason: SupersedeReason,
   at: number = Date.now(),
 ): { state: SessionState; problem?: string } {
   const over = state.chapters.find((c) => c.number === overNumber)
