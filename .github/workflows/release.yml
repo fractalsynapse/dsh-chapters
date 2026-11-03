@@ -128,4 +128,6 @@ jobs:
 
       - name: shipped
         if: ${{ !inputs.dry_run }}
-        run: echo "@fractalsynapse/dsh-chapters@$(node -p "require('./package.json').version") is on npm — https://www.npmjs.com/package/@fractalsynapse/dsh-chapters (provenance state: see the publish step's output; a TLOG-collision fallback ships WITHOUT attestation and says so)"
+        run: |
+          echo "@fractalsynapse/dsh-chapters@$(node -p "require('./package.json').version") is on npm — https://www.npmjs.com/package/@fractalsynapse/dsh-chapters"
+          echo "provenance state is in the publish step output; the TLOG-collision fallback ships WITHOUT attestation and says so"
