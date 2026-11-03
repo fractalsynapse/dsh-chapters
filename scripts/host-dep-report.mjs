@@ -35,7 +35,7 @@ console.log(`declared=${String(declared.length)} missing=${String(missing)}`)
 
 // Version and dist integrity per hoisted @deepseek-ai package, plus the LOCKFILE entry that decided it.
 // Why: the pinned host declares 79 deps, both trees install 289 of them, the booted profile mounts exactly one
-// plugin (`@treeseed/dsh-chapters`), and yet the host's own `request/header` event reports 34 tools here against
+// plugin (`@fractalsynapse/dsh-chapters`), and yet the host's own `request/header` event reports 34 tools here against
 // 7 on the runner with `config` and `adapterDefaults` byte-identical. So the difference must be in WHICH host
 // code is actually running. `dsh`'s own integrity matching the registry proves only the top package; the
 // transitive tool-providers need their own number. npm computes `dist.integrity` at pack time for every
@@ -97,10 +97,10 @@ try {
   // The level that decides mounted tools: what the dev profile's plugin tree actually contains. The boot builds
   // this with the SAME script CI runs, so a difference here is a real environment fact, not a stale-cache story.
   const base = path.join(root, 'var', 'e2e-profile-base', 'profiles', 'web', 'node_modules')
-  const treeseed = path.join(base, '@treeseed')
+  const scopeDir = path.join(base, '@fractalsynapse')
   const ds = path.join(base, '@deepseek-ai')
   const list = (d) => { try { return fs.readdirSync(d).length } catch { return 0 } }
-  console.log(`profile-base-node_modules=${String(list(base))} profile-base-deepseek-ai=${String(list(ds))} profile-base-treeseed=${String(list(treeseed))}`)
+  console.log(`profile-base-node_modules=${String(list(base))} profile-base-deepseek-ai=${String(list(ds))} profile-base-fractalsynapse=${String(list(scopeDir))}`)
   const home = path.join(root, '.dshdev-local', 'profiles', 'web', 'node_modules')
   console.log(`devhome-node_modules=${String(list(home))} devhome-deepseek-ai=${String(list(path.join(home, '@deepseek-ai')))}`)
 } catch (e) {

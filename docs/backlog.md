@@ -18,7 +18,7 @@
 
 ## State at 2026-10-28 night — `0.2.2-dev.2` is published; two threads left, in order
 
-**Shipped:** `@treeseed/dsh-chapters@0.2.2-dev.2` on npm, dist-tag `dev.2`, `latest` still `0.2.1` (a prerelease must not
+**Shipped:** `@fractalsynapse/dsh-chapters@0.2.2-dev.2` on npm, dist-tag `dev.2`, `latest` still `0.2.1` (a prerelease must not
 claim the default channel). Verified against `registry.npmjs.org` directly, because a local `npm view` said it was missing
 while the registry had it — the registry is the source of record, the CLI is a cache. `0.2.2-dev.1` is a dead tag (its bump
 moved `package.json` only; `loudness.test.ts:123` pins `PLUGIN_VERSION === pkg.version`) and stays in place, unreleased and
@@ -1180,7 +1180,7 @@ Every environment level I can measure is equal, with numbers, not narrative:
 | host lock deps | `declared=79 missing=0` | `declared=79 missing=0` |
 | installed at lock root | `deepseek-ai-packages=289`, `installed-top-level=179` | same |
 | repo-root `@deepseek-ai` | 34 dirs (18 undeclared by package.json) | report uploaded (same script) |
-| profile base tree | `node_modules=2 deepseek-ai=0 @treeseed=1` | built by the same `bootstrap-dev-profile.sh` |
+| profile base tree | `node_modules=2 deepseek-ai=0 @fractalsynapse=1` | built by the same `bootstrap-dev-profile.sh` |
 | host provenance | lock resolves to `registry.npmjs.org/…/dsh-0.2.0-rc.2.tgz`, integrity matches `npm view` | same tarball |
 | pinned host install | `npm ci --prefix dev/dsh-host-lock` (CI's own command) | same |
 
@@ -1205,9 +1205,9 @@ not intend to: masking it would certify a corpus recorded by different software 
 The boot now reports its own mounted tree (`var/e2e-home-plugins-<port>.log`), so this is read from artifacts,
 not inferred:
 
-    CI:    patchPluginIds=preset-chapters,agent-preset-registry,'@treeseed/dsh-chapters',llm-pi-ai,
+    CI:    patchPluginIds=preset-chapters,agent-preset-registry,'@fractalsynapse/dsh-chapters',llm-pi-ai,
            agent-default-model,llm-gate,fetch-timeouts,ui-settings-general
-    local: patchPluginIds=preset-chapters,agent-preset-registry,'@treeseed/dsh-chapters',llm-pi-ai,
+    local: patchPluginIds=preset-chapters,agent-preset-registry,'@fractalsynapse/dsh-chapters',llm-pi-ai,
            agent-default-model,llm-gate,fetch-timeouts
 
 `ui-settings-general` appears in **no tracked file**: `tests/e2e/fixtures/dev-profile-cordis.patch.yml` (0),
@@ -1246,7 +1246,7 @@ difference I announced was not yet proven):
 
 | `suite` booted on | header | tools | plugin ids |
 |---|---|---|---|
-| this host | `chars=7396` | 34 | `preset-chapters, agent-preset-registry, @treeseed/dsh-chapters, llm-pi-ai, agent-default-model, llm-gate, fetch-timeouts` |
+| this host | `chars=7396` | 34 | `preset-chapters, agent-preset-registry, @fractalsynapse/dsh-chapters, llm-pi-ai, agent-default-model, llm-gate, fetch-timeouts` |
 | the runner | `chars=2893` | 7 | same **plus `ui-settings-general`** |
 
 So for the same project the runner mounts one MORE plugin and gets 27 FEWER tools. `ui-settings-general` is in no

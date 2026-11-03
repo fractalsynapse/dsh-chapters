@@ -21,7 +21,7 @@ existing config is preserved):
 
 | Plugin | Source | What It Provides |
 |--------|--------|-----------------|
-| `@treeseed/dsh-chapters` | Linked from this checkout | Chapter archiving, zero-token compaction, knowledge pool, continuation/fork tools |
+| `@fractalsynapse/dsh-chapters` | Linked from this checkout | Chapter archiving, zero-token compaction, knowledge pool, continuation/fork tools |
 | `@jiangzhenguo/dsh-codegraph` | GitHub | Pre-indexed code knowledge graph — structural code search via `codegraph_*` tools instead of grep/glob |
 | `dsh-tinyfish-search` | npm | Web search capability for agents |
 

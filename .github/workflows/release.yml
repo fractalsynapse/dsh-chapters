@@ -1,17 +1,21 @@
 name: Release
 
-# Publishes the plugin package `@treeseed/dsh-chapters` to npm
-# (npm scope 'treeseed'; GitHub org 'treeseed-ai' — deliberately different homes).
+# Publishes the plugin package `@fractalsynapse/dsh-chapters` to npm
+# (npm org 'fractalsynapse', GitHub org 'fractalsynapse' — the same NAME since
+#  #261, still different homes; formerly npm scope 'treeseed' under 'treeseed-ai').
 #
-# Auth: npm TRUSTED PUBLISHING (OIDC) — there is NO NPM_TOKEN in CI. The npm
-# package's Trusted Publisher is registered on npmjs.com for exactly:
-#   Repository:  treeseed-ai/dsh-chapters
-#   Branch:      main
-#   Workflow:    release.yml
-#   Environment: Production
-# npm's CLI detects the Actions OIDC environment itself and asks the registry
-# for a one-time signed token — setup-node must therefore get `registry-url`
-# but NEVER a `token:` input (any _authToken in an npmrc overrides this path).
+# Auth: the npm ACCESS TOKEN held as the `Production` environment secret
+# NPM_TOKEN (#261). It replaces OIDC trusted publishing, whose package-side
+# config was bound to the OLD repository identity — after the org move the
+# registry answered the OIDC publish with a misleading 404 (the 0.2.17 attempt;
+# nothing published, tag recorded dead in §26). The step appends an npmrc line
+# holding only the LITERAL ${NPM_TOKEN}; npm interpolates it at use time, so the
+# secret never enters a log or a written file. `id-token: write` REMAINS: npm
+# signs provenance from the run's OIDC identity alongside a token publish — if
+# the registry ever refuses that pairing, drop `--provenance` and amend §26's
+# attestation sentence in the same change, stated not silent.
+# setup-node keeps `registry-url` and NO `token:` input (the npmrc line below is
+# the only credential path; a setup-node token input would write the VALUE).
 #
 # Two ways in:
 #   1. push a version tag:  git tag 0.1.1 && git push origin 0.1.1
@@ -40,7 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # 'Production' enforces tag protection *.*.* — a non-semver tag never
-    # reaches this job. (No secrets needed anymore: OIDC identity IS the auth.)
+    # reaches this job. (#261: the environment ALSO carries NPM_TOKEN, the
+    # publish credential; it was empty on the OIDC path.)
     environment: Production
     permissions:
       contents: read
@@ -84,9 +89,15 @@ jobs:
       - name: pack preview
         run: npm pack --dry-run 2>&1 | tail -30
 
-      - name: publish (npm trusted publishing / OIDC)
+      - name: publish (NPM_TOKEN from the Production environment; provenance via OIDC)
         if: ${{ !inputs.dry_run }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          # The single-quoted heredoc keeps ${NPM_TOKEN} LITERAL in the file — npm
+          # expands it from the env at use time, so no step log or written file ever
+          # carries the secret (project security rule: raw tokens never in output).
+          printf '%s\n' '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "$HOME/.npmrc"
           # Prerelease versions ('x.y.z-tag') ship under a matching dist-tag so
           # they never steal 'latest' from the last stable ship.
           V="$(node -p "require('./package.json').version")"
@@ -97,4 +108,4 @@ jobs:
 
       - name: shipped
         if: ${{ !inputs.dry_run }}
-        run: echo "@treeseed/dsh-chapters@$(node -p "require('./package.json').version") is on npm (provenance attached) — https://www.npmjs.com/package/@treeseed/dsh-chapters"
+        run: echo "@fractalsynapse/dsh-chapters@$(node -p "require('./package.json').version") is on npm (provenance attached) — https://www.npmjs.com/package/@fractalsynapse/dsh-chapters"

@@ -4,7 +4,7 @@ description: Every knob, which plane it lives on, and the one rule that ties the
 lastUpdated: true
 ---
 
-No hardcoded tunables anywhere the harness can configure them. The table below is the complete host-plane list (the `config` schema in `src/index.ts`); the comment header of the shipped `cordis.patch.yml` (inside `node_modules/@treeseed/dsh-chapters/`) mirrors the schema and is the in-repo reference, but this page is kept current with the code.
+No hardcoded tunables anywhere the harness can configure them. The table below is the complete host-plane list (the `config` schema in `src/index.ts`); the comment header of the shipped `cordis.patch.yml` (inside `node_modules/@fractalsynapse/dsh-chapters/`) mirrors the schema and is the in-repo reference, but this page is kept current with the code.
 
 **Two planes.** `config` (below) is the *host plane* — your profile's plugin entry. The compaction *engine* lives on the *realm plane*: the `chapters` agent-preset row (the `preset-chapters` declaration row at the foot of the bundle's `cordis.patch.yml`, mounted by `src/preset.ts`), which owns `thresholdRatio`, `retainRatio/retainTokens`, `maxTokens`, `compactionRetries/maxOverflowRetries`, `summarizationProvider/summarizationModel` (legacy override), `enrichmentTrigger` (`afterPush|idle|both|manual`), `elicitedPlot`, and `toolResultArtifactTokens`. Shared names behave per plane — design record §12.
 
@@ -33,7 +33,7 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `rulesMinedPerChapter` | 3 | cap on mined rules per chapter; the cap counts rules **written**, so a duplicate cannot consume a chapter's budget, and 3 is the ceiling on what any one archived chapter can teach the session |
 | `rulesMarkerPrefix` | `ADD RULE:` | the capture marker; matched at line start in **human-authored** messages only, so prose that merely mentions it is not a rule |
 | `rulesEnrichment` | true | model-derived capture: the enrichment pass mines standing orders from each archived chapter, idle-batched, never per-turn |
-| `rulesAutoActivate` | true | whether a mined rule governs on arrival. It does by default — inferring what nobody said is the tier's purpose ([#50, Amendment 2026-10-21](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md)). Off ⇒ mined rules are written `reviewOnly` and stay inert until you `approve` |
+| `rulesAutoActivate` | true | whether a mined rule governs on arrival. It does by default — inferring what nobody said is the tier's purpose ([#50, Amendment 2026-10-21](https://github.com/fractalsynapse/dsh-chapters/blob/main/docs/knowledge-repo.md)). Off ⇒ mined rules are written `reviewOnly` and stay inert until you `approve` |
 | `rulesModel` | `''` | `'provider/model'` for a **dedicated mining model**: one extra bounded call per chapter, and its answer replaces (never supplements) the annotation pass's rules. `''` ⇒ mine inside the enrichment call, at no extra cost. Runtime: `/chapters-rule model p/m` |
 | `projectRulesDisplayCap` / `sessionRulesDisplayCap` | 12 / 12 | per-tier count caps on rules rendered into a rebuilt head — anything dropped is **announced by count**, never silently clipped |
 | `rulesRelevance` | true | topic-overlap selection on (`search.rankEntries`, the same scorer as `chapters_search`); off ⇒ deterministic category→id order |

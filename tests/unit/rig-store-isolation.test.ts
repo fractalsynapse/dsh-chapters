@@ -36,7 +36,7 @@ test('each port gets its OWN absolute store root, and nothing else moves', () =>
 test('rerunning the patch replaces our row instead of stacking a second one', () => {
   const once = applyRigPluginPatch(PROVIDER_ROW, { storeRoot: '/x/one' })
   const twice = applyRigPluginPatch(once, { storeRoot: '/x/two' })
-  const rows = twice.match(/^- id: '@treeseed\/dsh-chapters'$/gm) ?? []
+  const rows = twice.match(/^- id: '@fractalsynapse\/dsh-chapters'$/gm) ?? []
   assert.equal(rows.length, 1, `two rows for one id leaves precedence to the host's merge order:\n${twice}`)
   assert.match(twice, /artifactStoreRoot: \/x\/two/, 'and the new value is the one present')
   assert.ok(!twice.includes('/x/one'), 'the stale value is gone, not shadowed')
