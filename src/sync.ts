@@ -101,6 +101,9 @@ export interface SyncOpts {
   /** Transport provider (tests inject a fake; default resolves from the
    * project record's kind via src/provider.ts — 'git' when absent). */
   provider?: SyncProvider
+  /** #255: names the operator removed from THIS project's store. Rehydration skips them;
+   * the count lands in the steps. Absent ⇒ guard inert (the pre-#255 behavior). */
+  removed?: RemovedGuard
 }
 
 /**
@@ -303,19 +306,30 @@ export function buildIndexInClone(cloneDir: string): boolean {
   }
   const { shards, manifest: next, changed } = buildIndexShards(stitchFragments(entries), curation, manifest)
   const indexDir = path.join(cloneDir, 'index')
-  if (!changed) {
-    if (fs.existsSync(indexDir)) {
-      const expected = new Set([...shards.keys()].map(topicSlug))
-      for (const f of fs.readdirSync(indexDir)) {
-        if (f.endsWith('.md') && !expected.has(f)) fs.unlinkSync(path.join(indexDir, f))
-      }
+  // The stale-shard sweep, ONCE for both branches, compared in FILENAME terms: `topicSlug(topic)`
+  // is the stem, the directory lists `stem.md`. The first cut of this cleanup compared bare slugs
+  // against filenames, matched nothing, and DELETED EVERY shard on any unchanged build — measured
+  // 2026-11-02 while testing the #255 removal sweep (a topic's last chapter removed must take its
+  // shard with it; an unchanged rebuild must take NOTHING with it). One predicate, one comparison.
+  const sweepStaleShards = (): void => {
+    if (!fs.existsSync(indexDir)) return
+    const expectedFiles = new Set([...shards.keys()].map((topic) => `${topicSlug(topic)}.md`))
+    for (const f of fs.readdirSync(indexDir)) {
+      if (f.endsWith('.md') && !expectedFiles.has(f)) fs.unlinkSync(path.join(indexDir, f))
     }
+  }
+  if (!changed) {
+    sweepStaleShards()
     return false
   }
   fs.mkdirSync(indexDir, { recursive: true })
   for (const [topic, content] of shards) {
     fs.writeFileSync(path.join(indexDir, `${topicSlug(topic)}.md`), content)
   }
+  // #255: the sweep runs on CHANGED builds too — when the LAST entry of a topic dies (an operator
+  // removal is exactly that), the shard that named it must die with it. Without this, "the index is
+  // a pure function of the corpus" would be true only while the corpus never shrinks.
+  sweepStaleShards()
   fs.writeFileSync(manifestPath, JSON.stringify(next, null, 1))
   return true
 }
@@ -484,11 +498,32 @@ function runVocabularyPass(
  * still holds — rehydration fills gaps, it never arbitrates drift); other
  * projects' prefixes are out of scope; counts land in the sync steps so the
  * recovery is never silent.
+ *
+ * #255: an operator REMOVAL deletes the store file with intent. Without a guard, the next pass
+ * would copy the still-present mirror file straight back over the operator's decision — the
+ * deletion resurrecting itself between unlink and push. `removed` names those files (session#file
+ * for chapters and plan docs, blob basename for artifacts) and rehydration skips them, counting
+ * every skip so the pass says what it refused.
  */
-export function rehydrateStoreFromMirror(cloneDir: string, storeDir: string, projectKey: string): number {
+export interface RemovedGuard {
+  /** `<sessionDir>#<file>` — the mirror walk's identity for a chapter or plan document. */
+  chapterKeys: ReadonlySet<string>
+  /** Artifact basenames (`<sha>.txt`) — content-addressed, unique by construction. */
+  blobKeys: ReadonlySet<string>
+}
+
+export function rehydrateStoreFromMirror(
+  cloneDir: string, storeDir: string, projectKey: string, removed?: RemovedGuard,
+): { restored: number; skippedRemoved: number } {
   let restored = 0
-  const tryRestore = (absSrc: string, absDst: string): void => {
+  let skippedRemoved = 0
+  const tryRestore = (absSrc: string, absDst: string, kind: 'chapter' | 'blob', key: string): void => {
     if (fs.existsSync(absDst)) return
+    // #255: a removed name is a DECISION, not a gap to fill.
+    if (removed !== undefined && (kind === 'chapter' ? removed.chapterKeys.has(key) : removed.blobKeys.has(key))) {
+      skippedRemoved += 1
+      return
+    }
     try {
       fs.mkdirSync(path.dirname(absDst), { recursive: true })
       fs.copyFileSync(absSrc, absDst)
@@ -501,7 +536,7 @@ export function rehydrateStoreFromMirror(cloneDir: string, storeDir: string, pro
       if (!session.isDirectory()) continue
       const dir = path.join(chaptersRoot, session.name)
       for (const f of fs.readdirSync(dir)) {
-        if (f.endsWith('.md')) tryRestore(path.join(dir, f), path.join(storeDir, session.name, 'chapters', f))
+        if (f.endsWith('.md')) tryRestore(path.join(dir, f), path.join(storeDir, session.name, 'chapters', f), 'chapter', `${session.name}#${f}`)
       }
     }
   }
@@ -511,12 +546,12 @@ export function rehydrateStoreFromMirror(cloneDir: string, storeDir: string, pro
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, e.name)
         if (e.isDirectory()) walk(p, path.join(rel, e.name))
-        else tryRestore(p, path.join(storeDir, 'artifacts', rel, e.name))
+        else tryRestore(p, path.join(storeDir, 'artifacts', rel, e.name), 'blob', e.name)
       }
     }
     walk(artRoot, '')
   }
-  return restored
+  return { restored, skippedRemoved }
 }
 
 export async function runSync(opts: SyncOpts): Promise<SyncResult> {
@@ -592,8 +627,10 @@ export async function runSync(opts: SyncOpts): Promise<SyncResult> {
       }
     }
 
-    const restored = rehydrateStoreFromMirror(cloneDir, storeDir, opts.project.projectKey)
-    if (restored > 0) steps.push(`rehydrated ${restored} file(s) from the pool into the store`)
+    const { restored, skippedRemoved } = rehydrateStoreFromMirror(cloneDir, storeDir, opts.project.projectKey, opts.removed)
+    if (restored > 0 || skippedRemoved > 0) {
+      steps.push(`rehydrated ${restored} file(s) from the pool into the store${skippedRemoved > 0 ? ` — ${skippedRemoved} SKIPPED as removed (#255: a deletion is a decision, not a gap)` : ''}`)
+    }
 
     const { committed } = await publishCommit()
     void committed
@@ -719,6 +756,10 @@ export interface SyncSchedulerDeps {
   tokenFor(cwd: string, projectKey: string): string | undefined
   /** Collection JSONL lines per session, read from the registry (may be empty). */
   collectionsFor(cwd: string): { sessionId: string; lines: string[] }[]
+  /** #255: the removed-stub guard for this cwd's project, read from the registry rows.
+   * The planes that own a store handle supply it; a scheduler without one simply never
+   * guards, and the pass says so nowhere it cannot know. */
+  removedFor?(cwd: string): RemovedGuard | undefined
   /** P2 §6.3 vocabulary pass options for every scheduled pass (undefined = off). */
   vocab?: VocabPassOpts
   /** Injectable timer (tests). Defaults to setTimeout/clearTimeout. */
@@ -762,6 +803,8 @@ export function createSyncScheduler(deps: SyncSchedulerDeps): SyncScheduler {
       return Promise.resolve({ ok: false, steps: [], detail: 'no knowledge project linked for this workspace', mode: 'local-only' })
     }
     const token = deps.tokenFor(cwd, project.projectKey)
+    // exactOptionalPropertyTypes: a `removed: undefined` arm is NOT an absent arm — spread only when set.
+    const guard = deps.removedFor?.(cwd)
     const pass = runSync({
       cwd,
       storeRoot: deps.storeRoot,
@@ -769,6 +812,7 @@ export function createSyncScheduler(deps: SyncSchedulerDeps): SyncScheduler {
       project,
       ...(token !== undefined ? { token } : {}),
       collections: deps.collectionsFor(cwd),
+      ...(guard !== undefined ? { removed: guard } : {}),
       ...(deps.vocab !== undefined ? { vocab: deps.vocab } : {}),
       ...(deps.provider !== undefined ? { provider: deps.provider } : {}),
     }).finally(() => { inFlight.delete(cwd) })
