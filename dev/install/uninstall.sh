@@ -71,13 +71,13 @@ if [[ -f "$PKG_JSON" ]]; then
 
     // Remove dependency
     if (pkg.dependencies) {
-      delete pkg.dependencies['@treeseed/dsh-chapters'];
+      delete pkg.dependencies['@fractalsynapse/dsh-chapters'];
     }
 
     // Remove from bundles
     if (pkg.dsh?.profile?.bundles) {
       pkg.dsh.profile.bundles = pkg.dsh.profile.bundles.filter(
-        b => b !== '@treeseed/dsh-chapters'
+        b => b !== '@fractalsynapse/dsh-chapters'
       );
     }
 

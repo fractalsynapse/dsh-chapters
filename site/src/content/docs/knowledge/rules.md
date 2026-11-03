@@ -5,15 +5,15 @@ lastUpdated: true
 ---
 
 > **Status.** Both tiers ship. The *project* tier has been running since P3; the *session* tier is
-> [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50), with the mining posture settled by
-> [Amendment 2026-10-21](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md).
+> [#50](https://github.com/fractalsynapse/dsh-chapters/issues/50), with the mining posture settled by
+> [Amendment 2026-10-21](https://github.com/fractalsynapse/dsh-chapters/blob/main/docs/knowledge-repo.md).
 > Two things are honestly unverified: no live model has mined a real chapter yet (so how often an
 > inference is *right* is unmeasured), and the browser-plane acceptance is blocked on a host-lock
 > move — see `docs/backlog.md`. Neither changes what this page describes.
 
 > **Status.** Both tiers ship. The *project* tier is what has been running since P3; the *session*
-> tier is [#50](https://github.com/treeseed-ai/dsh-chapters/issues/50), specified in
-> [the record §7](https://github.com/treeseed-ai/dsh-chapters/blob/main/docs/knowledge-repo.md).
+> tier is [#50](https://github.com/fractalsynapse/dsh-chapters/issues/50), specified in
+> [the record §7](https://github.com/fractalsynapse/dsh-chapters/blob/main/docs/knowledge-repo.md).
 > What is **not** yet witnessed anywhere is a live small model doing the mining on real hardware —
 > the gate is proven against fixtures, and the browser-plane acceptance is blocked on a host-lock
 > move (see `docs/backlog.md`). Nothing on this page depends on that being done.

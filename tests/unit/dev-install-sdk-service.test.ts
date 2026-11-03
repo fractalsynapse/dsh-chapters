@@ -81,7 +81,7 @@ test('contract: sdk profile bundles include base + sdk-app + all three dev plugi
   for (const required of [
     '@deepseek-ai/dsh-base',
     '@deepseek-ai/dsh-sdk-app',
-    '@treeseed/dsh-chapters',
+    '@fractalsynapse/dsh-chapters',
     '@jiangzhenguo/dsh-codegraph',
     'dsh-tinyfish-search',
   ]) {
@@ -94,7 +94,7 @@ test('contract: sdk profile installs the same npm deps as the web profile', () =
   const sdkSection = dockerfile.slice(dockerfile.indexOf('dsh-profile-sdk'))
   assert.ok(sdkSection.length > 0, 'no sdk profile section found in Dockerfile')
   // chapters via file:/app, codegraph via github:, tinyfish pinned — same trio
-  assert.match(sdkSection, /@treeseed\/dsh-chapters\\?": "file:\/app/, 'sdk profile must resolve dsh-chapters from the built /app')
+  assert.match(sdkSection, /@fractalsynapse\/dsh-chapters\\?": "file:\/app/, 'sdk profile must resolve dsh-chapters from the built /app')
   assert.match(sdkSection, /npm install .*--legacy-peer-deps/, 'sdk profile install needs --legacy-peer-deps (#19: silent skips swallowed the conflict)')
 })
 

@@ -49,7 +49,7 @@ server→client requests unimplemented (approval flows would need these), versio
 The current stack (`compose.yml`, `Dockerfile`, `docker-entrypoint.sh`) bakes everything into
 `$DSH_HOME/profiles/web/`: generated `settings.yaml` (vLLM `local` provider + qwen token-plan
 marketplace, `agent-default-model`, `agent-presets.default: chapters`), `profile-cordis.patch.yml`,
-profile `package.json` bundles (`@treeseed/dsh-chapters`, codegraph, tinyfish), credentials seed at
+profile `package.json` bundles (`@fractalsynapse/dsh-chapters`, codegraph, tinyfish), credentials seed at
 mode 600, peer-symlink resolution fix.
 
 **Correction (measured live, issue #25):** on host 0.2.x a profile-dir `settings.yaml` is read by
@@ -64,7 +64,7 @@ which is also what makes the sdk profile carry the identical configuration.
 For an SDK profile this is **copy-and-retarget**, not redesign:
 
 - `$DSH_HOME/profiles/sdk/package.json` declaring the bundles:
-  `["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-sdk-app", "dsh-tinyfish-search", "@treeseed/dsh-chapters", "@jiangzhenguo/dsh-codegraph"]`
+  `["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-sdk-app", "dsh-tinyfish-search", "@fractalsynapse/dsh-chapters", "@jiangzhenguo/dsh-codegraph"]`
   — plus the same generated `cordis.patch.yml` content (minus web-only rows). Profiles are directories;
   the entrypoint just writes two of them.
 - Patch semantics that make this safe: `- id:` rows REPLACE whole config blocks (restating required —

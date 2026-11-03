@@ -335,7 +335,7 @@ export const Config = Schema.object({
   codegraphSearchBonus: Schema.number().default(0.2),
 }) as Schema<Config>
 
-export const name = '@treeseed/dsh-chapters'
+export const name = '@fractalsynapse/dsh-chapters'
 
 export const inject = ['storageDomain', 'tools', 'agents', 'llm', 'sessionProjections']
 
@@ -1198,7 +1198,7 @@ export async function readRosterVerdict(
 export function rosterRemediation(presetId: string): string {
   return `the plugin ships "${presetId}" as the "preset-chapters" declaration row in its bundle patch `
     + '(cordis.patch.yml), which is a visible Loader entry: check that row in the plugin list, whether a '
-    + 'profile patch disables or overrides it, and whether @treeseed/dsh-chapters is in this profile\u2019s '
+    + 'profile patch disables or overrides it, and whether @fractalsynapse/dsh-chapters is in this profile\u2019s '
     + 'dsh.profile.bundles at all. If the row is present but this line says absent, the host is below the '
     + '0.2.0 support floor and cannot register preset rows.'
 }

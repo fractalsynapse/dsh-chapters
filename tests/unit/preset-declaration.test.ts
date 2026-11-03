@@ -10,7 +10,7 @@
  *
  * The preset ships as a row in OUR bundle patch (`cordis.patch.yml`, id `preset-chapters`) so
  * it is a visible Loader entry like the host's own `preset-standard` — and the row's plugin is
- * ours (`@treeseed/dsh-chapters/preset`), which mirrors the host's line for line and drops
+ * ours (`@fractalsynapse/dsh-chapters/preset`), which mirrors the host's line for line and drops
  * rows this host cannot import before registering. Why the host package is not named directly,
  * and why disposal works the way it does, are recorded with their measurements in
  * `src/preset.ts`.
@@ -64,7 +64,7 @@ const PKG_ROOT = join(HERE, '..', '..')
 const PATCH = join(PKG_ROOT, 'cordis.patch.yml')
 const PRESET_ID = 'chapters'
 const ROW_ID = 'preset-chapters'
-const ROW_MODULE = '@treeseed/dsh-chapters/preset'
+const ROW_MODULE = '@fractalsynapse/dsh-chapters/preset'
 
 /** Strip comments/blanks; keep indentation, which is the structure we assert on. */
 function significantLines(file: string): string[] {
@@ -138,7 +138,7 @@ test('RUN — the bundle ships the preset as a visible declaration row', () => {
   assert.ok(body.some((l) => /^\s+id: chapters$/.test(l)), 'config.id is the roster key')
   assert.ok(body.some((l) => /^\s+order: \d+$/.test(l)), 'config.order positions the preset in the menu')
   assert.ok(body.some((l) => /^\s+plugins:$/.test(l)), 'config.plugins is the mounted list')
-  assert.ok(body.some((l) => l.includes(`name: '@treeseed/dsh-chapters/engine'`)),
+  assert.ok(body.some((l) => l.includes(`name: '@fractalsynapse/dsh-chapters/engine'`)),
     'without the engine realm row there is no chapter-form compaction in this preset')
   assert.ok(mountedNames(body).length > 10, 'a preset that mounts almost nothing is a typo, not a preset')
 })
@@ -164,7 +164,7 @@ test('RUN — the patch stays a string, packed, and the row module stays exporte
   assert.ok((manifest.files ?? []).includes('cordis.patch.yml'),
     'the patch file must be packed: a bundle whose patch is absent delivers nothing, silently')
   assert.equal(manifest.exports?.['./preset'], './lib/preset.js',
-    'the row names @treeseed/dsh-chapters/preset — if that subpath stops being exported the row cannot '
+    'the row names @fractalsynapse/dsh-chapters/preset — if that subpath stops being exported the row cannot '
     + 'be imported and the preset is gone with no error naming the cause')
 })
 
@@ -206,7 +206,7 @@ test(`${guard} — our list differs from the host standard list ONLY by the decl
   const CROSS_VERSION = new Set([...KNOWN_OPTIONAL, '@deepseek-ai/dsh-time-context'])
   const added = [...ours].filter((n) => !theirs.has(n) && !CROSS_VERSION.has(n))
   const removed = [...theirs].filter((n) => !ours.has(n) && !CROSS_VERSION.has(n))
-  assert.deepEqual(added, ['@treeseed/dsh-chapters/engine'],
+  assert.deepEqual(added, ['@fractalsynapse/dsh-chapters/engine'],
     'the only row we ADD is the chapter engine; if the host renamed or dropped something else, this '
     + 'preset is mounting a package that may not exist on another supported host')
   assert.deepEqual(removed, ['@deepseek-ai/dsh-compaction-basic'],
@@ -331,7 +331,7 @@ test('RUN — the pruner drops an unresolvable row instead of mounting a broken 
   ], 'every drop is named — a silent drop is how a preset loses a tool nobody notices')
   // cordis: pseudo-names and our own realm row are never probed: pruning the engine row would
   // silently delete the feature the preset exists to provide.
-  const none = pruneUnresolvableRows([{ id: 'engine', name: '@treeseed/dsh-chapters/engine' }], () => false)
+  const none = pruneUnresolvableRows([{ id: 'engine', name: '@fractalsynapse/dsh-chapters/engine' }], () => false)
   assert.deepEqual(none.dropped, [], 'the chapters engine row must never be prunable')
 })
 
@@ -478,7 +478,7 @@ test('RUN — resolvableFromThisPackage answers without throwing, both ways', ()
   // 0.1.17 release run caught.
   assert.equal(resolvableFromThisPackage('isomorphic-git'), true, 'a declared dependency must resolve')
   assert.equal(resolvableFromThisPackage('@deepseek-ai/schemastery'), true, 'a declared peer must resolve')
-  assert.equal(resolvableFromThisPackage('@treeseed/dsh-chapters-not-a-package'), false,
+  assert.equal(resolvableFromThisPackage('@fractalsynapse/dsh-chapters-not-a-package'), false,
     'a missing package must be a false answer, never a thrown error — this runs while mounting')
   assert.equal(resolvableFromThisPackage('@deepseek-ai/schemastery/definitely-not-an-export'), false,
     'a package that exists but no longer exports the subpath a row names must be a NO — that is the '

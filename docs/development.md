@@ -25,7 +25,7 @@ Two consequences worth stating plainly:
    truth only for the question you asked it; resolve real behaviour against the version you are actually
    booting.
 3. **Check the binary you are measuring, not just the code you changed.** #54 lost hours to
-   `.dshdev-local/profiles/web/node_modules/@treeseed/dsh-chapters` having become a COPIED tree
+   `.dshdev-local/profiles/web/node_modules/@fractalsynapse/dsh-chapters` having become a COPIED tree
    dated six days earlier: every browser journey, probe and re-distill attempt was running a build
    predating the feature under test, and drew confident conclusions about the HOST — including a
    seed-admission refusal the current code does not produce (`tests/e2e/boot.ts` refuses to spawn
@@ -135,8 +135,8 @@ answers the question in exactly one place; two consumers use it:
 The gate lifts with no code change: re-distill the eight projects
 (`scripts/distill-tapes.sh`), write the new `host =` line, done. Current state: pinned
 `0.2.0-rc.2`, corpus distilled `0.1.5-rc.1`, tracked by
-[issue #56](https://github.com/treeseed-ai/dsh-chapters/issues/56) (with the door-selector blocker
-[#57](https://github.com/treeseed-ai/dsh-chapters/issues/57) inside it). Rows in
+[issue #56](https://github.com/fractalsynapse/dsh-chapters/issues/56) (with the door-selector blocker
+[#57](https://github.com/fractalsynapse/dsh-chapters/issues/57) inside it). Rows in
 `tests/unit/corpus-anchor.test.ts` assert both directions — matching lifts, missing/garbled
 provenance refuses, and the committed repo state is reported honestly as NOT anchored.
 
@@ -308,7 +308,7 @@ user-facing version.
 
 ### Release status (measured 2026-09-25)
 
-`@treeseed/dsh-chapters@0.1.0` is LIVE on npmjs.org — published manually from
+`@fractalsynapse/dsh-chapters@0.1.0` is LIVE on npmjs.org — published manually from
 the CI-verified tag (`npm publish --access public --provenance=false`; the
 registry shasum matches the CI tree byte-for-byte, install-smoke green).
 Manual because the Production environment's NPM_TOKEN cannot CREATE a
@@ -318,7 +318,7 @@ run on npm TRUSTED PUBLISHING (OIDC)**. release.yml carries no token;
 setup-node gets `registry-url` but never a `token:` (any `_authToken` in an
 npmrc overrides the OIDC path), `id-token: write` is the credential, and the
 npm side must register this package's Trusted Publisher as: repo
-`treeseed-ai/dsh-chapters`, branch `main`, workflow `release.yml`,
+`fractalsynapse/dsh-chapters`, branch `main`, workflow `release.yml`,
 environment `Production`. Prerelease versions publish under a matching
 dist-tag so 'latest' stays stable. `0.1.1` is the first OIDC + provenance
 ship; `0.1.0` itself carries no attestation.
@@ -572,7 +572,7 @@ happened in these notes before it was caught.
 | `src/notice.ts` + `test/notice.test.ts` — TOC-notice builder, kernel-rejection reproduction, vocabulary pins + drift guard (Phase 0b check 5) | **done**, 10 tests |
 | `src/registry.ts` + `src/store.ts` — pure numbering/ancestry/plan state; zod domain spec, storage-domain + node-fs adapters | **done**, 13 + 7 tests; durability witness passed |
 | `src/engine-core.ts` + `src/engine.ts` — ChaptersCompactionEngine | **done & boot-proven** (r18/r19: realm subpath row mounts; real cascade finalizes; catch-path fix — FINDINGS § Phase 1) |
-| preset delivery | **0.1.18: the preset IS a declaration row** — `preset-chapters` in `cordis.patch.yml`, mounted by `@treeseed/dsh-chapters/preset` (`src/preset.ts`), which registers what the host can load and drops what it cannot. The `presets/chapters/` + copy-on-boot mechanism is deleted with the 0.2.0 floor. Verify.md P24 (rows + three-host boots) |
+| preset delivery | **0.1.18: the preset IS a declaration row** — `preset-chapters` in `cordis.patch.yml`, mounted by `@fractalsynapse/dsh-chapters/preset` (`src/preset.ts`), which registers what the host can load and drops what it cannot. The `presets/chapters/` + copy-on-boot mechanism is deleted with the 0.2.0 floor. Verify.md P24 (rows + three-host boots) |
 | `npm test` (unit + integration) | **188 passing, <2 s** — unit imports no harness services; integration runs the sync loop against a fake git driver AND a real git smart-HTTP server (git-http-backend on loopback; the git binary is test-only scaffolding, the product stays pure-JS) |
 | 20-check verify.md pass | **r26/26b**: 18 mechanical on `.dshdev2` (refusals with numbers, tamper marks, idempotent retry, cross-boot registry + resume); human rows per verify.md evidence map |
 | dsh-session-fork coexistence | **moot at this version** (r26a pair-boot): the example fails to boot the installed host ALONE (unguarded `webServer` read in the installed dsh-client-connection) — assumed-neutral until a version-matched pair-boot |

@@ -19,7 +19,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const PLUGIN_NAME = '@treeseed/dsh-chapters'
+export const PLUGIN_NAME = '@fractalsynapse/dsh-chapters'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 

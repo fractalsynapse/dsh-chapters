@@ -164,9 +164,9 @@ All variables are read from the **parent shell**. No `.env` file required. See
 - **`dsh: startup failed: 1 required plugin did not activate` + credentials mode 755** — a named
   volume mounted at the FILE path `.credentials.yaml` becomes an empty 755 directory. Fixed (#19):
   no credentials volume; the entrypoint seeds the file at mode 600. If you re-added one, remove it.
-- **`skipping profile bundle "@treeseed/dsh-chapters"` / plugins absent in the Web UI** — pre-fix
+- **`skipping profile bundle "@fractalsynapse/dsh-chapters"` / plugins absent in the Web UI** — pre-fix
   images had `link:/app` (npm rejects the protocol) and a silent `|| true` install. Rebuild the
-  image; verify with `docker exec dsh-chapters-dev ls /dsh-home/profiles/web/node_modules/@treeseed`.
+  image; verify with `docker exec dsh-chapters-dev ls /dsh-home/profiles/web/node_modules/@fractalsynapse`.
 - **`dependency vllm failed to start`** for `dsh-web`/`dsh-test` — always a symptom of the above or
   a failed healthcheck; fix vllm first, the dependents follow once healthy.
 - **vllm exits with `--enable-auto-tool-choice requires --tool-call-parser`** — also an old image:

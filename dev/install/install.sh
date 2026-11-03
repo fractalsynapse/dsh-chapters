@@ -143,7 +143,7 @@ if [[ -f "$PKG_JSON" ]]; then
     if (!pkg.dependencies) pkg.dependencies = {};
 
     // dsh-chapters (linked to this checkout)
-    pkg.dependencies['@treeseed/dsh-chapters'] = 'link:$REPO_ROOT';
+    pkg.dependencies['@fractalsynapse/dsh-chapters'] = 'link:$REPO_ROOT';
 
     // dsh-codegraph (GitHub source)
     if (!pkg.dependencies['$CODEGRAPH_PKG']) {
@@ -160,7 +160,7 @@ if [[ -f "$PKG_JSON" ]]; then
     if (!pkg.dsh.profile) pkg.dsh.profile = {};
     if (!pkg.dsh.profile.bundles) pkg.dsh.profile.bundles = [];
     const bundles = pkg.dsh.profile.bundles;
-    for (const b of ['@treeseed/dsh-chapters', '$TINYFISH_PKG', '$CODEGRAPH_PKG']) {
+    for (const b of ['@fractalsynapse/dsh-chapters', '$TINYFISH_PKG', '$CODEGRAPH_PKG']) {
       if (!bundles.includes(b)) bundles.push(b);
     }
 
@@ -176,7 +176,7 @@ else
   "private": true,
   "dependencies": {
     "${CODEGRAPH_PKG}": "${CODEGRAPH_SRC}",
-    "@treeseed/dsh-chapters": "link:${REPO_ROOT}",
+    "@fractalsynapse/dsh-chapters": "link:${REPO_ROOT}",
     "${TINYFISH_PKG}": "${TINYFISH_VER}"
   },
   "dsh": {
@@ -185,7 +185,7 @@ else
         "@deepseek-ai/dsh-base",
         "@deepseek-ai/dsh-web-app",
         "${TINYFISH_PKG}",
-        "@treeseed/dsh-chapters",
+        "@fractalsynapse/dsh-chapters",
         "${CODEGRAPH_PKG}"
       ]
     }
