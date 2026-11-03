@@ -233,3 +233,24 @@ test('apply with a wired clone unlinks the mirror copy too — the pool commit c
   assert.equal(fs.existsSync(path.join(f.cwd, b.path)), false, 'store bytes gone')
   assert.equal(fs.existsSync(path.join(clone, 'chapters', 'K', 'A', '002-x.md')), false, 'mirror bytes gone before the commit')
 })
+
+test('apply: a failing second unlink is journalled as partial and named — the chapter that went, went', () => {
+  const f = fixture()
+  const blob = '.dsh-chapters/artifacts/cd/blob.txt'
+  fs.mkdirSync(path.join(f.cwd, blob), { recursive: true }) // a DIRECTORY where the blob should be: unlinkSync will throw
+  const a = rec('A', 1)
+  const b = rec('A', 2, { artifacts: [{ path: blob, sha256: sha('x'), bytes: 1 }] })
+  f.write(a.path, 'first'); f.write(b.path, 'doomed')
+  const rows: [string, SessionState][] = [['A', appendChapters(freshSession('A'), [a, b])]]
+  const plan = planRemoval({ targets: [target('A', b)], rows, cwd: f.cwd })
+  const store = makeStore(rows)
+  return applyRemoval({ store, cwd: f.cwd, rows, storeDir: f.storeDir, now: () => '2026-11-02T19:30:00.000Z' }, plan)
+    .then((out) => {
+      assert.equal(fs.existsSync(path.join(f.cwd, b.path)), false, 'the chapter file is gone')
+      assert.equal(out.stubbed.length, 1, 'the stub flipped — its own file went')
+      assert.ok(out.problems.some((p) => p.includes('blob') && /unlink/.test(p)), `blob failure named: ${out.problems.join('; ')}`)
+      const j = JSON.parse(fs.readFileSync(path.join(f.storeDir, 'A', 'removals', `${out.journalId}.json`), 'utf8'))
+      assert.equal(j.status, 'partial')
+      assert.ok(j.problems.length > 0, 'the journal carries the problems too')
+    })
+})

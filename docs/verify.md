@@ -206,26 +206,27 @@ renderer, the segmentation tool, and the child's notice.
 Known limitation, stated rather than hidden: an audit through `ctx.fs` cannot list a directory, so it
 reports `blindSpots: ['orphan-file','test-litter']`; the offline script has `readdir` and sees them.
 
-## Removal (#255) — deleting bad chapters for real — SPEC (written docs-first; rows flip to PASS with named tests)
+## Removal (#255) — deleting bad chapters for real
 
 The wrong-project-prompt case: bytes that should not be in this project's memory leave the store and the
 mirror, while the registry stub holds the watermark and the durable log stays complete (invariant 1).
-Every row below was written before the implementation, per the docs-first cycle; each names the test that
-must prove it.
+Every row below was written before the implementation (docs-first), then flipped with the named proof.
+Rows verified 2026-11-02 on the branch `feature/255-chapter-removal`; deterministic suites only — no
+browser or model leg is claimed here (M11 records the tape-stability check).
 
 | # | Claim | Procedure | Status 2026-11-02 |
 |---|---|---|---|
-| M1 | A `removed` stub holds the watermark | archive-tail after removing the newest chapter: the next save starts ABOVE the removed `endSeq`, never re-capturing it | **SPEC** — `tests/unit/registry.test.ts` watermark rows over stubs |
-| M2 | The one predicate excludes it everywhere | TOC (`collectEntries`), index build, enrichment candidates, plan rows all omit `removed`; grep finds no second status list | **SPEC** — `tests/unit/registry.test.ts` + `removal.test.ts`; enrich-wire filter swept |
-| M3 | Shared blobs survive | two records name one artifact sha; remove one ⇒ blob on disk, the other chapter still verifies | **SPEC** — `removal.test.ts` orphan math |
-| M4 | Orphaned blobs and plan docs die with the chapter | deletion set lists file + artifacts + planDocs; bytes match the dry-run exactly | **SPEC** — `removal.test.ts` plan set |
-| M5 | Journal precedes deletion | fail the journal write ⇒ zero unlinks, record unmutated; partial unlink ⇒ journal names exactly what went | **SPEC** — sequencing rows |
-| M6 | The mirror publishes the deletion and never rehydrates it | clone paths unlinked before sync pass; commit shows `git rm`; `rehydrateStoreFromMirror` restores 0 for stub-owned names | **SPEC** — `tests/integration/sync.test.ts` rows |
-| M7 | Index and search go clean | `buildIndexInClone` shard + `chapters_search` after removal omit the chapter; TOC of a NEW continuation omits it | **SPEC** — integration + `find-without-a-pool` style row |
-| M8 | Dangling citations are reported and logged | removal output prints referrers; `<tree>/removals/missing-access.log` gains the lines; a later dead-citation miss appends too | **SPEC** — `removal.test.ts` append rows + TOC-build integration row |
-| M9 | Restore re-derives byte-identically, under a NEW number | journal → restore: file renders from the log, sha matches the journal's, old number stays spent; a zero-message span refuses | **SPEC** — `tests/integration/removal-restore.test.ts` |
-| M10 | Ids cannot cross projects or guess | unknown id ⇒ near candidates; ambiguous pool path ⇒ refusal; foreign store-root path ⇒ refusal; dry-run is default | **SPEC** — `resolveRemovalId` unit rows + command integration refusals |
-| M11 | No model-visible byte changed | `git diff` shows no tool description/prompt change ⇒ zero corpus re-record; the nine model-free replay legs stay green untouched | **SPEC** — Task-8 diff check |
+| M1 | A `removed` stub holds the watermark | archive-tail after removing the newest chapter: the next save starts ABOVE the removed `endSeq`, never re-capturing it | **PASS** — `tests/unit/registry.test.ts` ('archiveWatermark counts removed stubs'); the three reduce sites read ALL records by construction, no tombstone filter added anywhere |
+| M2 | The one predicate excludes it everywhere | TOC (`collectEntries`), index build, enrichment candidates, plan rows all omit `removed`; grep finds no second status list | **PASS** — `registry.test.ts` rows + gate `tests/unit/one-predicate.test.ts` (compares against tombstones outside registry.ts fail the build); `enrich-wire.ts` swept to the predicate, old inline shape now pinned absent in `repair.test.ts` |
+| M3 | Shared blobs survive | two records name one artifact sha; remove one ⇒ blob on disk, the other chapter still verifies | **PASS** — `removal.test.ts` orphan-math row + `commands-removal.test.ts` apply row (shared blob present after apply) |
+| M4 | Orphaned blobs and plan docs die with the chapter | deletion set lists file + artifacts + planDocs; bytes match the dry-run exactly | **PASS** — `removal.test.ts` (owned blob + planDoc in set), `commands-removal.test.ts` (dry-run set == apply set) |
+| M5 | Journal precedes deletion | fail the journal write ⇒ zero unlinks, record unmutated; partial unlink ⇒ journal names exactly what went | **PASS** — `removal.test.ts` rows 'a journal that cannot be written' (file-where-dir-goes ⇒ zero unlinks) and 'failing second unlink is journalled as partial' (directory-at-blob-path ⇒ status partial, problems in journal) |
+| M6 | The mirror publishes the deletion and never rehydrates it | clone paths unlinked before sync pass; commit shows `git rm`; `rehydrateStoreFromMirror` restores 0 for stub-owned names | **PASS** — guard rows in `tests/integration/sync.test.ts`; clone unlink in `removal.test.ts`/`commands-removal.test.ts`. The `git rm` line itself follows from `stageAllAndCommit`'s workdir-vs-HEAD diff (established #60 behavior); no new live-push leg was added in v1 |
+| M7 | Index and search go clean | `buildIndexInClone` shard + `chapters_search` after removal omit the chapter; TOC of a NEW continuation omits it | **PASS** — `sync.test.ts` dead-topic-shard sweep row (+ the pre-existing slug-vs-filename cleanup bug it exposed, fixed and pinned); `buildIndex` stub row; search reads corpus files, which are gone |
+| M8 | Dangling citations are reported and logged | removal output prints referrers; `<tree>/removals/missing-access.log` gains the lines; a later dead-citation miss appends too | **PASS** — dangling rows in `removal.test.ts` + `commands-removal.test.ts` (dry-run prints referrer list; report reads ledger); structured relay pinned in `continue.test.ts` (`onIntegrity` modified + missing arms), plane append wired in tools.ts ports |
+| M9 | Restore re-derives byte-identically, under a NEW number | journal → restore: file renders from the log, sha matches the journal's, old number stays spent; a zero-message span refuses | **PASS** — `tests/integration/removal-restore.test.ts` (5 rows: identity, unrecoverable, idempotent, renders-nothing, ledger) |
+| M10 | Ids cannot cross projects or guess | unknown id ⇒ near candidates; ambiguous pool path ⇒ refusal; foreign store-root path ⇒ refusal; dry-run is default | **PASS** — `removal.test.ts` resolve rows (bare basename across two sessions refuses; pool path disambiguates) + `commands-removal.test.ts` foreign-tree and unknown-verb refusals; NOTHING-WRITTEN asserted byte-intact |
+| M11 | No model-visible byte changed | `git diff` shows no tool description/prompt change ⇒ zero corpus re-record; the nine model-free replay legs stay green untouched | **PENDING Task 8/CI** — verified by diff check at PR time and the acceptance job running the unchanged corpus |
 
 ## Two-Tier Rules — SPEC (record §7.1, §7.3–§7.9; issue #50)
 
