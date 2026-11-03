@@ -1111,8 +1111,9 @@ Rules of the amendment, all enforced by tests (verify.md P12–P14):
   an order is the drift the whole store exists to prevent. The guard reads the file's own
   `kind: plan` frontmatter, so renaming cannot disarm it.
 - **Superseding never overwrites.** A revised plan is a new document; the earlier one keeps its
-  bytes and its status changes only in the sense that the newest submission is operative. The store
-  stays append-only with no exceptions.
+  bytes and its status changes only in the sense that the newest submission is operative. Within
+  their classes the append-only rules stand; the one sanctioned deletion is operator removal of bad
+  chapters (#255), which takes a removed chapter's plan documents and orphaned artifacts with it.
 - **Numbering is its own** (`nextPlanNumber`, registry-allocated under a distinct attempt key,
   never a directory scan), so a plan never consumes a chapter number, never reorders the TOC, and
   never collides with a concurrent sibling. Files are `plan-<NNN>-<slug>.md` precisely so a listing

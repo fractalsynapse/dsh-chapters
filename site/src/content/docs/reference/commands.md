@@ -169,17 +169,63 @@ What it fixes, by class:
 
 ### The repair contract (why it never edits a chapter)
 
-Append-only has no exceptions, and a body-hash guard is the only sanctioned mutation of a chapter file.
-So repair **supersedes**: it writes a new chapter number carrying `repairs: <n>`, marks the old registry
-record `status: 'superseded'`, and **copies** the corrupt file into `<tree>/.repair-quarantine/`. Nothing
-is deleted, nothing is rewritten, and every applied run is journalled to
-`<tree>/repairs/<utc-stamp>.json` — one record per move, with hashes, so `restore` can walk it backwards.
+Damage is superseded, never repaired in place, and a body-hash guard is the only sanctioned mutation of
+a chapter file — the one deletion class is operator removal of bad data, [`/chapters-remove`](#chapters-remove--delete-a-bad-chapter-for-real),
+and repair itself never deletes. So repair **supersedes**: it writes a new chapter number carrying
+`repairs: <n>`, marks the old registry record `status: 'superseded'`, and **copies** the corrupt file into
+`<tree>/.repair-quarantine/`. Nothing is deleted, nothing is rewritten, and every applied run is journalled
+to `<tree>/repairs/<utc-stamp>.json` — one record per move, with hashes, so `restore` can walk it backwards.
 Derived layers (TOC, index shards, vocabulary, plan status, counters) are re-derivable and repair may
 rewrite **those**; verbatim bytes are read-only input.
 
 Refusals, deliberately: it will not merge, split or renumber existing chapters; will not touch a session
 log or a checkpoint's text; will not re-cite a file it cannot verify byte-for-byte; and will not run
 against a workspace whose registry row it cannot serialize through the #59 write discipline.
+
+## `/chapters-remove` — delete a bad chapter for real
+
+The mistake this door exists for: a prompt meant for another project, typed into this project's session.
+The contaminated turns archive, and from that boundary on every TOC, every search, and every enrichment
+result carries the wrong project's context. `/chapters-repair` *supersedes* damage and keeps the bytes;
+**removal** is for bytes that should not exist at all — another project's content, junk, a secret. The
+rule it ships with: *bad bytes leave the memory; the durable log is what lets you admit you were wrong.*
+
+```
+/chapters-remove list                       # the session's active TOC with removable ids
+/chapters-remove find <query>               # search this project's pool; names ids
+/chapters-remove <id ...>                   # dry-run: the exact deletion set, nothing written
+/chapters-remove apply <id ...>             # delete for real — journal first
+/chapters-remove report                     # missing-access log: who still cites removed chapters
+/chapters-remove restore <journal-id>       # re-derive the removed chapter from the durable log
+```
+
+What `apply` deletes, and what it deliberately keeps:
+
+| layer | removed chapter's fate |
+|---|---|
+| chapter file | **deleted** from the store **and** from the pool mirror — the deletion is committed and pushed, so index shards regenerate without it |
+| artifacts & plan documents | **deleted when orphaned** — a content-addressed blob survives if any *active* chapter still names it |
+| registry record | a **stub** stays: number, seq span, path, hash, artifact manifest, `status: 'removed'` — the archive watermark reads it, so no auto-archive moment can re-capture the poisoned span |
+| derived surfaces | TOC notices, index shards, `chapters_search`, enrichment: gone from the next build onward, through the one `isActiveChapter` predicate |
+| the durable session log | **never touched.** Removal is a store operation; the log stays append-only and complete |
+| already-seeded child TOCs | still name the chapter (recorded text is never rewritten) — the dangling-reference report names them, and later misses land in `removals/missing-access.log` |
+| git history of the pool | unchanged — the deletion is a new commit, not a rewrite |
+
+Identifiers: the canonical id is the registry path printed by `list`; `find` results, `<sessionId>:<number>`,
+and a bare TOC ordinal from `list` all resolve through the same door. An unknown id refuses and names near
+candidates; an ambiguous one refuses rather than guessing; an id pointing outside **this project's** store
+refuses — removal is same-project only, from the contaminated session or any other session of the project.
+
+Reversal is re-derivation, not resurrection: `restore <journal-id>` re-renders the journaled span from the
+session's durable log through the same save core every door uses, under a **new** number — so a removed
+number stays spent forever, and a restore that would render nothing refuses rather than writing a husk.
+Safety order is the #60 discipline: the journal under `<tree>/removals/` is written **before** the first
+unlink; if it cannot be written, nothing is deleted.
+
+Known scope limit, stated rather than hidden: v1 is **single-machine correct**. If the same pool is linked
+on a second machine that still holds the file locally, that machine can re-publish it until cross-machine
+removal tombstones land (follow-up issue). Dry-run is the default: `list` and `find` write nothing, and the
+`apply` word is the only thing that deletes.
 
 ## Auto-save when a subagent settles
 

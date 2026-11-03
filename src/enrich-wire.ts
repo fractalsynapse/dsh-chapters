@@ -24,6 +24,7 @@ import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
 import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
 import { resolveStoredPath } from './archive.ts'
+import { isActiveChapter } from './registry.ts'
 
 /** The row shape the ladder may read and re-write — structural, never the registry's own type. */
 interface ChapterRowItem {
@@ -169,7 +170,7 @@ export function humanBytesOf(body: string): string {
   return out.join('\n')
 }
 
-type ChapterLike = { number: number; title: string; generated?: Record<string, { by: string; model?: string }[]> }
+type ChapterLike = { number: number; title: string; status?: 'superseded' | 'removed'; generated?: Record<string, { by: string; model?: string }[]> }
 /**
  * The ONE "does this chapter still need annotating?" test, used by BOTH the queue and `pendingCount`
  * (#61). They were two hand-written loops over `chaptersOf` that had already drifted in shape, and the
@@ -190,9 +191,11 @@ export function isPendingChapter(
 
 function chaptersOf(state: unknown): ChapterLike[] {
   const c = (state as { chapters?: unknown } | undefined)?.chapters
-  // #60: the enrichment queue reads registry chapters through the ONE supersede predicate, so a
-  // repaired-away husk is never annotated again (and never re-enters the corpus through the ladder).
-  return Array.isArray(c) ? (c as ChapterLike[]).filter((row) => (row as { status?: string }).status !== 'superseded') : []
+  // #60, widened #255: the enrichment queue reads registry chapters through the ONE predicate, so a
+  // repaired-away husk AND an operator-removed stub are never annotated and never re-enter the corpus
+  // through the ladder. The old inline `!== 'superseded'` here was a second predicate (#59 shape) —
+  // tests/unit/one-predicate.test.ts keeps comparisons against tombstone statuses inside registry.ts.
+  return Array.isArray(c) ? (c as ChapterLike[]).filter(isActiveChapter) : []
 }
 
 export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {

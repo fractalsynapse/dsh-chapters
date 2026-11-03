@@ -25,7 +25,7 @@
  *  5. **One serialized section per row.** Every registry mutation goes through `store.mutate` (#59): a
  *     repair that clobbered a live door's commit would be #59 with better intentions.
  */
-import { appendChapters, isActiveChapter, releaseReservation, type SessionState } from './registry.ts'
+import { appendChapters, isActiveChapter, isRemovedChapter, releaseReservation, type SessionState } from './registry.ts'
 import type { ChapterRecord } from './archive.ts'
 import { sameStoredPath } from './archive.ts'
 import type { RenderConfig } from './types.ts'
@@ -268,14 +268,17 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
  */
 export interface RegistryHealth {
   hollow: number; duplicate: number; drift: number; unreleased: number; ghost: number
-  superseded: number; chapters: number; sessions: number
+  superseded: number; removed: number; chapters: number; sessions: number
 }
 
 export function registryHealth(states: readonly SessionState[]): { text: string; counts: RegistryHealth } {
-  const counts: RegistryHealth = { hollow: 0, duplicate: 0, drift: 0, unreleased: 0, ghost: 0, superseded: 0, chapters: 0, sessions: states.length }
+  const counts: RegistryHealth = { hollow: 0, duplicate: 0, drift: 0, unreleased: 0, ghost: 0, superseded: 0, removed: 0, chapters: 0, sessions: states.length }
   for (const st of states) {
     counts.chapters += st.chapters.length
     counts.superseded += st.chapters.filter((c) => c.status === 'superseded').length
+    // #255: the removal stub is COUNTED, never hidden — a status that cannot see removed chapters is a
+    // partial check, and a partial check presented as clean is the #61 defect family.
+    counts.removed += st.chapters.filter(isRemovedChapter).length
     counts.hollow += st.chapters.filter((c) => c.messages === 0 && c.artifacts.every((a) => a.bytes === 0)).length
     const seen = new Set<number>()
     for (const c of st.chapters) { if (seen.has(c.number)) counts.duplicate += 1; seen.add(c.number) }
@@ -331,6 +334,14 @@ export const FINDING_CLASSES: readonly FindingClass[] = [
   'dead-citation', 'tampered-file', 'test-litter', 'unrecoverable',
 ]
 
+/**
+ * What may write `repairs[].class`: the auditor's classes, plus the one non-finding reason —
+ * an operator restored a removed chapter (#255). The registry field is a `string` (rows predate
+ * the enum); typing the WRITE here is what stops doors inventing classes, and lets an audit
+ * tell a repair move from a restore move.
+ */
+export type SupersedeReason = FindingClass | 'operator-restore'
+
 // ─────────────────────────────────────────────────── supersede (pure)
 
 /**
@@ -344,7 +355,7 @@ export function supersedeChapter(
   state: SessionState,
   overNumber: number,
   replacements: readonly ChapterRecord[],
-  reason: FindingClass,
+  reason: SupersedeReason,
   at: number = Date.now(),
 ): SessionState {
   const stamped = replacements.map((r) => ({ ...r, repairs: [...(r.repairs ?? []), { class: reason, over: overNumber, at }] }))
@@ -371,7 +382,7 @@ export function markSupersededBy(
   state: SessionState,
   overNumber: number,
   byNumber: number,
-  reason: FindingClass,
+  reason: SupersedeReason,
   at: number = Date.now(),
 ): { state: SessionState; problem?: string } {
   const over = state.chapters.find((c) => c.number === overNumber)

@@ -33,6 +33,14 @@ import type { SessionEventLike } from './types.ts'
 import { resolveStoreRoot } from './store.ts'
 import { diagnosticStatusLine } from './diag.ts'
 import { registryHealth } from './repair.ts'
+import { removedGuard } from './removal.ts'
+import { applyRemoval, planRemoval, readMissingAccess, resolveRemovalId, restoreRemoval, type RemovalTarget } from './removal.ts'
+import { readDurableSession } from './auto-save.ts'
+import type { SaveSessionConfig } from './save-core.ts'
+import { ancestorPath, buildIndex, isRemovedChapter } from './registry.ts'
+import { resolveStoredPath, verifyChapter } from './archive.ts'
+import { searchKnowledge, searchLocalStore } from './search.ts'
+import { makeArchiveFs, type RegistryStore } from './store.ts'
 import type { SessionState } from './registry.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
@@ -64,6 +72,15 @@ export interface HostCommandsConfig {
   /** §7.8: fed to `resolveProject` so the identity line reports the SAME key the
    * plugin binds by, not a naive re-derivation. */
   projectKeyOverride?: string
+  /** #255: the plane's registry store handle — `/chapters-remove` mutates through it
+   * (one serialized section per row, #59). Absent ⇒ the command refuses cleanly. */
+  store?: RegistryStore
+  /** #255: cap for removal report/print arms. Reuses the repair report row — one
+   * knob for "how many lines may a command print", not two (#117 family). */
+  reportMaxLines?: number
+  /** #255: the door plane's assembled render/save config — `restore` re-derives spans through
+   * the SAME save core with the SAME thresholds (one assembly, index.ts shares it; #90). */
+  save?: SaveSessionConfig
 }
 
 type CommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string }
@@ -264,6 +281,9 @@ export function registerHostCommands(
     return runSync({
       cwd, storeRoot: config.artifactStoreRoot, cloneDir: DEFAULT_CLONE_DIR,
       project: record, ...(token !== undefined && token !== null ? { token } : {}),
+      // #255: the guard reads removed stubs from the registry rows this command already holds —
+      // a deletion must never be rehydrated back into the store on the pass that publishes it.
+      removed: removedGuard(domain.table('sessions').entries() as Iterable<[string, SessionState]>),
       force: true,
     })
   }
@@ -341,6 +361,15 @@ export function registerHostCommands(
         const dead = states.reduce((m, st) => m + (st.chapters?.length ?? 0), 0)
         lines.push(`Findings (registry-level, this machine): ${health.text}`)
         lines.push(`  NOT checked here: coverage holes, orphan files, dead citations — run /chapters-repair audit${dead === 0 ? ' (no chapter records at all yet)' : ''}`)
+      }
+      // #255: removals are a STATE — printed in every condition, unlinked included (#61).
+      {
+        const storeDir0 = cwd === '' ? '' : resolveStoreRoot(cwd, config.artifactStoreRoot)
+        const stubs = storeDir0 === '' ? 0 : [...(domain.table('sessions').entries() as Iterable<[string, SessionState]>)]
+          .filter(([, st]) => st.rootSession !== undefined && fs.existsSync(path.join(storeDir0, st.rootSession)))
+          .reduce((m, [, st]) => m + (st.chapters ?? []).filter(isRemovedChapter).length, 0)
+        const mal = storeDir0 === '' ? null : readMissingAccess(storeDir0, 0)
+        lines.push(`Removals (this project): ${stubs} removed stub(s); missing-access ledger: ${mal === null ? 'no workspace cwd on this session' : mal.total === 0 ? 'empty (it fills at the next TOC build that cites a vanished chapter — /chapters-remove report)' : `${mal.total} line(s) at ${mal.file}`}`)
       }
       // The retrievability line: a long session that has never tripped an archive moment is the field
       // case #61 found (2,363 events, 414 tool calls, `chapters: []`) — knowledge that exists only in
@@ -661,11 +690,218 @@ export function registerHostCommands(
     },
   }
 
+  /**
+   * #255: `/chapters-remove` — the operator door that deletes BAD chapters from THIS project's
+   * memory. The field case is the wrong-project prompt; supersede (#60) keeps bytes, this removes
+   * them. Verbs: `list [sessionId]`, `find <query>`, `[dry-run] <id…>`, `apply <id…>`, `report`,
+   * `restore <journal-id>`. Dry-run is the default; `apply` is the only word that deletes. Scope
+   * is same-project by construction: only rows whose store tree exists under THIS workspace resolve.
+   */
+  const removeCommand = {
+    name: 'chapters-remove',
+    description: 'Delete bad chapters from this project\u2019s memory (#255): list | find | dry-run | apply | report | restore.',
+    input: { hint: '[list [sessionId] | find <query> | [dry-run] <id…> | apply <id…> | report | restore <journal-id>]' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
+      const cwd = cwdOf(invocation.agent)
+      const cap = config.reportMaxLines ?? 40
+      const err = (t: string): CommandResult => ({ kind: 'error', text: t })
+      if (cwd === '') return err('chapters-remove: this session has no workspace cwd — nowhere to act')
+      // The store handle is required only by MUTATING arms (`apply`, `restore`). `list`, `find`,
+      // `report` and the dry-run resolve are reads of rows and files the plane already exposes —
+      // refusing them for a plumbing detail would hide the operator's own memory behind it.
+      // Each mutating arm guards `config.store === undefined` inline, which also narrows the type.
+      const noStore = (): CommandResult => ({ kind: 'error', text: 'chapters-remove: this plane carries no registry handle — nothing was written' })
+      const wrapped = invocation.agent as { session?: { id?: string }; agent?: { session?: { id?: string } } }
+      const callerId = wrapped.session?.id ?? wrapped.agent?.session?.id
+      const storeDir = resolveStoreRoot(cwd, config.artifactStoreRoot)
+      // Same-project scope (#255): a row resolves iff its store tree exists under this workspace.
+      // Session ids are globally unique, so the tree-exists test cannot cross projects.
+      const allRows = [...(domain.table('sessions').entries() as Iterable<[string, SessionState]>)]
+      const rows: [string, SessionState][] = allRows.filter(([, st]) =>
+        st.rootSession !== undefined && st.rootSession !== '' && fs.existsSync(path.join(storeDir, st.rootSession)))
+      const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((p) => p.length > 0)
+      const verb = parts[0] ?? ''
+      const argTail = parts.slice(1)
+      const fmtBytes = (n: number): string => n >= 1024 ? `${(n / 1024).toFixed(1)} KB` : `${n} B`
+
+      if (verb === 'list') {
+        const focus = argTail[0] ?? callerId
+        if (focus === undefined) return err('chapters-remove list: no session context — pass list <sessionId> whose ancestor path names the chapters to review')
+        const byId = new Map(rows)
+        if (byId.get(focus) === undefined) return err(`chapters-remove list: session ${focus} has no row under this project's store (${storeDir}) — removal is same-project only; run it in the project that owns the session`)
+        let pathIds: string[]
+        try { pathIds = ancestorPath((id) => byId.get(id), focus) } catch (error) { return err(`chapters-remove list: ${String((error as Error)?.message ?? error)}`) }
+        const entries = buildIndex(pathIds, (id) => byId.get(id), () => 'ok' as const)
+        const afs = makeArchiveFs(cwd)
+        const lines: string[] = []
+        for (let i = 0; i < entries.length; i += 1) {
+          const e = entries[i]!
+          const rec = byId.get(e.authorSession)?.chapters.find((c) => c.number === e.number)
+          const verdict = rec !== undefined ? await verifyChapter(afs, rec) : 'missing'
+          lines.push(`  ${String(i + 1)}. ${e.authorSession}:${e.number} · ${verdict} · ${e.title} — ${e.summary}\n      ${e.path}`)
+        }
+        const stubs = rows.reduce((m, [, st]) => m + st.chapters.filter(isRemovedChapter).length, 0)
+        const head = entries.length === 0
+          ? 'chapters-remove list: no ACTIVE chapters on this ancestor path — nothing removable here.'
+          : `chapters-remove list (${pathIds.join(' → ')}) — ${entries.length} active chapter(s), reading order = TOC order; the ids are what dry-run/apply accept:`
+        return { kind: 'success', text: [head, ...lines, `  +${stubs} removed stub(s) on this project (uncited by design; ledger: /chapters-remove report)`].join('\n') }
+      }
+
+      if (verb === 'find') {
+        const query = argTail.join(' ')
+        if (query === '') return err('chapters-remove find: needs a query — /chapters-remove find <words>')
+        const project = projectForCwd(domain.table('projects').entries(), cwd)
+        const lines: string[] = []
+        const push = (rawPath: string, title: string, kindLabel: string): void => {
+          if (kindLabel === 'rule') { lines.push(`  ${rawPath} · ${title} — rules are revoked via /chapters-rule, not removed here`); return }
+          const res = resolveRemovalId(rawPath, rows, cwd, callerId)
+          lines.push('target' in res
+            ? `  ${rawPath} → removable id ${res.target.sessionId}:${res.target.record.number} · ${title}`
+            : `  ${rawPath} · ${title} — not removable from this tree (${res.refusal.split('\n')[0]})`)
+        }
+        if (project !== undefined) {
+          const out = searchKnowledge(path.join(cwd, DEFAULT_CLONE_DIR), query, 600, { projectKey: project.projectKey })
+          for (const r of out.results) push(r.path, r.title, r.kind)
+          if (out.total === 0) return { kind: 'success', text: `chapters-remove find "${query}" — no matches in the pool mirror. Nothing was written.` }
+          const withheldF = Math.max(0, out.results.length - cap)
+          return { kind: 'success', text: [
+            `chapters-remove find "${query}" — ${out.total} hit(s) in the pool mirror, ${lines.length} shown:`,
+            ...lines.slice(0, cap),
+            ...(withheldF > 0 ? [`  … ${withheldF} more withheld by the report cap (${cap})`] : []),
+            '  next: /chapters-remove <removable id> (dry-run), then apply <id>',
+          ].join('\n') }
+        }
+        const out = searchLocalStore(storeDir, query, 600)
+        for (const r of out.results) push(r.path, r.title, r.kind)
+        if (out.total === 0) return { kind: 'success', text: `chapters-remove find "${query}" — no matches in this project's local store (${out.documents} document(s) scanned; no pool linked). Nothing was written.` }
+        const withheldL = Math.max(0, out.results.length - cap)
+        return { kind: 'success', text: [
+          `chapters-remove find "${query}" — ${out.total} hit(s) in the LOCAL store (knowledge-local: no pool linked), ${lines.length} shown:`,
+          ...lines.slice(0, cap),
+          ...(withheldL > 0 ? [`  … ${withheldL} more withheld by the report cap (${cap})`] : []),
+          '  next: /chapters-remove <removable id> (dry-run), then apply <id>',
+        ].join('\n') }
+      }
+
+      // dry-run is the DEFAULT: a first token that is not a verb but looks like an id (path,
+      // `session:number`, pool tail, or a bare ordinal) resolves as `[dry-run] <id…>`. A token
+      // that is neither never guesses — it hits the unknown-verb refusal below.
+      const looksLikeId = !['list', 'find', 'report', 'restore', 'apply', 'dry-run'].includes(verb) && /[:/.0-9]/.test(verb)
+      if (verb === '' || verb === 'dry-run' || verb === 'apply' || looksLikeId) {
+        const ids = verb === 'apply' ? argTail : parts.filter((p) => p !== 'dry-run')
+        if (ids.length === 0) return err('usage: /chapters-remove list [sessionId] | find <query> | [dry-run] <id…> | apply <id…> | report | restore <journal-id>')
+        const targets: RemovalTarget[] = []
+        const refusals: string[] = []
+        for (const raw of ids) {
+          const res = resolveRemovalId(raw, rows, cwd, callerId)
+          if ('target' in res) targets.push(res.target)
+          else refusals.push(res.refusal)
+        }
+        if (refusals.length > 0) return err(`chapters-remove: NOTHING WRITTEN — ${refusals.length} unresolved id(s):\n  ${refusals.join('\n  ')}${targets.length > 0 ? `\n  (${targets.length} did resolve; drop the bad ids and re-run)` : ''}`)
+        const plan = planRemoval({ targets, rows, cwd })
+        const bytes = plan.chapterFiles.reduce((s, f) => s + f.bytes, 0) + plan.blobFiles.reduce((s, f) => s + f.bytes, 0)
+        const header = [`chapters-remove ${verb === 'apply' ? 'APPLY' : 'dry-run'} — ${targets.length} chapter(s) from ${new Set(targets.map((t) => t.sessionId)).size} tree(s):`]
+        const set = [
+          ...plan.chapterFiles.map((f) => `  chapter  ${f.stored} (${fmtBytes(f.bytes)})`),
+          ...plan.blobFiles.map((f) => `  blob     ${f.stored} (${fmtBytes(f.bytes)}) — orphaned: no active chapter names it`),
+          ...plan.missing.map((m) => `  absent   ${m} — the record cites it, the disk does not have it; the stub closes the claim anyway`),
+          `  total leaving the store: ${fmtBytes(bytes)} across ${plan.chapterFiles.length + plan.blobFiles.length} file(s); blobs shared with a surviving chapter are NEVER deleted (orphan math)`,
+        ]
+        const dang = plan.dangling.length > 0
+          ? [`  dangling after removal (${plan.dangling.length}) — surviving chapters that still cite a removed file ("does the referrer stay?" is the operator's call):`,
+            ...plan.dangling.slice(0, cap).map((d) => `    ${d.referrer} cites ${d.needle}`),
+            ...(plan.dangling.length > cap ? [`    … ${plan.dangling.length - cap} more (all of them land in /chapters-remove report)`] : [])]
+          : ['  no surviving chapter cites these files']
+        if (verb !== 'apply') return { kind: 'success', text: [...header, ...set, ...dang, '  NOTHING WRITTEN. apply: /chapters-remove apply <the same ids>'].join('\n') }
+        // the mutating seam: narrowing this way (a lone guard at the use site) is what keeps
+        // `config.store` typed below — the compound `verb && !store` guard never narrowed.
+        if (config.store === undefined) return noStore()
+        const project = projectForCwd(domain.table('projects').entries(), cwd)
+        const mirrorAbs = path.join(cwd, DEFAULT_CLONE_DIR)
+        const out = await applyRemoval({
+          store: config.store,
+          cwd, rows, storeDir,
+          ...(project !== undefined && fs.existsSync(mirrorAbs) ? { cloneDir: mirrorAbs, projectKey: project.projectKey } : {}),
+          now: () => new Date().toISOString(),
+        }, plan)
+        let syncLine = '  pool: unlinked project — store-only removal; this machine\u2019s memory is what got cleaned'
+        if (project !== undefined) {
+          try {
+            const res = config.scheduler !== undefined
+              ? await config.scheduler.run(cwd, 'removal', project)
+              : await syncNow(cwd, project, readToken(cwd, config.artifactStoreRoot, project.projectKey))
+            syncLine = `  sync: ${res.steps.join('') !== '' ? res.steps.join(' → ') : res.detail}${res.ok ? '' : ' ⚠ the deletion is applied locally; the pool push FAILED — /chapters-status carries the detail'}`
+          } catch (error) {
+            syncLine = `  sync: pass threw (${String((error as Error)?.message ?? error)}) — local removal is complete; run /chapters-link or let the scheduler retry`
+          }
+        }
+        return { kind: 'success', text: [
+          ...header, ...set, ...dang,
+          `  removed ${out.removed.length} file(s), stubbed ${out.stubbed.length === 0 ? 'NONE (see problems)' : out.stubbed.join(', ')}`,
+          `  journal: ${out.journalId !== '' ? `${out.journalId} — reversal: /chapters-remove restore ${out.journalId}` : 'NOT WRITTEN — nothing was deleted'}`,
+          out.problems.length > 0 ? `  PROBLEMS (${out.problems.length}): ${out.problems.join(' | ')}` : '  no problems',
+          syncLine,
+          '  every TOC built from here on omits the removed chapter(s); already-seeded children keep their recorded text (invariant 1) and their misses land in /chapters-remove report',
+        ].join('\n') }
+      }
+
+      if (verb === 'report') {
+        const r = readMissingAccess(storeDir, cap)
+        if (r.total === 0) return { kind: 'success', text: `chapters-remove report: the missing-access ledger is empty — no removal citations and no dead-citation misses recorded on this project yet. File when written: ${r.file}` }
+        return { kind: 'success', text: [
+          `chapters-remove report — ${r.total} line(s) at ${r.file}, last ${r.lines.length}:`,
+          ...r.lines,
+          ...(r.withheld > 0 ? [`  … ${r.withheld} earlier line(s) withheld by the report cap (${cap}) — read the file for all`] : []),
+          '  verdicts: dead-citation = a TOC cite whose bytes vanished (decide: repair or remove the referrer); removed= = the removal ledger',
+        ].join('\n') }
+      }
+
+      if (verb === 'restore') {
+        if (argTail[0] === undefined) return err('chapters-remove restore: needs a journal id (printed by apply; journals live under <store>/<tree>/removals/)')
+        if (config.store === undefined) return noStore()
+        if (config.save === undefined) return err('chapters-remove restore: this plane carries no render config — restore re-derives through the save core and cannot guess its thresholds')
+        const get = (name: string): unknown => { try { return (ctx as { get?: (n: string) => unknown }).get?.(name) } catch { return undefined } }
+        const out = await restoreRemoval({
+          store: config.store, cwd, storeDir,
+          readLog: async (sid) => (await readDurableSession(get, sid))?.events ?? null,
+          config: config.save,
+          now: () => new Date().toISOString(),
+        }, argTail[0])
+        const lines = [
+          `chapters-remove restore — journal ${out.journalId}:`,
+          ...(out.restored.length > 0 ? [`  re-derived under new numbers: ${out.restored.join(' · ')}`] : ['  nothing was re-derived']),
+          ...out.skipped.map((s) => `  skipped: ${s}`),
+          ...out.problems.map((p) => `  PROBLEM: ${p}`),
+          '  the log was read, never written; removed numbers stay spent; the re-rendered chapters are normal chapters from here on',
+        ]
+        let syncLine = '  pool: unlinked — the restored chapters live in the local store'
+        if (out.restored.length > 0) {
+          const project = projectForCwd(domain.table('projects').entries(), cwd)
+          if (project !== undefined) {
+            try {
+              const res = config.scheduler !== undefined
+                ? await config.scheduler.run(cwd, 'removal-restore', project)
+                : await syncNow(cwd, project, readToken(cwd, config.artifactStoreRoot, project.projectKey))
+              syncLine = `  sync: ${res.steps.join(' → ') !== '' ? res.steps.join(' → ') : res.detail}${res.ok ? '' : ' ⚠ restored locally; the pool push failed — /chapters-status carries the detail'}`
+            } catch (error) {
+              syncLine = `  sync: pass threw (${String((error as Error)?.message ?? error)}) — restored chapters are safe in the store`
+            }
+          }
+        }
+        return { kind: out.problems.length > 0 && out.restored.length === 0 ? 'error' : 'success', text: [...lines, syncLine].join('\n') }
+      }
+
+      return err(`chapters-remove: unknown verb "${verb}" — usage: list [sessionId] | find <query> | [dry-run] <id…> | apply <id…> | report | restore <journal-id>`)
+    },
+  }
+
   try {
     const d1 = commands.register(linkCommand)
     if (typeof d1 === 'function') disposers.push(d1 as () => void)
     const d2 = commands.register(statusCommand)
     if (typeof d2 === 'function') disposers.push(d2 as () => void)
+    const dRemove = commands.register(removeCommand)
+    if (typeof dRemove === 'function') disposers.push(dRemove as () => void)
     const d3 = commands.register(enrichCommand)
     if (typeof d3 === 'function') disposers.push(d3 as () => void)
     const d3b = commands.register(promptCommand)

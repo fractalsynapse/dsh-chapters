@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import * as fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { runSync, planStoreToRepo, syncLockPath, readSyncStatus, rehydrateStoreFromMirror } from '../../src/sync.ts'
+import { runSync, planStoreToRepo, syncLockPath, readSyncStatus, rehydrateStoreFromMirror, buildIndexInClone } from '../../src/sync.ts'
 import { stageAllAndCommit } from '../../src/gitops.ts'
 import { canonicalizeRemote, projectKeyFromRemote } from '../../src/repo.ts'
 import { makeFakeRemote, makeFakeDriver, type FakeRemote } from '../support/fake-driver.ts'
@@ -281,12 +281,29 @@ test('rehydrateStoreFromMirror: fills absent chapters/artifacts, never overwrite
   wf(path.join(clone, 'chapters', 'K2', 'sessZ', '001-other-project.md'), 'OTHER')
   wf(path.join(store, 'sessA', 'chapters', '001-x.md'), 'STORE-GROUND-TRUTH') // exists — must NOT be touched
   const n = rehydrateStoreFromMirror(clone, store, 'K1')
-  assert.equal(n, 2, 'fills only the two absent K1 files')
+  assert.equal(n.restored, 2, 'fills only the two absent K1 files')
   assert.equal(fs.readFileSync(path.join(store, 'sessA', 'chapters', '001-x.md'), 'utf8'), 'STORE-GROUND-TRUTH', 'present files are never overwritten')
   assert.equal(fs.readFileSync(path.join(store, 'sessA', 'chapters', '002-y.md'), 'utf8'), 'Y')
   assert.ok(fs.existsSync(path.join(store, 'artifacts', 'ab', 'abcdef.txt')), 'store-root artifacts restore')
   assert.equal(fs.existsSync(path.join(store, 'sessZ')), false, 'other projects prefixes are out of scope')
-  assert.equal(rehydrateStoreFromMirror(clone, store, 'K1'), 0, 'idempotent second pass restores nothing')
+  assert.equal(rehydrateStoreFromMirror(clone, store, 'K1').restored, 0, 'idempotent second pass restores nothing')
+})
+
+test('#255: the rehydrate guard never resurrects a name a removed stub owns', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'rehyd-guard-'))
+  const clone = path.join(base, 'clone')
+  const store = path.join(base, 'store')
+  const wf = (p: string, t: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t) }
+  wf(path.join(clone, 'chapters', 'K1', 'sessA', '002-y.md'), 'CONTAMINATED')
+  wf(path.join(clone, 'chapters', 'K1', 'sessA', '003-ok.md'), 'GOOD')
+  wf(path.join(clone, 'artifacts', 'K1', 'ab', 'abcdef.txt'), 'orphan-blob')
+  const guard = { chapterKeys: new Set(['sessA#002-y.md']), blobKeys: new Set(['abcdef.txt']) }
+  const r = rehydrateStoreFromMirror(clone, store, 'K1', guard)
+  assert.equal(r.restored, 1, 'only the un-guarded chapter comes back')
+  assert.equal(r.skippedRemoved, 2, 'guarded chapter + blob counted, never silently dropped')
+  assert.equal(fs.existsSync(path.join(store, 'sessA', 'chapters', '002-y.md')), false, 'the removed chapter stays deleted')
+  assert.equal(fs.existsSync(path.join(store, 'artifacts', 'ab', 'abcdef.txt')), false, 'the guarded blob stays deleted')
+  assert.equal(fs.existsSync(path.join(store, 'sessA', 'chapters', '003-ok.md')), true)
 })
 
 test('runSync after a store wipe rehydrates from the pool and says so in steps', async () => {
@@ -300,4 +317,43 @@ test('runSync after a store wipe rehydrates from the pool and says so in steps',
   assert.ok(res.steps.some((x) => /rehydrated \d+ file\(s\) from the pool into the store/.test(x)), 'recovery is LOUD in the status: ' + res.steps.join('; '))
   assert.ok(fs.existsSync(path.join(storeDir, 'rootA', 'chapters', '001-first-topic.md')), 'chapter bytes back on disk')
   assert.ok(fs.existsSync(path.join(storeDir, 'artifacts', 'ab', 'abcdef0123.txt')), 'store-root artifact back too')
+})
+
+test('#255: buildIndexInClone sweeps a stale topic shard when its last entry disappears (changed build)', () => {
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'shardsweep-'))
+  const wf = (p: string, t: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t) }
+  const chapter = (title: string, topics: string[]): string =>
+    `---\ntitle: "${title}"\ntopics: [${topics.map((t) => JSON.stringify(t)).join(', ')}]\n---\n# ${title}\n\nbody\n`
+  wf(path.join(clone, 'chapters', 'K', 'sessA', '001-auth-work.md'), chapter('auth work', ['jwt-auth']))
+  wf(path.join(clone, 'chapters', 'K', 'sessA', '002-other.md'), chapter('other work', ['builds']))
+  assert.equal(buildIndexInClone(clone), true, 'first build writes shards')
+  const shardDir = path.join(clone, 'index')
+  const jwtShard = fs.readdirSync(shardDir).find((f) => f.includes('jwt'))
+  assert.ok(jwtShard !== undefined, 'the topic shard exists')
+  // operator removes the ONLY jwt chapter: file gone, rebuild
+  fs.rmSync(path.join(clone, 'chapters', 'K', 'sessA', '001-auth-work.md'))
+  assert.equal(buildIndexInClone(clone), true, 'a shrinking corpus is still a changed build')
+  assert.equal(fs.readdirSync(shardDir).includes(jwtShard!), false, 'the dead topic shard is swept, not left citing a removed chapter')
+})
+
+test('#255-found pre-existing bug, pinned: an UNCHANGED rebuild keeps every live shard (the old comparison deleted them all)', () => {
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'shardkeep-'))
+  const wf = (p: string, t: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t) }
+  wf(path.join(clone, 'chapters', 'K', 's', '001-a.md'), '---\ntitle: "auth work"\ntopics: ["jwt-auth"]\n---\nbody\n')
+  assert.equal(buildIndexInClone(clone), true)
+  const dir = path.join(clone, 'index')
+  const first = fs.readdirSync(dir).filter((f) => f.endsWith('.md'))
+  assert.equal(first.length, 1, 'one topic shard after the first build')
+  assert.equal(buildIndexInClone(clone), false, 'identical corpus is an unchanged build')
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.md')), first, 'an unchanged rebuild deletes NOTHING')
+})
+
+test('#255 guard state (restored=0, skipped>0) still speaks in the steps', async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'rehyd-skiponly-'))
+  const clone = path.join(base, 'clone')
+  const store = path.join(base, 'store')
+  const wf = (p: string, t: string) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t) }
+  wf(path.join(clone, 'chapters', 'K1', 'sessA', '002-y.md'), 'X')
+  const r = rehydrateStoreFromMirror(clone, store, 'K1', { chapterKeys: new Set(['sessA#002-y.md']), blobKeys: new Set() })
+  assert.deepEqual(r, { restored: 0, skippedRemoved: 1 }, 'the skip-only state is its own honest number')
 })

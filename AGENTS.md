@@ -314,11 +314,20 @@ not a plugin bug.
 ## Hard Rules
 
 - **Never renumber, rewrite, or copy a chapter, and never add a second index.** The store is append-only
-  with no exceptions. Damage is therefore **superseded, not repaired in place** (#60): a new number with
+  toward **damage**: damage is **superseded, not repaired in place** (#60) — a new number with
   `repairs: <n>`, the old record marked `status: 'superseded'` and excluded from TOC/index/enrichment, the
   bad file **copied** (never moved-away-from-truth or deleted) into `.repair-quarantine/`, and the whole run
   journalled so it is reversible. A dead citation is made true by writing the file it names, not by editing
-  the text that names it.
+  the text that names it. **The one sanctioned deletion is operator removal of *bad* data (#255)**: a chapter
+  that should never have been archived (another project's prompt, junk, a secret) leaves the memory for
+  real — file, orphaned artifacts and plan docs go from store **and** mirror; shared blobs only if no active
+  record names them — while the registry keeps a `status: 'removed'` stub carrying number/span/path/sha/
+  artifacts, because the watermark is `max(endSeq)` over *all* records and an erased record would let an
+  auto-archive moment re-capture the poisoned span. Numbers stay spent; `nextChapterNumber` never rewinds;
+  the journal (`<tree>/removals/`) is written before the first unlink; undo is re-derivation from the durable
+  log (Invariant 1 untouched); filtering stays behind the ONE `isActiveChapter` predicate (a second status
+  list is the #59 bug); and the door is operator-only, dry-run by default. *Bad bytes leave the memory; the
+  log is what lets you admit you were wrong.*
 - **Stored paths are workspace-relative, and comparisons are never `===`.** `ChapterRecord.path` is one
   dialect: minted through `toStoredPath(cwd, p)` and compared through `sameStoredPath(a, b, cwd)` (#69).
   Absolute from one door and relative-from-disk looked like two files, so the auditor reported a chapter
