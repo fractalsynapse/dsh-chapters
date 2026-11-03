@@ -130,6 +130,13 @@ export interface ContinuePorts {
    * surface it. OPTIONAL on purpose: absence must never break a door.
    */
   diagnostic?(where: string, message: string, error?: unknown): void
+  /**
+   * #255: a TOC entry failed integrity (`modified` or `missing`) is additionally structured here,
+   * with the referrer, so the plane can log the dead citation durably (removals/missing-access.log).
+   * The warning text keeps flowing as before — this is the DELIVERY channel, not a second decision:
+   * the verdict is minted once, at `verifyChapter`, and only relayed.
+   */
+  onIntegrity?(referrerSessionId: string, citedPath: string, verdict: 'modified' | 'missing'): void
 }
 
 export interface ContinueResult {
@@ -391,7 +398,11 @@ async function collectEntries(
   const citedRecords: ChapterRecord[] = []
   for (const record of cited) {
     const status = await verifyChapter(fs, record)
-    if (status !== 'ok') warnings.push(`${record.path}: ${status} since archived — marked in the TOC, not silently trusted`)
+    if (status !== 'ok') {
+      warnings.push(`${record.path}: ${status} since archived — marked in the TOC, not silently trusted`)
+      // #255: same verdict, structured — the plane turns it into a missing-access log line.
+      ports.onIntegrity?.(callerSessionId, record.path, status)
+    }
     entries.push({ number: entries.length + 1, path: record.path, title: record.title, summary: record.summary, status, ...(record.messages !== undefined ? { messages: record.messages } : {}) })
     citedRecords.push(record)
   }

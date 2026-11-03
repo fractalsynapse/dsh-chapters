@@ -154,7 +154,12 @@ test('a superseded chapter leaves every derived layer; a legacy record never doe
   assert.match(continueSrc, /priorRecords\.push\(\.\.\.st\.chapters\.filter\(isActiveChapter\)\)/,
     'the TOC feed must use isActiveChapter')
   const enrichSrc = await import('node:fs').then((fs) => fs.readFileSync(new URL('../../src/enrich-wire.ts', import.meta.url), 'utf8'))
-  assert.match(enrichSrc, /\.status !== 'superseded'/, 'the enrichment queue must skip superseded rows')
+  // #255: this pin used to assert the INLINE `.status !== 'superseded'` comparison — the exact
+  // second-predicate shape (#59) that widening to `removed` would silently have missed. The queue
+  // must now go through the ONE predicate, and a second comparison anywhere is red in
+  // tests/unit/one-predicate.test.ts.
+  assert.match(enrichSrc, /\.filter\(isActiveChapter\)/, 'the enrichment queue must filter through the ONE predicate')
+  assert.ok(!enrichSrc.match(/status\s*!==\s*'superseded'/), 'and the enrich queue may not reimplement it inline')
   assert.ok(!continueSrc.match(/function .*superseded/) , 'and no door may reimplement the predicate')
 })
 

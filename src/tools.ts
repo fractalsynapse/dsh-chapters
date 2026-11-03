@@ -29,6 +29,7 @@ import { saveSession } from './save-core.ts'
 import { searchKnowledge, searchLocalStore } from './search.ts'
 import { resolveArtifactPath, resolveArtifactWithMirror, buildToc, searchArtifact, readLines } from './artifact-query.ts'
 import { makeArchiveFs, type DomainLike, type RegistryStore , resolveStoreRoot } from './store.ts'
+import { appendMissingAccess } from './removal.ts'
 import type { SessionState } from './registry.ts'
 
 const jsonOutput = <T>(render: (value: T) => string) => ({
@@ -141,6 +142,13 @@ export function buildChaptersTools(
       // `store.mutate` resolves with the written row; the port contract is fire-and-forget void, so the
       // value is deliberately dropped here rather than leaking a row into a tool result.
       mutateState: async (sessionId, fn) => { await store.mutate(sessionId, fn) },
+      // #255: a TOC cite that failed integrity lands in the missing-access log with its referrer —
+      // the operator's "should the referrer stay?" ledger. The verdict is minted once by
+      // verifyChapter; this is delivery, not a second decision (#61).
+      onIntegrity: (referrerSessionId, citedPath, verdict) => appendMissingAccess(
+        resolveStoreRoot(cwd, config.artifactStoreRoot),
+        [`${new Date().toISOString()} | dead-citation | referrer-session=${referrerSessionId} | cited=${citedPath} | verdict=${verdict}`],
+      ),
       fs: () => {
         if (cwd === '') throw new Error('caller session has no workspace cwd — nowhere reachable for the read tool')
         return makeArchiveFs(cwd)

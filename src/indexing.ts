@@ -230,8 +230,12 @@ export function buildIndexShards(
   }
   // entries gone from the input drop out of the shards but stay in the
   // manifest? No — the index is a pure function of current entries: prune.
+  // And PRUNING IS A CHANGE (#255): a removed chapter leaves the surviving entries' hashes
+  // untouched, so the loop above never flips `changed` — a shrinking corpus must still rewrite the
+  // manifest and ship the sweep, or "pure function of the corpus" only holds while it grows.
+  let pruned = false
   for (const path of Object.keys(manifestNext)) {
-    if (!entries.some((e) => e.path === path)) delete manifestNext[path]
+    if (!entries.some((e) => e.path === path)) { delete manifestNext[path]; pruned = true }
   }
 
   const shards = new Map<string, string>()
@@ -251,5 +255,5 @@ export function buildIndexShards(
     shards.set(topic, `${header}\n${lines.join('\n')}\n`)
   }
   void canonical
-  return { shards, manifest: manifestNext, changed, topics: topicNames }
+  return { shards, manifest: manifestNext, changed: changed || pruned, topics: topicNames }
 }
