@@ -24,6 +24,28 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      # A workflow file GitHub never parses until its trigger fires is a landmine. Measured
+      # shipping 0.2.19: one plain-scalar `: ` in release.yml's shipped-step echo poisoned the
+      # TAG-triggered run at parse time — zero jobs, no log, and the tag is immutable (third
+      # dead number in a row). Every workflow file now parses on every CI run, first step with
+      # no deps. If python3 or PyYAML ever leave the runner image the step fails LOUDLY by
+      # design: a gate that silently skips is a rumor (the #89/#92 lesson).
+      - name: workflow files parse
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          files = sorted(glob.glob('.github/workflows/*.yml'))
+          bad = []
+          for f in files:
+              try:
+                  yaml.safe_load(open(f))
+              except Exception as e:
+                  bad.append(f'{f}: {e}')
+          if bad:
+              print('\n'.join(bad))
+              sys.exit(1)
+          print(f'workflow files parse OK ({len(files)})')
+          PY
       # All dependencies (incl. every @deepseek-ai/* devDep) resolve from the
       # PUBLIC registry — no install secret and no private-registry config.
       - run: npm ci
