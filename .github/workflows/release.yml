@@ -11,9 +11,12 @@ name: Release
 # nothing published, tag recorded dead in §26). The step appends an npmrc line
 # holding only the LITERAL ${NPM_TOKEN}; npm interpolates it at use time, so the
 # secret never enters a log or a written file. `id-token: write` REMAINS: npm
-# signs provenance from the run's OIDC identity alongside a token publish — if
-# the registry ever refuses that pairing, drop `--provenance` and amend §26's
-# attestation sentence in the same change, stated not silent.
+# signs provenance from the run's OIDC identity alongside a token publish; when
+# a REPEATED attempt of the same commit re-submits the equivalent provenance
+# entry, the transparency log answers 409 forever and npm aborts the publish
+# (npm/cli#10078, measured shipping 0.2.18) — the step then retries WITHOUT
+# provenance behind a loud ::warning::, so no tag is held hostage by its own
+# transport history; the attestation degrades stated, never silently.
 # setup-node keeps `registry-url` and NO `token:` input (the npmrc line below is
 # the only credential path; a setup-node token input would write the VALUE).
 #
@@ -94,18 +97,35 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          # The single-quoted heredoc keeps ${NPM_TOKEN} LITERAL in the file — npm
+          # The single-quoted printf keeps ${NPM_TOKEN} LITERAL in the file — npm
           # expands it from the env at use time, so no step log or written file ever
           # carries the secret (project security rule: raw tokens never in output).
           printf '%s\n' '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "$HOME/.npmrc"
           # Prerelease versions ('x.y.z-tag') ship under a matching dist-tag so
           # they never steal 'latest' from the last stable ship.
           V="$(node -p "require('./package.json').version")"
-          case "$V" in
-            *-*) npm publish --provenance --tag "${V#*-}" ;;
-            *)   npm publish --provenance ;;
-          esac
+          DIST=()
+          case "$V" in *-*) DIST=(--tag "${V#*-}") ;; esac
+          # One attempt WITH provenance; the captured output is what distinguishes the
+          # one retryable failure from a fatal transport error.
+          if OUT="$(npm publish --provenance "${DIST[@]}" 2>&1)"; then
+            printf '%s\n' "$OUT"
+          elif printf '%s' "$OUT" | grep -q 'TLOG_CREATE_ENTRY_ERROR'; then
+            # The self-collision class (measured shipping 0.2.18): an earlier FAILED
+            # attempt of this same commit already signed and submitted the equivalent
+            # provenance entry, the transparency log dedupes forever (npm/cli#10078),
+            # and npm ABORTS the publish on the 409 — so re-running the tag can never
+            # succeed. A tag must not be held hostage by transport history: republish
+            # WITHOUT provenance, loudly — the version ships, the attestation does
+            # not, and the warning says so (the §26 sentence allows for exactly this).
+            printf '%s\n' "$OUT"
+            echo "::warning::provenance submit collided with this build's own earlier transparency-log entry (npm/cli#10078) — republishing WITHOUT provenance; this version carries no attestation"
+            npm publish --no-provenance "${DIST[@]}"
+          else
+            printf '%s\n' "$OUT"
+            exit 1
+          fi
 
       - name: shipped
         if: ${{ !inputs.dry_run }}
-        run: echo "@fractalsynapse/dsh-chapters@$(node -p "require('./package.json').version") is on npm (provenance attached) — https://www.npmjs.com/package/@fractalsynapse/dsh-chapters"
+        run: echo "@fractalsynapse/dsh-chapters@$(node -p "require('./package.json').version") is on npm — https://www.npmjs.com/package/@fractalsynapse/dsh-chapters (provenance state: see the publish step's output; a TLOG-collision fallback ships WITHOUT attestation and says so)"
