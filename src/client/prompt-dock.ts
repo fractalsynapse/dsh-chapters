@@ -89,11 +89,7 @@ const CSS = [
   // #236: the expanded offer is a bounded reading pane — max-height with an internal scrollbar, so
   // a long suggestion can never cover the screen (the maintainer asked for exactly this). Normal
   // wrapping (`break-word`, not `anywhere`) keeps words whole on full-width lines.
-  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block;max-height:9rem;overflow-y:auto;position:relative}',
-  // #282: the collapse control sits in the top-right corner of the expanded reading pane, sized like
-  // the action row's own glyphs. Padding-top on the pane keeps the first text line clear of it.
-  '.dsh-chapters_promptCollapse{position:absolute;top:2px;right:2px;width:22px;height:22px;border:none;border-radius:4px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;line-height:22px;padding:0}',
-  '.dsh-chapters_promptCollapse:hover{color:var(--dsw-alias-label-primary)}',
+  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block;max-height:9rem;overflow-y:auto}',
   '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',
   '.dsh-chapters_promptIntent{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}',
 
@@ -124,9 +120,9 @@ const Glyph = (): ReactElement => h(
 )
 
 /** One action button, labelled through the host tooltip exactly as the goal bar labels its own. */
-const Action = (props: { label: string; glyph: string; onClick: () => void; disabled?: boolean; title?: string }): ReactElement => {
+const Action = (props: { label: string; glyph: string; onClick: () => void; disabled?: boolean; title?: string; className?: string | undefined }): ReactElement => {
   const button = h('button', {
-    type: 'button', className: 'dsh-chapters_promptBtn', 'aria-label': props.label,
+    type: 'button', className: props.className === undefined ? 'dsh-chapters_promptBtn' : `dsh-chapters_promptBtn ${props.className}`, 'aria-label': props.label,
     ...(props.disabled === true ? { disabled: true } : {}),
     ...(props.title !== undefined ? { title: props.title } : nativeTitle(props.label)),
     onClick: props.onClick,
@@ -619,6 +615,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
         try { inputActions.setDraft(state.text); wrote = true } catch { wrote = false }
       }
       if (!wrote) { refuse('neither insertText nor setDraft was accepted'); return }
+      // #295: the handoff SUCCEEDED — fold the bar back to its normal size. The gesture the
+      // maintainer leans on ends tidy: the words are in the composer, the pane is closed, and
+      // the offer stays in the row (Run still works; the next turn's pull refreshes it anyway).
+      dispatch({ t: 'collapse' })
       // Verify what the human will SEE: the words in the editor, or in the persisted draft store
       // (setDraft writes the store; some builds mirror it into the editor only at mount). Neither?
       // say so plainly — Run still works, and silence is the one outcome never allowed.
@@ -635,6 +635,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
     }
     if (typeof inputActions?.setDraft === 'function') {
       inputActions.setDraft(state.text)
+      dispatch({ t: 'collapse' }) // #295: same fold on the fallback write path
       return
     }
     console.warn('[client:prompt] click-to-draft refused: this host exposes neither insertText nor setDraft')
@@ -658,19 +659,19 @@ export function PromptDock(props: DockProps): ReactElement | null {
         disabled: state.running,
         onClick: populate,
       }, state.expanded
-        ? h('span', { className: 'dsh-chapters_promptFull' },
-            // #282: the corner collapse control — folding back was a dead end; the reducer's
-            // 'collapse' case always kept the offer, so this is a reading action, not a dismissal.
-            h('button', {
-              type: 'button', className: 'dsh-chapters_promptCollapse',
-              'aria-label': 'Collapse the suggested prompt', title: 'Collapse',
-              onClick: () => { dispatch({ t: 'collapse' }) },
-            }, '▴'),
-            state.text ?? '')
+        ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
         : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
       ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptNote', role: 'status' }, state.note)]),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },
+        // #295: the collapse control lives in the ACTION row (right edge = top-right of the bar),
+        // never floated over the prompt text — the pane-corner version made text and button fight
+        // for the same pixel. The reducer's 'collapse' case keeps the offer; this is reading, not dismissal.
+        ...(state.expanded ? [h(Action, {
+          key: 'collapse',
+          label: 'Collapse the suggested prompt', glyph: '▴', className: 'dsh-chapters_promptCollapse',
+          onClick: () => { dispatch({ t: 'collapse' }) },
+        })] : []),
         h(Action, {
           label: 'Run the suggested next step', glyph: '▶', onClick: run, disabled: busy,
           ...(state.text === null || state.text === '' || !canRunHere(state) ? { disabled: true } : {}),

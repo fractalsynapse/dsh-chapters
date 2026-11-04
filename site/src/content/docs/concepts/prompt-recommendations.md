@@ -36,11 +36,13 @@ has an icon, a status label, the suggested prompt, and three actions:
   lands — its verification, its follow-up — or a different line of work the state plainly
   calls for (#279).
 - **Click the prompt to expand it** — the row tooltip says so while collapsed. The expanded
-  pane shows the complete prompt and carries a **collapse control (▴, top-right)** so folding
-  it back is one gesture, not a dead end; collapsing keeps the offer, only a human prompt or
+  pane shows the complete prompt; the **collapse control (▴) lives in the bar's own action
+  row** (top-right, never over the text — an early build floated it inside the pane and the
+  two click targets fought, #295), and folding keeps the offer — only a human prompt or
   **Off** dismisses it (#282).
-- **Click it while expanded to send it to the chat input for editing** — the tooltip while
-  expanded names exactly that. This handoff is **live-verified in use**: the maintainer's
+- **Click it while expanded to send it to the chat input for editing — and the bar folds back**
+  to its normal size in the same gesture (#295). The tooltip while expanded names exactly that.
+  This handoff is **live-verified in use**: the maintainer's
   2026-11-03 report ("you got the click to chat input working… I love that") supersedes the
   `draftRev` refusal measured in #126/#162 on earlier builds; where the host still refuses a
   dock's write, the bar says so on its face rather than leaving a button that did nothing.
