@@ -27,3 +27,8 @@ test('#282: unknown running is NOT running — the clear-on-run must never stran
   assert.doesNotMatch(DOCK, /running \?\? true/, 'the #221 doctrine extended: `?? true` made an absent signal mean "a turn is in flight", which under clear-on-run would clear the bar forever')
   assert.match(DOCK, /running === true/, 'strict boolean: only a published true edge folds to running')
 })
+
+test('#291: the ✕ executes the session-scoped verb — never the plane-wide off', () => {
+  assert.match(DOCK, /exec\('\/chapters-prompt off-session'\)/, 'the label and the verb now share one scope')
+  assert.doesNotMatch(DOCK, /exec\('\/chapters-prompt off'\)/, 'the plane-wide verb is out of the dock entirely')
+})
