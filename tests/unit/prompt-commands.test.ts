@@ -452,3 +452,28 @@ test('#231: a session WITH a row answers from the row and never touches read or 
   assert.equal(reads, 0, 'a served session costs NO full read')
   assert.equal(mirrors, 0, 'and NO duplicate record mirror — this path ran every minute for hours on the maintainer\u2019s host')
 })
+
+test('#289: a state read never re-serves a delivered offer — resting renders, the row heals elsewhere', async () => {
+  const h = harness({
+    effective: () => ({ spec: 'local/qwen', source: 'config' }),
+    statusLine: () => 'prompt: ON (local/qwen)',
+    bar: {
+      read: async () => ({ ...barState, autorun: 'disarmed' as const, fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: 'disarmed' as const, fired: 0 }) as never,
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+    },
+  })
+  const AGENT_DELIVERED = {
+    session: {
+      id: 's-9',
+      // the offer arrived verbatim as a later human turn (seq 44 > the offer's 41): it RAN.
+      events: [{ seq: 44, type: 'user/message', data: { content: [{ type: 'text', text: barState.text }] } }],
+    },
+  }
+  const res = await h.run('state', AGENT_DELIVERED)
+  assert.match(res.text ?? '', /^suggested next step: idle/, 'delivered ⇒ rendered resting (off + configured model ⇒ idle), never the old offer')
+  assert.doesNotMatch(res.text ?? '', /prompt:/, 'the stale text is not served, so no tab can render a re-runnable ghost')
+  const same = await h.run('state', AGENT)
+  assert.match(same.text ?? '', /^suggested next step: ready/, 'no delivery in the log — the offer stands untouched')
+})
