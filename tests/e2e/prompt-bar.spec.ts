@@ -118,6 +118,9 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     await expect(promptButton).toHaveAttribute('aria-label', 'Click to expand the full suggested prompt', { timeout: 15_000 })
     await promptButton.click()
     await promptButton.click()
+    // #295: the successful handoff folds the bar back — the row re-reads as the collapsed
+    // gesture label once the words have landed in the composer.
+    await expect(promptButton).toHaveAttribute('aria-label', 'Click to expand the full suggested prompt', { timeout: 15_000 })
     fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-draft-dump.json'), JSON.stringify({
       prompt,
       composerText: await composer.evaluate((el) => (el as HTMLElement).innerText ?? (el as HTMLTextAreaElement).value ?? ''),
