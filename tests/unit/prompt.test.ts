@@ -336,3 +336,14 @@ test('#243+#273: the suggestion rules demand a DIRECTIVE TO THE MODEL, not advic
   assert.ok(a.includes('run /chapters-prompt suggest and report the output'), 'the real failure names itself in the instruction')
   assert.ok(a.includes('advice to the user'), 'and names the failure mode it forbids')
 })
+
+test('#279: the rules also demand a FORWARD step — never a restatement of in-flight work', () => {
+  const built = buildSuggestInput(facts([{ number: 1, title: 'Setup', summary: 'installed the rig', plots: [] }], [{ role: 'assistant' as const, text: 'done for now' }]), 4000, 240)
+  const a = inputOf(built)
+  assert.ok(a.includes('FORWARD'), 'the forward constraint is named')
+  assert.ok(a.includes('NOT YET BEGUN'), 'the step must not have started')
+  assert.ok(a.includes('never a restatement of the work this session is already doing'), 'the echo class is explicitly forbidden')
+  // the reproduced live failure, pinned verbatim IN the rule, exactly as #273 pinned its own
+  assert.ok(a.includes('Create the #273 echo-adjacency issue and run the pre-change sampler'), 'the real echo names itself in the instruction')
+  assert.ok(a.includes('a mirror, not a director'), 'and states what the echo actually is')
+})

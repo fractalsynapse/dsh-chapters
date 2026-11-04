@@ -89,7 +89,11 @@ const CSS = [
   // #236: the expanded offer is a bounded reading pane — max-height with an internal scrollbar, so
   // a long suggestion can never cover the screen (the maintainer asked for exactly this). Normal
   // wrapping (`break-word`, not `anywhere`) keeps words whole on full-width lines.
-  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block;max-height:9rem;overflow-y:auto}',
+  '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block;max-height:9rem;overflow-y:auto;position:relative}',
+  // #282: the collapse control sits in the top-right corner of the expanded reading pane, sized like
+  // the action row's own glyphs. Padding-top on the pane keeps the first text line clear of it.
+  '.dsh-chapters_promptCollapse{position:absolute;top:2px;right:2px;width:22px;height:22px;border:none;border-radius:4px;background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary);cursor:pointer;font-size:13px;line-height:22px;padding:0}',
+  '.dsh-chapters_promptCollapse:hover{color:var(--dsw-alias-label-primary)}',
   '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',
   '.dsh-chapters_promptIntent{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}',
 
@@ -275,11 +279,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
     // reducer path, so there is no second fold implementation to drift.
     const pushEvs = pushEventsOf(pushed)
     if (pushEvs !== null) {
-      return { ...promptBarReducer(promptBarReducer(s, pushEvs.polled), pushEvs.autorun), running: running ?? true }
+      return { ...promptBarReducer(promptBarReducer(s, pushEvs.polled), pushEvs.autorun), running: running === true }
     }
     const c = cachedState(sessionId)
     const base = c !== undefined ? stateFromCache(c.ev, c.autorun) : s
-    return { ...base, running: running ?? true }
+    return { ...base, running: running === true }
   })
   // #79's discipline, kept because the failure it prevents was real: one pull per mount, then per edge.
   // A fetch in an effect with no such guard re-fires on every render.
@@ -471,9 +475,12 @@ export function PromptDock(props: DockProps): ReactElement | null {
 
   // Autorun fires off the IDLE edge, never off a render. `running` comes from the host when it publishes it;
   // absent means unknown, and unknown means do not start a turn the human cannot see coming.
-  const prevRunning = useRef<boolean>(running ?? true)
+  // #221/#282: unknown is NOT running. `?? true` here pinned a non-publishing host into a permanent
+  // running edge — harmless while running only decorated the flag, fatal once a running edge CLEARS
+  // the offer (#282): the bar would show "Agent is running" forever. Strict boolean at every fold.
+  const prevRunning = useRef<boolean>(running === true)
   useEffect(() => {
-    const next = running ?? true
+    const next = running === true
     const prev = prevRunning.current
     prevRunning.current = next
     dispatch({ t: 'running', running: next })
@@ -515,7 +522,13 @@ export function PromptDock(props: DockProps): ReactElement | null {
       .then((out) => {
         if (!alive.current) return
         if (/^cannot run:/i.test(out.trim())) dispatch({ t: 'polled', status: 'failed', text: state.text, error: out.trim().slice(0, 200), turnSeq: state.turnSeq } as PromptBarEvent)
-        else dispatch({ t: 'collapse' })
+        // #285: success means THIS click authored a turn — the dock knows that without any host
+        // signal, so it folds `running: true` locally: the offer clears, Run disarms, and the
+        // generic running line shows even on edgeless hosts (#221). The server consumed the row in
+        // the same breath, so the next pull (any tab) confirms the truth, and polled retires the
+        // flag wire-first. Replaces #282's collapse-only success fold, which left a just-run offer
+        // sitting there re-runnable — the hole the maintainer's double-Click found.
+        else dispatch({ t: 'running', running: true } as PromptBarEvent)
       })
       .catch((error: unknown) => { console.warn(`[client:prompt] run failed: ${String((error as Error)?.message ?? error).slice(0, 160)}`) })
       .finally(() => { if (alive.current) setBusy(false) })
@@ -638,11 +651,23 @@ export function PromptDock(props: DockProps): ReactElement | null {
       ...(state.intent === 'goal-edit' ? [h('span', { key: 'intent', className: 'dsh-chapters_promptIntent', 'aria-label': 'This step edits the goal' }, 'edits the goal · run it yourself')] : []),
       h('button', {
         type: 'button', className: 'dsh-chapters_promptText',
-        'aria-label': state.expanded ? 'Put this suggested prompt in the input box' : 'Show the full suggested prompt',
+        // #282: the tooltip names what the NEXT click does, per state — the maintainer's ask. Same
+        // string for aria-label and the native title bubble, so screen-reader and hover never diverge.
+        'aria-label': state.expanded ? 'Click to send this prompt to the chat input for editing' : 'Click to expand the full suggested prompt',
+        title: state.expanded ? 'Click to send this prompt to the chat input for editing' : 'Click to expand the full suggested prompt',
+        disabled: state.running,
         onClick: populate,
       }, state.expanded
-        ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
-        : h('span', { className: 'dsh-chapters_promptEllipsis', title: state.text ?? undefined }, lineFor(state))),
+        ? h('span', { className: 'dsh-chapters_promptFull' },
+            // #282: the corner collapse control — folding back was a dead end; the reducer's
+            // 'collapse' case always kept the offer, so this is a reading action, not a dismissal.
+            h('button', {
+              type: 'button', className: 'dsh-chapters_promptCollapse',
+              'aria-label': 'Collapse the suggested prompt', title: 'Collapse',
+              onClick: () => { dispatch({ t: 'collapse' }) },
+            }, '▴'),
+            state.text ?? '')
+        : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
       ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptNote', role: 'status' }, state.note)]),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },

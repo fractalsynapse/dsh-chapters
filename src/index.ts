@@ -712,6 +712,14 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         const st = await promptBar.read(sessionId)
         if (st.text === '' || st.status !== 'ready') return { ok: false, reason: 'there is no offer on screen to run' }
         submitOffer(sessionId, st.text)
+        // #285: a successful run CONSUMES its offer, server-side, before anything else can re-read
+        // it. `noSuggestion` is the runner's own resting vocabulary — and the `state` verb's resting
+        // mapping (#113: off + configured model ⇒ idle) turns it into "enabled, next offer at the
+        // next completed turn" on every pull, in every tab, on every cold mount. Without this write,
+        // the maintainer's double-Run test reran the same step twice: the row kept offering what had
+        // already happened. mutate, never a snapshot (the shared-row rule); push mirror rides the
+        // next write — the clicking tab folds locally immediately (prompt-dock run()).
+        await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
         return { ok: true, text: st.text }
       },
       setAutorun: (sessionId: string, on: boolean, session?: unknown) => {

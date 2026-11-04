@@ -29,19 +29,31 @@ has an icon, a status label, the suggested prompt, and three actions:
   sentence only the human could perform (typing a slash command, opening a UI, clicking this
   bar) or one that is about the suggestion system itself is a contract violation, and the
   generation rules name the failure explicitly (#273).
-- **Click the prompt to expand it.** The row opens in place and shows the complete prompt.
-- **Click it again while expanded to put it in the input box for editing.** This is the part
-  the host does not yet support: a dock can *reach* the composer verbs — `insertText`, `setDraft`,
-  `submit` are all present and callable — but the write path dies on a missing revision object
-  (`Cannot read properties of undefined (reading 'draftRev')`, composer text still empty), and **the bar says so on its face**
-  instead of leaving you with a button that did nothing. Reading and committing stay two
-  gestures, and the second one becomes available the day the host fixes or exposes a path a dock can call:
-  measured on **both** `0.2.0-rc.2` and `0.2.1-rc.4`, with the `rc.4` draft machinery rebuilt in ways that looked like
-  the fix (`mirrorFn` gone, a `cancelCommandRestore()` added, the method's own comment now claiming "programmatic
-  writes") — and the refusal is byte-identical on both, because `draftRev` is not read in that module at all
-  ([#126](https://github.com/fractalsynapse/dsh-chapters/issues/126)).
+- **And it must be FORWARD.** The offer names a step the session has **not begun** — never a
+  restatement of work already in flight. A live sample proposed "Create the #273 echo-adjacency
+  issue and run the pre-change sampler" while the issue was already filed and the sampler was
+  running: a mirror, not a director. Mid-task, the suggestion is what comes *after* the task
+  lands — its verification, its follow-up — or a different line of work the state plainly
+  calls for (#279).
+- **Click the prompt to expand it** — the row tooltip says so while collapsed. The expanded
+  pane shows the complete prompt and carries a **collapse control (▴, top-right)** so folding
+  it back is one gesture, not a dead end; collapsing keeps the offer, only a human prompt or
+  **Off** dismisses it (#282).
+- **Click it while expanded to send it to the chat input for editing** — the tooltip while
+  expanded names exactly that. This handoff is **live-verified in use**: the maintainer's
+  2026-11-03 report ("you got the click to chat input working… I love that") supersedes the
+  `draftRev` refusal measured in #126/#162 on earlier builds; where the host still refuses a
+  dock's write, the bar says so on its face rather than leaving a button that did nothing.
+- **While the agent is running, the bar shows that, not a stale offer.** When a turn starts —
+  whether from **Run**, autorun, or your own prompt — the bar clears the previous suggestion,
+  collapses, and carries a generic running line; the offer comes back through the normal
+  post-turn flow (the suggestion generated for the turn that just ended). Acting on a stale
+  offer is how a bar lies, and a running agent makes every on-screen offer obsolete (#282).
 - **Run** submits the offer as your own turn, through the same follow-up path autorun uses —
-  one code path for "run it", whether you clicked it or the loop armed it.
+  one code path for "run it", whether you clicked it or the loop armed it. **A successful run
+  consumes its offer:** the server retires the row's suggestion the moment it submits it, so no
+  pull, no second tab, and no repeated click can ever re-run a step that already ran (#285 —
+  the self-proving test: click Run twice; the second click has nothing left to run).
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
   step and runs it, until you stop it, until you send a prompt yourself, or until the goal
   finishes.
@@ -62,6 +74,7 @@ model defining the work, and you should know which mind suggested it.
 | `analyzing` | "Analyzing the session…" | a generation is running for the current turn |
 | `ready` | **Recommended Next Step** + the prompt | an offer is on screen, yours to run or ignore |
 | `failed` | the reason, in red | the call did not work — the bar keeps the last offer rather than pretending |
+| `running` (display overlay, not a wire state) | "Agent is running — a fresh suggestion lands when the turn ends" | a turn is in flight (from Run, autorun, or your own prompt): the previous offer is cleared and the bar collapsed, because acting on a stale offer is how a bar lies (#282) |
 
 `idle` exists because an earlier build collapsed "enabled but nothing to say yet" into `off`, and the bar
 rendered nothing while the feature was in fact working. A disabled feature and a waiting one must not look
