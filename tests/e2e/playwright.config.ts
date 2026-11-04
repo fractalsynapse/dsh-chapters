@@ -84,7 +84,11 @@ export default defineConfig({
     { name: 'rules', env: rigEnv('rules'), testMatch: ['**/rules.spec.ts'] },
     // The docked Suggested Next Step bar (#113). Its own boot, because the bar only exists when a defining
     // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
-    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
+    // The docked Suggested Next Step bar (#113). Its own boot, because the bar only exists when a defining
+    // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
+    // #276: the persisted-off revival spec rides the same boot — it needs a ready row to exist, which this
+    // project's journey is the only one that produces. (prompt-off's matcher is its exact filename; no drift.)
+    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts', '**/prompt-off-revival.spec.ts'] },
     // Same journey, switch off: the bar must be absent. See tests/e2e/prompt-off.spec.ts.
     { name: 'prompt-off', env: rigEnv('prompt-off'), testMatch: ['**/prompt-off.spec.ts'] },
     // #138: LIVE-only goal journeys (see the pin comment). Deliberately absent from `scripts/chain-replay.sh`'s leg
