@@ -1,6 +1,6 @@
 {
   "name": "@fractalsynapse/dsh-chapters",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "dsh plugin: verbatim chapter archive + zero-token index for small-context models",
   "type": "module",
   "license": "Apache-2.0",
