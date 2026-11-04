@@ -326,10 +326,13 @@ test('a budget smaller than the protected frame REFUSES with numbers instead of 
   assert.match(refusal, /\/chapters-prompt model/, 'and the remedy is named')
 })
 
-test('#243: the suggestion rules demand a DIRECTIVE TO THE MODEL, not advice to the user', () => {
+test('#243+#273: the suggestion rules demand a DIRECTIVE TO THE MODEL, not advice to the user', () => {
   const built = buildSuggestInput(facts([{ number: 1, title: 'Setup', summary: 'installed the rig', plots: [] }], [{ role: 'assistant' as const, text: 'done for now' }]), 4000, 240)
   const a = inputOf(built)
-  assert.ok(a.includes('ADDRESSED TO THE MODEL'), 'the voice constraint is in the instruction')
-  assert.ok(a.includes('never advice to the user'), 'and names the failure mode it forbids')
-  assert.ok(a.includes("'run the tests'"), 'with a positive example of the right shape')
+  assert.ok(a.includes('WORKER MODEL'), 'the addressee constraint is in the instruction')
+  assert.ok(a.includes('could the worker act on it directly'), 'and carries the positive self-test the maintainer named')
+  assert.ok(a.includes('run the tests'), 'with a positive example of the right shape')
+  // #273: the live failure is pinned IN the rule as the forbidden example — the meta/slash-command class.
+  assert.ok(a.includes('run /chapters-prompt suggest and report the output'), 'the real failure names itself in the instruction')
+  assert.ok(a.includes('advice to the user'), 'and names the failure mode it forbids')
 })

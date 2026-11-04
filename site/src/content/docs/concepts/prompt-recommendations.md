@@ -23,6 +23,12 @@ has an icon, a status label, the suggested prompt, and three actions:
 - **`Analyzing situation…`** while the second model is working, then **`Recommended Next
   Step`** with the prompt in one line. The label is the state; you are never guessing whether
   it is thinking or stuck.
+- **The suggestion is a prompt for the model, pasted by you — never an instruction to you.**
+  It must be a message the worker model in the session receives and can act on with its own
+  tools: telling it to run tests, edit files, execute commands, investigate — all right. A
+  sentence only the human could perform (typing a slash command, opening a UI, clicking this
+  bar) or one that is about the suggestion system itself is a contract violation, and the
+  generation rules name the failure explicitly (#273).
 - **Click the prompt to expand it.** The row opens in place and shows the complete prompt.
 - **Click it again while expanded to put it in the input box for editing.** This is the part
   the host does not yet support: a dock can *reach* the composer verbs — `insertText`, `setDraft`,
