@@ -523,6 +523,17 @@ export function registerHostCommands(
           }
           return { kind: 'success', text: `prompt model set to ${arg} — this ENABLES the composer ghost (one bounded call per turn boundary; /chapters-prompt off disables).${capsNote} If the bar is hidden, it reappears at the next page reload.` }
         }
+        if (verb === 'off-session') {
+          // #291: the bar's ✕ scope — THIS session only. Deliberately does NOT touch the model
+          // setting: a per-session control must never be able to silence the plane. Back on: `on`.
+          const holder = invocation.agent as { agent?: { session?: { id?: string } }; session?: { id?: string } }
+          const sessId = holder.session?.id ?? holder.agent?.session?.id
+          if (sessId === undefined || config.prompt.bar === undefined) {
+            return { kind: 'error', text: 'off-session needs a session scope and the chapters prompt store' }
+          }
+          await config.prompt.bar.setOff(sessId, holder.session ?? holder.agent?.session)
+          return { kind: 'success', text: 'prompt suggestions OFF for this session — the model is kept; /chapters-prompt on turns this session back on' }
+        }
         if (verb === 'off') {
           await config.prompt.setModel('')
           // #194: the global switch alone leaves a PUSHED bar showing its last offer forever — no row
@@ -534,7 +545,10 @@ export function registerHostCommands(
           if (offSessId !== undefined && config.prompt.bar !== undefined) {
             await config.prompt.bar.setOff(offSessId, offHolder.session ?? offHolder.agent?.session)
           }
-          return { kind: 'success', text: 'prompt suggestions OFF (stored override; /chapters-prompt model clear restores the config default)' }
+          // #291: the reply names its true scope. This verb clears the model for EVERY session —
+          // the words used to hide that behind a session-shaped sentence, and the bar's own ✕
+          // executed it: one exploratory click silenced the whole plane (#291).
+          return { kind: 'success', text: 'prompt suggestions OFF for the WHOLE PLANE — the model is cleared for every session. /chapters-prompt on re-enables it (the bar’s ✕ is the session-scoped switch).' }
         }
         // #113: the bar's three pulls. `state` answers in k: v lines so ONE output serves both the human
         // typing it and the component rendering it — a separate JSON verb would be a second contract to keep

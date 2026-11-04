@@ -73,7 +73,34 @@ test('model <spec> ENABLES with the promised sentence; clear deletes the row (ne
   assert.match(clear.text!, /now following the config default \(p\/m, ON\)/)
   const off = await h.run('off')
   assert.deepEqual(writes[2], '', 'off is the STORED EMPTY override')
-  assert.match(off.text!, /OFF \(stored override; \/chapters-prompt model clear restores the config default\)/)
+  // #291: the reply must name its scope — this verb is PLANE-WIDE. The old session-shaped sentence
+  // was the lie that made the bar's ✕ (which ran THIS verb) silence every session unnoticed.
+  assert.match(off.text!, /OFF for the WHOLE PLANE/, 'scope named in words')
+})
+
+test('#291: off-session silences ONE session and never touches the model setting', async () => {
+  const modelWrites: Array<string | null> = []
+  const offed: string[] = []
+  const h = harness({
+    effective: () => ({ spec: 'p/m', source: 'config' }),
+    setModel: async (s) => { modelWrites.push(s) },
+    statusLine: () => 'x',
+    bar: {
+      read: async () => ({ status: 'off', text: '', turnSeq: null, error: '', at: '', autorun: 'disarmed', fired: 0 }) as never,
+      peekRow: async () => null,
+      setAutorun: () => ({ autorun: 'disarmed', fired: 0, displaced: false }),
+      disarmHuman: () => undefined,
+      setOff: async (id: string) => { offed.push(id) },
+      setOn: async () => undefined,
+    },
+  })
+  const res = await h.run('off-session', AGENT)
+  assert.equal(res.kind, 'success')
+  assert.match(res.text ?? '', /OFF for this session/, 'the reply says the scope the label promises')
+  assert.deepEqual(offed, ['s-9'], 'the session row went off')
+  assert.deepEqual(modelWrites, [], 'the model setting was NOT touched — a per-session control cannot silence the plane')
+  const bare = await h.run('off-session', {})
+  assert.equal(bare.kind, 'error', 'and it refuses without a session scope rather than guessing one')
 })
 
 test('suggest without a session scope refuses with the remedy; with one, it hands the surface id/title/events verbatim', async () => {
