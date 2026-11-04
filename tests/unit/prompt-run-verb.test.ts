@@ -55,3 +55,26 @@ test('one submission path serves both autorun and the human keystroke', () => {
   assert.ok(!/agent\.followup\(suggestPromptMessage/.test(idx.split('const submitOffer')[1].slice(600)),
     'and there is no second copy of the follow-up call hidden in another arm')
 })
+
+test('#285: a successful run consumes its offer in the same breath it submits it', () => {
+  const idx = read('src/index.ts')
+  const block = idx.slice(idx.indexOf('runNow: async'), idx.indexOf('setAutorun:'))
+  assert.ok(block.includes('submitOffer(sessionId, st.text)'), 'submit first — never consume an offer the submit never fired')
+  assert.match(block, /promptSuggestion: noSuggestion/, 'then mutate the row to the resting vocabulary (state verb renders it idle: enabled, next offer at the next completed turn)')
+  assert.match(block, /promptRow\.mutate\(sessionId/, 'through the shared-row mutate, never a snapshot')
+  assert.ok(block.indexOf('submitOffer') < block.indexOf('promptRow.mutate'), 'the ORDER is the contract')
+})
+
+test('#285: the refused run does NOT consume — a failure keeps the offer on screen', () => {
+  const idx = read('src/index.ts')
+  const block = idx.slice(idx.indexOf('runNow: async'), idx.indexOf('setAutorun:'))
+  // the no-offer refusal returns before any write:
+  assert.ok(block.indexOf("'there is no offer on screen to run'") < block.indexOf('promptRow.mutate'),
+    'refusal path returns before the consume — nothing is retired that did not run')
+})
+
+test('#285: the dock folds the run-success as its own local running edge (edgeless hosts need truth too)', () => {
+  const dock = read('src/client/prompt-dock.ts')
+  assert.match(dock, /else dispatch\(\{ t: 'running', running: true \} as PromptBarEvent\)/,
+    'the click authored the turn — the fold is knowledge, not a host signal (#221 hosts never publish one)')
+})

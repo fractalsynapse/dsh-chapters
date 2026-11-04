@@ -66,11 +66,16 @@ export function promptBarReducer(state: PromptBarState, ev: PromptBarEvent): Pro
 function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarState {
   switch (ev.t) {
     case 'polled': {
-      if (ev.status === 'off') return { ...state, status: 'off', text: null, turnSeq: null, error: null, expanded: false, autorun: 'disarmed' }
+      // #285: the wire is the supreme authority on `running`. A local run-click folds `running: true`
+      // honestly (the click authored the turn), but on hosts with no running edge (#221) nothing else
+      // would ever retire that line — so any polled answer, whatever it carries, ends the local claim.
+      // Wire-first, then the local fold: the order the #208/#221 lineage has always kept.
+      if (ev.status === 'off') return { ...state, status: 'off', text: null, turnSeq: null, error: null, expanded: false, autorun: 'disarmed', running: false }
       // A fresh generation invalidates the previous offer: acting on a stale one is how a bar lies.
-      if (ev.status === 'analyzing') return { ...state, status: 'analyzing', text: null, error: null }
+      if (ev.status === 'analyzing') return { ...state, status: 'analyzing', text: null, error: null, running: false }
       return {
         ...state,
+        running: false,
         status: ev.status,
         text: ev.status === 'ready' ? (ev.text ?? null) : null,
         intent: ev.status === 'ready' ? (ev.intent ?? 'worker-step') : 'worker-step',
