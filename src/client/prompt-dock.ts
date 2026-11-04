@@ -172,7 +172,7 @@ const PULL_TIMEOUT_MS = 15_000
  * reducer (stateFromCache), and only an untrustworthy cache pulls (mountPullDecision). A page
  * reload clears it and pays exactly one honest pull.
  */
-interface CacheEntry { ev: import('./prompt-bar.ts').PromptBarEvent; autorun: 'armed' | 'disarmed' | null; at: number }
+interface CacheEntry { ev: import('./prompt-bar.ts').PromptBarEvent; autorun: 'armed' | 'disarmed' | null; at: number; /** #272: set while this entry came from localStorage and THIS page has not polled since — it predates whatever the server decided, including an enablement. */ fromDisk?: boolean | undefined }
 const stateCache = new Map<string, CacheEntry>()
 
 /**
@@ -197,7 +197,7 @@ function readPersisted(sessionId: string): CacheEntry | null {
     const t = (p.ev as { t?: unknown }).t
     if (t !== 'polled') return null
     const autorun = p.autorun === 'armed' || p.autorun === 'disarmed' ? p.autorun : null
-    return { ev: p.ev as CacheEntry['ev'], autorun, at: p.at }
+    return { ev: p.ev as CacheEntry['ev'], autorun, at: p.at, fromDisk: true }
   } catch { return null }
 }
 
@@ -416,6 +416,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
         ageMs: c !== undefined ? Date.now() - c.at : Number.MAX_SAFE_INTEGER,
         status: effectiveStatus(),
         autorun: stateRef.current.autorun,
+        // #272: an off carried across the reload from localStorage must still pay this page's one
+        // honest pull — the revival promise. Once this page polls, the replacing entry is untagged.
+        cacheFromDisk: c?.fromDisk === true,
       })
     }
     const tick = async (opts?: { mount?: boolean; force?: boolean }): Promise<void> => {
