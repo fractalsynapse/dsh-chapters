@@ -31,7 +31,7 @@ export default defineConfig({
     // tape was distilled under, the surface diverged (stubs appearing where none were
     // recorded), and the proxy MISSed. Playwright merges project `env` into every worker,
     // so record, replay, coverage and a manual run now boot the SAME world.
-    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts',
+    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts', '**/prompt-off-revival.spec.ts',
       // #138: `prompt-goal-live.spec.ts` rides its OWN project (live provider, wall-clock bound). Left here it ran
       // inside the suite boot — `suite` is everything-not-ignored — and changed that session's human-message set,
       // which is what the title request at msg1 of the suite tape encodes. Measured: suite `4 passed` on staging's tree,
@@ -86,11 +86,12 @@ export default defineConfig({
     // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
     // The docked Suggested Next Step bar (#113). Its own boot, because the bar only exists when a defining
     // model is configured — sharing a boot would make other legs acquire a component nobody distilled for.
-    // #276: the persisted-off revival spec rides the same boot — it needs a ready row to exist, which this
-    // project's journey is the only one that produces. (prompt-off's matcher is its exact filename; no drift.)
-    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts', '**/prompt-off-revival.spec.ts'] },
+    { name: 'prompt', env: rigEnv('prompt'), testMatch: ['**/prompt-bar.spec.ts'] },
     // Same journey, switch off: the bar must be absent. See tests/e2e/prompt-off.spec.ts.
     { name: 'prompt-off', env: rigEnv('prompt-off'), testMatch: ['**/prompt-off.spec.ts'] },
+    // #276: the persisted-off revival leg, its own boot (see rig-pins for the measured reason) — the spec
+    // manufactures #272's state (stale disk `off` over a ready row), reloads, and requires the revival pull.
+    { name: 'prompt-revival', env: rigEnv('prompt-revival'), testMatch: ['**/prompt-off-revival.spec.ts'] },
     // #138: LIVE-only goal journeys (see the pin comment). Deliberately absent from `scripts/chain-replay.sh`'s leg
     // list, so the model-free acceptance job does NOT cover these two claims — a live run does. Recorded, not hidden.
     { name: 'prompt-goal-live', env: rigEnv('prompt-goal-live'), testMatch: ['**/prompt-goal-live.spec.ts'] },
