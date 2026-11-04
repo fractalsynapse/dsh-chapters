@@ -82,7 +82,18 @@ function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarSta
     // Collapsing is a reading action. It keeps the offer — only a human prompt or `Off` dismisses it.
     case 'collapse': return { ...state, expanded: false }
     case 'autorun': return { ...state, autorun: ev.on ? 'armed' : 'disarmed' }
-    case 'running': return { ...state, running: ev.running }
+    // #282: a turn start makes every on-screen offer obsolete — Run could fire a stale step and the
+    // human would watch the agent act on last cycle's question. The rising edge clears the offer,
+    // collapses, and hands the row to the generic running line (barLabel/barVisible); the falling
+    // edge shows nothing new — the post-turn pull lands the fresh state through the normal path.
+    // Idempotent on repeats: same flag in, SAME object out — a re-delivered edge must not become
+    // render-loop fuel. Unknown running folds as FALSE at the source (#221: unknown is not running).
+    case 'running': {
+      if (ev.running === state.running) return state
+      return ev.running
+        ? { ...state, running: true, text: null, error: null, expanded: false }
+        : { ...state, running: false }
+    }
     case 'human/prompt':
       // The human took the wheel: yield the loop, and drop the offer that was on screen. Generation itself
       // continues on the NEXT turn boundary — suspension is not disable.
@@ -102,6 +113,9 @@ function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarSta
 
 /** The status label. `failed` keeps the ready label so the error span is the delta, not a mystery row. */
 export function barLabel(s: PromptBarState): string | null {
+  // #282: running outranks everything shown — while the agent works, the bar says so and nothing
+  // else. The wording is the §28 states-table row, kept identical (one predicate per decision, #59).
+  if (s.running) return 'Agent is running — a fresh suggestion lands when the turn ends'
   if (s.status === 'analyzing') return 'Analyzing situation…'
   if (s.status === 'ready' || s.status === 'failed') return 'Recommended Next Step'
   return null
@@ -199,6 +213,9 @@ export function barVisible(s: PromptBarState): boolean {
   // Only `off` hides the row. `idle` is enabled-and-waiting, and showing it is the difference between
   // "the feature is live, nothing to say yet" and silence that reads as disabled (#113).
   if (s.status === 'off') return false
+  // #282: the running line shows even with cleared text — the ready-empty rule below would otherwise
+  // hide the bar exactly when it has the most important thing to say. `off` stays the first gate (#208).
+  if (s.running) return true
   if (s.status === 'ready' && (s.text === null || s.text === '')) return false
   // The goal bar's `clearedGoalId` guard, in our terms: don't flicker back the offer just dismissed.
   if (s.hiddenTurnSeq !== null && s.hiddenTurnSeq === s.turnSeq) return false

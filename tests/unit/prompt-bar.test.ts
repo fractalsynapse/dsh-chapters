@@ -184,6 +184,23 @@ test('#203: the mount pull is a decision — a fresh cache renders for free, and
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'disarmed', cacheFromDisk: true }), false, '#251 unchanged: a disk-restored READY offer renders with zero commands')
 })
 
+test('#282: a turn start clears the offer, collapses, and shows the running line', () => {
+  const ready = { ...initialBarState(), status: 'ready' as const, text: 'run the tests', turnSeq: 5, expanded: true }
+  const r = promptBarReducer(ready, { t: 'running', running: true })
+  assert.equal(r.running, true)
+  assert.equal(r.text, null, 'the offer is gone — acting on a stale suggestion is how a bar lies')
+  assert.equal(r.expanded, false, 'and collapsed')
+  assert.equal(barLabel(r), 'Agent is running — a fresh suggestion lands when the turn ends', 'the generic line, worded as §28 documents it')
+  assert.equal(barVisible(r), true, 'the running line shows even with empty text')
+  const back = promptBarReducer(r, { t: 'running', running: false })
+  assert.equal(back.running, false)
+  assert.equal(back.text, null, 'stays cleared until a fresh poll lands the new offer')
+  const same = promptBarReducer(r, { t: 'running', running: true })
+  assert.equal(same, r, 'idempotent: a repeat edge returns the SAME object — no render-loop fuel')
+  const offBar = promptBarReducer({ ...initialBarState(), status: 'off' as const }, { t: 'running', running: true })
+  assert.equal(barVisible(offBar), false, 'an OFF session never shows the running line — not relevant, not visible (#208 stands)')
+})
+
 test('#203: stateFromCache folds cached wire events back through the SAME reducer — no second fold path to drift', () => {
   const st = stateFromCache({ t: 'polled', status: 'ready', text: 'ship it', turnSeq: 7, intent: 'worker-step' }, 'armed')
   assert.equal(st.status, 'ready')
