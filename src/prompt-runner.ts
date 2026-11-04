@@ -12,8 +12,45 @@
  * failure are different states, and collapsing them was defect #2 of the removed ghost.
  */
 import type { SessionEventLike } from './types.ts'
+import { isHumanAuthored, stripReminderSpans } from './injections.ts'
 import { classifyOffer, noSuggestion, type PromptSuggestionState } from './prompt-state.ts'
 import type { SessionState } from './registry.ts'
+
+/**
+ * #289: was this offer ALREADY SENT? Deterministic, model-free, durable-log-only: the row's offer
+ * text, normalized, equal to a HUMAN-authored `user/message` that arrived AFTER the offer was born.
+ * The exact case is the whole rule — fuzzy similarity would invent retirements, and a suggestion
+ * the human rewrote into their own words is a NEW instruction, not this offer running. Narration is
+ * excluded by `isHumanAuthored` (the ONE predicate, #59): the bar's authored autorun message, goal
+ * rounds, and host injections are not the human sending it. Reminder spans are stripped before
+ * comparing, because the host wraps a real keystroke in them.
+ *
+ * Who retired what: #285 made a successful Run consume its offer; this covers offers the human sent
+ * outside Run (typed, or Run on a version that predated consumption — the maintainer's row 4036,
+ * sent twice pre-update and re-rendered forever after it). Read together, an offer that ran cannot
+ * be served again from ANY surface, even if the boundary door is dead.
+ */
+export function deliveredOffer(session: unknown, offer: PromptSuggestionState): boolean {
+  if (offer.status !== 'ready' || offer.text === '') return false
+  const s = session as { events?: readonly SessionEventLike[]; snapshotEvents?: () => readonly SessionEventLike[]; header?: Record<string, unknown> } | undefined
+  const events = Array.isArray(s?.events) ? s?.events : (typeof s?.snapshotEvents === 'function' ? s.snapshotEvents() : undefined)
+  if (!Array.isArray(events)) return false
+  const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
+  const want = norm(offer.text)
+  if (want === '') return false
+  const bornAt = offer.turnSeq ?? Number.NEGATIVE_INFINITY
+  for (const ev of events) {
+    if (ev.type !== 'user/message') continue
+    if (typeof ev.seq === 'number' && ev.seq <= bornAt) continue
+    const data = (ev.data ?? {}) as Record<string, unknown>
+    if (!isHumanAuthored(data)) continue
+    const message = (data.message ?? data) as Record<string, unknown>
+    const blocks = Array.isArray(message.content) ? message.content as { type?: string; text?: string }[] : []
+    const text = blocks.filter((b) => b.type === 'text' && typeof b.text === 'string').map((b) => b.text as string).join('')
+    if (norm(stripReminderSpans(text).text) === want) return true
+  }
+  return false
+}
 
 export interface GenerateOutcome {
   ok: boolean

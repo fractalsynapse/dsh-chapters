@@ -40,7 +40,7 @@ import { buildRulesSection } from './rules.ts'
 import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } from './prompt.ts'
 import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
-import { makePromptRoundRunner } from './prompt-runner.ts'
+import { deliveredOffer, makePromptRoundRunner } from './prompt-runner.ts'
 import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, type PushWriter } from './prompt-push.ts'
 import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
@@ -708,9 +708,17 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       // injected as a human-authored follow-up — the same path autorun uses, so what the human clicks and what
       // the loop arms cannot be two different behaviors. `no live agent` is the honest failure and reaches the
       // bar as its reason.
-      runNow: async (sessionId: string) => {
+      runNow: async (sessionId: string, session?: unknown) => {
         const st = await promptBar.read(sessionId)
         if (st.text === '' || st.status !== 'ready') return { ok: false, reason: 'there is no offer on screen to run' }
+        // #289: a DELIVERED offer — one whose exact text already arrived as a later human turn — never
+        // runs again: refused, and retired on the spot (run is a write verb, so unlike the state READ
+        // this may heal the row). Covers rows consumed by a pre-#285 version, which is exactly what the
+        // maintainer's row 4036 was: sent twice before the update, re-rendered forever after it.
+        if (deliveredOffer(session, st)) {
+          await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
+          return { ok: false, reason: 'that offer was already sent as your own turn — the next completed turn brings a fresh one' }
+        }
         submitOffer(sessionId, st.text)
         // #285: a successful run CONSUMES its offer, server-side, before anything else can re-read
         // it. `noSuggestion` is the runner's own resting vocabulary — and the `state` verb's resting
