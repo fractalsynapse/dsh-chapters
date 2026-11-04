@@ -522,7 +522,13 @@ export function PromptDock(props: DockProps): ReactElement | null {
       .then((out) => {
         if (!alive.current) return
         if (/^cannot run:/i.test(out.trim())) dispatch({ t: 'polled', status: 'failed', text: state.text, error: out.trim().slice(0, 200), turnSeq: state.turnSeq } as PromptBarEvent)
-        else dispatch({ t: 'collapse' })
+        // #285: success means THIS click authored a turn — the dock knows that without any host
+        // signal, so it folds `running: true` locally: the offer clears, Run disarms, and the
+        // generic running line shows even on edgeless hosts (#221). The server consumed the row in
+        // the same breath, so the next pull (any tab) confirms the truth, and polled retires the
+        // flag wire-first. Replaces #282's collapse-only success fold, which left a just-run offer
+        // sitting there re-runnable — the hole the maintainer's double-Click found.
+        else dispatch({ t: 'running', running: true } as PromptBarEvent)
       })
       .catch((error: unknown) => { console.warn(`[client:prompt] run failed: ${String((error as Error)?.message ?? error).slice(0, 160)}`) })
       .finally(() => { if (alive.current) setBusy(false) })
