@@ -54,6 +54,12 @@ has an icon, a status label, the suggested prompt, and three actions:
   consumes its offer:** the server retires the row's suggestion the moment it submits it, so no
   pull, no second tab, and no repeated click can ever re-run a step that already ran (#285 —
   the self-proving test: click Run twice; the second click has nothing left to run).
+- **And a delivered offer is never served again (#289).** An offer whose exact words later
+  arrived as one of your own turns has run, whatever path sent it — including rows consumed
+  by a version that predates run-consumption. The state read renders it resting, and a Run
+  attempt refuses and retires it on the spot. Comparison is byte-exact against the durable
+  log (reminder spans stripped, host narration and goal rounds excluded) — never a guess,
+  never a model call: the same read-the-log discipline as the archive.
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
   step and runs it, until you stop it, until you send a prompt yourself, or until the goal
   finishes.
