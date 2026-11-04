@@ -702,9 +702,11 @@ export function PromptDock(props: DockProps): ReactElement | null {
         }),
         h(Action, {
           label: 'Turn prompt suggestions off for this session', glyph: '✕',
-          // `off` is a server write, not a local hide: generation stops, the configured model is KEPT so
-          // back-on is one action, and the bar disappears instead of lingering with a stale offer.
-          onClick: () => { void (async () => { if (exec !== undefined) await exec('/chapters-prompt off'); dispatch({ t: 'off' }); if (sessionId !== undefined) { const offEntry = { ev: { t: 'polled', status: 'off' } as CacheEntry['ev'], autorun: null, at: Date.now() }; stateCache.set(sessionId, offEntry); writePersisted(sessionId, offEntry) } })() },
+          // #291: off-SESSION — the scope this label has always promised. It used to execute the
+          // plane-wide `off` verb (clears the model for EVERY session); one exploratory click here
+          // silenced the whole plane while the row said "for this session". Generation stops for
+          // this session, the model is kept, and the bar disappears instead of lingering stale.
+          onClick: () => { void (async () => { if (exec !== undefined) await exec('/chapters-prompt off-session'); dispatch({ t: 'off' }); if (sessionId !== undefined) { const offEntry = { ev: { t: 'polled', status: 'off' } as CacheEntry['ev'], autorun: null, at: Date.now() }; stateCache.set(sessionId, offEntry); writePersisted(sessionId, offEntry) } })() },
         }),
       ),
     ),
