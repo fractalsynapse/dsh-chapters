@@ -175,6 +175,13 @@ test('#203: the mount pull is a decision — a fresh cache renders for free, and
   // that re-enable say so — a guarded pull per reactivation was one visible node too many for a
   // feature that is not on.
   assert.equal(mountPullDecision({ hasCache: true, ageMs: 10 * QUIET_POLL_MS, status: 'off', autorun: 'disarmed' }), false, 'a STALE off stays hidden — the page reload is the revival path, stated by the enabling command')
+  // #272: "the page reload is the revival path" only means something if a reload can still SEE that
+  // the off predates the page. #251 moved the mirror to localStorage, so it doesn't — an `off`
+  // restored from disk was never observed by this page and must pay the one honest reload pull.
+  // (The maintainer's tab proved the alternative: a pre-enable off vetoed every reload forever, and
+  // the bar stayed invisible behind a mounted component with a ready server row.)
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'off', autorun: 'disarmed', cacheFromDisk: true }), true, 'a disk-restored off pays the one honest reload pull (#208 stays terminal for OBSERVED off)')
+  assert.equal(mountPullDecision({ hasCache: true, ageMs: 1_000, status: 'ready', autorun: 'disarmed', cacheFromDisk: true }), false, '#251 unchanged: a disk-restored READY offer renders with zero commands')
 })
 
 test('#203: stateFromCache folds cached wire events back through the SAME reducer — no second fold path to drift', () => {
