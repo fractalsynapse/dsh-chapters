@@ -559,3 +559,9 @@ Field numbers from 2026-10-24 (both stores, 0.2.0 installed): SAIP **1,441 regis
 terminal state 3 refused (#59 twins); this repo **1,097 moves in one pass**, terminal state 634 refused, of
 which 483 `test-litter` and 143 `empty-artifact`. Registry backups sit at
 `$DSH_HOME/storages/dsh_chapters.json.pre-repair-*.bak` for either run to be undone.
+
+## The Suggested Next Step bar — delivery-layer verification
+
+| # | Claim | How it is verified | Result |
+|---|---|---|---|
+| B1 | A `persisted off` cannot strand the bar across a reload (#272/#276) | Browser leg `tests/e2e/prompt-off-revival.spec.ts`, its own boot (`prompt-revival`, port 41743 — measured reason in rig-pins: as the fifth session on the prompt boot it destabilized new-session creation for every spec): carry a session to a ready offer, seed a stale `off` mirror via `addInitScript` so it pre-dates all app JS, reload, and require (a) the bar visible and (b) the dock's `__dshPromptReply` seam showing the wire answered `suggested next step: …` — a veto never pulls, so an empty seam or missing bar fails the leg | **PASS** — recorded on the scripted stub (3 entries, own boot 41743), `prompt`+`prompt-off`+`prompt-revival` replay green model-free each under its own boot; mutation-proof: restoring the pre-#272 `off`-veto reddens EXACTLY this leg (`expect(locator).toBeVisible` — the veto never pulls), the canonical runner restores green. Local record needs `CHOKIDAR_USEPOLLING=1` on this box: 128 inotify instances are machine-exhausted (real ENOSPC, unrelated to the leg; CI runners never hit it) |
