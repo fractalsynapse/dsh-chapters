@@ -108,9 +108,15 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     // puts the words in the composer for editing. Asserting a draft after one click measured my own test, not
     // the product — and the row's own aria-label changes between the two states, which is how the leg now
     // knows it is on the second one.
-    await expect(promptButton).toHaveAttribute('aria-label', 'Show the full suggested prompt', { timeout: 15_000 })
+    await expect(promptButton).toHaveAttribute('aria-label', 'Click to expand the full suggested prompt', { timeout: 15_000 })
     await promptButton.click()
-    await expect(promptButton).toHaveAttribute('aria-label', 'Put this suggested prompt in the input box', { timeout: 15_000 })
+    await expect(promptButton).toHaveAttribute('aria-label', 'Click to send this prompt to the chat input for editing', { timeout: 15_000 })
+    // #282: the expanded pane's corner collapse control folds the reading view back WITHOUT losing
+    // the offer (collapse is a reading action; only a human prompt or Off dismisses it), and the row
+    // is then expandable again — the round trip the maintainer asked for from real use.
+    await bar.locator('button.dsh-chapters_promptCollapse').click()
+    await expect(promptButton).toHaveAttribute('aria-label', 'Click to expand the full suggested prompt', { timeout: 15_000 })
+    await promptButton.click()
     await promptButton.click()
     fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-draft-dump.json'), JSON.stringify({
       prompt,
