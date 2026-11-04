@@ -141,9 +141,14 @@ inside that split rather than around it:
 - **A step that re-cuts the goal is never auto-run.** The host reserves goal edits for a turn that contains a
   direct human message. An autorun message is authored by the plugin, so it could not perform the edit even
   if it ran — and faking a human message to make it work would hand an automated loop authority the host
-  deliberately withholds. Instead the recommending model prefixes such a step with `GOAL:`, the bar labels it
-  *edits the goal · run it yourself*, and **Run** stays enabled: your keystroke is exactly what makes it
-  legitimate. The prefix is stripped before the text reaches anyone, so the worker never sees scaffolding.
+  deliberately withholds. Instead the recommending model prefixes such a step with `GOAL:` — only when an
+  ACTIVE goal actually governs the session (#300: with no active goal the prefix is never legal, not even
+  for "close out this release cycle"-flavored wording) — and the bar carries the fact in its one message
+  slot: the row's label reads **`Goal edit — run it yourself`** in place of `Recommended Next Step`, and
+  **Run** stays enabled: your keystroke is exactly what makes it legitimate. (The badge used to be a SECOND
+  message beside the label; it overflowed the row and clipped the composer — the dock has room for one
+  sentence, and this one earns the slot.) The prefix is stripped before the text reaches anyone, so the
+  worker never sees scaffolding.
 - **A goal edit invalidates the offer made against the old revision.** Revisions bump by one per accepted
   change, so an outstanding offer written against the previous objective is dropped rather than pushed into
   the objective you just re-cut.

@@ -902,7 +902,10 @@ Consequences for this plugin, in order of how much they matter:
    behaviour, and the feature must respect it rather than route around it.
 3. **Therefore an offer carries an intent, and intent decides whether autorun may act on it.** The suggestion
    model prefixes its answer: `GOAL:` = this step changes the standing objective → **never auto-run**; the bar
-   holds it for the human's keystroke and says why. Anything else = a worker step → auto-run is allowed.
+   holds it for the human's keystroke, its label slot reading `Goal edit — run it yourself` IN PLACE OF
+   `Recommended Next Step` (one message per row — the beside-label badge overflowed it, #300). The prefix is
+   legal only while an active goal governs the session: with none, the model must not use it (#300's
+   mis-stamp: "…to close out this release cycle" with `goalRevision: null`). Anything else = a worker step → auto-run is allowed.
    The prefix is stripped before the prompt reaches the composer or the followup, so the worker never sees
    protocol scaffolding.
 4. **Exactly one thing may start a turn at a boundary.** The host goal driver queues a round on
