@@ -29,6 +29,12 @@ has an icon, a status label, the suggested prompt, and three actions:
   sentence only the human could perform (typing a slash command, opening a UI, clicking this
   bar) or one that is about the suggestion system itself is a contract violation, and the
   generation rules name the failure explicitly (#273).
+- **And it must be FORWARD.** The offer names a step the session has **not begun** — never a
+  restatement of work already in flight. A live sample proposed "Create the #273 echo-adjacency
+  issue and run the pre-change sampler" while the issue was already filed and the sampler was
+  running: a mirror, not a director. Mid-task, the suggestion is what comes *after* the task
+  lands — its verification, its follow-up — or a different line of work the state plainly
+  calls for (#279).
 - **Click the prompt to expand it.** The row opens in place and shows the complete prompt.
 - **Click it again while expanded to put it in the input box for editing.** This is the part
   the host does not yet support: a dock can *reach* the composer verbs — `insertText`, `setDraft`,

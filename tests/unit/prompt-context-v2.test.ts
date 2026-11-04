@@ -115,7 +115,9 @@ test('a protected set that cannot fit refuses WITH THE NUMBERS — never truncat
   const refusal = (r as { refusal: string }).refusal
   assert.match(refusal, /2000/, 'the budget is named')
   assert.match(refusal, /5000|exceed/, 'and the size that broke it')
-  // chapters all dropped first — the refusal only happens when protected alone cannot fit
-  const r2 = buildSuggestInput({ chapters: [ch(1), ch(2)], lastTurn: [{ role: 'user', text: 'go' }] }, 2_000, 4096)
+  // chapters all dropped first — the refusal only happens when protected alone cannot fit.
+  // Budget 4000, not 2000: the fixed floor (head + replyRules + scaffold) grew past 2000 when #279
+  // added the FORWARD clause, and THIS row asserts the ORDER (ladder before refusal), never a number.
+  const r2 = buildSuggestInput({ chapters: [ch(1), ch(2)], lastTurn: [{ role: 'user', text: 'go' }] }, 4_000, 4096)
   assert.ok('input' in r2, 'droppable history absorbs the pressure before refusal is considered')
 })
