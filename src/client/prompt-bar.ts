@@ -164,15 +164,21 @@ export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarA
  * only when the cache cannot be trusted — absent (first mount after a page load), stale (a turn
  * could have ended since; this guarded pull is what keeps Run honest, because clicking a stale
  * offer would submit the row's newer text while showing the old), mid-generation, or armed. A
- * cached `off` never pulls: off is a human/config switch, and only an explicit `on` revisits it.
+ * cached `off` never pulls WITHIN THE PAGE THAT SAW IT: off is a human/config switch, and only an
+ * explicit `on` revisits it. #272 makes the page the discriminator the mirror erased — an off
+ * RESTORED from localStorage after a reload was never observed by this page, and the reload pull
+ * is the revival promise the enabling commands make, so disk-restored off pays it.
  */
-export function mountPullDecision(c: { hasCache: boolean; ageMs: number; status: PromptBarStatus; autorun: PromptBarAutorun }): boolean {
+export function mountPullDecision(c: { hasCache: boolean; ageMs: number; status: PromptBarStatus; autorun: PromptBarAutorun; cacheFromDisk?: boolean | undefined }): boolean {
   if (!c.hasCache) return true
   // #208, the maintainer's rule — NOT RELEVANT, NOT VISIBLE: `off` is terminal for the page
   // lifetime. The #203 staleness-revival arm cost one visible history node per reactivation of a
   // known-off session, for a feature that is not on; revival is a page reload, and the commands
-  // that re-enable (`model`, `on`) say so in their replies.
-  if (c.status === 'off') return false
+  // that re-enable (`model`, `on`) say so in their replies. #251 then persisted the cache to disk,
+  // which silently un-wrote that sentence — every reload restored the veto. The `cacheFromDisk`
+  // input restores it exactly: an off THIS page observed stays terminal; an off carried across a
+  // reload pulls once, and the server's answer (off stays hidden; idle/ready renders) decides.
+  if (c.status === 'off') return c.cacheFromDisk === true
   if (c.autorun === 'armed' || c.status === 'analyzing') return true
   // #229: with no heartbeat configured, staleness alone never pulls — a tab left open for ten
   // minutes must not resurrect the drumbeat through the mount path. Freshness returns via the
