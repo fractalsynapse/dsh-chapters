@@ -54,11 +54,22 @@ has an icon, a status label, the suggested prompt, and three actions:
   consumes its offer:** the server retires the row's suggestion the moment it submits it, so no
   pull, no second tab, and no repeated click can ever re-run a step that already ran (#285 —
   the self-proving test: click Run twice; the second click has nothing left to run).
+- **And a delivered offer is never served again (#289).** An offer whose exact words later
+  arrived as one of your own turns has run, whatever path sent it — including rows consumed
+  by a version that predates run-consumption. The state read renders it resting, and a Run
+  attempt refuses and retires it on the spot. Comparison is byte-exact against the durable
+  log (reminder spans stripped, host narration and goal rounds excluded) — never a guess,
+  never a model call: the same read-the-log discipline as the archive.
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
   step and runs it, until you stop it, until you send a prompt yourself, or until the goal
   finishes.
-- **Off** turns suggestions off for this session. The configured model is kept, so turning it
-  back on is one action.
+- **The bar's ✕ turns suggestions off for THIS session only** (#291). The configured model is
+  kept; turning it back on is one action (`/chapters-prompt on`, or set a model again).
+- **The command `/chapters-prompt off` is plane-wide** — it clears the model for every session —
+  and its reply now says so in those words. It used to be what the bar's ✕ ran: a
+  session-scoped label executing a plane-scoped kill, which is how one exploratory click
+  silenced every suggestion on the machine while the door kept faithfully reporting `off`
+  (#291, found by the maintainer's live test).
 - **Nothing shows when there is nothing to recommend.** "Not yet" is not an error, and an
   error is never a blank — a failure stays labelled, with its reason.
 

@@ -73,7 +73,34 @@ test('model <spec> ENABLES with the promised sentence; clear deletes the row (ne
   assert.match(clear.text!, /now following the config default \(p\/m, ON\)/)
   const off = await h.run('off')
   assert.deepEqual(writes[2], '', 'off is the STORED EMPTY override')
-  assert.match(off.text!, /OFF \(stored override; \/chapters-prompt model clear restores the config default\)/)
+  // #291: the reply must name its scope — this verb is PLANE-WIDE. The old session-shaped sentence
+  // was the lie that made the bar's ✕ (which ran THIS verb) silence every session unnoticed.
+  assert.match(off.text!, /OFF for the WHOLE PLANE/, 'scope named in words')
+})
+
+test('#291: off-session silences ONE session and never touches the model setting', async () => {
+  const modelWrites: Array<string | null> = []
+  const offed: string[] = []
+  const h = harness({
+    effective: () => ({ spec: 'p/m', source: 'config' }),
+    setModel: async (s) => { modelWrites.push(s) },
+    statusLine: () => 'x',
+    bar: {
+      read: async () => ({ status: 'off', text: '', turnSeq: null, error: '', at: '', autorun: 'disarmed', fired: 0 }) as never,
+      peekRow: async () => null,
+      setAutorun: () => ({ autorun: 'disarmed', fired: 0, displaced: false }),
+      disarmHuman: () => undefined,
+      setOff: async (id: string) => { offed.push(id) },
+      setOn: async () => undefined,
+    },
+  })
+  const res = await h.run('off-session', AGENT)
+  assert.equal(res.kind, 'success')
+  assert.match(res.text ?? '', /OFF for this session/, 'the reply says the scope the label promises')
+  assert.deepEqual(offed, ['s-9'], 'the session row went off')
+  assert.deepEqual(modelWrites, [], 'the model setting was NOT touched — a per-session control cannot silence the plane')
+  const bare = await h.run('off-session', {})
+  assert.equal(bare.kind, 'error', 'and it refuses without a session scope rather than guessing one')
 })
 
 test('suggest without a session scope refuses with the remedy; with one, it hands the surface id/title/events verbatim', async () => {
@@ -451,4 +478,29 @@ test('#231: a session WITH a row answers from the row and never touches read or 
   assert.ok((r.text ?? '').includes('the standing offer'), 'the reply carries the ROW text')
   assert.equal(reads, 0, 'a served session costs NO full read')
   assert.equal(mirrors, 0, 'and NO duplicate record mirror — this path ran every minute for hours on the maintainer\u2019s host')
+})
+
+test('#289: a state read never re-serves a delivered offer — resting renders, the row heals elsewhere', async () => {
+  const h = harness({
+    effective: () => ({ spec: 'local/qwen', source: 'config' }),
+    statusLine: () => 'prompt: ON (local/qwen)',
+    bar: {
+      read: async () => ({ ...barState, autorun: 'disarmed' as const, fired: 0 }),
+      peekRow: async () => ({ ...barState, autorun: 'disarmed' as const, fired: 0 }) as never,
+      setAutorun: () => ({ autorun: 'disarmed' as const, fired: 0, displaced: false }),
+      disarmHuman: () => undefined, setOff: async () => undefined, setOn: async () => undefined,
+    },
+  })
+  const AGENT_DELIVERED = {
+    session: {
+      id: 's-9',
+      // the offer arrived verbatim as a later human turn (seq 44 > the offer's 41): it RAN.
+      events: [{ seq: 44, type: 'user/message', data: { content: [{ type: 'text', text: barState.text }] } }],
+    },
+  }
+  const res = await h.run('state', AGENT_DELIVERED)
+  assert.match(res.text ?? '', /^suggested next step: idle/, 'delivered ⇒ rendered resting (off + configured model ⇒ idle), never the old offer')
+  assert.doesNotMatch(res.text ?? '', /prompt:/, 'the stale text is not served, so no tab can render a re-runnable ghost')
+  const same = await h.run('state', AGENT)
+  assert.match(same.text ?? '', /^suggested next step: ready/, 'no delivery in the log — the offer stands untouched')
 })
