@@ -116,12 +116,15 @@ function baseBarReducer(state: PromptBarState, ev: PromptBarEvent): PromptBarSta
   return state
 }
 
-/** The status label. `failed` keeps the ready label so the error span is the delta, not a mystery row. */
+/** The status label. `failed` keeps the ready label so the error span is the delta, not a mystery row.
+ * A goal-edit offer REPLACES the label text (#300): the row is one message tall, and the second-message
+ * badge overflowed it and clipped the composer — so the protocol fact earns the slot or goes unsaid. */
 export function barLabel(s: PromptBarState): string | null {
   // #282: running outranks everything shown — while the agent works, the bar says so and nothing
   // else. The wording is the §28 states-table row, kept identical (one predicate per decision, #59).
   if (s.running) return 'Agent is running — a fresh suggestion lands when the turn ends'
   if (s.status === 'analyzing') return 'Analyzing situation…'
+  if (s.intent === 'goal-edit' && (s.status === 'ready' || s.status === 'failed')) return 'Goal edit — run it yourself'
   if (s.status === 'ready' || s.status === 'failed') return 'Recommended Next Step'
   return null
 }
