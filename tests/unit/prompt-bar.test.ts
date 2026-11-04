@@ -201,6 +201,20 @@ test('#282: a turn start clears the offer, collapses, and shows the running line
   assert.equal(barVisible(offBar), false, 'an OFF session never shows the running line — not relevant, not visible (#208 stands)')
 })
 
+test('#285: polled is supreme over the local running fold — edgeless hosts can never be stranded in it', () => {
+  const running = promptBarReducer({ ...initialBarState(), status: 'ready' as const, text: 'x', turnSeq: 1 }, { t: 'running', running: true })
+  assert.equal(running.running, true)
+  const idle = promptBarReducer(running, { t: 'polled', status: 'idle' })
+  assert.equal(idle.running, false, 'the run-consumed row pulled back as idle ends the running line')
+  const analyzed = promptBarReducer(running, { t: 'polled', status: 'analyzing' })
+  assert.equal(analyzed.running, false, 'and a generation already underway replaces it')
+  const ready = promptBarReducer(running, { t: 'polled', status: 'ready', text: 'next step', turnSeq: 2 })
+  assert.equal(ready.running, false, 'the fresh offer replaces the running line')
+  assert.equal(ready.text, 'next step', 'and Run is armed for the NEW step only')
+  const off = promptBarReducer(running, { t: 'polled', status: 'off' })
+  assert.equal(off.running, false, 'even the off arm retires it — no half-state survives a wire answer')
+})
+
 test('#203: stateFromCache folds cached wire events back through the SAME reducer — no second fold path to drift', () => {
   const st = stateFromCache({ t: 'polled', status: 'ready', text: 'ship it', turnSeq: 7, intent: 'worker-step' }, 'armed')
   assert.equal(st.status, 'ready')
