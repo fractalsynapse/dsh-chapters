@@ -63,8 +63,13 @@ has an icon, a status label, the suggested prompt, and three actions:
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
   step and runs it, until you stop it, until you send a prompt yourself, or until the goal
   finishes.
-- **Off** turns suggestions off for this session. The configured model is kept, so turning it
-  back on is one action.
+- **The bar's ✕ turns suggestions off for THIS session only** (#291). The configured model is
+  kept; turning it back on is one action (`/chapters-prompt on`, or set a model again).
+- **The command `/chapters-prompt off` is plane-wide** — it clears the model for every session —
+  and its reply now says so in those words. It used to be what the bar's ✕ ran: a
+  session-scoped label executing a plane-scoped kill, which is how one exploratory click
+  silenced every suggestion on the machine while the door kept faithfully reporting `off`
+  (#291, found by the maintainer's live test).
 - **Nothing shows when there is nothing to recommend.** "Not yet" is not an error, and an
   error is never a blank — a failure stays labelled, with its reason.
 
