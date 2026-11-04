@@ -50,7 +50,10 @@ has an icon, a status label, the suggested prompt, and three actions:
   post-turn flow (the suggestion generated for the turn that just ended). Acting on a stale
   offer is how a bar lies, and a running agent makes every on-screen offer obsolete (#282).
 - **Run** submits the offer as your own turn, through the same follow-up path autorun uses —
-  one code path for "run it", whether you clicked it or the loop armed it.
+  one code path for "run it", whether you clicked it or the loop armed it. **A successful run
+  consumes its offer:** the server retires the row's suggestion the moment it submits it, so no
+  pull, no second tab, and no repeated click can ever re-run a step that already ran (#285 —
+  the self-proving test: click Run twice; the second click has nothing left to run).
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
   step and runs it, until you stop it, until you send a prompt yourself, or until the goal
   finishes.
