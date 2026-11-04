@@ -38,7 +38,7 @@ if [[ -z "${E2E_UPSTREAM:-}" ]]; then
 fi
 
 # project:port — DISPLAY ONLY (the boot port comes from the project env in playwright.config.ts)
-declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739 [prompt-off]=41740)
+declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fanout]=41736 [rules]=41735 [fork]=41737 [plans]=41738 [prompt]=41739 [prompt-off]=41740 [prompt-revival]=41743)
 # #56: THRESHOLD/EXTRA tables DELETED. The regime lives in `playwright.config.ts` as
 # per-project `env`, because three copies (this file, `npm run test:e2e`, boot defaults) had
 # silently diverged: replay booted suite/rules/fork with no threshold while distill had recorded
@@ -46,7 +46,7 @@ declare -A PORTS=([suite]=41731 [heavy]=41733 [arrival]=41732 [enrich]=41734 [fa
 # MISSed. PORTS below is display-only; a row asserts it still agrees with the config's env.
 trap 'stop_stub' EXIT
 # prompt-off is the switch's OFF half (#113): it has its own port, boot, and tape, so it distills like any leg.
-ORDER=(suite heavy arrival enrich fanout rules fork plans prompt prompt-off)
+ORDER=(suite heavy arrival enrich fanout rules fork plans prompt prompt-off prompt-revival)
 
 # #56, measured: `plans` and `prompt` MUST be recorded through the scripted stub
 # (tests/e2e/stub-model.ts, :8081). Their PROVENANCE.md files say so, and the reason is the
@@ -55,7 +55,7 @@ ORDER=(suite heavy arrival enrich fanout rules fork plans prompt prompt-off)
 # sent them to the hosted model (nothing pinned or started :8081), so `prompt` failed an
 # unsatisfiable line and `plans` recorded a real model's improvisation. These two legs own their
 # upstream: start the stub, pin it, stop it — and fail loudly if it will not come up.
-STUB_PROJECTS="plans prompt"
+STUB_PROJECTS="plans prompt prompt-revival"
 STUB_PORT="${STUB_PORT:-8081}"
 stub_pid=""
 start_stub() {
