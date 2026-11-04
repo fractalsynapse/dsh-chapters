@@ -77,10 +77,13 @@ export const RIG_PINS: Record<string, RigPin> = {
   // (it lived in the project that turns the feature ON), which is a test that cannot fail — the exact shape of
   // vacuous green this repo keeps being bitten by (#113, and #54 before it).
   'prompt-off': { port: 41740, threshold: '0.9', noAuxModel: true },
-  // #276: the persisted-off revival leg gets its OWN boot — measured reason: as the fifth session on the
-  // prompt boot it destabilized new-session creation for every spec (two distill attempts: 1/5, then 3/5
-  // passing), the #133 sidebar family aggravated by session count. A pristine-home first session is the
-  // reliable path; the stub upstream is the same one prompt records under (STUB_PROJECTS).
+  // #276: the persisted-off revival leg, its own boot (one journey, one boot — AGENTS rig rule).
+  // The trail here is recorded because it was walked wrong first: two failing records were blamed on
+  // session pressure on the shared prompt boot, and BOTH causes were elsewhere — a machine-wide
+  // ENOSPC on inotify instances (real: 128 max; CHOKIDAR_USEPOLLING=1 clears it for local records) and,
+  // for this spec alone, a missing openApp() call: the helper clicks New session, it does not navigate,
+  // and a blank page looks identical to a dead boot from the outside. The controlled swap experiment
+  // (same spec on the healthy boot, bar tests 1-4 green) settled it in one run.
   'prompt-revival': { port: 41743, threshold: '0.9', prompt: true, noAuxModel: true },
   // #138: goal-bearing journeys run LIVE only, never against the tape. A goal round is itself a turn and every turn
   // ends, so an armed goal's request count tracks machine latency; bounding it (budget 1) instead ENDS the goal

@@ -13,14 +13,42 @@
  * the dock's own test-seam write of the last wire answer, which stays EMPTY if no pull ever ran.
  */
 import { test, expect } from '@playwright/test'
-import { newSessionWithTurn } from './session.ts'
+import fs from 'node:fs'
+import path from 'node:path'
+import { newSessionWithTurn, openApp } from './session.ts'
 import { DOCK_BAR, waitForOffer } from './prompt-bar-offer.ts'
+
+const ROOT = path.resolve(import.meta.dirname, '..', '..')
+
+/** What the page ACTUALLY holds when the New-session plumbing would have worked — the bar leg's own
+ * discipline (#135): a locator string is not a diagnosis. Written by a guarded pre-flight below. */
+async function dumpPage(page: import('@playwright/test').Page, why: string): Promise<void> {
+  try {
+    const d = await page.evaluate(() => ({
+      title: document.title,
+      bodyChars: document.body.innerText.length,
+      buttons: Array.from(document.querySelectorAll('button')).map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '').filter(Boolean).slice(0, 30),
+      errors: Array.from(document.querySelectorAll('[role="alert"], .error')).map((el) => (el.textContent ?? '').slice(0, 120)).slice(0, 4),
+      hash: location.hash.slice(0, 80),
+    }))
+    fs.writeFileSync(path.join(ROOT, 'var', 'e2e-revival-dom.json'), JSON.stringify({ why, ...d }, null, 1))
+  } catch { /* the dump must never outrank the test it explains */ }
+}
 
 test.describe('a persisted off surviving a reload revives (#276)', () => {
   test('the mount pull fires despite the stale cached off', async ({ page }) => {
     test.setTimeout(600_000)
+    await page.on('pageerror', (e) => { fs.appendFileSync(path.join(ROOT, 'var', 'e2e-revival-console.log'), `pageerror: ${String(e.message).slice(0, 200)}\n`); })
     // Same plumbing the bar legs use: a live session carried to a READY offer.
-    const sessionId = await newSessionWithTurn(page, 'Reply with exactly: OK')
+    let sessionId: string
+    try {
+      await openApp(page) // the helper clicks; it does not navigate — every bar spec opens first (the blank-page
+      // witness that cost this investigation: bodyChars 0 was about:blank, not a dead boot)
+      sessionId = await newSessionWithTurn(page, 'Reply with exactly: OK')
+    } catch (error) {
+      await dumpPage(page, `newSessionWithTurn failed: ${String((error as Error)?.message ?? error).slice(0, 120)}`)
+      throw error
+    }
     const bar = page.locator(DOCK_BAR)
     await waitForOffer(bar, page)
 
