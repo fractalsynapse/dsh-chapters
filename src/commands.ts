@@ -19,6 +19,7 @@ import {
   type ProjectRecord, type SyncScheduler,
 } from './sync.ts'
 import { classifyOffer } from './prompt-state.ts'
+import { deliveredOffer } from './prompt-runner.ts'
 import { isLocalUpstreamUrl, readOrigin, resolveLocalUpstreamPath } from './gitops.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, projectKeyFromRemote, resolveProject } from './repo.ts'
 import { createTreeDxClient } from './treedx/client.ts'
@@ -551,13 +552,20 @@ export function registerHostCommands(
           // re-read or re-mirrored here before — every pull cost a store read and (on push hosts) a
           // duplicate record append. On the maintainer's host that path ran every minute for hours.
           let st = await config.prompt.bar.peekRow(sessId)
+          const sessObj = (invocation.agent as { session?: unknown }).session
+            ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
           if (st === null) {
             st = await config.prompt.bar.read(sessId)
-            const sessObj = (invocation.agent as { session?: unknown }).session
-              ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
             if (sessObj !== undefined && typeof (config.prompt.bar.read as { mirror?: unknown }).mirror === 'function') {
               void (config.prompt.bar.read as unknown as { mirror: (sessionId: string, session: unknown) => void }).mirror(sessId, sessObj)
             }
+          }
+          // #289: an offer whose exact text already arrived as a later human turn has RUN — it is never
+          // served again, even from a row written by a version that predated run-consumption. Rendered
+          // as resting here (the read stays side-effect-free per #231); the row heals at the next
+          // claim, and runNow refuses+retires if anyone tries to Run it meanwhile.
+          if (st.status === 'ready' && deliveredOffer(sessObj, st)) {
+            st = { ...st, status: 'off', text: '', turnSeq: null }
           }
           const { spec, source } = config.prompt.effective()
           // #113: `off` must mean OFF. A session with a defining model and no stored offer is `idle` — enabled,
@@ -592,7 +600,12 @@ export function registerHostCommands(
             return { kind: 'error', text: 'run needs a session scope and the chapters prompt store' }
           }
           console.error(`[chapters-prompt] /run invoked for session=${String(runId)}`)
-          const res = await config.prompt.bar.runNow(runId)
+          // #289: the live session rides the call so runNow can refuse a DELIVERED offer — one whose
+          // text already arrived as a later human turn (the pre-#285 rows the maintainer's update
+          // inherited). No session object, no refusal: the bar's own consumption (#285) still guards.
+          const sessObjRun = (invocation.agent as { session?: unknown }).session
+            ?? (invocation.agent as { agent?: { session?: unknown } }).agent?.session
+          const res = await config.prompt.bar.runNow(runId, sessObjRun)
           console.error(`[chapters-prompt] /run result ok=${String(res.ok)} reason=${String(res.reason ?? '')}`)
           return res.ok
             ? { kind: 'success', text: `running the suggested next step as your own turn:\n${res.text}` }

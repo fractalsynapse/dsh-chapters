@@ -727,6 +727,9 @@ the bar's state rides a plugin record and a projection, and the steady state cos
 - Append sites: every durable row write — the runner's `analyzing`/`ready`/`failed`/quiet-`off`
   transitions (it holds the live session) and the bar-access mutations (`setAutorun`, `setOff`,
   `setOn`, `runNow`'s consumption), which gain an optional live-session parameter for the purpose.
+  `runNow` also refuses a DELIVERED offer (#289): text equal to a later human-authored turn means
+  it already ran; the refusal retires the row (a write verb may heal) and the `state` READ renders
+  such an offer resting without mutating anything.
 - The function comes ONLY from the host's own module instance — `createRequire(process.argv[1])
   → resolve('@deepseek-ai/dsh-session') → await import(resolved)`. The plugin's OWN copy at the
   IDENTICAL version throws `Receiver must be an instance of class Session` against a host session
