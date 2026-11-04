@@ -6,7 +6,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makePromptRoundRunner, type GenerateOutcome } from '../../src/prompt-runner.ts'
+import { deliveredOffer, makePromptRoundRunner, type GenerateOutcome } from '../../src/prompt-runner.ts'
 import { freshSession, type SessionState } from '../../src/registry.ts'
 
 interface Fake {
@@ -192,4 +192,26 @@ test('#225: a throwing listener is caught and WARNED, never propagated into the 
   runner({ id: 'S', header: {} }, { type: 'turn/end', seq: 1 })
   await new Promise((r) => setTimeout(r, 30))
   assert.ok(warns.some((w) => /turn listener failed/.test(w)), 'the outer catch names the failure class on the warn channel')
+})
+
+test('#289: deliveredOffer — an offer whose exact text later arrived as a human turn has RUN', () => {
+  const OFFER = 'Land #114, then cut 0.2.2.\nThen wire the verbs.'
+  const ready = { status: 'ready', text: OFFER, turnSeq: 41, error: '', at: '', intent: 'worker-step', goalRevision: null } as const
+  const mk = (text: string, seq: number, source?: Record<string, string>) => ({
+    type: 'user/message', seq, data: { source, content: [{ type: 'text', text }] },
+  })
+  const session = (events: unknown[]) => ({ id: 'S', events })
+  assert.equal(deliveredOffer(session([mk(OFFER, 44)]), ready), true, 'exact equal, later than birth')
+  assert.equal(deliveredOffer(session([mk('  LAND #114, then   cut 0.2.2. \n then wire the verbs. ', 44)]), ready), true, 'normalized: case and whitespace are not a new instruction')
+  assert.equal(deliveredOffer(session([mk(OFFER, 30)]), ready), false, 'the same words BEFORE the offer was born predate it — not a delivery of it')
+  assert.equal(deliveredOffer(session([mk(OFFER, 44, { kind: 'goal' })]), ready), false, 'a goal round carrying the text is not the human sending it')
+  assert.equal(deliveredOffer(session([mk(OFFER, 44, { kind: 'plugin', plugin: 'chapters' })]), ready), false, 'the bar authoring its own autorun message is not a human delivery')
+  assert.equal(deliveredOffer(session([mk(OFFER.slice(0, 20), 44)]), ready), false, 'a rewritten step is a NEW instruction, not this offer')
+  assert.equal(deliveredOffer(session([mk(`<system-reminder>tz</system-reminder>${OFFER}`, 44)]), ready), true, 'host reminder spans are stripped before comparing')
+  const manual = { status: 'ready', text: OFFER, turnSeq: null, error: '', at: '', intent: 'worker-step', goalRevision: null } as const
+  assert.equal(deliveredOffer(session([mk(OFFER, 3)]), manual), true, 'a manual offer (null turnSeq) compares against every later turn')
+  assert.equal(deliveredOffer(undefined, ready), false, 'no session is never a delivery')
+  assert.equal(deliveredOffer({ id: 'S', snapshotEvents: () => [mk(OFFER, 44)] }, ready), true, 'the live seat: snapshotEvents() is read too (#58 payload-bearing rule)')
+  const off = { status: 'off', text: '', turnSeq: 41, error: '', at: '', intent: 'worker-step', goalRevision: null } as const
+  assert.equal(deliveredOffer(session([mk('x', 44)]), off), false, 'only a ready offer can be delivered')
 })

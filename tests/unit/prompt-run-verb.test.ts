@@ -33,7 +33,7 @@ test('run refuses when there is no offer on screen, through the bar access', () 
   // what "nothing to run" means.
   const idx = src.indexOf("if (verb === 'run') {")
   const block = src.slice(idx, src.indexOf("if (verb === 'autorun') {"))
-  assert.match(block, /config\.prompt\.bar\.runNow\(runId\)/, 'it delegates to the single submission path')
+  assert.match(block, /config\.prompt\.bar\.runNow\(runId, sessObjRun\)/, 'it delegates to the single submission path — #289 added the live-session parameter so runNow can refuse a delivered offer')
   assert.match(block, /cannot run: /, 'the failure keeps the reason, verbatim, so the bar can show it')
 })
 
@@ -62,7 +62,9 @@ test('#285: a successful run consumes its offer in the same breath it submits it
   assert.ok(block.includes('submitOffer(sessionId, st.text)'), 'submit first — never consume an offer the submit never fired')
   assert.match(block, /promptSuggestion: noSuggestion/, 'then mutate the row to the resting vocabulary (state verb renders it idle: enabled, next offer at the next completed turn)')
   assert.match(block, /promptRow\.mutate\(sessionId/, 'through the shared-row mutate, never a snapshot')
-  assert.ok(block.indexOf('submitOffer') < block.indexOf('promptRow.mutate'), 'the ORDER is the contract')
+  // #289 added a REFUSE-and-retire mutate BEFORE submit (a delivered offer); the success-path order
+  // contract is submit-first, consume-after, measured against the LAST mutate in the block.
+  assert.ok(block.indexOf('submitOffer') < block.lastIndexOf('promptRow.mutate'), 'the ORDER is the contract')
 })
 
 test('#285: the refused run does NOT consume — a failure keeps the offer on screen', () => {
@@ -77,4 +79,12 @@ test('#285: the dock folds the run-success as its own local running edge (edgele
   const dock = read('src/client/prompt-dock.ts')
   assert.match(dock, /else dispatch\(\{ t: 'running', running: true \} as PromptBarEvent\)/,
     'the click authored the turn — the fold is knowledge, not a host signal (#221 hosts never publish one)')
+})
+
+test('#289: runNow refuses a delivered offer before it can ever fire again', () => {
+  const idx = read('src/index.ts')
+  const block = idx.slice(idx.indexOf('runNow: async'), idx.indexOf('setAutorun:'))
+  assert.match(block, /deliveredOffer\(session, st\)/, 'the delivered check gates the seam')
+  assert.ok(block.indexOf('deliveredOffer(session, st)') < block.indexOf('submitOffer(sessionId'), 'refusal precedes submission — a delivered offer never fires')
+  assert.match(block, /already sent as your own turn/, 'and the refusal names what happened')
 })
