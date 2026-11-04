@@ -18,7 +18,7 @@ const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const script = fs.readFileSync(path.join(ROOT, 'scripts', 'distill-tapes.sh'), 'utf8')
 
 test('plans and prompt are declared stub-pinned, and the stub is started for them', () => {
-  assert.match(script, /STUB_PROJECTS="plans prompt"/, 'the two journeys are named, not implied')
+  assert.match(script, /STUB_PROJECTS="plans prompt prompt-revival"/, 'the three journeys are named, not implied (#276: the revival leg mints its offer through the stub arm)')
   assert.match(script, /start_stub/, 'and something starts the scripted upstream')
   assert.match(script, /E2E_UPSTREAM=http:\/\/127\.0\.0\.1:\$\{STUB_PORT\}/,
     'the leg env pins the stub — the endpoint resolver must not get to decide this')
