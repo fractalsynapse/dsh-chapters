@@ -34,6 +34,9 @@ const EXPECTED: Record<string, Record<string, string>> = {
   rules: { E2E_PORT: '41735', E2E_THRESHOLD: '0.9' },
   fork: { E2E_PORT: '41737', E2E_THRESHOLD: '0.75' },
   plans: { E2E_PORT: '41738', E2E_THRESHOLD: '0.99', E2E_NO_AUX_MODEL: '1' },
+  // #276: the persisted-off revival leg, own boot. Declared independently of rig-pins.ts on purpose —
+  // that duplication IS the gate: an edit to one table without this restatement fails.
+  'prompt-revival': { E2E_PORT: '41743', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' },
   // #113: the docked Suggested Next Step bar needs its own leg, and the ghost's port map is the
   // convention it returns to (distill-tapes.sh: prompt=41739). The switch is `prompt: true`, which
   // derives E2E_PROMPT — the defining-model row — and NO other leg gets one.
@@ -153,7 +156,7 @@ test('the acceptance gate is BLOCKING — no ci.yml job may be advisory (#92 res
   const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
   const advisory = ci.split('\n').filter((l) => /continue-on-error:\s*true/.test(l))
   assert.equal(advisory.length, 0, `no job may be advisory without amending this row and citing the issue that authorizes it; found ${String(advisory.length)}: ${JSON.stringify(advisory)}`)
-  assert.match(ci, /name: acceptance — nine tape-replay legs/, 'the acceptance job must EXIST to be blocking — deleting it is not restoring the gate')
+  assert.match(ci, /name: acceptance — ten tape-replay legs/, 'the acceptance job must EXIST to be blocking — deleting it is not restoring the gate')
   assert.match(ci, /issues\/92/, 'the restoration comment cites the decision it completes')
 })
 

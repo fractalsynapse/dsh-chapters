@@ -23,6 +23,16 @@ test('#282: the expanded pane carries a collapse control wired to the reducer', 
   assert.match(DOCK, /dsh-chapters_promptCollapse/, 'with its own corner class')
 })
 
+test('#295: the collapse control lives in the action row — never floated over the prompt text', () => {
+  assert.doesNotMatch(DOCK, /\.dsh-chapters_promptCollapse\{[^}]*position:absolute/, 'the overlay CSS is gone: the button and the text cannot fight for one pixel')
+  assert.match(DOCK, /key: 'collapse'/, 'it is an expanded-conditional entry in the bar’s own actions row')
+  // and the handoff gesture folds back on both success paths, never on a refusal
+  const collapses = (DOCK.match(/dispatch\(\{ t: 'collapse' \}\)/g) ?? []).length
+  assert.ok(collapses >= 3, `collapse dispatched by the action-row button AND both handoff success paths (saw ${String(collapses)})`)
+  const refusalSite = DOCK.slice(DOCK.indexOf("if (!wrote) { refuse("), DOCK.indexOf("if (!wrote) { refuse(") + 30)
+  assert.ok(!/collapse/.test(refusalSite), 'the refusal path does not collapse — the note must stay readable')
+})
+
 test('#282: unknown running is NOT running — the clear-on-run must never strand a non-publishing host', () => {
   assert.doesNotMatch(DOCK, /running \?\? true/, 'the #221 doctrine extended: `?? true` made an absent signal mean "a turn is in flight", which under clear-on-run would clear the bar forever')
   assert.match(DOCK, /running === true/, 'strict boolean: only a published true edge folds to running')
