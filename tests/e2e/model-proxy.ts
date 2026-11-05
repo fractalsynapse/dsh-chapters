@@ -438,7 +438,7 @@ export function describeMiss(tape: TapeEntry[], incoming: unknown[], label = '?'
   const tied = scored.filter((x) => x.common === best.common).map((x) => x.entry)
   const at = best.common
   const wantIdx = at < inc.length ? String(at) : 'end'
-  const got = at < inc.length ? inc[at].slice(0, 110) : ''
+  const got = at < inc.length ? (inc[at] ?? '').slice(0, 110) : ''
   const exp = (() => {
     const e = best.idx >= 0 ? tape[best.idx] : tape.find((t) => t.file === best.entry)
     if (e === undefined || at >= (e.prefix ?? []).length) return ''
