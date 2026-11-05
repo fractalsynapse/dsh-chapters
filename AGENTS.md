@@ -97,6 +97,22 @@ trap in the original design; do not "helpfully" reuse the fork handler's seed st
   refusal cases (never seeded for a branch; never seeded after an approval, because approving EXITS plan
   mode) are in `docs/plans-carriage.md` § 10.
 
+  **Amendment 2026-11-05 (chair decision, #319): the seed may carry ZERO surface events — and now MUST.**
+  Measured on 0.2.0-rc.2: a seeded child whose surface[0] is the TOC notice becomes permanently
+  cold-load-refused the moment the kernel records its own first-request `system/message` mid-surface —
+  the host's writer and validator deadlock every headless-surface session (#314; the fold rule, the
+  provably impossible event positions, and the kernel's own root ordering `turn/start → step/start →
+  system/message@12 → user/message@13` are in `docs/contract.md`). The seed grammar accepts an empty
+  seed ("the constructor seed length (0 without one)"), so the sanctioned birth shape becomes:
+  **create with an empty seed; the TOC notice arrives as the first AUTHORED user/message turn** — the
+  kernel records its header first, exactly as for every GUI root, and the child is structurally
+  reload-safe. Invariant 2's substance is untouched: nothing is copied from the parent either way —
+  only the notice's arrival channel moves from seed to authored turn, costing one small model call at
+  child birth. STATE events stay seedable as the 2026-10-10 amendment describes (a lone `plan/mode`
+  seed is non-surface and poisons nothing). Already-seeded children are data, not code: the self-check
+  (`src/reload-check.ts`, #319) flags them at their first turn, the restore door continues them, and
+  vendor option (d) would heal them in place.
+
   **A created session composes NOTHING by itself.** Round 10 proved it for the model: no `agentOptions`
   ⇒ every turn dies with `prompt variable "{{model}}" has no value for this assembly`. Phase 0b proved
   the deeper half: **`agents.create` never mounts a preset** — `meta.agentPreset` is a durable label only
