@@ -347,3 +347,11 @@ test('#279: the rules also demand a FORWARD step — never a restatement of in-f
   assert.ok(a.includes('Create the #273 echo-adjacency issue and run the pre-change sampler'), 'the real echo names itself in the instruction')
   assert.ok(a.includes('a mirror, not a director'), 'and states what the echo actually is')
 })
+
+test('#300: the GOAL: prefix is conditioned on an ACTIVE goal — never legal with none', () => {
+  const built = buildSuggestInput(facts([{ number: 1, title: 'Setup', summary: 'installed the rig', plots: [] }], [{ role: 'assistant' as const, text: 'done for now' }]), 6000, 240)
+  const a = inputOf(built)
+  assert.ok(a.includes('prefix is legal ONLY when the goal block above names an ACTIVE goal'), 'the prefix is conditioned on the goal block, not on objective-flavored prose')
+  assert.ok(a.includes('NEVER use the prefix'), 'with no active goal the sentence forbids it outright')
+  assert.ok(a.includes('close out this release cycle'), 'the live mis-stamp is pinned as the named counter-example')
+})
