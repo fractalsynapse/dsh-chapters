@@ -121,6 +121,17 @@ test.describe('the suggested-next-step bar docked above the composer', () => {
     // #295: the successful handoff folds the bar back — the row re-reads as the collapsed
     // gesture label once the words have landed in the composer.
     await expect(promptButton).toHaveAttribute('aria-label', 'Click to expand the full suggested prompt', { timeout: 15_000 })
+    // #309: the hand-off goes ONLY into an empty composer. The composer now holds the text that just
+    // landed, so a second hand-off must REFUSE with a note, not append: the tooltip names the
+    // precondition while expanded, the click says it on the bar, and the prompt's head appears exactly
+    // once — the maintainer's "clicking three times yields the prompt three times" closed with a number.
+    await promptButton.click() // collapsed → expanded, WITH text in the composer now
+    await expect(promptButton).toHaveAttribute('aria-label', 'Clear existing prompt to send this prompt to chat input', { timeout: 5_000 })
+    await promptButton.click() // the refusal path
+    await expect(bar.locator('.dsh-chapters_promptNote')).toBeVisible({ timeout: 5_000 })
+    const textAfterRefusal = await composer.evaluate((el) => (el as HTMLElement).innerText ?? '')
+    expect(textAfterRefusal.split(prompt.slice(0, 24)).length - 1).toBe(1)
+
     fs.writeFileSync(path.join(ROOT, 'var', 'e2e-prompt-draft-dump.json'), JSON.stringify({
       prompt,
       composerText: await composer.evaluate((el) => (el as HTMLElement).innerText ?? (el as HTMLTextAreaElement).value ?? ''),

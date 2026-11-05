@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS, turnEndPulse, configureQuietHeartbeat } from '../../src/client/prompt-bar.ts'
+import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS, turnEndPulse, configureQuietHeartbeat, rowTooltip } from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -414,4 +414,11 @@ test('#304: the analyzing belt backs off 10/20/40/60 while an armed loop keeps i
   assert.equal(pollSpacingFor({ ...base, analyzingStreak: 5 }), 60_000, 'capped at 60s — never silent, never spam')
   assert.equal(pollSpacingFor({ ...base, autorun: 'armed' as const, analyzingStreak: 5 }), 10_000, 'the armed loop must never stall behind the back-off')
   assert.equal(pollSpacingFor({ ...base, status: 'ready' as const, text: undefined, analyzingStreak: 3 }), null, 'a stable disarmed bar keeps NO clock (back-off is belt-only)')
+})
+
+test('#309: rowTooltip states the click outcome AND the empty-composer precondition, per state', () => {
+  assert.equal(rowTooltip(false, false), 'Click to expand the full suggested prompt', 'collapsed: the reading invite')
+  assert.equal(rowTooltip(false, true), 'Click to expand the full suggested prompt', 'collapsed: the composer state is invisible until it matters')
+  assert.equal(rowTooltip(true, false), 'Click to send this prompt to the chat input for editing', 'expanded + empty: the gesture, unchanged')
+  assert.equal(rowTooltip(true, true), 'Clear existing prompt to send this prompt to chat input', 'expanded + occupied: the precondition, named')
 })
