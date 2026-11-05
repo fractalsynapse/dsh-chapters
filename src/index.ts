@@ -40,7 +40,7 @@ import { buildRulesSection } from './rules.ts'
 import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } from './prompt.ts'
 import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
-import { deliveredOffer, makePromptRoundRunner } from './prompt-runner.ts'
+import { deliveredOffer, makePromptRoundRunner, reconcilePromptRow } from './prompt-runner.ts'
 import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, type PushWriter } from './prompt-push.ts'
 import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
@@ -628,6 +628,25 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       get(sessionId: string): Promise<{ promptSuggestion?: typeof noSuggestion }>
       mutate(sessionId: string, fn: (row: never) => never): Promise<unknown>
     }
+    // #304: a boot releasing the previous process's zombie claims. `analyzing` means "someone is
+    // generating right now" — after a restart that someone is gone, and an unreleased claim strands
+    // every dock in a polling loop behind a generation that no longer exists (measured: 10.0s pulls
+    // for 12+ minutes, 2 history nodes each). The reservation rule, applied to the prompt row:
+    // released, not burned. Only 'analyzing' moves; mutate re-reads live (#101).
+    {
+      let reclaimed = 0
+      for (const [id, row] of store.sessions()) {
+        if (row.promptSuggestion?.status === 'analyzing') {
+          reclaimed += 1
+          await promptRow.mutate(id, ((r: Record<string, unknown>) => reconcilePromptRow(r)) as never)
+        }
+      }
+      if (reclaimed > 0) {
+        console.error(`[chapters-prompt] boot: released ${String(reclaimed)} zombie analyzing claim(s)`)
+        ctx.logger?.info?.(`dsh-chapters: released ${String(reclaimed)} zombie prompt claim(s) at boot`)
+      }
+    }
+
     // #194: the push transport. The writer resolves against the HOST's own module instance (the
     // probe-proven recipe — a plugin-side copy throws `Receiver must be an instance of class Session`
     // even at the identical version), and the projection is registered ONLY when the writer exists:
