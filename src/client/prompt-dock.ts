@@ -26,7 +26,7 @@ import {
   BAR_RUN_COMMAND,
   deriveRunning,
   BAR_STATE_COMMAND,
-  pollSpacingFor, mountPullDecision, stateFromCache, parseModelAbsent, edgeKickDelayMs,
+  pollSpacingFor, mountPullDecision, rowTooltip, stateFromCache, parseModelAbsent, edgeKickDelayMs,
   pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, turnEndPulse, ACTIVE_POLL_MS, type PromptBarStatus,
   barLabel,
   barVisible,
@@ -248,6 +248,29 @@ function execWithTimeout(exec: (line: string) => Promise<string>, line: string, 
       (error: unknown) => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
     )
   })
+}
+
+/**
+ * The composer, by the name the HOST gives it (placeholder "Message or run a task, / commands, …",
+ * locales.ts:400) — NOT a bare `[contenteditable][role=textbox]` first(), which on this app matches
+ * the sidebar's "Search session names" input (measured lesson, tests/e2e/prompt-bar.spec.ts:41: a
+ * whole click-to-draft assertion was reading the wrong element). The host's own editable element
+ * carries `data-composer-input` (measured: ComposerContentEditable.tsx:46) — stable across styles,
+ * locales and restyles, so the probe matches THAT and never a first(). Shared by the three sites
+ * that touch the editor: the #309 occupancy guard, the focus-before-insert, and the
+ * write-verification — one probe, one truth. Absent attribute ⇒ null ⇒ the guard ALLOWS the
+ * handoff (unknown is never a reason to block the feature; the post-write verify is the backstop).
+ */
+const composerBox = (): HTMLElement | null => {
+  try { return document.querySelector<HTMLElement>('[data-composer-input]') } catch { return null }
+}
+
+/** #309: does the chat input hold the user's in-flight text? Whitespace-only counts as empty. */
+const composerHasText = (): boolean => {
+  const el = composerBox()
+  if (el === null) return false
+  const t = 'value' in el ? String((el as unknown as { value: string }).value ?? '') : (el.innerText ?? '')
+  return t.trim() !== ''
 }
 
 export function PromptDock(props: DockProps): ReactElement | null {
@@ -575,6 +598,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
     console.info(`[client:prompt] populate expanded=${String(state.expanded)} hasInsertText=${String(typeof inputActions?.insertText)} hasSetDraft=${String(typeof inputActions?.setDraft)} textLen=${String(state.text?.length ?? -1)}`)
     if (!state.expanded) { dispatch({ t: 'expand' }); return }
     if (state.text === null || state.text === '') return
+    // #309: hand off INTO AN EMPTY COMPOSER ONLY — never append to, never overwrite, text the user
+    // is mid-typing. The refusal says itself on the bar (the tooltip already named the precondition).
+    if (composerHasText()) { dispatch({ t: 'note', note: 'The chat input has text — clear it first, then this click hands the suggestion over.' }); return }
     // Delivered, not assumed. The click-to-draft gesture is the interaction the maintainer asked for, so a
     // silent no-op here is indistinguishable from "the feature does not work" — and that ambiguity cost the
     // rest of this leg's diagnosis. Absent verb, absent text: both say so.
@@ -588,10 +614,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // call ran and put the words nowhere. Focusing the composer first is the whole difference, and it is done
       // with a tolerant query rather than a class name: the host's own module hashes (`wSkVaW_…`) are not mine
       // to depend on, and a bar that silently stops drafting after a host restyle is worse than one that tries.
-      try {
-        const box = document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')
-        box?.focus()
-      } catch { /* a host without the editor mounted: the insert below still records the intent */ }
+      try { composerBox()?.focus() } catch { /* a host without the editor mounted: the insert below still records the intent */ }
       // Measured on host 0.2.0-rc.2: called from a dock this throws
       // `Cannot read properties of undefined (reading 'draftRev')`, and the kit's other verb (`setDraft`) writes
       // a store the editor mirrors only at mount. Neither reaches the composer. A silent no-op is what cost the
@@ -634,7 +657,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
       const head = state.text.slice(0, 24)
       setTimeout(() => {
         try {
-          const dom = (document.querySelector<HTMLElement>('[contenteditable="true"][role="textbox"]')?.innerText ?? '').includes(head)
+          const el = composerBox()
+          const dom = el === null ? false : (('value' in el ? String((el as unknown as { value: string }).value ?? '') : (el.innerText ?? '')).includes(head))
           const stored = Object.entries(localStorage).some(([, v]) => String(v).includes(head))
           if (!dom && !stored) refuse('the write was accepted but nothing holds the text')
         } catch { /* diagnostics never break the gesture */ }
@@ -658,17 +682,23 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // #300: a goal re-cut still never auto-runs (the host reserves goal edits for a human turn), but the
       // fact now rides barLabel's REPLACEMENT text — the old second-message span overflowed the one-line
       // row and clipped the composer. Run's own tooltip (below) still explains the keystroke requirement.
-      h('button', {
-        type: 'button', className: 'dsh-chapters_promptText',
-        // #282: the tooltip names what the NEXT click does, per state — the maintainer's ask. Same
-        // string for aria-label and the native title bubble, so screen-reader and hover never diverge.
-        'aria-label': state.expanded ? 'Click to send this prompt to the chat input for editing' : 'Click to expand the full suggested prompt',
-        title: state.expanded ? 'Click to send this prompt to the chat input for editing' : 'Click to expand the full suggested prompt',
-        disabled: state.running,
-        onClick: populate,
-      }, state.expanded
-        ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
-        : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))),
+      (() => {
+        // #282+#309: one sentence (rowTooltip) for aria-label AND the bubble; the bubble rides the
+        // HOST's themed tooltip seat (withTooltip) like the door buttons — the hard-coded native title
+        // here was the black-bubble foreign style the maintainer flagged. nativeTitle appears only when
+        // the host seat is absent; never both. Read per render, so the occupied-composer warning
+        // tracks typing without a private clock.
+        const rowTip = rowTooltip(state.expanded, composerHasText())
+        return withTooltip(rowTip, h('button', {
+          type: 'button', className: 'dsh-chapters_promptText',
+          'aria-label': rowTip,
+          ...nativeTitle(rowTip),
+          disabled: state.running,
+          onClick: populate,
+        }, state.expanded
+          ? h('span', { className: 'dsh-chapters_promptFull' }, state.text ?? '')
+          : h('span', { className: 'dsh-chapters_promptEllipsis' }, lineFor(state))) as ReactElement<Record<string, unknown>>)
+      })(),
       ...(state.note === '' ? [] : [h('span', { key: 'note', className: 'dsh-chapters_promptNote', role: 'status' }, state.note)]),
       ...(state.error === '' ? [] : [h('span', { key: 'err', className: 'dsh-chapters_promptError', role: 'alert' }, state.error)]),
       h('div', { className: 'dsh-chapters_promptActions' },
@@ -677,7 +707,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
         // for the same pixel. The reducer's 'collapse' case keeps the offer; this is reading, not dismissal.
         ...(state.expanded ? [h(Action, {
           key: 'collapse',
-          label: 'Collapse the suggested prompt', glyph: '▴', className: 'dsh-chapters_promptCollapse',
+          label: 'Collapse the suggested prompt', glyph: '▾', className: 'dsh-chapters_promptCollapse', // #309: it folds DOWN
           onClick: () => { dispatch({ t: 'collapse' }) },
         })] : []),
         h(Action, {

@@ -36,12 +36,16 @@ has an icon, a status label, the suggested prompt, and three actions:
   lands — its verification, its follow-up — or a different line of work the state plainly
   calls for (#279).
 - **Click the prompt to expand it** — the row tooltip says so while collapsed. The expanded
-  pane shows the complete prompt; the **collapse control (▴) lives in the bar's own action
-  row** (top-right, never over the text — an early build floated it inside the pane and the
-  two click targets fought, #295), and folding keeps the offer — only a human prompt or
-  **Off** dismisses it (#282).
+  pane shows the complete prompt; the **collapse control (▾ — it folds the pane back down,
+  #309) lives in the bar's own action row** (top-right, never over the text — an early build
+  floated it inside the pane and the two click targets fought, #295), and folding keeps the
+  offer — only a human prompt or **Off** dismisses it (#282).
 - **Click it while expanded to send it to the chat input for editing — and the bar folds back**
-  to its normal size in the same gesture (#295). The tooltip while expanded names exactly that.
+  to its normal size in the same gesture (#295) — **but only when the chat input is empty.**
+  If you are mid-sentence, the bar will not append to or overwrite your text; the tooltip
+  changes to say what it would take (*clear the existing prompt first*), and clicking states
+  that on the bar instead of acting (#309). Tooltips ride the host's own themed tooltip seat,
+  so they look like everything else in the app.
   This handoff is **live-verified in use**: the maintainer's
   2026-11-03 report ("you got the click to chat input working… I love that") supersedes the
   `draftRev` refusal measured in #126/#162 on earlier builds; where the host still refuses a
