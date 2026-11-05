@@ -13,9 +13,23 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const DOCK = fs.readFileSync(path.join(ROOT, 'src', 'client', 'prompt-dock.ts'), 'utf8')
 
-test('#282: the row tooltip names the click outcome per state', () => {
-  assert.ok(DOCK.includes("Click to expand the full suggested prompt"), 'collapsed names expand')
-  assert.ok(DOCK.includes("Click to send this prompt to the chat input for editing"), 'expanded names the composer handoff')
+test('#282+#309: the row tooltip names the click outcome per state, from ONE pure predicate', () => {
+  const bar = fs.readFileSync(path.join(ROOT, 'src', 'client', 'prompt-bar.ts'), 'utf8')
+  assert.ok(bar.includes('Click to expand the full suggested prompt'), 'collapsed names expand (rowTooltip now owns the strings, prompt-bar.ts)')
+  assert.ok(bar.includes('Click to send this prompt to the chat input for editing'), 'expanded+empty names the composer handoff')
+  assert.ok(bar.includes('Clear existing prompt to send this prompt to chat input'), 'expanded+occupied names the precondition')
+})
+
+test('#309: the row bubble rides the host tooltip seat — no native black bubble, no hand-off into a typed composer', () => {
+  assert.doesNotMatch(DOCK, /title: state\.expanded/, 'the hard-coded native title is gone (the black-bubble foreign style)')
+  assert.match(DOCK, /withTooltip\(rowTip/, 'the row button wraps in the themed seat, like the door buttons')
+  assert.match(DOCK, /nativeTitle\(rowTip\)/, 'native only where the host seat is absent — never both')
+  assert.match(DOCK, /if \(composerHasText\(\)\) \{ dispatch\(\{ t: 'note'/, 'the occupied-composer refusal says itself on the bar')
+  assert.match(DOCK, /glyph: '▾'/, 'collapse folds DOWN — the maintainer\u2019s reading: we expand up, we collapse down')
+  assert.doesNotMatch(DOCK, /glyph: '▴'/, 'the up-glyph cannot return')
+  assert.match(DOCK, /const composerBox = \(\)/, 'one probe for the composer, shared by guard, focus, and verify')
+  assert.match(DOCK, /querySelector<HTMLElement>\('\[data-composer-input\]'\)/, 'the host\'s own identifying attribute (ComposerContentEditable.tsx:46) — never a first() on a shared selector')
+  assert.doesNotMatch(DOCK, /document\.querySelector<HTMLElement>\('\[contenteditable="true"\]\[role="textbox"\]'\)/, 'the bare first-match selector cannot return to any probe site')
 })
 
 test('#282: the expanded pane carries a collapse control wired to the reducer', () => {

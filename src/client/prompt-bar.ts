@@ -130,6 +130,18 @@ export function barLabel(s: PromptBarState): string | null {
 }
 
 /**
+ * #309: the row button's one sentence, as a pure function of what the click would DO —
+ * collapsed invites the reading; expanded-into-an-empty-composer invites the handoff;
+ * expanded-with-the-user-typing names the precondition instead of lying about the gesture.
+ * One predicate per decision (#59): aria-label and the tooltip render this same string.
+ */
+export function rowTooltip(expanded: boolean, composerHasText: boolean): string {
+  if (!expanded) return 'Click to expand the full suggested prompt'
+  return composerHasText ? 'Clear existing prompt to send this prompt to chat input'
+    : 'Click to send this prompt to the chat input for editing'
+}
+
+/**
  * #193: the pull cadence, as a decision instead of an interval constant. Every pull is two recorded
  * host lifecycle events (`command/run` + `command/done`) the UI renders as history nodes — cadence
  * IS the litter, so it belongs in this module with a row for every arm. Active = the state can
