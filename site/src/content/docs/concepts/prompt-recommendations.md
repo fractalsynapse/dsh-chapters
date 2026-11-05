@@ -285,8 +285,13 @@ publishes the running signal, the quiet **clock disappears entirely** for a stab
 every state change flows through an edge or an action, so a timer could only re-read truth. Hosts
 that publish no running prop keep the paced fallback (**10s** while analyzing/armed/running,
 **60s** while quiet, **zero pulls in a hidden tab** while quiet — never while armed, because
-walking away from a running loop is the point of autorun). An armed or analyzing bar keeps the
-10s belt on every host: a missed edge must not stall a loop.
+walking away from a running loop is the point of autorun). An armed bar keeps the flat 10s belt
+ on every host: a missed edge must not stall a loop. An **analyzing** bar backs the belt off
+ **10 → 20 → 40 → 60s** (#304): short generations never notice (the first wait is eager), while a
+ long one costs three pulls instead of nine — and a claim whose generation died with its server is
+ **released at boot** (the reservation rule: released, not burned), because the one cadence that
+ deserves no back-off at all is a timer polling for something that no longer exists.
+
 
 **The push transport retires the problem instead of pacing it** (#194, host 0.2.1+): every state
 change is appended as a durable plugin record (`ignorable`, never model-visible, rendered by

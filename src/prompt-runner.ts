@@ -88,6 +88,23 @@ export interface PromptRunnerDeps {
   warn?: (message: string) => void
 }
 
+/**
+ * #304: release a ZOMBIE claim at boot. `analyzing` means "a process is generating right now" —
+ * but a restart kills the generator and the durable row keeps the claim, so the dock's belt
+ * polls forever behind a generation that no longer exists (measured: a 10.0s-per-pull storm,
+ * 2 history nodes each, for a zombie that outlived its own process by 12 minutes). The reclaim
+ * is the reservation rule — released, not burned — applied to the prompt row: only `analyzing`
+ * moves, and only to the runner's own resting vocabulary; every other state stands untouched.
+ * Returns the SAME object when there is nothing to reclaim, so the caller writes nothing
+ * without a change.
+ */
+export function reconcilePromptRow<T extends { promptSuggestion?: PromptSuggestionState }>(row: T): T {
+  if (row.promptSuggestion !== undefined && row.promptSuggestion.status === 'analyzing') {
+    return { ...row, promptSuggestion: noSuggestion }
+  }
+  return row
+}
+
 export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: string; header?: Record<string, unknown> }, event: unknown) => void {
   const chains = new Map<string, Promise<void>>()
   const section = (id: string, job: () => Promise<void>): void => {

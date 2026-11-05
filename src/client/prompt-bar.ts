@@ -154,7 +154,19 @@ export function configureQuietHeartbeat(seconds: number | undefined): void {
   QUIET_POLL_MS = typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? Math.trunc(seconds * 1000) : 0
 }
 
-export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean; turnEndPulse?: boolean }): number | null {
+/**
+ * #304: the analyzing belt backs off 10s → 20s → 40s → 60s (cap) while a generation is in
+ * flight and nobody is armed. The first wait stays eager (short generations — every rig leg —
+ * land in the old 10s rhythm); long and zombie generations stop paying 2 history nodes per
+ * poll. The ARMED loop ignores the belt entirely: a stalled round is worse than any cadence.
+ * streak counts consecutive analyzing OBSERVATIONS (undefined/0 = eager).
+ */
+function analyzingBeltMs(streak: number | undefined): number {
+  const n = streak === undefined || streak < 1 ? 0 : Math.min(streak, 3)
+  return n === 0 ? ACTIVE_POLL_MS : n === 1 ? 20_000 : n === 2 ? 40_000 : 60_000
+}
+
+export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean; turnEndPulse?: boolean; analyzingStreak?: number | undefined }): number | null {
   // #203: where the host publishes the running signal, the idle EDGE is the schedule — a turn ending
   // pulls, the bar's own actions pull, and a stable disarmed bar keeps NO clock at all, because a
   // timer there could only re-read truth into rendered history nodes. Analyzing stays on the fast
@@ -164,7 +176,8 @@ export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarA
   // was just born. Applies in BOTH modes; it is the sanctioned moment, not a clock.
   if (s.turnEndPulse === true) return ACTIVE_POLL_MS
   if (s.edges) {
-    if (s.status === 'analyzing' || s.autorun === 'armed') return ACTIVE_POLL_MS
+    if (s.autorun === 'armed') return ACTIVE_POLL_MS
+    if (s.status === 'analyzing') return analyzingBeltMs(s.analyzingStreak)
     return null
   }
   // #221: unknown-running is UNKNOWN, not running. The maintainer's live host (0.2.0-rc.2) publishes
@@ -177,7 +190,10 @@ export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarA
   const active = s.status === 'analyzing' || s.autorun === 'armed'
   if (!active && s.hidden) return null
   if (!active) return QUIET_POLL_MS > 0 ? QUIET_POLL_MS : null
-  return ACTIVE_POLL_MS
+  // #304: armed keeps the 10s; analyzing alone rides the back-off (the 158-pull lesson was
+  // about FOREVER; a real 90s generation deserves 3 polls, not 9).
+  if (s.autorun === 'armed') return ACTIVE_POLL_MS
+  return analyzingBeltMs(s.analyzingStreak)
 }
 
 /**
