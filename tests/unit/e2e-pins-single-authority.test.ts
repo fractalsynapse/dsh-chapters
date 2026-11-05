@@ -37,6 +37,8 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // #276: the persisted-off revival leg, own boot. Declared independently of rig-pins.ts on purpose —
   // that duplication IS the gate: an edit to one table without this restatement fails.
   'prompt-revival': { E2E_PORT: '41743', E2E_THRESHOLD: '0.9', E2E_PROMPT: '1', E2E_NO_AUX_MODEL: '1' },
+  // #319: the restart-cold-load gate. Same regime shape as prompt-revival (cheap, inert prompt plane).
+  'reload': { E2E_TAPE: 'reload', E2E_PORT: '41744', E2E_THRESHOLD: '0.9', E2E_NO_AUX_MODEL: '1' },
   // #113: the docked Suggested Next Step bar needs its own leg, and the ghost's port map is the
   // convention it returns to (distill-tapes.sh: prompt=41739). The switch is `prompt: true`, which
   // derives E2E_PROMPT — the defining-model row — and NO other leg gets one.
