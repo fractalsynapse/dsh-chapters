@@ -410,6 +410,14 @@ function loadTape(tapeDir: string): TapeEntry[] {
  */
 export function describeMiss(tape: TapeEntry[], incoming: unknown[], label = '?'): string {
   const inc = incoming.map((x) => substituteAll(typeof x === 'string' ? x : JSON.stringify(x) ?? '')).filter((x) => x !== '')
+  // #319: an EMPTY tape (a journey authored but not yet recorded) used to fall through with
+  // best.common = -1, and the report's own inc[-1].slice crashed the proxy — a project-level
+  // death a test.fail() annotation cannot absorb. A new journey must fail its tests LOUDLY,
+  // not kill the rig.
+  if (tape.length === 0) {
+    const preview = inc.slice(0, 3).map((x) => x.slice(0, 80)).join(' | ')
+    return `tape ${label}: EMPTY (journey not recorded yet) — first requests: ${preview}`.slice(0, 600)
+  }
   // `file` is filled by the tape loader; a caller without it (a test, a partially built tape)
   // still gets a usable index rather than a mysterious `?`
   let best = { entry: '?', common: -1, idx: -1 }
