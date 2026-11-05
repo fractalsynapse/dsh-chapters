@@ -34,10 +34,10 @@ test('the prefix is only honoured at the start, and an empty re-cut is not a pha
 
 test('the suggestion model is actually told the protocol, in the rules it receives', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src', 'prompt.ts'), 'utf8')
-  assert.match(src, /prefix it with GOAL:/, 'no protocol row is worth anything if the model was never asked to write it')
-  assert.match(src, /the human sends those/, 'and it is told WHO sends a re-cut, so it does not hedge every step with the prefix')
+  assert.match(src, /prefix is legal ONLY when the goal block/, 'no protocol row is worth anything if the model was never asked to write it')
+  assert.match(src, /only the human can send those/, 'and it is told WHO sends a re-cut, so it does not hedge every step with the prefix')
   assert.match(src, /autorun will not/, 'and told the loop will not do it — the reason the prefix exists')
-  assert.match(src, /Do not use the prefix for an ordinary next step/, 'the negative case is stated: an over-used prefix would freeze the loop')
+  assert.match(src, /An ordinary next step takes no prefix even when a goal is active/, 'the negative case is stated: an over-used prefix would freeze the loop')
   const backticks = (src.split('\n').find((l) => l.includes('Write the ONE next prompt')) ?? '').split('`').length - 1
   assert.equal(backticks, 2, 'the rules template must open and close exactly once — a backtick inside it silently ends the literal (I shipped that bug and typecheck caught it)')
 })
