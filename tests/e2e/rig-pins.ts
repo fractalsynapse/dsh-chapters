@@ -85,9 +85,10 @@ export const RIG_PINS: Record<string, RigPin> = {
   // and a blank page looks identical to a dead boot from the outside. The controlled swap experiment
   // (same spec on the healthy boot, bar tests 1-4 green) settled it in one run.
   'prompt-revival': { port: 41743, threshold: '0.9', prompt: true, noAuxModel: true },
-  // #319: the red-first restart-cold-load gate. No prompt plane needed (the leg's model
-  // traffic is its own two turns), but prompt:true keeps the bar's door inert like the other cheap legs.
-  'reload': { port: 41744, threshold: '0.9', prompt: true, noAuxModel: true },
+  // #319: the red-first restart-cold-load gate. Deliberately NOT prompt:true — E2E_PROMPT is the
+  // defining-model row the prompt legs alone carry (the pin's own convention); reload's future tape
+  // must be an ordinary journey like fork/plans. noAuxModel keeps it cheap, as the other light legs.
+  'reload': { port: 41744, threshold: '0.9', noAuxModel: true },
   // #138: goal-bearing journeys run LIVE only, never against the tape. A goal round is itself a turn and every turn
   // ends, so an armed goal's request count tracks machine latency; bounding it (budget 1) instead ENDS the goal
   // (`round-limit` → blocked → the strip renders nothing), so there is no observable armed moment. The claims are
