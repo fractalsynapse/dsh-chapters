@@ -90,8 +90,7 @@ const CSS = [
   // a long suggestion can never cover the screen (the maintainer asked for exactly this). Normal
   // wrapping (`break-word`, not `anywhere`) keeps words whole on full-width lines.
   '.dsh-chapters_promptFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;line-height:20px;font-size:13px;color:var(--dsw-alias-label-primary);display:block;max-height:9rem;overflow-y:auto}',
-  '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',
-  '.dsh-chapters_promptIntent{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:20px}',
+  '.dsh-chapters_promptError{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:20px;flex:none;max-width:34%}',  '.dsh-chapters_promptNote{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:20px;min-width:0}',,
 
   '.dsh-chapters_promptActions{flex:none;align-items:center;gap:10px;display:flex}',
   '.dsh-chapters_promptBtn{corner-shape:round;width:28px;height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:999px;justify-content:center;align-items:center;padding:0;display:inline-flex;font-size:13px}',
@@ -646,10 +645,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
     h('div', { className: `dsh-chapters_promptBar${state.expanded ? ' dsh-chapters_promptExpanded' : ''}` },
       h('span', { className: 'dsh-chapters_promptGlyph' }, h(Glyph)),
       h('span', { className: 'dsh-chapters_promptLabel' }, barLabel(state as PromptBarState) ?? ''),
-      // A goal re-cut is held for the human's keystroke: the host reserves goal edits for a turn containing a
-      // direct human message, and an autorun message is not one. The bar says so on its face rather than
-      // letting Run appear to be a normal button that silently fails in the tool.
-      ...(state.intent === 'goal-edit' ? [h('span', { key: 'intent', className: 'dsh-chapters_promptIntent', 'aria-label': 'This step edits the goal' }, 'edits the goal · run it yourself')] : []),
+      // #300: a goal re-cut still never auto-runs (the host reserves goal edits for a human turn), but the
+      // fact now rides barLabel's REPLACEMENT text — the old second-message span overflowed the one-line
+      // row and clipped the composer. Run's own tooltip (below) still explains the keystroke requirement.
       h('button', {
         type: 'button', className: 'dsh-chapters_promptText',
         // #282: the tooltip names what the NEXT click does, per state — the maintainer's ask. Same

@@ -42,3 +42,8 @@ test('#291: the ✕ executes the session-scoped verb — never the plane-wide of
   assert.match(DOCK, /exec\('\/chapters-prompt off-session'\)/, 'the label and the verb now share one scope')
   assert.doesNotMatch(DOCK, /exec\('\/chapters-prompt off'\)/, 'the plane-wide verb is out of the dock entirely')
 })
+
+test('#300: the dock renders NO second message — the goal-edit fact lives only in the label', () => {
+  assert.doesNotMatch(DOCK, /edits the goal · run it yourself/, 'the overflowing badge text is gone from the source')
+  assert.doesNotMatch(DOCK, /promptIntent/, 'the class is gone entirely — label, element, and CSS (an unused rule is drift bait)')
+})

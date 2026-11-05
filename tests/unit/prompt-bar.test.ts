@@ -396,3 +396,12 @@ test('#243: the click-to-expand contract — expand never hides, and a re-pull o
   assert.equal(barVisible(s), true, 're-folding the identical row does not hide the bar')
   assert.equal(s.text, 'run the tests', 'and the offer survives the click intact')
 })
+
+test('#300: a goal-edit offer REPLACES the label text — the row has one message slot', () => {
+  const goalEdit = { ...initialBarState(), status: 'ready' as const, text: 're-cut the objective', turnSeq: 3, intent: 'goal-edit' as const }
+  assert.equal(barLabel(goalEdit), 'Goal edit — run it yourself', 'the label slot carries the protocol fact')
+  const worker = { ...goalEdit, intent: 'worker-step' as const }
+  assert.equal(barLabel(worker), 'Recommended Next Step', 'and ordinary offers keep the original label')
+  const running = { ...goalEdit, running: true }
+  assert.ok(barLabel(running) !== 'Goal edit — run it yourself', 'the running line still outranks: while a turn runs, that IS the message')
+})
