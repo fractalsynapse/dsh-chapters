@@ -70,8 +70,19 @@ test.describe('a persisted off surviving a reload revives (#276)', () => {
     // the reply seam proves a REAL pull answered (a cached render could never set it).
     const revived = page.locator(DOCK_BAR)
     await expect(revived, 'the bar revives despite the stale cached off').toBeVisible({ timeout: 30_000 })
+    // The visible bar is the DISK-TAGGED CACHE RENDER (#272 renders immediately and pulls async);
+    // reading the reply seam right now can race the pull itself. CI measured it: the first reply
+    // read was EMPTY (the response had not landed) and the leg failed on MY timing, not the
+    // product. Wait for the wire to answer; THEN name what it said.
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __dshPromptReply?: string }).__dshPromptReply ?? ''),
+      { timeout: 20_000, message: 'the mount pull must answer the reply seam — an empty seam is a race, not a revival' })
+      .toMatch(/suggested next step/)
     const reply = await page.evaluate(() => (window as unknown as { __dshPromptReply?: string }).__dshPromptReply ?? '')
-    expect(reply, 'the mount paid its one honest pull — the wire answered, not a cached render').toMatch(/suggested next step: (ready|analyzing|idle)/)
+    // #304 taught this seam a fourth honest answer: a boot that released a zombie claim can make
+    // the mount's first pull legitimately answer `off`. The claim guarded here is "the wire
+    // answered", not the status — the waitForOffer below still refuses a cached veto, because a
+    // dead render never yields a visible offer.
+    expect(reply, 'the mount paid its one honest pull — the wire answered, not a cached render').toMatch(/suggested next step: (ready|analyzing|off|idle)/)
     await waitForOffer(revived, page)
   })
 })
