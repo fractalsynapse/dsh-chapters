@@ -405,3 +405,13 @@ test('#300: a goal-edit offer REPLACES the label text — the row has one messag
   const running = { ...goalEdit, running: true }
   assert.ok(barLabel(running) !== 'Goal edit — run it yourself', 'the running line still outranks: while a turn runs, that IS the message')
 })
+
+test('#304: the analyzing belt backs off 10/20/40/60 while an armed loop keeps its 10s', () => {
+  const base = { running: false, hidden: false, edges: false, status: 'analyzing' as const, autorun: 'disarmed' as const }
+  assert.equal(pollSpacingFor({ ...base, analyzingStreak: 0 }), 10_000, 'first wait stays eager')
+  assert.equal(pollSpacingFor({ ...base, analyzingStreak: 1 }), 20_000)
+  assert.equal(pollSpacingFor({ ...base, analyzingStreak: 2 }), 40_000)
+  assert.equal(pollSpacingFor({ ...base, analyzingStreak: 5 }), 60_000, 'capped at 60s — never silent, never spam')
+  assert.equal(pollSpacingFor({ ...base, autorun: 'armed' as const, analyzingStreak: 5 }), 10_000, 'the armed loop must never stall behind the back-off')
+  assert.equal(pollSpacingFor({ ...base, status: 'ready' as const, text: undefined, analyzingStreak: 3 }), null, 'a stable disarmed bar keeps NO clock (back-off is belt-only)')
+})

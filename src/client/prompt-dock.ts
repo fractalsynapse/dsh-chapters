@@ -283,6 +283,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // #79's discipline, kept because the failure it prevents was real: one pull per mount, then per edge.
   // A fetch in an effect with no such guard re-fires on every render.
   const pulling = useRef(false)
+  // #304: consecutive analyzing OBSERVATIONS drive the belt back-off (10/20/40/60). It counts
+  // what the wire SAID, not what we hope is happening — any non-analyzing answer resets it.
+  const analyzingStreak = useRef(0)
   // TWO different facts, two different refs — conflating them is the bug I just shipped: `pulled` is the
   // once-per-mount pull guard, `alive` is "may this component still call dispatch/setState". Initializing the
   // pull guard to true made every mount skip its first pull, so the bar sat at its `off` default and rendered
@@ -336,7 +339,13 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // bytes the browser parsed, not the bytes the server meant. Overwritten each pull; read on failure.
       try { (window as unknown as { __dshPromptReply?: string }).__dshPromptReply = text } catch { /* test seam only */ }
       const ev = parseBarState(text) as PromptBarEvent | null
-      if (ev !== null) { answered.current = true; replyStatus.current = (ev as { status?: string }).status ?? replyStatus.current; dispatch(ev) }
+      if (ev !== null) {
+        answered.current = true
+        const st = (ev as { status?: string }).status ?? replyStatus.current
+        replyStatus.current = st
+        analyzingStreak.current = st === 'analyzing' ? analyzingStreak.current + 1 : 0 // #304
+        dispatch(ev)
+      }
       const autorun = parseBarAutorun(text)
       if (autorun !== null) dispatch({ t: 'autorun', on: autorun === 'armed' })
       // #208: a reply naming the model unset silences the whole page — relevance is plane-wide.
@@ -406,6 +415,7 @@ export function PromptDock(props: DockProps): ReactElement | null {
         hidden: typeof document !== 'undefined' && document.hidden === true,
         edges: edgesRef.current,
         turnEndPulse: pe.pulse,
+        analyzingStreak: analyzingStreak.current, // #304: arm the back-off with what we've OBSERVED
       })
     }
     const duePull = (): boolean => {
