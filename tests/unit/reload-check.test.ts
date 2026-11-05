@@ -49,3 +49,21 @@ test('#319 EQUIVALENCE with the vendor reader on both shapes (skip-loud when unr
   assert.equal(vendorVerdict(CHILD), false, 'vendor refuses the child shape')
   assert.ok(reloadRuleRefusal(CHILD) !== null, 'we agree: refuse')
 })
+
+test('#304-precedent, #319: a session with an adopted head survives a LATER header record (root migration shape)', () => {
+  // The real root flow: turn 1 records its head (adopts); turn 2 records ANOTHER system/message
+  // while the surface is long since non-empty. A predicate that only models first-adoption would
+  // cry wolf here — and reload-check must not, or the self-check would drown the chair in false
+  // refusals on healthy sessions, which is worse than the silence it replaces.
+  const headThenLive = [
+    mk(0, 'turn/start', { turn: 1 }), mk(1, 'step/start', { turn: 1, step: 1 }),
+    { ...sm(2), data: { ...sm(2).data, turn: 1, step: 1 } },
+    mk(3, 'step/end', { turn: 1, step: 1 }), mk(4, 'turn/end', { turn: 1 }),
+    mk(5, 'turn/start', { turn: 2 }), mk(6, 'step/start', { turn: 2, step: 1 }),
+    { ...sm(7), data: { ...sm(7).data, turn: 2, step: 1 } },
+    mk(8, 'step/end', { turn: 2, step: 1 }),
+    mk(9, 'plugin:record', {}), // non-surface, AFTER the head — the continue branch (line 549) needs a specimen
+    mk(10, 'turn/end', { turn: 2 }),
+  ]
+  assert.equal(reloadRuleRefusal(headThenLive), null, 'head adopted at 2; the second header at 7 must NOT refuse')
+})
