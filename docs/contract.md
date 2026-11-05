@@ -942,3 +942,36 @@ The rule now: **arming prompt autorun displaces the goal's continuation, and the
   turn — so a missing seam degrades to the safe behaviour rather than double-firing.
 - Re-arming the goal (`/goal resume`, or the bar's next human Run of a `GOAL:` step) is a human act, matching
   the host's own rule that a model may not resume a paused goal (`GOAL_TOOL_RESUME_PAUSED`).
+
+## Seeded-continuation load deadlock — the fold rule vs the header recorder (measured 2026-11-05, #314)
+
+The native-V4 relationships validator (`@deepseek-ai/dsh-session-format-v3-to-v4`, entered as
+`assertReleasedV4Relationships(artifact, knownEventTypes)`, which runs
+`assertV4LifecycleRelationships` → `foldSurface`) admits a `system/message` ONLY as the
+**protected first surface head**: a mid-surface occurrence throws
+`system/message requires a protected first surface head` **before any `surfaceOp` is consulted**
+(installed bundle `lib/index.js:599`), and the sole exemption is a *replacement* shadowing exactly
+one existing `protectedHead`. The validator tracks the head BY SEQ and healthy sessions' heads
+legitimately migrate to mid-surface positions (measured on loadable logs: seq 79, 112, 488, 2697)
+— the prohibition bites only at ADOPTION.
+
+Our continuation seed is `user/message@0, surfaceOp:'append'` — a surface node before any head.
+The kernel's own first-request header recorder then writes `system/message`
+(`{turn, step, message{role:'system', source:{kind:'system-prompt'}, id}}`, `surfaceOp:'append'`)
+inside the open step — and from that moment the session log fails its own load validation forever:
+the GUI refuses to reopen the child after a restart ("stored session is corrupt … gateway/internal").
+Row admission (`assertV4RowAdmission`) accepts the shape and the kernel records it without complaint:
+the deadlock is writer-versus-validator, host-internal. Measured on the maintainer's box: 4/4 seeded
+children carry the mid-surface event at their first real request; all four logs are byte-perfect and
+ALL FOUR re-validate cleanly once the first `system/message` is allowed to adopt the head regardless
+of position (resolution option (d)) — the corruption is fully reversible with a two-line host change.
+
+Two gotchas for anyone probing this API: `assertV4MessageSources` throws the DIFFERENT rule's
+message (`format v4 message requires a producer-owned source kind`) for a missing
+`system/message.message.id` — the string is overloaded; and `system/message` may only fold while
+its turn/step are OPEN, or `does not match an open turn and step` fires first.
+
+Drift guard: `tests/unit/host-seed-load-deadlock.test.ts` pins the deadlock against the installed
+host — evidence row (the throw), a healthy-shape control, and a **wish row marked `failing: true`**
+asserting the load succeeds. When a host release lands option (d) the wish row passes unexpectedly
+and turns the suite RED: that is the signal to flip the marker and re-verify the pins here.
