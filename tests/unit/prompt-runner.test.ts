@@ -8,6 +8,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { deliveredOffer, makePromptRoundRunner, type GenerateOutcome } from '../../src/prompt-runner.ts'
 import { freshSession, type SessionState } from '../../src/registry.ts'
+import { reconcilePromptRow } from '../../src/prompt-runner.ts'
+import fs from 'node:fs'
+import path from 'node:path'
 
 interface Fake {
   writes: PromptSuggestionView[]
@@ -214,4 +217,24 @@ test('#289: deliveredOffer — an offer whose exact text later arrived as a huma
   assert.equal(deliveredOffer({ id: 'S', snapshotEvents: () => [mk(OFFER, 44)] }, ready), true, 'the live seat: snapshotEvents() is read too (#58 payload-bearing rule)')
   const off = { status: 'off', text: '', turnSeq: 41, error: '', at: '', intent: 'worker-step', goalRevision: null } as const
   assert.equal(deliveredOffer(session([mk('x', 44)]), off), false, 'only a ready offer can be delivered')
+})
+
+test('#304: a zombie analyzing claim reconciles to resting at boot; every other state stands', () => {
+  const mk = (over: Record<string, unknown>) => ({ status: 'ready', text: 'x', turnSeq: 1, error: '', at: '2026-11-04T00:00:00Z', intent: 'worker-step', goalRevision: null, ...over })
+  const z = { promptSuggestion: mk({ status: 'analyzing', text: '' }) } as never
+  const out = reconcilePromptRow(z) as { promptSuggestion: { status: string; turnSeq: unknown } }
+  assert.equal(out.promptSuggestion.status, 'off', 'a claim with no live owner is released, not burned — the reservation rule, applied to the prompt row')
+  assert.equal(out.promptSuggestion.turnSeq, null)
+  for (const keep of ['ready', 'failed', 'off']) {
+    const r = { promptSuggestion: mk({ status: keep }) } as never
+    assert.equal(reconcilePromptRow(r), r, keep + ' rows are not ours to touch')
+  }
+  const bare = { someOtherField: 1 } as never
+  assert.equal(reconcilePromptRow(bare), bare, 'no promptSuggestion, no claim: the SAME object back — nothing to rewrite')
+})
+
+test('#304: boot runs the reclaim — the wiring calls reconcilePromptRow over every stored session', () => {
+  const idx = fs.readFileSync(path.join(process.cwd(), 'src', 'index.ts'), 'utf8')
+  assert.match(idx, /reconcilePromptRow/, 'the boot pass exists')
+  assert.match(idx, /store\.sessions\(\)/, 'it enumerates sessions (the store\'s sanctioned read-only listing)')
 })
