@@ -34,7 +34,10 @@ const rowTexts = (page: import('@playwright/test').Page): Promise<string[]> =>
 
 test.describe('a continued child survives a host restart (#319)', () => {
   test('cold-loads on a fresh host process: its history renders', async ({ browser }) => {
-    test.fail(true, '#319 — the seeded birth puts the TOC notice at surface[0], so the kernel\u2019s own first-turn header lands mid-surface and the host\u2019s cold validator refuses the log (#314 deadlock). This test is EXPECTED TO FAIL until the empty-seed birth ships AND this journey\u2019s tape is recorded. When it turns green, delete the annotation — do not weaken the assertions.')
+    // RETIRED 2026-11-05: the empty-seed birth (#319 part 2) is in and the reload journey is
+    // recorded. This row's PASS is now the contract: a child that ran real turns survived a
+    // kill-and-reboot and cold-loaded its history. If it fails, the birth regressed — do not
+    // re-annotate, find the seed.
     test.skip(!tapeRecorded(), '#319: reload journey has no tape yet — record it (E2E_MODEL=record chain-replay reload); until then this leg must not generate MISS traffic, and once recorded its failure means the BUG, not a missing fixture')
     test.setTimeout(600_000)
 

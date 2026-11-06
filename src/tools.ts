@@ -240,11 +240,17 @@ export function buildChaptersTools(
         // lesson, aimed this time at authoring).
         try {
           const nd = noticeEvent.data as { id?: string; source?: unknown; content?: unknown }
-          const followup = (handle as unknown as { followup?: (m: Record<string, unknown>) => unknown }).followup
-          if (typeof followup !== 'function') {
-            throw new Error('agents.create returned no followup seam — this host build cannot author the birth TOC; refusing a child that would never see it (#319)')
+          // TWO seams, one meaning (measured on rc.2: the CREATE handle is minimal; the LIVE
+          // registry is where followup lives — the prompt loop has always authored through
+          // ctx.agents.get(id).followup, and birth is the same act). Absence on BOTH is loud.
+          const onHandle = (handle as unknown as { followup?: (m: Record<string, unknown>) => unknown }).followup
+          const live = (ctx.agents as unknown as { get?: (id: string) => { followup?: (m: Record<string, unknown>) => unknown } | undefined }).get?.(sessionId)
+          const fn = typeof onHandle === 'function' ? onHandle : (typeof live?.followup === 'function' ? live.followup : null)
+          const receiver: unknown = typeof onHandle === 'function' ? handle : (live ?? null)
+          if (fn === null || receiver === null) {
+            throw new Error('no followup seam on the created handle or the live registry (ctx.agents.get) — this host build cannot author the birth TOC; refusing a child that would never see it (#319)')
           }
-          followup.call(handle, {
+          fn.call(receiver as object, {
             id: `${sessionId}-toc`,
             role: 'user',
             ...(nd.source !== undefined ? { source: nd.source } : {}),
