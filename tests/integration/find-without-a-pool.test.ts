@@ -29,7 +29,7 @@ const world = (): { tmp: string; built: ReturnType<typeof buildChaptersTools>; c
   const store = makeDomainStore({ table: table as never, close: async () => {} })
   const ctx = {
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 131072 } }) },
-    agents: { create: async () => ({ dispose: async () => {} }) },
+    agents: { create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) },
     get: () => undefined,
     sessionProjections: { stateOf: () => 'chapters' },
     logger: { info: () => {}, warn: () => {} },

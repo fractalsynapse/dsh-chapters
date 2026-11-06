@@ -37,7 +37,7 @@ function w(opts: {
   events.push(ev(2, 'turn/end', {}))
   const ctx: Record<string, unknown> = {
     llm: opts.noResolve ? {} : { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
-    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return {} } },
+    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: (_m?: unknown) => {} } } },
     get: () => ({ mount: async () => undefined }),
     sessionProjections: { stateOf: () => opts.preset === null ? null : 'chapters' },
     tools: { register: () => () => undefined },
@@ -176,7 +176,7 @@ test('degraded caller (no header, no snapshotEvents, no context info, partial us
   // a session with header but a caller with NO header anywhere resolves cwd ''
   const ctx = {
     llm: { resolveModelInfo: async () => null },
-    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return {} } },
+    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: (_m?: unknown) => {} } } },
     get: (name: string) => name === 'agentPresets' ? { mount: async () => undefined } : undefined,
     sessionProjections: { stateOf: () => undefined },
     tools: { register: () => () => undefined },

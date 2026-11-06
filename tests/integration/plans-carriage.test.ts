@@ -88,8 +88,11 @@ function world(events: Ev[], sessionId = 'sess-archive') {
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 131072 } }) },
     agents: {
       create: async (o: Record<string, unknown>) => {
-        seeds.push({ sessionId: String(o.sessionId), seed: o.seed as Array<Record<string, unknown>> })
-        return { dispose: async () => {} }
+        const entry: { sessionId: string; seed: Array<Record<string, unknown>>; authored?: unknown } = { sessionId: String(o.sessionId), seed: o.seed as Array<Record<string, unknown>> }
+        seeds.push(entry)
+        // #319 part 2: the handle authors the birth notice; record it on the entry for the assertions
+        void entry
+return { followup: (msg: Record<string, unknown>) => { entry.authored = msg }, dispose: async () => {} }
       },
     },
     get: () => undefined,
@@ -102,9 +105,9 @@ function world(events: Ev[], sessionId = 'sess-archive') {
     planInlineChars: 900, callArgArtifactTokens: 0, plansInNotice: true,
   } as never)
   const noticeText = (): string => {
-    const seed = seeds[0]?.seed[0]
-    const sections = (seed?.data as { source?: { sections?: { text?: string }[] } })?.source?.sections
-    return sections?.[0]?.text ?? ''
+    // #319 part 2: the TOC rides the AUTHORED first-turn message, not the seed
+    const authored = (seeds[0] as unknown as { authored?: { source?: { sections?: { text?: string }[] } } } | undefined)?.authored
+    return authored?.source?.sections?.[0]?.text ?? ''
   }
   return { tmp, built, exec: { agent: caller } as never, seeds, noticeText, store }
 }

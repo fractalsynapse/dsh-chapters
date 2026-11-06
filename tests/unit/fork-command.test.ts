@@ -49,7 +49,7 @@ function makeWorld(opts: { events?: SessionEventLike[]; parentChapters?: Array<{
     get: (_name: string) => undefined,
     sessionProjections: { stateOf: (_s: unknown, key: string) => (key === 'agentPreset' ? 'chapters' : undefined) },
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) },
-    agents: { create: async (req: Record<string, unknown>) => { createRequests.push(req); return { dispose: async () => {} } } },
+    agents: { create: async (req: Record<string, unknown>) => { createRequests.push(req); return { followup: (m: Record<string, unknown>) => { const last = (createRequests)[createRequests.length - 1] as { authored?: unknown } | undefined; if (last !== undefined) last.authored = m }, dispose: async () => {} } } },
     logger: { warn: (_m: string) => {} },
   }
   // #101: the domain store's `mutate(sessionId, fn)` is the only safe write to an EXISTING row, and this
@@ -76,11 +76,11 @@ test('success path: files written, child seeded with a TOC notice citing them, c
   const req = w.createRequests[0]!
   assert.equal(req.inheritedEventCount, 0)
   const seed = req.seed as SessionEventLike[]
-  assert.equal(seed.length, 1)
-  const noticeText = JSON.stringify(seed[0]!.data)
+  assert.equal(seed.length, 0, 'the seed is EMPTY of content events: surface[0] belongs to the kernel header (319 part 2)')
+  const noticeText = JSON.stringify((req as unknown as { authored?: unknown }).authored ?? {})
   const chapters = w.states.get('caller-1')!.chapters
   assert.ok(chapters.length >= 1)
-  assert.ok(noticeText.includes(chapters[0]!.path), 'notice cites the chapter path')
+  assert.ok(noticeText.includes(chapters[0]!.path), 'the AUTHORED notice cites the chapter path')
   // the archive itself on disk (real fs):
   const fsMod = await import('node:fs')
   assert.ok(fsMod.existsSync(path.join(w.tmp, chapters[0]!.path)))
@@ -110,7 +110,7 @@ test('watermark: existing chapters are inherited, only newer events are archived
   const fresh = state.chapters[1]!
   assert.equal(fresh.number, 2)
   assert.equal(fresh.startSeq, 6, 'new chapter starts strictly after the watermark')
-  const noticeText = JSON.stringify((w.createRequests[0]!.seed as SessionEventLike[])[0]!.data)
+  const noticeText = JSON.stringify(((w.createRequests[0] as unknown as { authored?: unknown }).authored ?? {}))
   assert.ok(noticeText.includes(priorChapter.path), 'child TOC carries the EXISTING chapter (the handoff test)')
   assert.ok(noticeText.includes(fresh.path), 'child TOC also lists the new chapter')
 })
@@ -126,7 +126,7 @@ test('nothing new since the last archive: pure citation fork, zero files written
   // citation path puts no parent state at all (no writes, no reservations)
   assert.equal(w.states.has('caller-1'), false, 'parent state untouched')
   assert.equal(w.createRequests.length, 1)
-  const noticeText = JSON.stringify((w.createRequests[0]!.seed as SessionEventLike[])[0]!.data)
+  const noticeText = JSON.stringify(((w.createRequests[0] as unknown as { authored?: unknown }).authored ?? {}))
   assert.ok(noticeText.includes(priorChapter.path), 'citation child lists the existing archive')
 })
 

@@ -58,7 +58,7 @@ const pendingSession = (): SessionEventLike[] => [
 function world(events: SessionEventLike[]) {
   const tmp = path.join(os.tmpdir(), `chapters-cont-${Math.random().toString(36).slice(2)}`)
   const states = new Map<string, SessionState>()
-  const created: Array<{ sessionId: string; seed: Array<Record<string, unknown>> & object; notice: string }> = []
+  const created: Array<{ sessionId: string; seed: Array<Record<string, unknown>> & object; notice: string; seedTypes: string[]; authored: Record<string, unknown> | null }> = []
   const ctx = {
     get: () => undefined,
     sessionProjections: { stateOf: (_s: unknown, key: string) => (key === 'agentPreset' ? 'chapters' : undefined) },
@@ -66,11 +66,18 @@ function world(events: SessionEventLike[]) {
     agents: {
       create: async (req: Record<string, unknown>) => {
         const seed = req.seed as Array<Record<string, unknown>>
-        const notice = ((seed[0]?.data as Record<string, never>)?.content as Array<{ text?: string }>)?.[0]?.text ?? ''
-        created.push({ sessionId: String(req.sessionId), seed: seed[0] ?? {}, notice })
-        // record the full seed shape for the mode-event rows
-        ;(created[created.length - 1] as { seedTypes: string[] }).seedTypes = seed.map((e) => String(e.type))
-        return { dispose: async () => {} }
+        // #319 part 2: the SEED carries only STATE events — no user/message may ever be seeded
+        // again, because surface[0] belonging to the notice is exactly what poisons the child's
+        // log against the host's own fold (#314). The TOC arrives AUTHORED as turn 1.
+        const entry = {
+          sessionId: String(req.sessionId), seed: seed[0] ?? {}, notice: '',
+          seedTypes: seed.map((e) => String(e.type)), authored: null as Record<string, unknown> | null,
+        }
+        created.push(entry)
+        return {
+          followup: (m: Record<string, unknown>) => { entry.authored = m; entry.notice = ((m.content as Array<{ text?: string }> | undefined)?.[0]?.text ?? '') },
+          dispose: async () => {},
+        }
       },
     },
     logger: { warn: () => {} },
@@ -128,7 +135,8 @@ test('a session still planning gets seeded through the human door — the live-a
   const r = await run('continueCommand', w, 'Hold the plan')
   assert.equal((r as { kind: string }).kind, 'success', JSON.stringify(r))
   const child = w.created[0]! as { seedTypes: string[]; notice: string }
-  assert.deepEqual(child.seedTypes, ['user/message', 'plan/mode'], 'the child carries its OWN plan/mode fact (invariant 2 amendment)')
+  assert.deepEqual(child.seedTypes, ['plan/mode'], 'the seed is STATE ONLY (invariant-2 amendment 2026-11-05): the child carries its OWN plan/mode fact, and the notice is authored, never seeded')
+  assert.ok(child.authored !== null, 'the birth follows up with the notice — a seeded child without an authored TOC is the corruption we are ending')
   assert.match(child.notice, /Plan mode is ACTIVE in this session/, 'and is told the directive is live, not history')
   assert.match(child.notice, /PENDING/, 'the unanswered plan is named as unanswered')
   // The plan sits ABOVE the ceiling (unfinished turn) ⇒ named as un-stored, never silently dropped.
@@ -139,7 +147,8 @@ test('the approved case is NOT seeded — approving exits plan mode (measured, n
   const w = world(approvedSession())
   await run('continueCommand', w)
   const child = w.created[0]! as { seedTypes: string[] }
-  assert.deepEqual(child.seedTypes, ['user/message'], 'one synthetic event: the child implements, it is not gated')
+  assert.deepEqual(child.seedTypes, [], 'no state event to seed: the seed is EMPTY — the notice rides turn 1 as an authored message')
+  assert.ok(child.authored !== null, 'and it really was authored (silent-birth is the bug, not the fallback)')
 })
 
 test('a plan-less session through the human door hands over prose, not a phantom directive', async () => {

@@ -189,9 +189,15 @@ export function buildChaptersTools(
         // the parent's log is copied; a seeded `plan/mode` is a synthetic fact about
         // the boundary, and the kernel's own setup events still append after it
         // (measured: notice@0 → plan/mode@1 → end-seed@2 → permission/sandbox/…).
+        // #319 part 2 (invariant-2 amendment 2026-11-05): the SEED carries STATE events only.
+        // A seeded user/message at surface[0] is what poisoned every continuation child against
+        // the host's own cold-load validator (issue #314: the kernel records its first-request
+        // header AFTER our notice, and its reader then refuses the log). The TOC notice is now
+        // AUTHORED as the child's first turn — the position every loadable session has always
+        // had for its first content: inside an open turn, after the kernel's own header.
         const handle = await ctx.agents.create({
           sessionId,
-          seed: [noticeEvent, ...modeEvents],
+          seed: [...modeEvents],
           inheritedEventCount: 0,
           meta: { cwd, isSeeded: false, ...(mountPreset !== undefined && mountPreset !== null ? { agentPreset: mountPreset } : {}) },
           ...(callerOptions.provider !== undefined ? { agentOptions: callerOptions } : {}),
@@ -227,11 +233,28 @@ export function buildChaptersTools(
           else ctx.logger?.warn?.('dsh-chapters: sessionController absent — child created without a title')
         } catch (error) {
           ctx.logger?.warn?.(`dsh-chapters: child title refused (${String(error)}); child remains untitled`)
+        }
+        // #319: author the TOC as the child's first turn — LOUD when the seam is absent. A
+        // child that never receives its archive believes it has none; refusing an un-birth-able
+        // child beats gifting the user a confidently confused session (#54's silent-fallback
+        // lesson, aimed this time at authoring).
+        try {
+          const nd = noticeEvent.data as { id?: string; source?: unknown; content?: unknown }
+          const followup = (handle as unknown as { followup?: (m: Record<string, unknown>) => unknown }).followup
+          if (typeof followup !== 'function') {
+            throw new Error('agents.create returned no followup seam — this host build cannot author the birth TOC; refusing a child that would never see it (#319)')
+          }
+          followup.call(handle, {
+            id: `${sessionId}-toc`,
+            role: 'user',
+            ...(nd.source !== undefined ? { source: nd.source } : {}),
+            ...(nd.content !== undefined ? { content: nd.content } : {}),
+          })
         } finally {
           // The live handle is ours only until the child is handed to the user:
           // holding it blocks their resume ("already owned by an active write
           // handle", measured r3). Dispose after the live-work, keep the session.
-          await handle.dispose?.()
+          await (handle as unknown as { dispose?: () => Promise<unknown> }).dispose?.()
         }
         return { warnings: attach.warnings }
       },

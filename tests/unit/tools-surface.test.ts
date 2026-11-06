@@ -73,7 +73,7 @@ function world(opts: { withProject?: boolean; tinyRulesBudget?: boolean } = {}) 
         created.push(o)
         // run the setup() the continuation contract requires (invariant 2)
         await (o.setup as (c: unknown) => Promise<void>)({})
-        return { dispose: async () => { disposed += 1 } }
+        return { followup: (m: Record<string, unknown>) => { const last = (created)[created.length - 1] as { authored?: unknown } | undefined; if (last !== undefined) last.authored = m }, dispose: async () => { disposed += 1 } }
       },
     },
     get: (name: string) => {
@@ -143,9 +143,11 @@ test('continue: archives, creates the child fully-composed, arms push', async ()
     assert.equal(r.ok, true, JSON.stringify(r))
     assert.equal(typeof r.childSessionId, 'string')
     assert.equal(w.created.length, 1, 'exactly one child created')
-    const seed = (w.created[0]!.seed as Array<{ data?: { source?: { kind?: string } } }>)
-    assert.equal(seed[0]!.data?.source?.kind, 'plugin:dsh-chapters', 'the TOC notice seed carries the v4 producer-owned kind (issue #43, invariant 2)')
-    assert.equal(seed[0]!.type, 'user/message'); assert.equal((seed[0] as { seq?: number }).seq, 0, 'seeds contiguous from seq 0')
+    const seed = (w.created[0]!.seed as Array<{ type: string }>)
+    assert.equal(seed.length, 0, 'nothing content-bearing is seeded (invariant-2 amendment, #319 part 2)')
+    const authored = (w.created[0] as unknown as { authored?: { role?: string; source?: { kind?: string } } }).authored
+    assert.equal(authored?.source?.kind, 'plugin:dsh-chapters', 'the AUTHORED notice carries the v4 producer-owned kind (#43 survives the move)')
+    assert.equal(authored?.role, 'user', 'authored as a user turn inside the open turn — the shape the fold accepts (measured)')
     assert.deepEqual(w.mounted, ['chapters'], 'setup mounted the preset (invariant 2)')
     assert.equal(w.attached.length, 1, 'workspace attach ran')
     assert.equal(w.renamed.length, 1, 'durable title through the service')
