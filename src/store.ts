@@ -95,6 +95,9 @@ const sessionStateSchema = z.object({
   nextPlanNumber: z.number().int().positive().default(1),
   chapters: z.array(chapterRecordSchema),
   reservations: z.record(z.string(), z.array(z.number().int().positive())).default({}),
+  // #319: the reload self-check's verdict (see registry.ts). Optional with no default: absent
+  // means "never checked or passed"; 'refused' is written once by the turn/end listener.
+  hostReload: z.literal('refused').optional(),
   // #113: the Suggested Next Step bar's durable facts. Optional-with-default (the `nextPlanNumber`
   // precedent) so a stored row from before the feature parses unchanged and no chapter bytes move.
   promptSuggestion: z.object({

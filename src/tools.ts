@@ -13,6 +13,10 @@ import { formatWarnings } from './warnings.ts'
 import { ensureDiagnosticsDefault } from './diag.ts'
 import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
 import { readDurableSession } from './auto-save.ts'
+import { findDurableLogDir, decodeDurableLog } from './durable-log.ts'
+import { runRestoreHandler } from './restore.ts'
+import { makeRestoreCommand } from './restore-command.ts'
+import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
 import { candidateTotals, estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
@@ -117,7 +121,7 @@ export function buildChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
   config: ToolsConfig,
-): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand; repairCommand: HostCommand } {
+): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand; repairCommand: HostCommand; restoreCommand: HostCommand } {
 
   // #52: the delegation edge for rule ancestry, read from whatever this plane can
   // reach (live handles, else the durable session query). undefined ⇒ the walk
@@ -1134,7 +1138,10 @@ export function buildChaptersTools(
     },
   }
 
-  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand }
+  
+  const restoreCommand = makeRestoreCommand({ store, config, portsFor, runRepair })
+
+return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand, restoreCommand }
 }
 
 export function registerChaptersTools(
@@ -1158,7 +1165,7 @@ export function registerChaptersTools(
       // that overwrote `disposeCommand` would leak the first registration and unregister
       // only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand, built.restoreCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }

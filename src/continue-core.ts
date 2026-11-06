@@ -369,6 +369,55 @@ export async function runContinue(
   return await finishChild(ports, config, args, callerState, bundle, warnings, wrote.records)
 }
 
+/**
+ * #319 part 3b — the continuation created FROM a restored (possibly host-unloadable) session.
+ * The runContinue tail mirrored on purpose — collectEntries, assembleNotice, buildTocNotice,
+ * createChild, linkChild: the SAME pieces in the SAME order with the SAME budget gate; two
+ * deliberate differences: the TOC walks the TARGET's lineage (its records were just re-derived
+ * by runRepair from the durable log), and the child links to the TARGET. No second birth logic
+ * anywhere (one predicate per decision): if the birth shape changes (part 2), it changes HERE
+ * once and restore inherits it. Returns a result rather than throwing Refusal — the command
+ * surface has no model in the loop to translate a throw.
+ */
+export async function continueFromRestored(
+  ports: ContinuePorts,
+  config: ContinueConfig,
+  targetSessionId: string,
+): Promise<{ ok: true; childId: string; warnings: string[] } | { ok: false; reason: string; warnings: string[] }> {
+  const warnings: string[] = []
+  const targetState = await ports.getState(targetSessionId)
+  const bundle = await collectEntries(ports, targetSessionId, [], warnings)
+  const title = `Restore ${targetSessionId.slice(0, 12)}\u2026`
+  const handoffNote = 'Created by chapters-restore: the source session could not be opened by the host (its durable log fails the host\u2019s own load validation \u2014 issue #314); its archive was re-derived from that log and this child carries the full TOC. Start by reading chapter 1; the restored work is whole here.'
+  const noticeText = assembleNotice({
+    title,
+    handoffNote,
+    entries: bundle.entries,
+    rootSession: targetState.rootSession,
+    parentSession: targetSessionId,
+    storeRoot: config.artifactStoreRoot,
+    retrievalHints: config.retrievalHints !== false,
+  })
+  const budget = preflight({
+    noticeTokens: estimateTokens(noticeText),
+    budget: await ports.budgetProbe(),
+    ratio: config.continuationBudgetRatio,
+  })
+  if (!budget.ok) {
+    return { ok: false, reason: `restore continuation over budget: notice ~${String(budget.budget.usedTokens)} > allowance ${String(budget.budget.allowanceTokens)} tokens. The archive is REPAIRED regardless — continuing from a root session of the same lineage carries the same records with a caller context to measure against.`, warnings }
+  }
+  const noticeEvent = buildTocNotice(noticeText, { newId: ports.newId, time: ports.now() })
+  const childId = `ch-${ports.newId()}`
+  try {
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents: [], presetId: config.fallbackPreset, title })
+    if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
+  } catch (error) {
+    return { ok: false, reason: `restore child creation refused: ${String((error as Error).message)}`, warnings }
+  }
+  await ports.putState(childId, linkChild(freshSession(childId), targetSessionId, targetState.rootSession))
+  return { ok: true, childId, warnings }
+}
+
 /** Ancestors' committed records (root-first) plus fresh records; verified, numbered for display. */
 async function collectEntries(
   ports: ContinuePorts,

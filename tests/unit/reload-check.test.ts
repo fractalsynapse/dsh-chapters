@@ -1,0 +1,117 @@
+import fs from 'node:fs'
+import path from 'node:path'
+/**
+ * #319 — the reload self-check, tested against BOTH truths: our predicate's verdicts on the
+ * canonical shapes, and the VENDOR's own reader on the same fixtures. Agreement is the contract;
+ * if their fold rule moves, the equivalence row goes red long before a chair gets surprised.
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { reloadRuleRefusal, type ReloadEvent } from '../../src/reload-check.ts'
+
+const T = 1_700_000_000_000
+const mk = (seq: number, type: string, data: Record<string, unknown> = {}, extra: Record<string, unknown> = {}): ReloadEvent =>
+  ({ type, seq, time: T + seq, ...extra, data })
+const sm = (seq: number) => mk(seq, 'system/message', { turn: 1, step: 1, message: { role: 'system', source: { kind: 'system-prompt' }, id: 'sm' + seq, content: [{ type: 'text', text: 'H' }] } }, { surfaceOp: 'append' })
+
+const CHILD = [
+  mk(0, 'user/message', { id: 'n', role: 'user', source: { kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [{ name: 'chapters:toc', text: '# T' }] }, content: [{ type: 'text', text: '# T' }] }, { surfaceOp: 'append' }),
+  mk(1, 'turn/start', { turn: 1 }), mk(2, 'step/start', { turn: 1, step: 1 }), sm(3),
+  mk(4, 'step/end', { turn: 1, step: 1 }), mk(5, 'turn/end', { turn: 1 }),
+]
+const ROOT = [
+  mk(0, 'permission/preset', { presetId: 'p' }), mk(1, 'sandbox/mode', {}),
+  mk(2, 'turn/start', { turn: 1 }), mk(3, 'step/start', { turn: 1, step: 1 }), sm(4),
+  mk(5, 'step/end', { turn: 1, step: 1 }), mk(6, 'turn/end', { turn: 1 }),
+]
+
+test('#319 the seeded-child shape is refused, named at the exact event', () => {
+  const r = reloadRuleRefusal(CHILD)
+  assert.ok(r !== null, 'the deadlock must be predicted')
+  assert.equal(r!.seq, 3); assert.equal(r!.rule, 'protected-head')
+})
+test('#319 the root shape (setup events, then the kernel header as first surface node) passes', () => {
+  assert.equal(reloadRuleRefusal(ROOT), null)
+})
+test('#319 non-surface events never count toward the surface', () => {
+  const noisy = [mk(0, 'command/run', {}), mk(1, 'turn/start', { turn: 1 }), mk(2, 'step/start', { turn: 1, step: 1 }), sm(3), mk(4, 'step/end', { turn: 1, step: 1 }), mk(5, 'turn/end', { turn: 1 })]
+  assert.equal(reloadRuleRefusal(noisy), null)
+})
+test('#319 EQUIVALENCE with the vendor reader on both shapes (skip-loud when unresolvable)', async () => {
+  const format = await import('@deepseek-ai/dsh-session-format-v3-to-v4').catch(() => null)
+  const kernel = await import('@deepseek-ai/dsh-session').catch(() => null)
+  if (format === null || kernel === null) { /* the rows above still ran; this row names its own absence */ console.log('SKIP-EQUIVALENCE: host modules unresolvable'); return }
+  const known = new Set((kernel as unknown as { KNOWN_SESSION_EVENT_TYPES: Set<string> }).KNOWN_SESSION_EVENT_TYPES)
+  const header = { id: 'ch-eq', version: 4, createdAt: T, cwd: '/tmp/e', isSeeded: false, delegationDepth: 0, agentPreset: 'chapters' }
+  const vendorVerdict = (events: ReloadEvent[]): boolean => {
+    try { (format as unknown as { assertReleasedV4Relationships(a: unknown, k: unknown): void }).assertReleasedV4Relationships({ header, events, inheritedEventCount: 0 }, known); return true } catch { return false }
+  }
+  assert.equal(vendorVerdict(ROOT), true, 'vendor accepts the root shape')
+  assert.equal(reloadRuleRefusal(ROOT), null, 'we agree: pass')
+  assert.equal(vendorVerdict(CHILD), false, 'vendor refuses the child shape')
+  assert.ok(reloadRuleRefusal(CHILD) !== null, 'we agree: refuse')
+})
+
+test('#304-precedent, #319: a session with an adopted head survives a LATER header record (root migration shape)', () => {
+  // The real root flow: turn 1 records its head (adopts); turn 2 records ANOTHER system/message
+  // while the surface is long since non-empty. A predicate that only models first-adoption would
+  // cry wolf here — and reload-check must not, or the self-check would drown the chair in false
+  // refusals on healthy sessions, which is worse than the silence it replaces.
+  const headThenLive = [
+    mk(0, 'turn/start', { turn: 1 }), mk(1, 'step/start', { turn: 1, step: 1 }),
+    { ...sm(2), data: { ...sm(2).data, turn: 1, step: 1 } },
+    mk(3, 'step/end', { turn: 1, step: 1 }), mk(4, 'turn/end', { turn: 1 }),
+    mk(5, 'turn/start', { turn: 2 }), mk(6, 'step/start', { turn: 2, step: 1 }),
+    { ...sm(7), data: { ...sm(7).data, turn: 2, step: 1 } },
+    mk(8, 'step/end', { turn: 2, step: 1 }),
+    mk(9, 'plugin:record', {}), // non-surface, AFTER the head — the continue branch (line 549) needs a specimen
+    mk(10, 'turn/end', { turn: 2 }),
+  ]
+  assert.equal(reloadRuleRefusal(headThenLive), null, 'head adopted at 2; the second header at 7 must NOT refuse')
+})
+
+// ---- part 3a: the listener that MAKES the predicate loud ----------------------
+import { makeReloadSelfCheckListener, type ReloadCheckDeps } from '../../src/reload-check.ts'
+
+test('#319 part3: the listener flags a doomed child ONCE at its first turn/end and writes the fact', () => {
+  const facts: string[] = []
+  const warns: string[] = []
+  const deps: ReloadCheckDeps = {
+    store: { mutate: async (id: string) => { facts.push(id) } },
+    warn: (m) => { warns.push(m) },
+  }
+  const listener = makeReloadSelfCheckListener(deps)
+  const doomed = { id: 'ch-doomed', snapshotEvents: () => CHILD }
+  listener(doomed, { type: 'turn/end', seq: 7 })
+  listener(doomed, { type: 'turn/end', seq: 12 }) // the SECOND turn must not shout twice
+  assert.equal(facts.length, 1, 'exactly one fact write')
+  assert.equal(facts[0], 'ch-doomed')
+  assert.equal(warns.length, 1, 'exactly one warning')
+  assert.match(warns[0], /seq 3/, 'the warning names the offending event')
+  assert.match(warns[0], /will NOT reopen/, 'it says the consequence, not just the fact')
+})
+
+test('#319 part3: healthy sessions are silent; non-children are not checked; other events ignored', () => {
+  const facts: string[] = []
+  const warns: string[] = []
+  const listener = makeReloadSelfCheckListener({ store: { mutate: async (id: string) => { facts.push(id) } }, warn: (m) => { warns.push(m) } })
+  listener({ id: 'ch-fine', snapshotEvents: () => ROOT }, { type: 'turn/end', seq: 9 })
+  listener({ id: 'session-root', snapshotEvents: () => CHILD }, { type: 'turn/end', seq: 9 }) // roots aren't born from our seed
+  listener({ id: 'ch-mid', snapshotEvents: () => CHILD }, { type: 'assistant/message', seq: 9 })
+  assert.deepEqual(facts, [])
+  assert.deepEqual(warns, [])
+})
+
+test('#319 part3: a listener failure is contained — the turn is never the check\'s hostage', () => {
+  const listener = makeReloadSelfCheckListener({
+    store: { mutate: async () => { throw new Error('domain offline') } },
+    warn: () => { /* swallowed */ },
+  })
+  listener({ id: 'ch-doomed2', snapshotEvents: () => CHILD }, { type: 'turn/end', seq: 3 }) // must not throw
+})
+
+test('#319 part3: the wiring exists — index.ts instantiates the listener and calls it on the shared turn/end seam', () => {
+  const idx = fs.readFileSync(path.join(process.cwd(), 'src', 'index.ts'), 'utf8')
+  assert.match(idx, /makeReloadSelfCheckListener\(\{/, 'the listener is constructed in apply()')
+  assert.match(idx, /reloadSelfCheck\(session as/, 'it is called on the same boundary the prompt plane uses')
+})
