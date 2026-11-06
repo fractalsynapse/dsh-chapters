@@ -93,11 +93,13 @@ test('#319: a target whose durable log is missing/unparsable is refused without 
   assert.equal(calls.filter((c) => c.startsWith('repair:') || c.startsWith('create:')).length, 0)
 })
 
-test('#319: the wiring exists — tools.ts registers the chapters-restore door', async () => {
+test('#319: the wiring exists — tools.ts registers the command, and it lives OUTSIDE the anchor surface', async () => {
   const src = fs.readFileSync(path.join(process.cwd(), 'src', 'tools.ts'), 'utf8')
-  assert.match(src, /name: 'chapters-restore'/, 'the door is registered beside chapters-repair')
-  assert.match(src, /text = await runRestoreHandler\(\{/, 'and delegates to the tested handler')
-  assert.match(src, /chapters-restore: \$\{String\(\(error as Error\)/, 'seam refusals are delivered as command error text, not thrown stacks')
+  assert.match(src, /makeRestoreCommand\(\{/, 'tools.ts wires the factory with its machine seams')
+  assert.doesNotMatch(src, /name: 'chapters-restore'/, 'the human-facing command text is NOT in a prompt-surface file (anchor #156: commands never reach the model)')
+  const cmd = fs.readFileSync(path.join(process.cwd(), 'src', 'restore-command.ts'), 'utf8')
+  assert.match(cmd, /text = await runRestoreHandler\(\{/, 'the command delegates to the tested handler')
+  assert.match(cmd, /chapters-restore: \$\{String\(\(error as Error\)/, 'seam refusals are delivered as error text, not thrown stacks')
 })
 
 // ---- continueFromRestored: the SHARED tail, mirrored on purpose (#319) ----------
