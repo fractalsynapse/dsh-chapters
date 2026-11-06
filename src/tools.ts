@@ -13,6 +13,9 @@ import { formatWarnings } from './warnings.ts'
 import { ensureDiagnosticsDefault } from './diag.ts'
 import { REPAIR_CLASS_ALIASES, resolveRepairClasses } from './repair.ts'
 import { readDurableSession } from './auto-save.ts'
+import { findDurableLogDir, decodeDurableLog } from './durable-log.ts'
+import { runRestoreHandler } from './restore.ts'
+import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
 import { candidateTotals, estimateTokens, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
@@ -117,7 +120,7 @@ export function buildChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
   config: ToolsConfig,
-): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand; repairCommand: HostCommand } {
+): { segment: ReturnType<typeof defineTool>; chaptersContinue: ReturnType<typeof defineTool>; chaptersFork: ReturnType<typeof defineTool>; chaptersSearch: ReturnType<typeof defineTool>; chaptersArtifact: ReturnType<typeof defineTool>; chaptersRulePropose: ReturnType<typeof defineTool>; chaptersRules: ReturnType<typeof defineTool>; forkCommand: HostCommand; continueCommand: HostCommand; saveCommand: HostCommand; repairCommand: HostCommand; restoreCommand: HostCommand } {
 
   // #52: the delegation edge for rule ancestry, read from whatever this plane can
   // reach (live handles, else the durable session query). undefined ⇒ the walk
@@ -1134,7 +1137,76 @@ export function buildChaptersTools(
     },
   }
 
-  return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand }
+  
+  /**
+   * #319 part 3b — /chapters-restore <sessionId> [dry-run|apply]. The door for sessions the HOST
+   * cannot open: its loader is precisely what must not be trusted here, so the target's bytes go
+   * through the RAW decode (the repair CLI's proven technique), the repair runs through the SAME
+   * runRepair core, and the child is born through the SAME continue-core tail (continueFromRestored
+   * mirrors runContinue's pieces — one birth site per shape, part 2 changes it once). The pure
+   * handler in src/restore.ts owns resolution/refusals; this wiring owns the machine seams.
+   * Dry-run default; `apply` writes; ids are never guessed; cross-project targets are refused —
+   * the store roots are this workspace's.
+   */
+  const restoreCommand: HostCommand = {
+    name: 'chapters-restore',
+    description: 'Continue past a session the host cannot load: re-derive its archive from the durable log and create a continuation citing it. Dry-run by default; the word apply repairs (journalled) and creates.',
+    input: { hint: '<sessionId> [dry-run|apply]' },
+    async handler(invocation: { agent: unknown; rawInput?: string }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
+      const agent = invocation.agent as CallerAgent
+      const cwd0 = (agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? ''
+      if (cwd0 === '') return { kind: 'error' as const, text: 'chapters-restore: this session has no workspace cwd — the store cannot be located' }
+      const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((x) => x.length > 0)
+      let ports: Awaited<ReturnType<typeof portsFor>> | null = null
+      try { ports = await portsFor(agent) } catch { /* created only if apply reaches create() */ }
+      const rootsOfProject = async (): Promise<string[]> => {
+        const out: string[] = []
+        for (const [id] of store.sessions()) {
+          const d = findDurableLogDir(id)
+          const dec = d === null ? null : decodeDurableLog(d)
+          if (dec?.header?.cwd !== undefined && path.resolve(String(dec.header.cwd)) === path.resolve(cwd0)) out.push((await store.get(id)).rootSession)
+        }
+        return out
+      }
+      let text: string
+      try { text = await runRestoreHandler({
+        rows: () => Object.fromEntries(Array.from(store.sessions()).map(([id]) => [id, null])),
+        dirFor: (id) => { const d = findDurableLogDir(id); return d === null ? null : decodeDurableLog(d) },
+        repair: async (id, dryRun) => {
+          const d = findDurableLogDir(id)
+          const dec = d === null ? null : decodeDurableLog(d)
+          if (dec === null || dec === undefined) throw new Error('no durable log inside the handler — the outer check should have refused first')
+          const hcwd = dec.header?.cwd
+          if (hcwd === undefined || path.resolve(String(hcwd)) !== path.resolve(cwd0)) {
+            throw new Error(`the target belongs to ${String(hcwd ?? 'an unknown workspace')}, not this project (${cwd0}) — run chapters-restore from the target\u2019s own session`)
+          }
+          const out = await runRepair(
+            { store, readLog: async () => dec.events, cwd: cwd0, config, knownRoots: await rootsOfProject(), log: () => {}, warn: () => {} },
+            { sessionId: id, classes: 'all', dryRun },
+          )
+          if (dryRun) {
+            const actionable = out.findingsBefore.filter((f) => f.remedy !== 'report-only').length
+            return `${String(actionable)} actionable finding(s) would be re-derived (${out.findingsBefore.length} total, report-only classes unchanged)`
+          }
+          return `${String(out.applied.length)} move(s) journalled ${out.journalId}; ${String(out.findingsAfter.length)} finding(s) remain`
+        },
+        create: async (id) => {
+          if (ports === null) throw new Error('ports unavailable — the caller agent has no continuation seam this invocation')
+          const r = await continueFromRestored(ports, config as unknown as Parameters<typeof continueFromRestored>[1], id)
+          if (!r.ok) throw new Error(r.reason)
+          return r.childId
+        },
+      }, parts[0] ?? '', parts.slice(1))
+      } catch (error) {
+        // refusals from the injected seams (foreign-project target, budget, kernel) arrive as
+        // text the operator must see, not a stack the host would only log.
+        return { kind: 'error' as const, text: `chapters-restore: ${String((error as Error)?.message ?? error)}` }
+      }
+      return { kind: 'success' as const, text }
+    },
+  }
+
+return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand, restoreCommand }
 }
 
 export function registerChaptersTools(
@@ -1158,7 +1230,7 @@ export function registerChaptersTools(
       // that overwrote `disposeCommand` would leak the first registration and unregister
       // only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand, built.restoreCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }
