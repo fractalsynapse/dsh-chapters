@@ -22,7 +22,7 @@ cd "$SRC"
 # the bash parser dies on it ("line 21: syntax error near unexpected token `('") — measured on run 40780981969.
 LEGS=$(node -e '
   import("./tests/e2e/rig-pins.ts").then((m) => {
-    const order = ["suite", "arrival", "enrich", "fanout", "rules", "fork", "plans", "prompt", "prompt-off", "prompt-revival"];
+    const order = ["suite", "arrival", "enrich", "fanout", "rules", "fork", "plans", "prompt", "prompt-off", "prompt-revival", "reload"];
     console.log(order.filter((k) => m.RIG_PINS[k] !== undefined).join(" "));
   }).catch(() => console.log(""));
 ' --experimental-strip-types 2>/dev/null)

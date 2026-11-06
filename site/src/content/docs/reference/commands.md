@@ -3,6 +3,18 @@ title: "15. Commands"
 description: The full composer surface, exact syntax, and what each answer means.
 lastUpdated: true
 ---
+## Reload self-check (#319)
+
+Every continuation child checks its own event stream against the host's fold rule at its FIRST
+completed turn — the same rule that, on host 0.2.0-rc.2, refuses seeded children at cold load (the
+#314 deadlock: the engine records its header as a mid-surface `system/message`; the validator
+admits that event only as the protected first head). If the check predicts a future refusal, it
+announces itself **the moment it becomes true, while the session is alive**: a stderr warning naming
+the exact seq, a `hostReload: refused` fact on the registry row, and a line in `/chapters-status`.
+The action it tells you is the plugin's own — `chapters_continue` (or restore, once shipped) —
+before any restart. Nobody should ever again discover a refused session by restarting into it.
+
+
 
 Run in the composer **inside a session** (draft screens send text as a message — [FAQ](/start/faq/)). Registered in `src/commands.ts`; the two deterministic archive doors (`/chapters-fork`, `/chapters-continue`) in `src/tools.ts`.
 
@@ -138,6 +150,22 @@ parallel sessions via `chapters_search` without disrupting the active conversati
 
 Idempotent: re-running saves only what has not yet been archived (respects the watermark).
 If nothing new was said since the last save, reports "nothing to save" without error.
+
+## `/chapters-restore <sessionId> [dry-run|apply]` — continue past a host-refused session (#319)
+
+When the host cannot cold-load a session at all (the #314 shape: its log folds a
+`system/message` its own validator refuses), this door does what the host can no longer do:
+it reads the session's **durable log directly** (the same multi-frame decode the repair
+CLI proved on the maintainer's real bytes), runs the repair engine over it so every
+completed span is archived and cited, and creates a fresh continuation whose TOC carries
+the target's full ancestry. The poisoned original is untouched — Invariant 1 holds; the
+target's registry row is repaired through the SAME `runRepair` core as `/chapters-repair`
+(journalled, reversible), and the new child is created through the same sanctioned
+`createChild` seam every continuation uses (until part 2's empty-seed birth ships, the new
+child is born in the CURRENT shape — and the reload self-check flags it honestly, exactly
+as it flags every other child). Dry-run is the default: it reports what would be re-derived
+and which session would be created; `apply` is the only word that writes. Ambiguous or
+unknown ids are refused with the candidate list — never guessed.
 
 ## `/chapters-repair` — re-derive the archive from the durable log
 

@@ -50,6 +50,12 @@ export interface SessionState {
    * an offer — the one-generation-per-turn key — and the pair (`status`, `turnSeq`) is what lets a re-read
    * after a restart say "there is nothing pending" instead of firing a second model call for a finished turn.
    */
+  /**
+   * #319: the reload self-check's verdict, written ONCE at the child's first turn when the host's
+   * own fold rule predicts a cold-load refusal (the #314 deadlock shape). Optional — the
+   * `nextPlanNumber` precedent — so every stored row predating the feature parses unchanged.
+   */
+  hostReload?: 'refused' | undefined
   promptSuggestion: PromptSuggestionState
   /**
    * compactionId -> the plan summarize() committed to: the TOC text already
