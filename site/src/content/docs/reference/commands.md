@@ -151,6 +151,22 @@ parallel sessions via `chapters_search` without disrupting the active conversati
 Idempotent: re-running saves only what has not yet been archived (respects the watermark).
 If nothing new was said since the last save, reports "nothing to save" without error.
 
+## `/chapters-restore <sessionId> [dry-run|apply]` — continue past a host-refused session (#319)
+
+When the host cannot cold-load a session at all (the #314 shape: its log folds a
+`system/message` its own validator refuses), this door does what the host can no longer do:
+it reads the session's **durable log directly** (the same multi-frame decode the repair
+CLI proved on the maintainer's real bytes), runs the repair engine over it so every
+completed span is archived and cited, and creates a fresh continuation whose TOC carries
+the target's full ancestry. The poisoned original is untouched — Invariant 1 holds; the
+target's registry row is repaired through the SAME `runRepair` core as `/chapters-repair`
+(journalled, reversible), and the new child is created through the same sanctioned
+`createChild` seam every continuation uses (until part 2's empty-seed birth ships, the new
+child is born in the CURRENT shape — and the reload self-check flags it honestly, exactly
+as it flags every other child). Dry-run is the default: it reports what would be re-derived
+and which session would be created; `apply` is the only word that writes. Ambiguous or
+unknown ids are refused with the candidate list — never guessed.
+
 ## `/chapters-repair` — re-derive the archive from the durable log
 
 The durable session log is append-only and complete (invariant 1), which is the only reason any of the
