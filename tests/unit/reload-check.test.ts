@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 /**
  * #319 — the reload self-check, tested against BOTH truths: our predicate's verdicts on the
  * canonical shapes, and the VENDOR's own reader on the same fixtures. Agreement is the contract;
@@ -66,4 +68,50 @@ test('#304-precedent, #319: a session with an adopted head survives a LATER head
     mk(10, 'turn/end', { turn: 2 }),
   ]
   assert.equal(reloadRuleRefusal(headThenLive), null, 'head adopted at 2; the second header at 7 must NOT refuse')
+})
+
+// ---- part 3a: the listener that MAKES the predicate loud ----------------------
+import { makeReloadSelfCheckListener, type ReloadCheckDeps } from '../../src/reload-check.ts'
+
+test('#319 part3: the listener flags a doomed child ONCE at its first turn/end and writes the fact', () => {
+  const facts: string[] = []
+  const warns: string[] = []
+  const deps: ReloadCheckDeps = {
+    store: { mutate: async (id: string) => { facts.push(id) } },
+    warn: (m) => { warns.push(m) },
+  }
+  const listener = makeReloadSelfCheckListener(deps)
+  const doomed = { id: 'ch-doomed', snapshotEvents: () => CHILD }
+  listener(doomed, { type: 'turn/end', seq: 7 })
+  listener(doomed, { type: 'turn/end', seq: 12 }) // the SECOND turn must not shout twice
+  assert.equal(facts.length, 1, 'exactly one fact write')
+  assert.equal(facts[0], 'ch-doomed')
+  assert.equal(warns.length, 1, 'exactly one warning')
+  assert.match(warns[0], /seq 3/, 'the warning names the offending event')
+  assert.match(warns[0], /will NOT reopen/, 'it says the consequence, not just the fact')
+})
+
+test('#319 part3: healthy sessions are silent; non-children are not checked; other events ignored', () => {
+  const facts: string[] = []
+  const warns: string[] = []
+  const listener = makeReloadSelfCheckListener({ store: { mutate: async (id: string) => { facts.push(id) } }, warn: (m) => { warns.push(m) } })
+  listener({ id: 'ch-fine', snapshotEvents: () => ROOT }, { type: 'turn/end', seq: 9 })
+  listener({ id: 'session-root', snapshotEvents: () => CHILD }, { type: 'turn/end', seq: 9 }) // roots aren't born from our seed
+  listener({ id: 'ch-mid', snapshotEvents: () => CHILD }, { type: 'assistant/message', seq: 9 })
+  assert.deepEqual(facts, [])
+  assert.deepEqual(warns, [])
+})
+
+test('#319 part3: a listener failure is contained — the turn is never the check\'s hostage', () => {
+  const listener = makeReloadSelfCheckListener({
+    store: { mutate: async () => { throw new Error('domain offline') } },
+    warn: () => { /* swallowed */ },
+  })
+  listener({ id: 'ch-doomed2', snapshotEvents: () => CHILD }, { type: 'turn/end', seq: 3 }) // must not throw
+})
+
+test('#319 part3: the wiring exists — index.ts instantiates the listener and calls it on the shared turn/end seam', () => {
+  const idx = fs.readFileSync(path.join(process.cwd(), 'src', 'index.ts'), 'utf8')
+  assert.match(idx, /makeReloadSelfCheckListener\(\{/, 'the listener is constructed in apply()')
+  assert.match(idx, /reloadSelfCheck\(session as/, 'it is called on the same boundary the prompt plane uses')
 })
