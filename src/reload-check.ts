@@ -68,3 +68,42 @@ export function reloadRuleRefusal(events: readonly ReloadEvent[]): ReloadRefusal
   }
   return null
 }
+
+/** The minimal store slice the listener touches — the RegistryStore satisfies it; tests fake it. */
+export interface ReloadCheckDeps {
+  store: { mutate(sessionId: string, fn: (row: never) => never): Promise<unknown> }
+  warn: (message: string) => void
+}
+
+/**
+ * #319 part 3 — the listener that MAKES the predicate loud. At each `ch-` child's FIRST
+ * turn/end, run the predicate over its live events; on a predicted cold-load refusal: ONE
+ * warning (stderr + logger via deps.warn) and ONE registry fact (`hostReload:'refused'`,
+ * what /chapters-status will surface). Fully contained — a check that throws must never
+ * cost the session its turn (AGENTS #61 discipline: delivery without damage). The Set is
+ * process-local on purpose: a restarted boot that still hosts a doomed child re-flags it;
+ * the warning belongs to whoever is about to lose the session.
+ */
+export function makeReloadSelfCheckListener(deps: ReloadCheckDeps): (
+  session: { id?: string; snapshotEvents?: () => readonly ReloadEvent[] },
+  event: { type?: string } | undefined,
+) => void {
+  const seen = new Set<string>()
+  return (session, event) => {
+    try {
+      if (event?.type !== 'turn/end') return
+      const id = session.id
+      if (id === undefined || !id.startsWith('ch-') || seen.has(id)) return
+      const events = session.snapshotEvents?.()
+      if (!Array.isArray(events)) return
+      seen.add(id)
+      const refusal = reloadRuleRefusal(events)
+      if (refusal === null) return
+      deps.warn(`session ${id}: the host's cold-load validator will NOT reopen this child — its log folds a ${refusal.type} at seq ${String(refusal.seq)} with no protected head (the #314 deadlock shape). Continue or restore this work BEFORE the next restart; /chapters-restore ships with #319.`)
+      void deps.store.mutate(id, ((row: Record<string, unknown>) => ({ ...row, hostReload: 'refused' })) as never)
+        .catch(() => { /* the fact is a courtesy; the warning is the delivery */ })
+    } catch (error) {
+      try { deps.warn(`reload self-check failed: ${String((error as Error)?.message ?? error).slice(0, 120)}`) } catch { /* never */ }
+    }
+  }
+}
