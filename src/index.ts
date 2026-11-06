@@ -41,6 +41,7 @@ import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } fro
 import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
 import { deliveredOffer, makePromptRoundRunner, reconcilePromptRow } from './prompt-runner.ts'
+import { makeReloadSelfCheckListener, type ReloadCheckDeps } from './reload-check.ts'
 import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, type PushWriter } from './prompt-push.ts'
 import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
@@ -1009,9 +1010,17 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         log: (m) => { console.error(`[chapters-prompt] ${m}`); ctx.logger?.info?.(`dsh-chapters: ${m}`) },
         warn: (m) => { console.error(`[chapters-prompt] WARN ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
       })
+      const reloadSelfCheck = makeReloadSelfCheckListener({
+        store: store as unknown as ReloadCheckDeps['store'],
+        warn: (m) => { console.error(`[chapters-reload] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
+      })
       try {
         ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
           if (session?.id === undefined) return
+          // #319 part 3: the reload self-check — one predicate over the child's own events at its
+          // first turn/end; doomed shapes announce themselves NOW (stderr + registry fact) instead
+          // of ambushing a restart. The factory owns all its failure; see src/reload-check.ts.
+          reloadSelfCheck(session as { id?: string; snapshotEvents?: () => readonly import('./reload-check.ts').ReloadEvent[] }, event as { type?: string })
           if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
           // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
           // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
