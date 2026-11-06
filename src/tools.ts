@@ -238,29 +238,73 @@ export function buildChaptersTools(
         // child that never receives its archive believes it has none; refusing an un-birth-able
         // child beats gifting the user a confidently confused session (#54's silent-fallback
         // lesson, aimed this time at authoring).
+        // Dispose FIRST, author SECOND — the r3 law in a new place: while we hold the create
+        // handle the child is "already owned by an active write handle", and a followup queued
+        // into that grip never starts a turn (measured on the plans rig: a 9-event child with
+        // zero user/messages — a silent unbirth, precisely what the loud-absence rule exists
+        // to catch). The prompt loop's authoring pattern is get-after-release; birth follows it.
+        await (handle as unknown as { dispose?: () => Promise<unknown> }).dispose?.()
         try {
           const nd = noticeEvent.data as { id?: string; source?: unknown; content?: unknown }
-          // TWO seams, one meaning (measured on rc.2: the CREATE handle is minimal; the LIVE
-          // registry is where followup lives — the prompt loop has always authored through
-          // ctx.agents.get(id).followup, and birth is the same act). Absence on BOTH is loud.
-          const onHandle = (handle as unknown as { followup?: (m: Record<string, unknown>) => unknown }).followup
-          const live = (ctx.agents as unknown as { get?: (id: string) => { followup?: (m: Record<string, unknown>) => unknown } | undefined }).get?.(sessionId)
-          const fn = typeof onHandle === 'function' ? onHandle : (typeof live?.followup === 'function' ? live.followup : null)
-          const receiver: unknown = typeof onHandle === 'function' ? handle : (live ?? null)
-          if (fn === null || receiver === null) {
-            throw new Error('no followup seam on the created handle or the live registry (ctx.agents.get) — this host build cannot author the birth TOC; refusing a child that would never see it (#319)')
-          }
-          fn.call(receiver as object, {
+          const msg = {
             id: `${sessionId}-toc`,
             role: 'user',
             ...(nd.source !== undefined ? { source: nd.source } : {}),
             ...(nd.content !== undefined ? { content: nd.content } : {}),
-          })
-        } finally {
-          // The live handle is ours only until the child is handed to the user:
-          // holding it blocks their resume ("already owned by an active write
-          // handle", measured r3). Dispose after the live-work, keep the session.
-          await (handle as unknown as { dispose?: () => Promise<unknown> }).dispose?.()
+          }
+          const agents = ctx.agents as unknown as {
+            get?: (id: string) => { followup?: (m: Record<string, unknown>) => unknown } | undefined
+            resume?: (opts: Record<string, unknown>) => Promise<{ agent?: { followup?: (m: Record<string, unknown>) => unknown }; dispose?: () => Promise<unknown> } | undefined>
+          }
+          // A warm child answers the registry directly; a cold one needs the SDK's own rail:
+          // resume -> author -> HOLD the lease (a disposed holder silently drops the queued
+          // followup: measured, the child persisted 10 events and zero user messages), and
+          // release only when its first turn/end lands or the safety window expires. The
+          // browser can then take the session; a hold-race at worst shows the host's own
+          // 'active write handle' once and the next attempt lands.
+          const warm = agents.get?.(sessionId)
+          const authorOf = (x: { followup?: unknown; agent?: { followup?: unknown } } | undefined | null): ((m: Record<string, unknown>) => unknown) | null => {
+            if (x == null) return null
+            const direct = typeof x.followup === 'function' ? x.followup as (m: Record<string, unknown>) => unknown : null
+            const inner = typeof x.agent?.followup === 'function' ? x.agent.followup as (m: Record<string, unknown>) => unknown : null
+            return direct ?? inner
+          }
+          let receiver: unknown = warm ?? null
+          let fn = authorOf(warm)
+          let lease: { dispose?: () => Promise<unknown> } | null = null
+          if (fn === null) {
+            if (typeof agents.resume !== 'function') throw new Error('no live agent and no agents.resume seam — cannot author the birth TOC on this host (#319)')
+            lease = (await agents.resume({
+              resumeSessionId: sessionId,
+              ...(callerOptions.provider !== undefined ? { agentOptions: callerOptions } : {}),
+              setup: async (agentCtx: unknown) => {
+                const presets = ctx.get?.('agentPresets') as { mount?: (c: unknown, id: string) => Promise<unknown> } | undefined
+                if (presets?.mount !== undefined) await presets.mount(agentCtx, mountPreset)
+              },
+            })) ?? null
+            receiver = (lease as { agent?: unknown } | null)?.agent ?? lease
+            fn = authorOf(lease as { followup?: unknown; agent?: { followup?: unknown } } | undefined | null)
+          }
+          if (fn === null) throw new Error(`no followup seam reachable for ${sessionId} (warm=${JSON.stringify(Object.keys((warm ?? {}) as object)).slice(0, 80)}, lease=${lease === null ? 'absent' : JSON.stringify(Object.keys(lease as object)).slice(0, 80)}) — refusing a child that would never see its TOC (#319)`)
+          fn.call(receiver as object, msg)
+          if (lease !== null) {
+            const release = async (): Promise<void> => { try { await (lease as { dispose?: () => Promise<unknown> }).dispose?.() } catch { /* the lease is best-effort after authoring */ } }
+            // LIFECYCLE, measured (the enrich leg, twice): the browser ATTACHES to the child
+            // while its birth turn runs; disposing our lease at turn/end kills the agent out
+            // from under that bound view — the composer never returns (420s/240s stalls).
+            // Release-at-birth-starves the queued followup (10-event silent unbirth). There is
+            // no safe mid-process release point for a handle the UI may be bound to — which is
+            // exactly why the SDK server's sessions map holds its handles for the process
+            // lifetime (server.ts getOrCreateSession; no release path at all). We mirror it:
+            // the lease lives until the host process does. Cross-RESUME contention (r3) was
+            // measured for handles over never-started sessions; a child that has run a turn is
+            // the SDK's own case, and the reload leg proves the restart side clean.
+            void release  // retained: no release point is safe while a view may be bound
+          }
+        } catch (error) {
+          // The child EXISTS and is durable even if authoring fails — a half-born child still
+          // has chapters cited by its own TOC-less state; refuse loudly, name the repair.
+          throw new Error(`birth TOC authoring failed for ${sessionId}: ${String((error as Error)?.message ?? error)}`)
         }
         return { warnings: attach.warnings }
       },

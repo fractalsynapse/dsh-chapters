@@ -68,8 +68,9 @@ function world(opts: { withProject?: boolean; tinyRulesBudget?: boolean } = {}) 
   }
   const ctx = {
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
-    agents: {
-      create: async (o: Record<string, unknown>) => {
+    agents: { get: (id: string) => { for (let i = created.length - 1; i >= 0; i -= 1) { const e = created[i] as { sessionId?: string; authored?: unknown } | undefined; if (e !== undefined && e.sessionId === id) return { followup: (m: Record<string, unknown>) => { (e as { authored?: unknown }).authored = m } } } return undefined },
+        resume: async (opts: { resumeSessionId?: string }) => { const id = String(opts.resumeSessionId ?? ''); for (let i = created.length - 1; i >= 0; i -= 1) { const e = (created) as Array<{ sessionId?: string; authored?: unknown }> | never[]; const x = e[i]; if (x !== undefined && x.sessionId === id) return { followup: (m: Record<string, unknown>) => { x.authored = m }, dispose: async () => {} } } return undefined },
+        create: async (o: Record<string, unknown>) => {
         created.push(o)
         // run the setup() the continuation contract requires (invariant 2)
         await (o.setup as (c: unknown) => Promise<void>)({})

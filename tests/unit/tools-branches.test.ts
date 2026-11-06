@@ -29,6 +29,7 @@ function world(fail: { attach?: boolean; rename?: boolean; noRename?: boolean } 
   const ctx = {
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
     agents: {
+      get: () => ({ followup: (_m?: unknown) => {} }),
       create: async (o: Record<string, unknown>) => {
         await (o.setup as (c: unknown) => Promise<void>)({})
         return { followup: (_m: Record<string, unknown>) => { /* this world asserts warnings, not the notice — the seam just must exist */ }, dispose: async () => { disposed += 1 } }
@@ -149,7 +150,7 @@ test('registerChaptersTools wires the /chapters-fork command and disposes everyt
       tools: { register: () => () => undefined },
       get: (name: string) => name === 'commands' ? { register: () => () => { commandDisposed = true } } : undefined,
       llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
-      agents: { create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) },
+      agents: { get: () => ({ followup: (_m?: unknown) => {} }), create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) },
       sessionProjections: { stateOf: () => 'chapters' },
       logger: { info: () => undefined, warn: () => undefined },
     }

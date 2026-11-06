@@ -23,7 +23,7 @@ import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
 import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
 import type { SessionState } from './registry.ts'
-import { buildTocNotice } from './notice.ts'
+import { buildTocNotice , noticeAuthoredText } from './notice.ts'
 import { deriveIdentity } from './engine-core.ts'
 import { buildPlansSection, detectPlans, PLAN_MODE_EVENT, type PlanIntent } from './plans.ts'
 
@@ -398,15 +398,17 @@ export async function continueFromRestored(
     storeRoot: config.artifactStoreRoot,
     retrievalHints: config.retrievalHints !== false,
   })
+  // The event is BUILT before it is MEASURED: the gate counts exactly the bytes the child's
+  // first turn will carry — including the authored tail. (P5: no measurement exemption.)
+  const noticeEvent = buildTocNotice(noticeText, { newId: ports.newId, time: ports.now() })
   const budget = preflight({
-    noticeTokens: estimateTokens(noticeText),
+    noticeTokens: estimateTokens(noticeAuthoredText(noticeEvent)),
     budget: await ports.budgetProbe(),
     ratio: config.continuationBudgetRatio,
   })
   if (!budget.ok) {
     return { ok: false, reason: `restore continuation over budget: notice ~${String(budget.budget.usedTokens)} > allowance ${String(budget.budget.allowanceTokens)} tokens. The archive is REPAIRED regardless — continuing from a root session of the same lineage carries the same records with a caller context to measure against.`, warnings }
   }
-  const noticeEvent = buildTocNotice(noticeText, { newId: ports.newId, time: ports.now() })
   const childId = `ch-${ports.newId()}`
   try {
     const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents: [], presetId: config.fallbackPreset, title })
@@ -556,8 +558,10 @@ async function finishChild(
     ...(plansSection !== '' ? { plansSection } : {}),
     retrievalHints: config.retrievalHints !== false,
   })
+  // Built-then-measured, as above: the budget gate sees the authored bytes, not a draft.
+  const noticeEvent = buildTocNotice(noticeText, { newId: ports.newId, time: ports.now() })
   const budget = preflight({
-    noticeTokens: estimateTokens(noticeText),
+    noticeTokens: estimateTokens(noticeAuthoredText(noticeEvent)),
     budget: await ports.budgetProbe(),
     ratio: config.continuationBudgetRatio,
   })
@@ -573,7 +577,6 @@ async function finishChild(
   }
 
   // ---- Create the child (one synthetic event at seq 0 — invariant 2), then commit.
-  const noticeEvent = buildTocNotice(noticeText, { newId: ports.newId, time: ports.now() })
   const childId = `ch-${ports.newId()}`
   const presetId = args.callerPreset ?? config.fallbackPreset
   try {

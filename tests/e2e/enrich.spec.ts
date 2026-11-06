@@ -43,7 +43,7 @@ test('an archived chapter enriches through the ladder with the body provably unt
   const before = fs.readFileSync(f, 'utf8')
   const bodyBefore = before.slice(before.indexOf('\n---\n') + 5)
 
-  await typeComposer(page, '/chapters-enrich run ', deliveredFor(sid, '/chapters-enrich run '))
+  await typeComposer(page, '/chapters-enrich run ', deliveredFor(sid, '/chapters-enrich run '), 120_000) // #319: the child may be mid birth-ack — the composer returns when it is idle
   await expect.poll(() => {
     const now = chapterFile(sid)
     const text = now === '' ? '' : fs.readFileSync(now, 'utf8')

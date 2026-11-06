@@ -63,8 +63,9 @@ function world(events: SessionEventLike[]) {
     get: () => undefined,
     sessionProjections: { stateOf: (_s: unknown, key: string) => (key === 'agentPreset' ? 'chapters' : undefined) },
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) },
-    agents: {
-      create: async (req: Record<string, unknown>) => {
+    agents: { get: (id: string) => { for (let i = created.length - 1; i >= 0; i -= 1) { const e = created[i] as { sessionId?: string; authored?: unknown } | undefined; if (e !== undefined && e.sessionId === id) return { followup: (m: Record<string, unknown>) => { (e as { authored?: unknown }).authored = m; (e as { notice?: string }).notice = ((m.content as Array<{ text?: string }> | undefined)?.[0]?.text ?? '') } } } return undefined },
+        resume: async (opts: { resumeSessionId?: string }) => { const id = String(opts.resumeSessionId ?? ''); for (let i = created.length - 1; i >= 0; i -= 1) { const e = (created) as Array<{ sessionId?: string; authored?: unknown }> | never[]; const x = e[i]; if (x !== undefined && x.sessionId === id) return { followup: (m: Record<string, unknown>) => { x.authored = m }, dispose: async () => {} } } return undefined },
+        create: async (req: Record<string, unknown>) => {
         const seed = req.seed as Array<Record<string, unknown>>
         // #319 part 2: the SEED carries only STATE events — no user/message may ever be seeded
         // again, because surface[0] belonging to the notice is exactly what poisons the child's
@@ -108,6 +109,8 @@ test('continue carries the directive; fork on the SAME session carries nothing (
   assert.equal((r as { kind: string }).kind, 'success', JSON.stringify(r))
   const contNotice = a.created[0]!.notice
   assert.match(contNotice, /^## Active plan$/m, 'the continuation gets the directive section')
+  assert.match(contNotice, /## First response/, 'the birth notice carries its first-turn discipline (#319: the child acknowledges and waits — no tool work unprompted)')
+  assert.match(contNotice, /Do not call tools in your first turn/, 'said plainly, because the distiller (and some hosts) otherwise wander')
   assert.match(contNotice, /ACTIVE PLAN: "Carry the plan into children" — APPROVED/)
   assert.match(contNotice, /plan document: \.dsh-chapters/, 'and it cites the searchable plan document')
   assert.equal(contNotice.includes('## Finding things'), true, 'the retrieval verbs ride along (0.1.12)')
