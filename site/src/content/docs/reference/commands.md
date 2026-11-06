@@ -3,6 +3,18 @@ title: "15. Commands"
 description: The full composer surface, exact syntax, and what each answer means.
 lastUpdated: true
 ---
+## Reload self-check (#319)
+
+Every continuation child checks its own event stream against the host's fold rule at its FIRST
+completed turn — the same rule that, on host 0.2.0-rc.2, refuses seeded children at cold load (the
+#314 deadlock: the engine records its header as a mid-surface `system/message`; the validator
+admits that event only as the protected first head). If the check predicts a future refusal, it
+announces itself **the moment it becomes true, while the session is alive**: a stderr warning naming
+the exact seq, a `hostReload: refused` fact on the registry row, and a line in `/chapters-status`.
+The action it tells you is the plugin's own — `chapters_continue` (or restore, once shipped) —
+before any restart. Nobody should ever again discover a refused session by restarting into it.
+
+
 
 Run in the composer **inside a session** (draft screens send text as a message — [FAQ](/start/faq/)). Registered in `src/commands.ts`; the two deterministic archive doors (`/chapters-fork`, `/chapters-continue`) in `src/tools.ts`.
 
