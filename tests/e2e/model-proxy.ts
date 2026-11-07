@@ -72,6 +72,7 @@ const VOLATILE: Array<[RegExp, string]> = [
   // id symmetrically. Both sides always: never a one-sided advantage; conversation prose that
   // spells an id in that exact shape folds too, identically on tape and on the wire.
   [/\[[a-z0-9][a-z0-9_-]{1,40}(?:\.[a-z0-9_-]+)*\/(\d{3})\]/g, '[<RULENS>/$1]'],
+  [/(rules\/(?:[0-9a-f][0-9a-f-]{20,40}|<UUID>)\/)[a-z0-9][a-z0-9_-]{1,40}\/(\d{3})/gi, '$1<RULENS>/$2'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
   // the system head embeds the GUI URL `http://127.0.0.1:<port>` and the e2e
   // home path carries `var/e2e-home-<port>` — run-scheduling facts of the

@@ -282,6 +282,15 @@ test('a rule-namespace token at a line head folds to one identity (the THIRD mac
   assert.ok(prose.includes('tests/unit/103'), 'only the BRACKETED id shape folds; bare paths keep their bytes')
 })
 
+test('the rule-namespace ALSO folds inside the category-hint path (same fact, second spelling)', () => {
+  // The runner's diff, byte 530 of msg1, run 42346079631: after the bracketed ids matched,
+  // the hint line still carried `rules/<uuid>/runnervmwuk1x/001-security-…md` vs the tape's
+  // `rules/<uuid>/dev2/001-security-…md`. One fact, both spellings — the TZ fold's own law.
+  const mine = normalizeSingle({ role: 'user', content: 'Rule categories: — e.g. rules/8cf3147a-97a8-50ed-ab06-04086e552e0e/dev2/001-security-never-log.md' })
+  const theirs = normalizeSingle({ role: 'user', content: 'Rule categories: — e.g. rules/7d1f0a2b-3c4d-5e6f-7a8b-9c0d1e2f3a4b/runnervmwuk1x/001-security-never-log.md' })
+  assert.equal(mine, theirs, 'path-form namespaces fold too — and the uuids fold on both sides via the existing rule')
+})
+
 test('a wire element that is the JSON STRING of a message folds to the object form (#319)', () => {
   // Measured on the acceptance runner: the registry-installed rc.2 puts body.messages as
   // PRE-SERIALIZED strings while a linked host build sends objects. Same conversation, two
