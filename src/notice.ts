@@ -69,8 +69,15 @@ export interface TocNoticeOptions {
  * event the kernel would reject at seed time — a refusal here is cheap, a
  * bricked log is not.
  */
+export const FIRST_RESPONSE_SECTION = '\n\n## First response\nAcknowledge in one short sentence and wait for the human\u2019s next message. Do not call tools in your first turn.'
+
 export function buildTocNotice(tocText: string, opts: TocNoticeOptions): SessionEventLike {
   if (tocText.trim().length === 0) throw new Error('chapters: TOC notice text must not be empty')
+  // #319 (born-authored era): the notice ARRIVES AS A TURN, so the child's first model call
+  // answers it. The door's promise is that the child acknowledges and waits for the human —
+  // say it in the bytes, or a literal-minded model starts tool work unprompted (measured on
+  // the distiller: a wander-prone answer stalls every leg that waits for the child to idle).
+  const authoredText = `${tocText}${FIRST_RESPONSE_SECTION}`
   const id = opts.newId()
   if (id.length === 0) throw new Error('chapters: notice message needs a non-empty id ("lacks an identified message")')
   const event: SessionEventLike = {
@@ -84,11 +91,11 @@ export function buildTocNotice(tocText: string, opts: TocNoticeOptions): Session
       source: {
         kind: NOTICE_SOURCE_KIND,
         form: 'snapshot' as const,
-        sections: [{ name: NOTICE_SECTION, text: tocText }],
+        sections: [{ name: NOTICE_SECTION, text: authoredText }],
       },
       // content mirrors sections[0].text byte-identically: the model reads
       // `content`; the UI and attribution read `source`. One text, two faces.
-      content: [{ type: 'text' as const, text: tocText }],
+      content: [{ type: 'text' as const, text: authoredText }],
     },
   }
   assertKernelAcceptedUserMessage(event)
@@ -133,4 +140,11 @@ export function assertKernelAcceptedUserMessage(event: SessionEventLike): void {
   if (!Array.isArray(data.content) || data.content.length === 0) {
     throw new Error('chapters: seed message has invalid content')
   }
+}
+
+/** The bytes the child's first turn carries: whatever buildTocNotice authored, read back from
+ * the event itself — one predicate (budget gates must never measure a pre-append draft). */
+export function noticeAuthoredText(event: { data?: unknown } | undefined | null): string {
+  const c = (event?.data as { content?: Array<{ text?: string }> } | undefined)?.content
+  return c?.[0]?.text ?? ''
 }

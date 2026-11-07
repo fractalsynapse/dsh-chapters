@@ -327,7 +327,7 @@ test('ONE BUILDER: /chapters-save on the same log archives byte-identically', as
     get: () => undefined,
     sessionProjections: { stateOf: (_s: unknown, k: string) => (k === 'agentPreset' ? 'chapters' : undefined) },
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) },
-    agents: { create: async () => ({ dispose: async () => {} }) },
+    agents: { get: () => ({ followup: (_m?: unknown) => {} }), create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) },
     logger: { warn: () => {} },
   }
   const built = buildChaptersTools(ctx2 as never, store2 as never, { ...CONFIG } as never)
