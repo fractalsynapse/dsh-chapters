@@ -104,10 +104,10 @@ across sessions.
 
 ### The `docs/superpowers/` plan directory
 
-The upstream `writing-plans` / `brainstorming` skills (`.dsh/skills/`, from obra/superpowers — see
-dev/install README § Skills) default their artifacts to `docs/superpowers/plans/YYYY-MM-DD-<feature>.md`
-and `docs/superpowers/specs/…`. Those files are **tracked**: they are per-feature design records, and a
-later session may re-reference them for the *why* behind an implementation. Two rules keep them honest:
+For substantial work, this project keeps tracked design and delivery records under
+`docs/superpowers/specs/` and `docs/superpowers/plans/`. The shared Scaffold skills
+use the project's chosen location. Routine edits can use the existing issue record.
+Later sessions can refer to these records for the rationale behind an implementation. Two rules keep them honest:
 
 1. A plan is stamped with a `**Status:**` header when its work lands (implemented → commit refs +
    pointers to the shipped code/tests/site docs), so nobody executes a spent to-do list.
