@@ -264,6 +264,47 @@ test('a count-mismatch miss still names near-length candidates and the recorded 
   assert.ok(p.incoming.length === 14, 'the incoming history is dumped in full, not truncated to a line')
 })
 
+test('a rule-namespace token at a line head folds to one identity (the THIRD machine fold, #319)', () => {
+  // Measured byte-for-byte on the acceptance runner (run 42341868999, its own uploaded
+  // tape-diff artifact): the rules-leg notice was identical for 255 characters, then CI
+  // read `[runnervmwuk1x/001] (security) Never log raw tokens…` while the tape held
+  // `[dev2/001] (security) …`. The harness namespace inside a rule id is a fact about
+  // WHO BOoted, not what was said — same class as the checkout path and the time zone.
+  const mine = normalizeSingle({ role: 'user', content: '## CORE RULES (approved for this project\n[dev2/001] (security) Never log raw tokens or bearer headers anywhere in command output' })
+  const theirs = normalizeSingle({ role: 'user', content: '## CORE RULES (approved for this project\n[runnervmwuk1x/001] (security) Never log raw tokens or bearer headers anywhere in command output' })
+  assert.equal(mine, theirs, 'rule-id namespace must fold at the line head')
+  // The symmetric cost, named: ids written in the same shape inside prose fold too — because
+  // the canonicalizer flattens line breaks to spaces before any fold runs, line-head anchoring
+  // is unmatchable at that point. Both sides, always, identically: [tools/103] prose folds to
+  // [<RULENS>/103] on tape AND on the wire, which is what makes the pair still EQUAL.
+  const prose = normalizeSingle({ role: 'user', content: 'see tests/unit/103 for the gate and the path [tools/103] folds alike both sides' })
+  assert.ok(prose.includes('[<RULENS>/103]'), 'the fold is symmetric — that is its safety')
+  assert.ok(prose.includes('tests/unit/103'), 'only the BRACKETED id shape folds; bare paths keep their bytes')
+})
+
+test('the rule-namespace ALSO folds inside the category-hint path (same fact, second spelling)', () => {
+  // The runner's diff, byte 530 of msg1, run 42346079631: after the bracketed ids matched,
+  // the hint line still carried `rules/<uuid>/runnervmwuk1x/001-security-…md` vs the tape's
+  // `rules/<uuid>/dev2/001-security-…md`. One fact, both spellings — the TZ fold's own law.
+  const mine = normalizeSingle({ role: 'user', content: 'Rule categories: — e.g. rules/8cf3147a-97a8-50ed-ab06-04086e552e0e/dev2/001-security-never-log.md' })
+  const theirs = normalizeSingle({ role: 'user', content: 'Rule categories: — e.g. rules/7d1f0a2b-3c4d-5e6f-7a8b-9c0d1e2f3a4b/runnervmwuk1x/001-security-never-log.md' })
+  assert.equal(mine, theirs, 'path-form namespaces fold too — and the uuids fold on both sides via the existing rule')
+})
+
+test('a wire element that is the JSON STRING of a message folds to the object form (#319)', () => {
+  // Measured on the acceptance runner: the registry-installed rc.2 puts body.messages as
+  // PRE-SERIALIZED strings while a linked host build sends objects. Same conversation, two
+  // wire shapes — and the matcher saw byte differences at the first shared message. A SHAPE
+  // fold, length-preserving: existing tapes and existing requests keep their identities.
+  const obj = { role: 'user', content: 'Name one HTTP redirect status code in one short sentence.' }
+  const wireString = JSON.stringify(obj)
+  assert.equal(normalizeSingle(wireString), normalizeSingle(obj), 'string-of-object must fold to object identity')
+  const doubly = JSON.stringify(wireString)
+  assert.equal(normalizeSingle(doubly), normalizeSingle(obj), 'one tolerant extra layer; the unwrap is capped, not recursive')
+  const plain = 'a plain non-JSON string message'
+  assert.notEqual(plain, '', 'plain strings still normalize by the old path')
+})
+
 test('a same-length miss still lands in storedCandidates, with nearest offered too', async () => {
   const { tapeDiffPayload } = await import('../../tests/e2e/model-proxy.ts')
   const mk = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `msg-${tag}-${String(i)}`)

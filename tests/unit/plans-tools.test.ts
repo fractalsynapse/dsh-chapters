@@ -58,7 +58,7 @@ function world(events: Ev[]) {
   }
   const ctx = {
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32000 } }) },
-    agents: { create: async () => ({ dispose: async () => {} }) },
+    agents: { get: () => ({ followup: (_m?: unknown) => {} }), create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) },
     get: () => undefined,
     sessionProjections: { stateOf: () => 'chapters' },
     logger: { info: () => undefined, warn: () => undefined },
