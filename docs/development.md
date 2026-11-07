@@ -202,6 +202,19 @@ Re-record discipline (learned the hard way 2026-09-22/23):
   before the verifying REPLAY, so both sides saw the same boot world. Hosted CI is inherently
   pristine: a locally-distilled tape that passes only on an accumulated home is a red flag,
   not a pass.
+- **Harness identity is part of the context too** (measured 2026-11-07, #319's record pass).
+  The runner's ephemeral harness namespace (`runnervmwuk1x` vs `dev2` here) rides the
+  continuation NOTICE in two spellings — `[ns/001]` display ids and `rules/<uuid>/ns/001-….md`
+  hint paths — and both now fold (`RULENS-BLIND` in `tests/e2e/model-proxy.ts`) after the
+  runner's own byte diff proved it. Same saga, two more portability facts: **(1)** child-turn
+  traffic only exists in a tape if the RECORDING run waited for that round-trip — a journal
+  captures what fired, not what the journey could fire, so verify the entry SHAPE (message
+  count post-fold), not just the color; **(2)** when CI misses while every local replay is
+  green, the acceptance job's uploaded `e2e-replay-diagnostics` artifact already contains the
+  runner's normalized `incoming` and `storedCandidates` (`gh run download <id> --dir …` —
+  diff them offline against `normalizeStoredPrefix(entry.prefix)` and the divergence prints
+  its own byte offset). One cycle per truth, no guessing; `E2E_PREFIX_TRACE=1` shows prefix
+  shapes at journaling time when you need it before a miss ever happens.
 - **Ports are parameterized end to end**: the model proxy derives `E2E_PROXY_PORT = boot port
   + 1000` (a hard-coded 41799 turned one killed run's orphan into EADDRINUSE for every later
   boot), and `boot.ts` fails FAST with a named-port message when the boot port is already
