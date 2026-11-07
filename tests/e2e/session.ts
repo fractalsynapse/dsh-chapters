@@ -196,13 +196,13 @@ export async function dismissTestingNotice(page: Page): Promise<void> {
  * loud with the active element named — every silent step here cost a full
  * suite round this week.
  */
-export async function focusComposer(page: Page): Promise<void> {
+export async function focusComposer(page: Page, waitMs = 15_000): Promise<void> {
   // The composer's aria-label differs by session state ('Message or run a
   // task…' in a live conversation, 'Describe what you want to build…' in a
   // pristine-home draft — both measured); the '/ commands, @ files or
   // sessions' tail is the stable join.
   const composer = page.locator('div[aria-label*="/ commands, @ files or sessions"]')
-  await composer.waitFor({ state: 'attached', timeout: 15_000 })
+  await composer.waitFor({ state: 'attached', timeout: waitMs })
   const box = await composer.boundingBox()
   if (box === null) throw new Error('composer has no box')
   await page.mouse.click(box.x + Math.min(60, box.width / 2), box.y + box.height / 2)
@@ -474,8 +474,8 @@ export function adoptSessionForTurn(opts: {
   return null
 }
 
-export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>): Promise<void> {
-  await focusComposer(page)
+export async function typeComposer(page: Page, line: string, delivered?: () => boolean | Promise<boolean>, waitMs = 15_000): Promise<void> {
+  await focusComposer(page, waitMs)
   await page.keyboard.insertText(line)
   const composerSel = 'div[aria-label*="/ commands, @ files or sessions"]'
   const needle = line.slice(0, 24)

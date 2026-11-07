@@ -27,6 +27,8 @@ function w(opts: {
   noProjections?: boolean
   noAgents?: boolean
   usageAt?: number | undefined
+  // #319: birth seams need per-row control over the agents registry (cold get, resume shape).
+  agentsPatch?: (agents: Record<string, unknown>) => void
 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'toolsdeep-'))
   const tables = new Map<string, Map<string, unknown>>()
@@ -35,14 +37,19 @@ function w(opts: {
   const events: Ev[] = [human(0, 'deep branch coverage of the wrappers'), asst(1, 'done: verified')]
   if (opts.usageAt !== undefined) events[1].data.usage = { inputTokens: 5000, cacheReadTokens: 100 }
   events.push(ev(2, 'turn/end', {}))
+  const ctxBuilt: [Record<string, unknown>] = [undefined as never]
   const ctx: Record<string, unknown> = {
     llm: opts.noResolve ? {} : { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
-    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return {} } },
+    agents: { get: () => ({ followup: (_m?: unknown) => {} }), create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: (_m?: unknown) => {} } } },
     get: () => ({ mount: async () => undefined }),
     sessionProjections: { stateOf: () => opts.preset === null ? null : 'chapters' },
     tools: { register: () => () => undefined },
+    __postAgentsPatch: true,
     logger: { info: () => undefined, warn: () => undefined },
   }
+  if (opts.agentsPatch !== undefined) opts.agentsPatch(ctx.agents as Record<string, unknown>)
+  void ctxBuilt
+
   const config = {
     artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, toolResultDeferFloorTokens: 200,
     continuationBudgetRatio: 0.25, fallbackPreset: 'chapters', harnessId: 'hD', coreRulesBudgetTokens: 1200,
@@ -176,7 +183,7 @@ test('degraded caller (no header, no snapshotEvents, no context info, partial us
   // a session with header but a caller with NO header anywhere resolves cwd ''
   const ctx = {
     llm: { resolveModelInfo: async () => null },
-    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return {} } },
+    agents: { create: async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: (_m?: unknown) => {} } } },
     get: (name: string) => name === 'agentPresets' ? { mount: async () => undefined } : undefined,
     sessionProjections: { stateOf: () => undefined },
     tools: { register: () => () => undefined },
@@ -202,4 +209,37 @@ test('degraded caller (no header, no snapshotEvents, no context info, partial us
   assert.equal(r3.ok, false)
   assert.match(r3.reason ?? '', /refus/i, 'a refusal, not a crash')
   fs.rmSync(tmp, { recursive: true, force: true })
+})
+
+// ─── #319 birth seams ────────────────────────────────────────────────────────
+// The born-authored child has three reachable outcomes on this host line, and each must be
+// MEASURED behavior, not an untested else-branch: a warm registry answer, a cold child that
+// needs the resume seam, and the loud refusal when neither answers.
+test('a cold child is authored through the resume seam (get answers nothing)', async () => {
+  const authored: Array<Record<string, unknown>> = []
+  const h = w({ agentsPatch: (agents) => {
+    agents.get = () => undefined
+    agents.resume = async () => ({ agent: { followup: (m: Record<string, unknown>) => { authored.push(m) } }, dispose: async () => {} })
+  } })
+  try {
+    const r = await h.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, h.exec as never) as { ok: boolean; reason?: string }
+    assert.equal(r.ok, true, JSON.stringify(r).slice(0, 220))
+    assert.equal(authored.length, 1, 'the birth notice was authored through handle.agent, not the registry')
+  } finally { h.dispose() }
+})
+
+test('when neither get nor resume answers, the door REFUSES and says why (#319 loud-absence)', async () => {
+  const h = w({ agentsPatch: (agents) => {
+    agents.get = () => undefined
+    delete agents.resume
+  } })
+  try {
+    const r = await h.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, h.exec as never) as { ok: boolean; reason?: string }
+    assert.equal(r.ok, false, 'a child that could never see its TOC must not be handed over silently')
+    assert.match(String(r.reason ?? ''), /no live agent and no agents\.resume seam|no followup seam/, 'the refusal names both registries it tried')
+  } finally { h.dispose() }
 })

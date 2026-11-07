@@ -29,9 +29,10 @@ function world(fail: { attach?: boolean; rename?: boolean; noRename?: boolean } 
   const ctx = {
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
     agents: {
+      get: () => ({ followup: (_m?: unknown) => {} }),
       create: async (o: Record<string, unknown>) => {
         await (o.setup as (c: unknown) => Promise<void>)({})
-        return { dispose: async () => { disposed += 1 } }
+        return { followup: (_m: Record<string, unknown>) => { /* this world asserts warnings, not the notice — the seam just must exist */ }, dispose: async () => { disposed += 1 } }
       },
     },
     get: (name: string) => {
@@ -83,8 +84,8 @@ test('child created despite workspace-attach failure — the miss is warned, not
 test('child title refused (rename throws) is cosmetic; child remains durable', async () => {
   const w = world({ rename: true })
   try {
-    const r = await w.built.chaptersContinue.execute(continueArgs as never, w.exec as never) as { ok: boolean }
-    assert.equal(r.ok, true)
+    const r = await w.built.chaptersContinue.execute(continueArgs as never, w.exec as never) as { ok: boolean; reason?: string }
+    assert.equal(r.ok, true, JSON.stringify(r).slice(0, 300))
     assert.ok(w.warns.some((m) => m.includes('child title refused')))
   } finally { w.dispose() }
 })
@@ -92,8 +93,8 @@ test('child title refused (rename throws) is cosmetic; child remains durable', a
 test('sessionController absent warns the child is untitled', async () => {
   const w = world({ noRename: true })
   try {
-    const r = await w.built.chaptersContinue.execute(continueArgs as never, w.exec as never) as { ok: boolean }
-    assert.equal(r.ok, true)
+    const r = await w.built.chaptersContinue.execute(continueArgs as never, w.exec as never) as { ok: boolean; reason?: string }
+    assert.equal(r.ok, true, JSON.stringify(r).slice(0, 300))
     assert.ok(w.warns.some((m) => m.includes('sessionController absent')))
   } finally { w.dispose() }
 })
@@ -149,7 +150,7 @@ test('registerChaptersTools wires the /chapters-fork command and disposes everyt
       tools: { register: () => () => undefined },
       get: (name: string) => name === 'commands' ? { register: () => () => { commandDisposed = true } } : undefined,
       llm: { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
-      agents: { create: async () => ({}) },
+      agents: { get: () => ({ followup: (_m?: unknown) => {} }), create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) },
       sessionProjections: { stateOf: () => 'chapters' },
       logger: { info: () => undefined, warn: () => undefined },
     }

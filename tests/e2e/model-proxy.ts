@@ -62,6 +62,17 @@ const VOLATILE: Array<[RegExp, string]> = [
   // missed `fork`/`prompt-off` at commonPrefix=3 with both sides already reading `[<TZ>]`, because only the
   // bracketed half was folded. One fact, both spellings, both blind.
   [/(Browser time zone for this request: )(?:UTC|[A-Za-z]+(?:\/[A-Za-z_]+)+)/g, '$1<TZ>'],
+  // RULENS-BLIND (measured 2026-11-07, acceptance run 42341868999, from the runner's OWN
+  // uploaded diff): the rules-tier block of a continuation notice carries `[<harness>/001]`
+  // ids — dev2 here, the runner's ephemeral name there — and the child's first request then
+  // diverged at byte 255 of msg1 while every other byte agreed. The namespace segment is
+  // machine identity; the number is conversation content. NOTE: substituteAll canonicalizes
+  // escapes/whitespace BEFORE the fold table runs (the S0 rule: backslash-n becomes a space), so
+  // no line-head anchor survives to be matched — the fold therefore takes EVERY `[token/NNN]`
+  // id symmetrically. Both sides always: never a one-sided advantage; conversation prose that
+  // spells an id in that exact shape folds too, identically on tape and on the wire.
+  [/\[[a-z0-9][a-z0-9_-]{1,40}(?:\.[a-z0-9_-]+)*\/(\d{3})\]/g, '[<RULENS>/$1]'],
+  [/(rules\/(?:[0-9a-f][0-9a-f-]{20,40}|<UUID>)\/)[a-z0-9][a-z0-9_-]{1,40}\/(\d{3})/gi, '$1<RULENS>/$2'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
   // the system head embeds the GUI URL `http://127.0.0.1:<port>` and the e2e
   // home path carries `var/e2e-home-<port>` — run-scheduling facts of the
@@ -536,7 +547,20 @@ export function tapeDiffPayload(incoming: string[], tape: TapeEntry[]): {
   }
 }
 
-export function normalizeSingle(m: unknown): string { return JSON.stringify(m) === '' ? '' : normalize(m) }
+export function normalizeSingle(m: unknown): string {
+  // SHAPE fold (#319, measured on the acceptance runner): the registry-built host serializes
+  // body.messages as PRE-ENCODED STRINGS while a linked dev build sends objects — the same
+  // conversation arriving in two shapes. Unwrap (capped at two layers so no pathological
+  // recursion) before the content folds; lengths never change, so every existing tape keeps
+  // matching under its own load-time re-normalization.
+  let v = m
+  for (let i = 0; i < 2 && typeof v === 'string'; i += 1) {
+    const t = v.trim()
+    if (!(t.startsWith('{') || t.startsWith('[') || t.startsWith('"'))) break
+    try { const p = JSON.parse(t); if (p === null || typeof p !== 'string') { v = p; break } v = p } catch { break }
+  }
+  return JSON.stringify(v) === '' ? '' : normalize(v)
+}
 
 /**
  * A single upstream attempt, buffered, with bounded throttle-retry (#54).
@@ -911,7 +935,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           transport, upstreamUrl, method: req.method ?? 'POST', headers: fwd, body: raw,
           tapeDir: opts.tapeDir, journal, res,
           keyOf: () => createHash('sha256').update(normalize(body)).digest('hex').slice(0, 16),
-          prefixOf: () => inc.map(normalizeSingle),
+          prefixOf: () => { const x = inc.map(normalizeSingle); if (process.env.E2E_PREFIX_TRACE === '1') console.log(`[prefix-trace] raw=${String(x.length)} empties=${String(x.filter((e) => e === '').length)} roles=${JSON.stringify(x.map((e) => { try { return JSON.parse(e).role } catch { return e === '' ? 'EMPTY' : '?' } }))}`); return x },
           modelOf: () => String(body.model ?? ''),
           timeoutMs: upstreamTimeoutMs, stallMs: stallWarnMs,
           retryMax, retryMs, startedAt,
