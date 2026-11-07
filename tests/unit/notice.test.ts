@@ -16,7 +16,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
-import {
+import { FIRST_RESPONSE_SECTION, noticeAuthoredText,
   ACCEPTED_CONTEXT_FORMS, ACCEPTED_SOURCE_KINDS, NOTICE_PLUGIN, NOTICE_SECTION, NOTICE_SOURCE_KIND,
   assertKernelAcceptedUserMessage, buildTocNotice,
 } from '../../src/notice.ts'
@@ -46,7 +46,7 @@ test('the notice is one user/message at seq 0, appended, kernel-shaped', () => {
   assert.equal(data.source.kind, NOTICE_SOURCE_KIND)
   assert.equal('plugin' in data.source, false, 'attribution rides in the kind, not a wrapper field')
   assert.equal(data.source.form, 'snapshot')
-  assert.deepEqual(data.source.sections, [{ name: NOTICE_SECTION, text: TOC }])
+  assert.deepEqual(data.source.sections, [{ name: NOTICE_SECTION, text: TOC + FIRST_RESPONSE_SECTION }])
 })
 
 test('content mirrors the section text byte-identically', () => {
@@ -54,7 +54,7 @@ test('content mirrors the section text byte-identically', () => {
   assert.equal(data.content.length, 1)
   assert.equal(data.content[0].type, 'text')
   assert.equal(data.content[0].text, data.source.sections[0].text)
-  assert.equal(data.content[0].text, TOC) // no invisible edits en route
+  assert.equal(data.content[0].text, TOC + FIRST_RESPONSE_SECTION) // one visible, pinned append — no other edits en route
 })
 
 // ------------------------------------------------------------------ the measured rejections, reproduced

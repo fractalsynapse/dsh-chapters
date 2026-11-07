@@ -52,7 +52,9 @@ function makeWorld(opts: { events?: SessionEventLike[]; parentChapters?: Array<{
     get: (_name: string) => undefined,
     sessionProjections: { stateOf: (_s: unknown, key: string) => (key === 'agentPreset' ? 'chapters' : undefined) },
     llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) },
-    agents: { create: async (req: Record<string, unknown>) => { createRequests.push(req); return { dispose: async () => {} } } },
+    agents: { get: (id: string) => { for (let i = createRequests.length - 1; i >= 0; i -= 1) { const e = createRequests[i] as { sessionId?: string; authored?: unknown } | undefined; if (e !== undefined && e.sessionId === id) return { followup: (m: Record<string, unknown>) => { (e as { authored?: unknown }).authored = m } } } return undefined },
+        resume: async (opts: { resumeSessionId?: string }) => { const id = String(opts.resumeSessionId ?? ''); for (let i = createRequests.length - 1; i >= 0; i -= 1) { const e = (createRequests) as Array<{ sessionId?: string; authored?: unknown }> | never[]; const x = e[i]; if (x !== undefined && x.sessionId === id) return { followup: (m: Record<string, unknown>) => { x.authored = m }, dispose: async () => {} } } return undefined },
+        create: async (req: Record<string, unknown>) => { createRequests.push(req); return { followup: (m: Record<string, unknown>) => { const last = (createRequests)[createRequests.length - 1] as { authored?: unknown } | undefined; if (last !== undefined) last.authored = m }, dispose: async () => {} } } },
     logger: { warn: (_m: string) => {} },
   }
   const store = withMutate({
@@ -141,7 +143,7 @@ test('save: triggers enrichment asynchronously (fire-and-forget)', async () => {
   // Inject enrich surface into config
   const configWithEnrich = { ...CONFIG, enrich: { runNow: async () => { enrichCalled = true; return { processed: 1, remaining: 0 } } } }
   const built = buildChaptersTools(
-    { get: () => undefined, sessionProjections: { stateOf: () => undefined }, llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) }, agents: { create: async () => ({ dispose: async () => {} }) }, logger: { warn: () => {} } } as never,
+    { get: () => undefined, sessionProjections: { stateOf: () => undefined }, llm: { resolveModelInfo: async () => ({ context: { contextWindow: 65536 } }) }, agents: { create: async () => ({ followup: (_m?: unknown) => {}, dispose: async () => {} }) }, logger: { warn: () => {} } } as never,
     withMutate({ get: async () => freshSession('caller-1'), put: async () => {} }) as never,
     configWithEnrich as never,
   )

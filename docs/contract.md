@@ -679,6 +679,23 @@ load-bearing, not historical:
 `mutate(id, () => snapshot)` is a stale `put` with better branding (fixed once already in `repair-run.ts`
 for the hollow-payload supersede).
 
+## Birth authoring — the child's first turn (measured 2026-11-07, host 0.2.0-rc.2, #319 part 2)
+
+The empty-seed child gets its TOC by AUTHORING, and the seams are these, measured on the rig:
+`agents.create` returns a minimal handle (no `followup`); `ctx.agents.get(id)` answers ONLY
+while an agent is warm; `agents.resume` takes ONE object — `{ resumeSessionId, agentOptions?,
+setup? }` — and its handle wraps the callable agent at `handle.agent` (installed dsh-agent
+`lib/index.js:1499` destructures `{sessionId, resumeSessionId, ...rest}`; `followup` is a
+prototype method of the agent-loop's `ReactLoopAgent`, `runtime-types.ts:222`). The lease
+lifecycle has no safe mid-process release point for a handle a browser view may be bound to:
+dispose-at-authoring starves the queued turn (a durable child with ZERO user messages — the
+silent unbirth), dispose-at-turn-end kills the agent under the view the UI already attached
+(composer never returns; 240s and 420s stalls measured). The SDK server's own `prompt()`
+holds `handle` in its sessions map for the process lifetime with no release path
+(`packages/sdk/server/src/server.ts` `getOrCreateSession`); the plugin mirrors it. A host
+without any seam that can author answers LOUD — a refusal naming both registries — never a
+child that silently missed its archive.
+
 ## Suggested Next Step bar
 
 > **Host fact, measured 2026-10-28 (the draft gesture's limit, and where it actually lives).** The composer surface a
