@@ -911,7 +911,7 @@ export async function startModelProxy(opts: ProxyOpts): Promise<ProxyHandle> {
           transport, upstreamUrl, method: req.method ?? 'POST', headers: fwd, body: raw,
           tapeDir: opts.tapeDir, journal, res,
           keyOf: () => createHash('sha256').update(normalize(body)).digest('hex').slice(0, 16),
-          prefixOf: () => inc.map(normalizeSingle),
+          prefixOf: () => { const x = inc.map(normalizeSingle); if (process.env.E2E_PREFIX_TRACE === '1') console.log(`[prefix-trace] raw=${String(x.length)} empties=${String(x.filter((e) => e === '').length)} roles=${JSON.stringify(x.map((e) => { try { return JSON.parse(e).role } catch { return e === '' ? 'EMPTY' : '?' } }))}`); return x },
           modelOf: () => String(body.model ?? ''),
           timeoutMs: upstreamTimeoutMs, stallMs: stallWarnMs,
           retryMax, retryMs, startedAt,
