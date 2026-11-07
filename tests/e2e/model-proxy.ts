@@ -62,6 +62,16 @@ const VOLATILE: Array<[RegExp, string]> = [
   // missed `fork`/`prompt-off` at commonPrefix=3 with both sides already reading `[<TZ>]`, because only the
   // bracketed half was folded. One fact, both spellings, both blind.
   [/(Browser time zone for this request: )(?:UTC|[A-Za-z]+(?:\/[A-Za-z_]+)+)/g, '$1<TZ>'],
+  // RULENS-BLIND (measured 2026-11-07, acceptance run 42341868999, from the runner's OWN
+  // uploaded diff): the rules-tier block of a continuation notice carries `[<harness>/001]`
+  // ids — dev2 here, the runner's ephemeral name there — and the child's first request then
+  // diverged at byte 255 of msg1 while every other byte agreed. The namespace segment is
+  // machine identity; the number is conversation content. NOTE: substituteAll canonicalizes
+  // escapes/whitespace BEFORE the fold table runs (the S0 rule: backslash-n becomes a space), so
+  // no line-head anchor survives to be matched — the fold therefore takes EVERY `[token/NNN]`
+  // id symmetrically. Both sides always: never a one-sided advantage; conversation prose that
+  // spells an id in that exact shape folds too, identically on tape and on the wire.
+  [/\[[a-z0-9][a-z0-9_-]{1,40}(?:\.[a-z0-9_-]+)*\/(\d{3})\]/g, '[<RULENS>/$1]'],
   // HOSTPORT-BLIND (measured 2026-09-22, the root cause of the replay collapse):
   // the system head embeds the GUI URL `http://127.0.0.1:<port>` and the e2e
   // home path carries `var/e2e-home-<port>` — run-scheduling facts of the

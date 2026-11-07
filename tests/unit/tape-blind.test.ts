@@ -264,6 +264,24 @@ test('a count-mismatch miss still names near-length candidates and the recorded 
   assert.ok(p.incoming.length === 14, 'the incoming history is dumped in full, not truncated to a line')
 })
 
+test('a rule-namespace token at a line head folds to one identity (the THIRD machine fold, #319)', () => {
+  // Measured byte-for-byte on the acceptance runner (run 42341868999, its own uploaded
+  // tape-diff artifact): the rules-leg notice was identical for 255 characters, then CI
+  // read `[runnervmwuk1x/001] (security) Never log raw tokens…` while the tape held
+  // `[dev2/001] (security) …`. The harness namespace inside a rule id is a fact about
+  // WHO BOoted, not what was said — same class as the checkout path and the time zone.
+  const mine = normalizeSingle({ role: 'user', content: '## CORE RULES (approved for this project\n[dev2/001] (security) Never log raw tokens or bearer headers anywhere in command output' })
+  const theirs = normalizeSingle({ role: 'user', content: '## CORE RULES (approved for this project\n[runnervmwuk1x/001] (security) Never log raw tokens or bearer headers anywhere in command output' })
+  assert.equal(mine, theirs, 'rule-id namespace must fold at the line head')
+  // The symmetric cost, named: ids written in the same shape inside prose fold too — because
+  // the canonicalizer flattens line breaks to spaces before any fold runs, line-head anchoring
+  // is unmatchable at that point. Both sides, always, identically: [tools/103] prose folds to
+  // [<RULENS>/103] on tape AND on the wire, which is what makes the pair still EQUAL.
+  const prose = normalizeSingle({ role: 'user', content: 'see tests/unit/103 for the gate and the path [tools/103] folds alike both sides' })
+  assert.ok(prose.includes('[<RULENS>/103]'), 'the fold is symmetric — that is its safety')
+  assert.ok(prose.includes('tests/unit/103'), 'only the BRACKETED id shape folds; bare paths keep their bytes')
+})
+
 test('a wire element that is the JSON STRING of a message folds to the object form (#319)', () => {
   // Measured on the acceptance runner: the registry-installed rc.2 puts body.messages as
   // PRE-SERIALIZED strings while a linked host build sends objects. Same conversation, two
