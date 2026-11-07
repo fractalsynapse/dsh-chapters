@@ -536,7 +536,20 @@ export function tapeDiffPayload(incoming: string[], tape: TapeEntry[]): {
   }
 }
 
-export function normalizeSingle(m: unknown): string { return JSON.stringify(m) === '' ? '' : normalize(m) }
+export function normalizeSingle(m: unknown): string {
+  // SHAPE fold (#319, measured on the acceptance runner): the registry-built host serializes
+  // body.messages as PRE-ENCODED STRINGS while a linked dev build sends objects — the same
+  // conversation arriving in two shapes. Unwrap (capped at two layers so no pathological
+  // recursion) before the content folds; lengths never change, so every existing tape keeps
+  // matching under its own load-time re-normalization.
+  let v = m
+  for (let i = 0; i < 2 && typeof v === 'string'; i += 1) {
+    const t = v.trim()
+    if (!(t.startsWith('{') || t.startsWith('[') || t.startsWith('"'))) break
+    try { const p = JSON.parse(t); if (p === null || typeof p !== 'string') { v = p; break } v = p } catch { break }
+  }
+  return JSON.stringify(v) === '' ? '' : normalize(v)
+}
 
 /**
  * A single upstream attempt, buffered, with bounded throttle-retry (#54).

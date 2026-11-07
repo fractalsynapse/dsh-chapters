@@ -264,6 +264,20 @@ test('a count-mismatch miss still names near-length candidates and the recorded 
   assert.ok(p.incoming.length === 14, 'the incoming history is dumped in full, not truncated to a line')
 })
 
+test('a wire element that is the JSON STRING of a message folds to the object form (#319)', () => {
+  // Measured on the acceptance runner: the registry-installed rc.2 puts body.messages as
+  // PRE-SERIALIZED strings while a linked host build sends objects. Same conversation, two
+  // wire shapes — and the matcher saw byte differences at the first shared message. A SHAPE
+  // fold, length-preserving: existing tapes and existing requests keep their identities.
+  const obj = { role: 'user', content: 'Name one HTTP redirect status code in one short sentence.' }
+  const wireString = JSON.stringify(obj)
+  assert.equal(normalizeSingle(wireString), normalizeSingle(obj), 'string-of-object must fold to object identity')
+  const doubly = JSON.stringify(wireString)
+  assert.equal(normalizeSingle(doubly), normalizeSingle(obj), 'one tolerant extra layer; the unwrap is capped, not recursive')
+  const plain = 'a plain non-JSON string message'
+  assert.notEqual(plain, '', 'plain strings still normalize by the old path')
+})
+
 test('a same-length miss still lands in storedCandidates, with nearest offered too', async () => {
   const { tapeDiffPayload } = await import('../../tests/e2e/model-proxy.ts')
   const mk = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `msg-${tag}-${String(i)}`)
