@@ -171,7 +171,7 @@ const chaptersContinue = defineTool({
     + 'table of contents. This session is left untouched. Supply event ranges, not text.',
   parameters: {
     title:       { type: 'string', required: true, description: 'Name for the continued session.' },
-    handoffNote: { type: 'string', required: true, description: 'State of play: what was in progress, decisions held, next step. As long as it needs to be — it is budget-checked, not truncated.' },
+    handoffNote: { type: 'string', required: true, description: 'State of play: what was in progress, decisions held, next step. It reaches the child whole — never clipped.' },
     chapters: {
       type: 'array', required: true,
       description: 'Ranges ascending by startSeq, non-overlapping, all <= archiveCeiling, covering every event below the ceiling.',
@@ -184,8 +184,23 @@ const chaptersContinue = defineTool({
 })
 ```
 
-Register host-side: `ctx.tools.register(tool)`. Call-site precedent:
-`dsh-session-fork/src/index.ts:786`.
+Register **in-realm** (#330, 0.2.32): the seven chapters tools and the three continuation door commands
+(`/chapters-fork`, `/chapters-continue`, `/chapters-save`) mount through a `chapters-tools` row
+(`@fractalsynapse/dsh-chapters/tools`) inside the `preset-chapters` composition — the same seam the host's
+own `dsh-tool-fs` and `dsh-tool-subagent` rows use — and the host plane registers none of them.
+`/chapters-repair` and `/chapters-restore` stay on the host plane: they are operator surfaces that must
+reach a broken chapters archive from any session, and human command text is not model-visible. The measured
+host fact that forced the move: a tool registered on the **host plane** rides EVERY session's request
+whatever preset it composes (the #319 diagnostics found the `chapters_*` schemas in `agentPreset: "standard"`
+headers while the chapters persona suffix was absent). The old call-site precedent
+(`dsh-session-fork/src/index.ts:786`, host-side `ctx.tools.register`) predates that measurement and is NOT
+the model for per-preset tools.
+
+Prose rule (#330, per AGENTS § The Model Never Measures Its Context): a tool/parameter description
+is agent-visible text in every session that mounts it — it states what the tool does to the archive,
+never a quantity about the model's own context. No `description` may name the model's context window,
+its fill, or token estimates of the live session; `scripts/prompt-anchor.mjs` treats these literals as
+prompt bytes, and `tests/unit/no-pressure-language.test.ts` refuses pressure vocabulary in them.
 
 ## LLM Calls
 

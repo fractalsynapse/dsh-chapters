@@ -126,7 +126,7 @@ test('segment: missing caller, no completed turn, then the real fact-sheet', asy
     assert.equal(r.ok, true)
     assert.equal(r.archiveCeiling, 2)
     assert.ok(Array.isArray(r.toolResults) && Array.isArray(r.existingChapters === undefined ? [] : r.existingChapters))
-    assert.ok(r.budgetHint !== undefined, 'budget hint rides for the model')
+    assert.ok(r.budgetHint === undefined, '#330: no budget hint reaches the model')
     assert.deepEqual(w.routes, [], 'segment does not touch the route seam')
   } finally { w.dispose() }
 })

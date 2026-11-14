@@ -396,42 +396,24 @@ dev/install/
 └── sdk-embedding-analysis.md    ← in-process embedding feasibility (Hono/Cordis as libraries, #28)
 
 .dsh/skills/                     ← all agent skills (see below)
-skills-lock.json                 ← lock file for upstream-installed skills
 ```
 
 ## Skills
 
-Skills live in `.dsh/skills/<name>/SKILL.md`. Two categories:
+Skills live in `.dsh/skills/<name>/SKILL.md` and are tracked in this repository.
 
-### Project-owned (maintained in this repo, NOT in skills-lock.json)
+The shared procedures come from [Scaffold at 92cf2d0](https://github.com/fractalsynapse/scaffold/tree/92cf2d08fa28a7f4383bd34f4500193bcdfdb31a).
+Refresh them from one reviewed Scaffold revision and verify their bytes and links.
+The Scaffold initializer is a source-side adoption procedure. This installed
+collection contains the shared procedures used by the project.
 
-These are authored or customized locally. `npx skills update` will not touch them.
+Project-owned skills stay separate from that baseline:
 
-| Skill | Origin | Notes |
-|-------|--------|-------|
-| `release-workflow` | Authored locally | Mandatory Git/GitHub workflow |
-| `local-llm` | Authored locally | vLLM endpoint guidance |
-| `find-skills` | Forked from vercel-labs/skills | Modified to require user approval before install |
-| `gh-cli` | Pre-existing | GitHub CLI reference |
-
-### Upstream-tracked (installed via `npx skills`, tracked in skills-lock.json)
-
-These are installed from skills.sh and pinned by content hash. Run `npx skills update`
-to update them. The lock file ensures reproducible installs across clones.
-
-| Skill | Source | Installs |
-|-------|--------|----------|
-| `brainstorming` | obra/superpowers | 395K |
-| `writing-plans` | obra/superpowers | 275.7K |
-| `verification-before-completion` | obra/superpowers | 242.6K |
-| `writing-skills` | obra/superpowers | 211.7K |
-| `doc-coauthoring` | anthropics/skills | 91.5K |
-| `documentation-writer` | github/awesome-copilot | 27.5K |
-| `github-ops` | affaan-m/ecc | 8.3K |
-
-**Updating**: `npx skills update` refreshes upstream-tracked skills only. Project-owned
-skills are updated by editing them directly and committing. If an upstream update breaks
-a customization, re-fork and re-apply the modification.
+| Skill | Use |
+|-------|-----|
+| [dsh-verification](../../.dsh/skills/dsh-verification/SKILL.md) | Claim-specific evidence from the pinned rig, installed artifacts and live hosts |
+| [dsh-release](../../.dsh/skills/dsh-release/SKILL.md) | Staging integration, immutable versions and production authority |
+| [local-llm](../../.dsh/skills/local-llm/SKILL.md) | Local inference and decision endpoints, Compose and dev platform operations |
 
 ## Prerequisites
 
