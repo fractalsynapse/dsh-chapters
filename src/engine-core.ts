@@ -25,7 +25,7 @@
 import type { ChapterRange, RenderedChapter, SessionEventLike } from './types.ts'
 import { chapterTopics } from './signature.ts'
 import type { ChapterRecord } from './archive.ts'
-import { estimateTokens, noticeIndexSection, renderChapter, renderIndex } from './render.ts'
+import { noticeIndexSection, renderChapter, renderIndex } from './render.ts'
 import { isInjectedProse } from './injections.ts'
 import { lineageOf } from './types.ts'
 import { slugify, toStoredPath } from './archive.ts'
@@ -329,9 +329,12 @@ export function deriveIdentity(
     : hasCheckpoint ? 'Earlier history' : 'Conversation span'
   return {
     title,
-    summary: `${userCount} user / ${assistantCount} assistant messages (${estimateTokens(
-      messages.map(messageText).join(' '),
-    )} est tokens)`,
+    // #330: message counts are archive facts; the "(N est tokens)" this used to append
+    // rode EVERY TOC bullet and read to the child as a fuel gauge for a window it cannot
+    // measure. The plugin keeps its own size math (render stats, admission probes) and
+    // never shows the session a number of its own making. The tape mask for the retired
+    // shape was removed with it at the re-distill.
+    summary: `${userCount} user / ${assistantCount} assistant messages`,
   }
 }
 
