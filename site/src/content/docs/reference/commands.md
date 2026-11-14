@@ -16,7 +16,7 @@ before any restart. Nobody should ever again discover a refused session by resta
 
 
 
-Run in the composer **inside a session** (draft screens send text as a message — [FAQ](/start/faq/)). Registered in `src/commands.ts`; the two deterministic archive doors (`/chapters-fork`, `/chapters-continue`) in `src/tools.ts`.
+Run in the composer **inside a session** (draft screens send text as a message — [FAQ](/start/faq/)). The operator commands are registered in `src/commands.ts` on the host plane — including `/chapters-repair` and `/chapters-restore`, which must stay reachable from any session to fix a broken chapters archive. The three continuation doors (`/chapters-fork`, `/chapters-continue`, `/chapters-save`) mount with the tools **inside the chapters preset realm** (0.2.32, [#330](https://github.com/fractalsynapse/dsh-chapters/issues/330)) — sessions on other presets do not carry them.
 
 ## `/chapters-link` — the knowledge upstream
 
