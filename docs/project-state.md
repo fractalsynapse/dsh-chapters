@@ -11,6 +11,46 @@ history of a decision, not before every task.** The rules that lived inside it a
 ---
 
 ## Start Here
+## 2026-11-14 — #330: the tools go where the user pointed, and the agent stops reading gauges (shipped in 0.2.32)
+
+**The defect, measured.** The `chapters_*` tools registered on the HOST plane, and a host-plane tool
+rides EVERY session's request whatever preset composes — the #319 diagnostics' own logs showed the
+`chapters_*` schemas inside `standard`-preset headers with the chapters persona absent. Agents on
+presets that never chose chapters read an archive/context vocabulary in every prompt, obeyed the
+`chapters_rules` "run me before every task" description, and talked about their context window.
+Independently, the prose handed every chapters agent fuel gauges it cannot verify (arrival stub
+`≈ N tok … NOT elsewhere in this context`, per-result `estimatedTokens`/`budgetHint`, TOC bullets'
+`(N est tokens)`, `window × ratio − header` in refusal reasons) — and they steered by the guess.
+
+**The change.** (1) A `chapters-tools` realm row (`src/tools-row.ts`, export `./tools-row`) mounts
+the seven tools and the three continuation doors inside the `preset-chapters` composition — the host's
+own `dsh-tool-fs`/`dsh-tool-subagent` pattern; the host plane keeps only operator reach
+(`/chapters-repair`, `/chapters-restore`, commands/prompt-bar/settlement), because a poisoned child may
+not compose its realm (#319's way in must exist). Maintainer ruling: other presets lose the doors too.
+(2) The prose purge, now doctrine (AGENTS § The Model Never Measures Its Context) with a gate row that
+fails the build if the gauges return (`tests/unit/no-pressure-language.test.ts`): one shared predicate
+`defersAtArchive()` replaces per-result size dumps with a boolean, the stub cites the file not the
+cost, TOC summaries count messages, and the model-visible budget receipt shrinks to the notice's own
+size against its allowance — refuse-with-numbers survives because it sizes the artifact being written.
+
+**Found by the boot, not the unit.** The eager realm acquire raced `apply()`'s domain open — the
+facility reserves a name before awaiting the backend and commits it after, so the second opener saw
+`already-open` with nothing adoptable and the preset came back **DECLARED BUT BROKEN — chapters-tools**
+(first fork distill, 2026-11-14). `acquireChapterStore` now retries the adoption window bounded and
+re-raises the original error if the reservation never resolves; `acquire.test.ts` pins all arms.
+
+**Evidence, by class.** Deterministic: typecheck/build green, `ci-gate.sh` green (1491 tests, 0 fail —
+1 standing expected TODO; coverage 91.6/85.11/86.82/91.6) on the sealed tree. Pinned-host tape: full
+11-leg re-distill and a **chain-replay 11/11 green both locally and on GitHub runners**, each leg under
+its own boot; stamped `promptAnchor d3757708405049ee` / `lib 1e6ba9b1cdb4cdac`, CORPUS_HOST re-anchored
+2026-11-14. Integrated to staging as #332 (head `f3e7a78`). The re-anchor surfaced the `enrich`
+annotate-title nondeterminism — the annotate prompt embeds the async-renamed session title, so record
+and replay diverge by construction; masked per the HOSTPORT/MSGCOUNT family, deeper fix stays open as
+#331. A rig incident, recorded honestly: a symlink mistake of mine while building a control worktree
+clobbered `var/ms-playwright` mid-session (two apparent enrich failures were that, not the product);
+browsers were reinstalled via the documented path and every affected leg re-run. Installed-package
+smoke and live-host verification of 0.2.32 stay OPEN claims until the tag ships.
+
 ## 2026-10-22/23 — the host 0.2.0-rc.2 acceptance sweep (#56)
 
 **What actually happened, in order.** The pinned host moved to 0.2.x; the tape corpus stayed at
@@ -640,3 +680,90 @@ a long job launched with a shell `&` died with its tool shell and looked like it
 carried a **fabricated CI run id** (`40810272330`), amended to the read value (`40803763620`) with the invention left
 visible in the correction. Every one was caught by a gate, a re-read, or an exit code that someone bothered to check —
 which is the entire argument for this repository's design.
+
+## Historical browser and release observations moved from AGENTS.md
+
+This snapshot came from the pre-migration root at `bffa698`. Its dated results and
+test counts are historical. Use the current candidate and verification record for
+delivery decisions. The original root remains available in Git.
+
+**Shipped and CI-green on the real model:** the engine, tools, preset, all seven archive moments, the
+knowledge layer (P1–P3c), the repair engine (#60), and `/chapters-prompt` as a deliberate command with a readable block output (#71, rewritten by #113/#114). The composer GHOST surface that shipped under #71 was REMOVED in #114 at the maintainer's decision — four defects, none fixable by restyling; what replaces it is the docked Suggested Next Step bar (site §28), verified in a browser on 2026-10-26 — see the next paragraph. **Browser plane — re-anchored and partly
+verified (2026-10-26, host 0.2.0-rc.2 on the maintainer's provider route):** every leg that was failing at a
+missing assistant row was failing because the tape proxy joined its upstream base and the request path into a
+doubled `/v1/v1` — no model answer, so no door, no plan card, no markers. Fixed, and `rules`, `explore-dev`,
+`fork`, `arrival`, `fanout`, `enrich`, `plans`, `suite` and `heavy` then recorded green; the Suggested Next Step
+bar has its own legs (`prompt`, and `prompt-off` for the switch's other half) and **passes in Chromium in both
+record and replay**. **Measured later on 2026-10-27, superseding the paragraph above on three points:** (1) the
+chain's shape was itself a defect — `globalSetup` boots ONE server from the setup process's environment while
+Playwright gives a project's `env` only to workers, so nine legs replayed in the first leg's realm and home (#129);
+`npm run test:e2e:replay` now runs **one boot per journey** (`scripts/chain-replay.sh`), the shape the corpus is
+recorded in, and against that runner the current corpus captured ten-for-ten (`D2=0`) and replayed **green twice**
+(`K1=0`, `K2=0`), with `CORPUS_HOST` re-stamped (`lib=b5e15a0de600f6dd`). (2) `coverage:e2e` is **green on this corpus** —
+ten legs, `COVPJ5=0`, All files **77.97%** — after two runs where `prompt` instead timed out on a sidebar row that
+never became actionable. The armed diagnostic settled what that looked like (`rows (0)`, `current session: null`,
+no browser crash, `MemAvailable` flat at ~66.8 GB across all ten boots), and a third consecutive full run passed
+without the diagnostic ever firing: so it is an intermittent view failure under instrumentation, filed as such, and
+deliberately not treated by raising a timeout. The older 77.94% belongs to the previous corpus. (3) CI's **acceptance** job no longer
+fails on `MOUNT FAULT`: the 7-vs-34 tool asymmetry was root-caused (the preset's rows name 28 `@deepseek-ai/*`
+packages, **none a dependency of this repo**, so a runner resolved nothing and our preset silently pruned them) and
+closed by `linkPinnedToolPackages()` running **before** the spawn; the runner now assembles 34 tools and gets far
+deeper, failing on conversation content (its first assistant turn carries a different tool call than the capture,
+`glob` where the tape has `read`) after two machine-identity folds (the harness checkout path, already blind via
+`<DSH-CHECKOUT>`, and both spellings of the runtime time zone). Acceptance moved a full layer deeper that day and the cause is now **identified by outcome, not theory**: the remaining misses are legs whose **turn count is the model's choice** — a bounded journey (`fanout`: one decisive oversized read per child instead of six ranges sitting on the deferral floor; `arrival`: one read plus at most two artifact queries) **passed on the runner**, and the failing set shrank to `heavy` alone. That leg is bounded the same way (exactly three reads with named offsets; 36 → 9 requests), so the tape's shape is a property of the spec. Relief timing, the 7-vs-34 tool gap, and machine-identity bytes were all real and are all closed; none of them was the last story. Evidence and eliminated classes: docs/backlog.md, #129/#131/#132.
+
+**Then it went green.** Run 40676609079: deterministic ✅ · preset-rows probe ✅ · **acceptance ✅ — all ten legs `ok`, one boot each**
+(`suite heavy arrival enrich fanout rules fork plans prompt prompt-off`). Strict replay locally green twice, `coverage:e2e` exit 0 at **78.34%**, corpus stamped
+`lib=b67e373defcad83a` with `corpus:check` agreeing. Merged to `staging` as `45dd4ac` (PR #127, which closes #56 and carries the accounting).
+Say the trigger honestly, because it is easy to over-claim: CI runs on `pull_request` and on push to `main`, **not** on push to `staging` — so "green on staging"
+means the content that landed is what passed its acceptance checks, not a separate staging push run. Still open there: **a dock cannot write the composer, and it is not the reason I first gave**. A dock does receive the
+verbs — `insertText`, `setDraft`, `submit` are present and callable — and the programmatic write throws
+`Cannot read properties of undefined (reading 'draftRev')` with the composer left empty, **identically on `0.2.0-rc.2`
+and `0.2.1-rc.4`** (`var/e2e-prompt-draft-dump.json`; #126, #162). The earlier wording here — "`setDraft` mirrors only at
+mount" — was an inference from reading the wrong module: `draftRev` appears nowhere in `ui-conversation/src`, in either tag;
+the identifier lives in `ui-commands/src/client/popup.ts`. So the bar shows an explanation and Run submits, and upgrading the
+host is **not** a path to closing #126 — measured, after I argued the opposite from a `.d.ts` diff (#150). **Autorun displacing a goal's continuation is now observed in Chromium** (2026-10-28): with a goal armed the host
+offers `Pause goal`; clicking the bar's Autorun leaves `Autorun off` in place after the server round-trip, the host
+flips to `Resume goal`, and `Pause goal` disappears. Recorded alone under the real provider and replayed model-free
+twice (5 passed each) — **but the leg that carries it is portable only by luck, and that is now known (#138)**: a goal
+round is itself a turn, so rounds cascade at 256-budget by default, and how many exist when the leg acts is machine
+latency. Evidence is a docs-only PR (#137, zero non-docs delta) turning acceptance red with `MISS tape=prompt entries=23
+storedCandidates: []` while the runner's history held `Round: 1/256`…`Round: 4/256` where the capture had none — run
+40676609079 (all ten legs `ok`) agreed only because the runner's latency reproduced my round count. The displacement
+*behavior* was observed in Chromium and stands; the *replay* of it is not dependable until the goal is created with a
+ bounded budget, and the bound was not what I assumed. Built and measured it: `ctx.goals.create(agent, { objective,
+maxGoalRounds: 1 })` is plugin-callable (upstream's own fixture does exactly this) and it WORKED — a 17-entry tape with
+`Round: 1/` and no second round — while the leg still failed, because spending the budget calls
+`ctx.goals.block(…, 'round-limit')` and `GoalBar.tsx:85-86` renders no strip for a blocked goal. **An armed goal has no
+rest state**: budget 256 floods it, budget 1 ends it. Facts and line numbers: docs/contract.md, #138.
+
+`heavy` is live-class as well, by the maintainer's decision on six captures' evidence (#141): relief auto-continues a
+model-written turn and the child then does unrequested marker work, measured at 5/7/12/23/24 tape entries for ONE commit
+across four designs, with CI's widened miss diff naming the extra `bash` turn. `oversized-turn.spec.ts` therefore skips
+under `E2E_MODEL === 'replay'` with the reason in the skip message and is absent from `chain-replay.sh`'s list, which is now
+**nine** model-free legs; relief timing stays covered without a browser or a model in `tests/unit/engine-lifecycle.test.ts`
+(#140's rows). Two release facts belong here too. `0.2.2-dev.1` is a **dead tag**: the bump commit moved `package.json`
+only and `tests/unit/loudness.test.ts:123` (`PLUGIN_VERSION === pkg.version`) failed the publish blocker — a pushed tag is
+immutable, so `0.2.2-dev.2` bumps all three version-bearing files (`package.json`, `src/version.ts`, lock root) together.
+And `@deepseek-ai/dsh-compaction-basic@0.1.5-rc.2` has **zero** occurrences of `headroomTokens` (verified in its tarball),
+which is why the #140 realm key and the #128 alignment must ship as one change. Finally, my own live-leg guard had shipped
+inverted — `test.skip(process.env.E2E_MODEL !== 'replay', …)` runs a live spec only against a tape — corrected to
+`=== 'replay'` and proven by `2 skipped` plus exit 0 on a replay invocation.
+
+**Live-class does not mean live-green, and here it is red.** The `heavy` leg's live run failed on its own bound —
+`expect(summaries.length).toBeLessThanOrEqual(30)` (`var/heavy-live.log`, exit 1) — so NO browser-level claim about relief
+converging on the pinned 32K window is being made: what is proven is that relief neither throws nor crashes there (#140's rows),
+and the nine model-free legs are green on CI. The convergence failure is its own issue (#143) and its first criterion is
+per-pass numbers, not a raised bound.
+
+So both goal claims are verified **live**, in a class that can say so honestly. `tests/e2e/prompt-goal-live.spec.ts`
+runs them against the real provider under a 420 s ceiling and both passed (**2 passed**): arming Autorun takes the
+continuation from an active goal (`Pause goal` → `Resume goal`, Pause gone — after the inert-control fix in
+`prompt-dock-autorun-write.test.ts`, which is what made the click refuse itself), and after `/goal clear` the bar still
+produces a real suggestion on the next turn (#135's second half, browser-observed at last). The spec refuses to run on a
+tape and `chain-replay.sh` omits the project — the model-free acceptance job does NOT cover these two, a live run does,
+and that is stated wherever the claim is made. What the tape leg keeps is everything goal-free: dock order 30, Analyzing
+→ suggestion, expand, Run as a human-authored turn, and `prompt-off`.
+
+Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
+Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.

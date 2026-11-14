@@ -77,7 +77,7 @@ test('continue with no measurable window refuses rather than guessing (no-never-
       title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
     } as never, h.exec as never) as { ok: boolean; reason?: string }
     assert.equal(r.ok, false)
-    assert.match(r.reason ?? '', /window|measure|configure|budget/i, 'refuses WITH a reason')
+    assert.match(r.reason ?? '', /cannot be admitted|no model route|size the notice/i, 'refuses WITH a usable reason; #330 removed the raw window number from the agent-facing text')
   } finally { h.dispose() }
 })
 
@@ -144,7 +144,7 @@ test('fork tool: no scheduler + no rules + no project still forks', async () => 
   } finally { h.dispose() }
 })
 
-test('segment names its own cap: showing X of Y by size, Z KB withheld (#61)', async () => {
+test('segment names its own cap: listing X of Y, N smaller ones omitted (#61, reworded #330)', async () => {
   const h = w()
   try {
     const seg = await h.built.segment.execute({} as never, h.exec as never) as {
@@ -153,9 +153,12 @@ test('segment names its own cap: showing X of Y by size, Z KB withheld (#61)', a
       toolResultsReport?: string
     }
     assert.equal(seg.ok, true)
-    assert.match(seg.toolResultsReport ?? '', /showing \d+ of \d+ candidates by size/,
+    assert.match(seg.toolResultsReport ?? '', /listing \d+ of \d+ tool results/,
       `the tool must state its own truncation, not emit 50 KB silently: ${JSON.stringify(seg.toolResultsReport)}`)
-    assert.match(seg.toolResultsReport ?? '', /withheld/, 'and name the withheld amount')
+    // #330: the cap line counts what it omitted, and NO LONGER sizes it in bytes —
+    // a withheld COUNT is an honesty fact; a byte tally was the fuel gauge.
+    if (/smaller ones omitted/.test(seg.toolResultsReport ?? '')) assert.match(seg.toolResultsReport ?? '', /segmentCandidateCapTokens=\d+/, 'and names the cap it hit')
+    assert.doesNotMatch(seg.toolResultsReport ?? '', /KB|bytes|est tokens/, 'no size numbers on the cap line (#330)')
     assert.equal(Array.isArray(seg.toolResults) && (seg.toolResults?.length ?? 0) <= 4000, true, 'a capped list cannot exceed the cap')
   } finally { h.dispose() }
 })
@@ -207,7 +210,7 @@ test('degraded caller (no header, no snapshotEvents, no context info, partial us
   const built2 = buildChaptersTools(ctxNoPresets as never, store as never, config as never)
   const r3 = await built2.chaptersContinue.execute({ title: 'T', handoffNote: 'n', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }] } as never, { agent: ok } as never) as { ok: boolean; reason?: string }
   assert.equal(r3.ok, false)
-  assert.match(r3.reason ?? '', /refus/i, 'a refusal, not a crash')
+  assert.match(r3.reason ?? '', /cannot be admitted|refus/i, 'a refusal-shaped result, not a crash (the no-window arm says "cannot be admitted" since #330)')
   fs.rmSync(tmp, { recursive: true, force: true })
 })
 

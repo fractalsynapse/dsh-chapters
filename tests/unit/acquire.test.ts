@@ -40,3 +40,19 @@ test('already-open with nothing live behind it still throws', async () => {
   const facility = { async open() { throw new Error("domain 'dsh_chapters' is already open") }, get: () => undefined }
   await assert.rejects(() => acquireChapterStore(facility as never), /already open/)
 })
+
+test('#330 an in-flight opener commits inside the retry window and is ADOPTED', async () => {
+  // The race that broke the realm tools-row: the facility reserves the name before
+  // awaiting the backend, so `open` already throws while `get` answers undefined for
+  // a few milliseconds. Acquire must wait for the commit and adopt, owner:false.
+  const domain = { table: () => ({ get: () => undefined, put: async () => {}, entries: () => [][Symbol.iterator]() }), close: async () => {} }
+  let getCalls = 0
+  const facility = {
+    async open() { throw new Error("domain 'dsh_chapters' is already open") },
+    get: () => (++getCalls >= 4 ? domain : undefined),
+  }
+  const h = await acquireChapterStore(facility as never)
+  assert.equal(h.owner, false, 'adoption, not ownership')
+  assert.ok(getCalls >= 4, `the window was retried (get calls ${getCalls})`)
+  assert.ok(typeof h.store.get === 'function')
+})

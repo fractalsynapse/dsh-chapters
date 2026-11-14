@@ -157,14 +157,13 @@ export function oversizeRanges(
     // The result is a loud, counted warning rather than silence (#61): the chapter carries one event larger
     // than the window it exists for, and a reader must be told that `read` must go back to it in slices.
     if (r.stats.events === 1) {
-      indivisible.push(`chapter "${r.range.title}" is ONE indivisible event (seq ${String(r.range.startSeq)}) at `
-        + `${String(r.stats.estimatedTokens)} est tokens, over the hard oversize ceiling ${String(ceiling)} `
-        + '(= chapterTokenTarget ' + String(chapterTokenTarget) + ' × ' + String(oversizeFactor) + ') — archived whole, '
+      indivisible.push(`chapter "${r.range.title}" is ONE indivisible event (seq ${String(r.range.startSeq)}) that exceeds the chapter ceiling `
+        + `(${String(ceiling)} = chapterTokenTarget ${String(chapterTokenTarget)} × ${String(oversizeFactor)}) — archived whole, `
         + 'because clipping is forbidden and no split can shrink a single event; reload it with read offset/limit')
       continue
     }
-    errors.push(`"${r.range.title}" (seqs ${String(r.range.startSeq)}-${String(r.range.endSeq)}) rendered ${String(r.stats.estimatedTokens)} est tokens, `
-      + `over the hard oversize ceiling ${String(ceiling)} (= chapterTokenTarget ${String(chapterTokenTarget)} × ${String(oversizeFactor)}) `
+    errors.push(`"${r.range.title}" (seqs ${String(r.range.startSeq)}-${String(r.range.endSeq)}) exceeds the chapter ceiling `
+      + `(${String(ceiling)} = chapterTokenTarget ${String(chapterTokenTarget)} × ${String(oversizeFactor)}) `
       + '— split at the next boundary; clipping is forbidden')
   }
   return { errors, indivisible }
@@ -237,6 +236,18 @@ export function candidateTotals(
 ): { count: number; bytes: number } {
   const all = collectCandidates(events, range)
   return { count: all.length, bytes: all.reduce((m, c) => m + c.bytes, 0) }
+}
+
+/**
+ * The ONE deferral predicate (#330): a tool result of this estimated size becomes a file
+ * REFERENCE in its chapter (full text still written) rather than repeating inline. The
+ * renderer used to carry this as a bare `tokens <= floor` comparison; `chapters_segment`
+ * now reports the SAME decision as a boolean (`deferred`) so the model can see which
+ * results will be cited-not-repeated WITHOUT being handed a token count of its own
+ * session. Two rules would drift; one cannot.
+ */
+export function defersAtArchive(estimatedTokens: number, floorTokens: number): boolean {
+  return estimatedTokens > floorTokens
 }
 
 /**
@@ -383,7 +394,7 @@ export function renderChapter(
           break
         }
         const tokens = estimateTokens(text)
-        const wantsInline = inline.get(ev.seq) ?? tokens <= config.toolResultDeferFloorTokens
+        const wantsInline = inline.get(ev.seq) ?? !defersAtArchive(tokens, config.toolResultDeferFloorTokens)
         const priorCall = [...inRange].reverse().find((c) => c.type === 'tool/call' && c.seq < ev.seq)
         const toolName = String((priorCall?.data as Record<string, unknown> | undefined)?.name ?? 'tool')
         const ref = artifactRef(text, { toolName, sourceSeq: ev.seq, inlined: wantsInline })
