@@ -48,8 +48,16 @@ annotate-title nondeterminism — the annotate prompt embeds the async-renamed s
 and replay diverge by construction; masked per the HOSTPORT/MSGCOUNT family, deeper fix stays open as
 #331. A rig incident, recorded honestly: a symlink mistake of mine while building a control worktree
 clobbered `var/ms-playwright` mid-session (two apparent enrich failures were that, not the product);
-browsers were reinstalled via the documented path and every affected leg re-run. Installed-package
-smoke and live-host verification of 0.2.32 stay OPEN claims until the tag ships.
+browsers were reinstalled via the documented path and every affected leg re-run. **Post-tag, shipped**
+(2026-11-14): #333 merged to main (`4be41cb`), annotated tag `0.2.32` pushed at that commit, Release run
+43636628508 success. Registry verified directly, not by CLI cache: `0.2.32` present, `latest` moved,
+provenance attested, shasum `1fd309081de32a47d92b9a6c4994e1e9b01f88a3`; the published tarball was
+unpacked and inspected (manifest, `lib/version.js`, the `chapters-tools` row in the shipped
+`cordis.patch.yml`, the gauge-free arrival stub, the host registering no tools — all agree with the
+tag); installed-package smoke: a clean `npm install @fractalsynapse/dsh-chapters@0.2.32` resolves
+`./tools-row` (`ChaptersToolsRow`, inject list) and both registrars. Staging reconciled by back-merge.
+REMAINING OPEN CLAIM: live-host verification — a running DSH process loaded with 0.2.32 lands with the
+next restart of each deployment; not separately performed here.
 
 ## 2026-10-22/23 — the host 0.2.0-rc.2 acceptance sweep (#56)
 
