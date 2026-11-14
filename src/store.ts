@@ -418,9 +418,19 @@ export async function acquireChapterStore(
     return { store: makeDomainStore(domain), domain, owner: true }
   } catch (error) {
     if (!/already[- ]open/i.test(String((error as Error)?.message ?? error))) throw error
-    const existing = storageDomain.get?.(chapterDomainSpec.name)
-    if (existing === undefined) throw error
-    return { store: makeDomainStore(existing), domain: existing, owner: false }
+    // Adopt the live handle. The host facility marks a name `reserved` BEFORE it
+    // awaits `loadAll`, and sets `domains` only AFTER — so a concurrent opener (the
+    // #330 realm tools-row mounting while the host `apply()` is still opening) sees
+    // `already-open` while `get()` still returns undefined. Bounded retry adopts the
+    // in-flight opener's handle once it commits; if it never does, the reservation is
+    // leaked by a dead opener and the ORIGINAL already-open error stays the loud
+    // answer (r27b: a silent second opener is worse than a named failure).
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const existing = storageDomain.get?.(chapterDomainSpec.name)
+      if (existing !== undefined) return { store: makeDomainStore(existing), domain: existing, owner: false }
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    throw error
   }
 }
 

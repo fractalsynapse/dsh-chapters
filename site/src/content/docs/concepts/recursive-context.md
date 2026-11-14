@@ -21,7 +21,7 @@ The same decomposition, engineered for a coding agent's real corpus, **without a
 | long input as external environment | the `.dsh-chapters/` archive on disk — files, plain Markdown |
 | recursive decomposition | TOC notice → numbered chapters → per-chapter frontmatter + headings → `read` on a path |
 | pull sub-spans into the window | `read` with offset/limit; oversized *tool results* deferral to content-addressed `artifacts/`, retrieved via `chapters_artifact` with `toc / search / read` |
-| agent drives the recursion | the model issues the reads; the plugin provides handles (paths, `⟦omitted…⟧` markers, `(N est tokens)`, artifact TOCs) |
+| agent drives the recursion | the model issues the reads; the plugin provides handles (paths, `⟦omitted…⟧` markers, artifact TOCs) — never a token reading of the session, which the model cannot verify (#330) |
 
 Structured documents even self-describe: a 373 KB book arrives with a parsed table of contents so the first call is already a search, not a dump.
 

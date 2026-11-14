@@ -128,7 +128,7 @@ test('budget refusal carries the numbers and creates nothing', async () => {
   await assert.rejects(() => runContinue(h.ports, baseArgs as never, CONFIG), (error: unknown) => {
     const res = refusalResult(error)
     assert.ok(res && !res.ok)
-    assert.match(res!.reason ?? '', /over budget: notice ~\d+ tokens > allowance 125/)
+    assert.match(res!.reason ?? '', /over budget: the notice is ~\d+ tokens against an allowance of 125/)
     assert.equal(res!.budget?.allowanceTokens, 125)
     return true
   })
@@ -139,7 +139,7 @@ test('unknown model window refuses instead of guessing', async () => {
   const h = harness({ budget: { windowTokens: null, headerBoundTokens: null } })
   await assert.rejects(() => runContinue(h.ports, baseArgs as never, CONFIG), (error: unknown) => {
     const res = refusalResult(error)
-    assert.ok(res && !res.ok && /cannot resolve the model context window/.test(res.reason ?? ''))
+    assert.ok(res && !res.ok && /continuation cannot be admitted: no model route/.test(res.reason ?? ''))
     return true
   })
 })

@@ -136,7 +136,7 @@ test('a range far over chapterTokenTarget is REFUSED with its number, before any
     config: { artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, chapterOversizeFactor: 2, toolResultDeferFloorTokens: 200, mergeThreshold: 0.3, chapterLimit: 8000 } as never,
   })
   assert.equal(out.skipped, 'oversize', `expected an oversize refusal, got ${JSON.stringify(out.skipped)}`)
-  assert.ok(out.warnings.some((w) => /est tokens|chapterTokenTarget/.test(w)), 'the refusal must carry its numbers')
+  assert.ok(out.warnings.some((w) => /larger than its target|chapter ceiling/.test(w)), 'the refusal names the artifact')
   assert.equal((await store.get('S')).nextChapterNumber, 1, 'no number was spent on a refused archive')
   assert.equal(fs.existsSync(`${tmp}/.dsh-chapters/S/chapters`), false, 'and no file was written')
 })

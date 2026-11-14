@@ -17,9 +17,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
-const skill = fs.readFileSync(path.join(ROOT, '.dsh', 'skills', 'release-workflow', 'SKILL.md'), 'utf8')
+const root = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8')
+const skill = fs.readFileSync(path.join(ROOT, '.dsh', 'skills', 'dsh-release', 'SKILL.md'), 'utf8')
 
-test('the release skill forbids deleting a pushed tag and requires a new version', () => {
+test('the routed DSH release skill forbids deleting a pushed tag and requires a new version', () => {
+  assert.ok(root.includes('](.dsh/skills/dsh-release/SKILL.md)'), 'root guidance must route to DSH release policy')
   assert.match(skill, /tag[s]? .* never delete|do not delete a pushed tag/i,
     'the skill must state the prohibition, because an agent follows the file, not the memory')
   assert.match(skill, /new version|next patch/i, 'and name the remedy: a new release number')

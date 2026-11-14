@@ -206,8 +206,12 @@ test(`${guard} — our list differs from the host standard list ONLY by the decl
   const CROSS_VERSION = new Set([...KNOWN_OPTIONAL, '@deepseek-ai/dsh-time-context'])
   const added = [...ours].filter((n) => !theirs.has(n) && !CROSS_VERSION.has(n))
   const removed = [...theirs].filter((n) => !ours.has(n) && !CROSS_VERSION.has(n))
-  assert.deepEqual(added, ['@fractalsynapse/dsh-chapters/engine'],
-    'the only row we ADD is the chapter engine; if the host renamed or dropped something else, this '
+  // #330 declares a second delta: the chapters tools moved OFF the host plane onto a
+  // realm row inside this composition (a host-plane `ctx.tools.register` rides every
+  // preset's request — the leak). Both added rows are OUR package — never probed, never
+  // pruned (`needsProbe` in src/preset.ts), because pruning one would delete the feature.
+  assert.deepEqual(added, ['@fractalsynapse/dsh-chapters/tools-row', '@fractalsynapse/dsh-chapters/engine'],
+    'the only rows we ADD are the chapter tools row and the chapter engine; if the host renamed or dropped something else, this '
     + 'preset is mounting a package that may not exist on another supported host')
   assert.deepEqual(removed, ['@deepseek-ai/dsh-compaction-basic'],
     'the only row we REPLACE is the host LLM summarizer — everything else stays mounted, or a chapters '
