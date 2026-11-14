@@ -9,10 +9,18 @@
 #
 # Two planes, two surfaces:
 #   HOST PLANE  — the `config:` block below (defaults shown commented; set any
-#                 under your profile's plugin entry).
-#   REALM PLANE — the compaction ENGINE row inside the preset's composition (the
-#                 `preset-chapters` row at the foot of this file); shared names behave per
-#                 plane. Design record: docs/knowledge-repo.md §12.
+#                 under your profile's plugin entry). Registers NOTHING model-visible:
+#                 no tools, no door commands (#330 — a host-plane tool registration
+#                 rides every session's request whatever preset composes; measured in
+#                 the #319 diagnostics as `chapters_*` schemas inside `standard`-preset
+#                 headers).
+#   REALM PLANE — the rows inside the preset's composition (the `preset-chapters` row
+#                 at the foot of this file): the compaction ENGINE row and the
+#                 `chapters-tools` row (the seven `chapters_*` tools + the three
+#                 continuation door commands, #330; repair/restore stay operator-side
+#                 on the host plane). Shared names behave per plane; a profile that
+#                 overrides a shared tunable sets it in both places. Design record:
+#                 docs/knowledge-repo.md §12.
 #
 # PRESET DELIVERY — the preset is a DECLARATION ROW, exactly like the host's own presets.
 #   `preset-chapters` (the id is the host convention `preset-<id>`) is inserted by this
@@ -238,6 +246,20 @@
               sampleOverCapGlobResults: false
           - id: tool-jobs
             name: '@deepseek-ai/dsh-tool-jobs'
+          # OURS (#330): the seven `chapters_*` tools + the three continuation door
+          # commands, mounted IN-REALM so only a chapters session composes them. A
+          # host-plane `ctx.tools.register` rides EVERY session's request whatever
+          # preset composes (measured: `chapters_*` schemas in `standard` headers) — that
+          # is the leak this row closes. Repair/restore stay host-plane (operator reach
+          # into a broken archive). src/tools-row.ts.
+          - id: chapters-tools
+            name: '@fractalsynapse/dsh-chapters/tools-row'
+            config:
+              # The rig rewrites THIS line per boot (tests/e2e/rig-preset-pin.ts), the
+              # same way it pins the engine row's `artifactStoreRoot` — a profile that
+              # retunes any other row key sets it beside this one; every unset key
+              # keeps the default declared in src/tools-row.ts.
+              artifactStoreRoot: '.dsh-chapters'
           - id: tool-schedule
             name: '@deepseek-ai/dsh-tool-schedule'
           - id: skill-filesystem

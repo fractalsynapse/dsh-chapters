@@ -18,7 +18,7 @@ import { runRestoreHandler } from './restore.ts'
 import { makeRestoreCommand } from './restore-command.ts'
 import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
-import { candidateTotals, estimateTokens, toolResultCandidates } from './render.ts'
+import { candidateTotals, defersAtArchive, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
@@ -66,6 +66,17 @@ interface CallerAgent {
 }
 
 const CALLER_MISSING = { ok: false as const, reason: 'no calling agent: this tool runs only inside an agent session' }
+
+/**
+ * #330 — the shape of a budget receipt the MODEL may see: the size of the NOTICE the
+ * plugin measured against its allowance, both properties of an artifact being written.
+ * The admission inputs (`windowTokens`, `headerBoundTokens`) measure the live session —
+ * a gauge the model cannot read for itself and would only learn to guess with — so they
+ * are withheld here deliberately. The refusal REASON carries the same discipline (see
+ * continue-core); human door text and the logs may carry the full probe.
+ */
+const noticeReceipt = (b: { usedTokens: number; allowanceTokens: number }): { usedTokens: number; allowanceTokens: number } =>
+  ({ usedTokens: b.usedTokens, allowanceTokens: b.allowanceTokens })
 
 function callerOf(exec: ToolRunContext): CallerAgent | typeof CALLER_MISSING {
   const agent = (exec as unknown as { agent?: CallerAgent }).agent
@@ -317,9 +328,10 @@ export function buildChaptersTools(
   const chaptersSegment = defineTool({
     name: 'chapters_segment',
     description:
-      'Facts for planning a chapter archive of THIS session: the completed-turn archive ceiling, '
-      + 'every tool result with its real size, and the chapters already in the registry. '
-      + 'Returns ranges for you to propose in chapters_continue — you never write chapter text; the plugin renders it from the log.',
+      'Facts for planning a chapter archive of THIS session: the completed-turn ceiling, which tool '
+      + 'results will be cited as file references versus repeated inline, and the chapters already in '
+      + 'the registry. Returns ranges for you to propose in chapters_continue — you never write chapter '
+      + 'text; the plugin renders it from the log.',
     parameters: {},
     output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
     async execute(_args: Record<string, never>, exec: ToolRunContext) {
@@ -342,8 +354,6 @@ export function buildChaptersTools(
         title: p.title,
         status: p.status,
         resultSeq: p.resultSeq,
-        bytes: p.bytes,
-        estimatedTokens: estimateTokens(p.text),
         outline: p.outline,
         verdict: p.verdict === null ? null : p.verdict.slice(0, 200),
       })
@@ -365,10 +375,11 @@ export function buildChaptersTools(
           : { planHint: 'a submitted plan is a topic boundary: the chapter that carries it ENDS there, and its title becomes the chapter title' }),
         // fresh literals, not the ToolResultCandidate interface: anonymous
         // object types carry the implicit index signature JsonValue needs.
-        // #61: the candidate list is CAPPED and says so. The field version returned 49,932 characters
-        // while also reporting `Omitted 275266 bytes` — ~81K est tokens into a 32K-class window, asking
-        // the model to keep/drop-judge a list it had not received. Ranking is by size descending, so the
-        // cap removes the SMALL entries and the big ones a real decision turns on stay visible.
+        // #61: the candidate list is CAPPED and says so — but #330 took the SIZE
+        // NUMBERS out of it: per-result bytes/token estimates read to the model as a
+        // fuel gauge, and the cap line's "KB withheld" was the same quantity the
+        // caller cannot verify. The list says what is on it and what the archive will
+        // reference by default; the plugin does the measuring.
         ...(() => {
           const range = { title: '', summary: '', startSeq: 0, endSeq: ceiling } as const
           const cap = config.segmentCandidateCapTokens ?? 4000
@@ -377,17 +388,18 @@ export function buildChaptersTools(
             : toolResultCandidates(below, range)
           const totals = candidateTotals(below, range)
           const withheld = Math.max(0, totals.count - kept.length)
-          const withheldBytes = Math.max(0, totals.bytes - kept.reduce((m, c) => m + c.bytes, 0))
+          const floor = config.toolResultDeferFloorTokens ?? 200
           return {
-            toolResults: kept.map((c) => ({ seq: c.seq, toolName: c.toolName, bytes: c.bytes, estimatedTokens: c.estimatedTokens, excerpt: c.excerpt })),
-            toolResultsReport: `showing ${kept.length} of ${totals.count} candidates by size, ${(withheldBytes / 1024).toFixed(0)} KB withheld`
-              + (cap > 0 ? ` (segmentCandidateCapTokens=${cap})` : ' (uncapped)'),
+            // `deferred` is the SAME decision the renderer makes (one predicate,
+            // defersAtArchive): this result's full text will be cited as a file path
+            // in its chapter rather than repeated. An archive fact, not a session one.
+            toolResults: kept.map((c) => ({ seq: c.seq, toolName: c.toolName, excerpt: c.excerpt, deferred: defersAtArchive(c.estimatedTokens, floor) })),
+            toolResultsReport: `listing ${kept.length} of ${totals.count} tool results${withheld > 0 ? ` (${String(withheld)} smaller ones omitted by the cap${cap > 0 ? `, segmentCandidateCapTokens=${cap}` : ''})` : ''}`,
           }
         })(),
         existingChapters: callerState.chapters.map((c) => ({
           number: c.number, path: c.path, title: c.title, startSeq: c.startSeq, endSeq: c.endSeq,
         })),
-        budgetHint: { continuationBudgetRatio: config.continuationBudgetRatio, chapterTokenTarget: config.chapterTokenTarget },
       }
     },
   })
@@ -399,12 +411,12 @@ export function buildChaptersTools(
     description:
       'Archive this conversation as verbatim Markdown chapters and open a NEW session that starts from their '
       + 'table of contents plus your handoff note. Supply event ranges (startSeq/endSeq) — never chapter text; '
-      + 'the plugin renders bodies from the session log. This session is left untouched; the child gets its own '
-      + 'cache and can reload any chapter with read. Oversized tool results defer to reference files by default; '
-      + 'toolResultOverrides marks the exceptions you want kept inline (it still writes the artifact).',
+      + 'the plugin renders bodies from the session log. This session is left untouched; the child can reload any '
+      + 'chapter with read. Large tool results are cited as file references in the chapter by default; '
+      + 'toolResultOverrides names the few you want repeated inline instead (the file is still written).',
     parameters: {
       title: { type: 'string', required: true, description: 'Name for the continued session.' },
-      handoffNote: { type: 'string', required: true, description: 'State of play for the child: what was in progress, decisions held, the next step. Budget-checked as part of the notice, never silently truncated.' },
+      handoffNote: { type: 'string', required: true, description: 'State of play for the child: what was in progress, decisions held, the next step. It reaches the child whole, never clipped.' },
       chapters: {
         type: 'array',
         required: true,
@@ -428,7 +440,7 @@ export function buildChaptersTools(
           additionalProperties: false,
           properties: {
             seq: { type: 'integer', required: true, description: 'The tool result event seq (from chapters_segment toolResults).' },
-            inline: { type: 'boolean', required: true, description: 'Keep inline (true) or defer (false), overriding the size default for this one result.' },
+            inline: { type: 'boolean', required: true, description: 'Repeat this one result inline (true) or as a file reference (false), overriding the archive default for it.' },
           },
         },
       },
@@ -473,7 +485,7 @@ export function buildChaptersTools(
           ...(result.presetUsed !== undefined ? { presetUsed: result.presetUsed } : {}),
           ...(result.chapters !== undefined ? { chapters: result.chapters } : {}),
           ...(result.warnings !== undefined && result.warnings.length > 0 ? { warnings: result.warnings } : {}),
-          ...(result.budget !== undefined ? { budget: result.budget } : {}),
+          ...(result.budget !== undefined ? { budget: noticeReceipt(result.budget) } : {}),
         }
       } catch (error) {
         const refusal = refusalResult(error)
@@ -481,7 +493,7 @@ export function buildChaptersTools(
           return {
             ok: false as const,
             reason: refusal.reason ?? 'refused',
-            ...(refusal.budget !== undefined ? { budget: refusal.budget } : {}),
+            ...(refusal.budget !== undefined ? { budget: noticeReceipt(refusal.budget) } : {}),
             ...(refusal.warnings !== undefined && refusal.warnings.length > 0 ? { warnings: refusal.warnings } : {}),
           }
         }
@@ -496,11 +508,11 @@ export function buildChaptersTools(
     name: 'chapters_fork',
     description:
       'Open a SIBLING session citing the same chapter archive this one already has — nothing new is '
-      + 'archived, no files written, no numbers spent. Use for trying a genuinely different approach '
-      + 'while the current session keeps working. Your handoff note says what the sibling should do.',
+      + 'archived, no files written, no chapter numbers consumed. Use for trying a genuinely different '
+      + 'approach while the current session keeps working. Your handoff note says what the sibling should do.',
     parameters: {
       title: { type: 'string', required: true, description: 'Name for the forked session.' },
-      handoffNote: { type: 'string', required: true, description: 'What the sibling is for — its whole context is the archive TOC plus this note.' },
+      handoffNote: { type: 'string', required: true, description: 'What the sibling is for — it starts from the archive TOC plus this note.' },
     },
     output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
     async execute(args: { title: string; handoffNote: string }, exec: ToolRunContext) {
@@ -531,12 +543,12 @@ export function buildChaptersTools(
           ok: true as const,
           ...(result.childSessionId !== undefined ? { childSessionId: result.childSessionId } : {}),
           ...(result.presetUsed !== undefined ? { presetUsed: result.presetUsed } : {}),
-          ...(result.budget !== undefined ? { budget: result.budget } : {}),
+          ...(result.budget !== undefined ? { budget: noticeReceipt(result.budget) } : {}),
         }
       } catch (error) {
         const refusal = refusalResult(error)
         if (refusal !== null) {
-          return { ok: false as const, reason: refusal.reason ?? 'refused', ...(refusal.budget !== undefined ? { budget: refusal.budget } : {}) }
+          return { ok: false as const, reason: refusal.reason ?? 'refused', ...(refusal.budget !== undefined ? { budget: noticeReceipt(refusal.budget) } : {}) }
         }
         return { ok: false as const, reason: `chapters_fork failed: ${(error as Error)?.stack ?? String(error)}`.slice(0, 800) }
       }
@@ -862,7 +874,7 @@ export function buildChaptersTools(
       + 'Pass a topic or keyword query; raise maxTokens to see more of the ranked list. Results are file paths readable with the read tool.',
     parameters: {
       query: { type: 'string', required: true, description: 'Topic or keyword query.' },
-      maxTokens: { type: 'number', description: 'Token budget for the result list (default 400; raise to page deeper).' },
+      maxTokens: { type: 'number', description: 'Cap on the returned list length (default 400; raise to page deeper).' },
     },
     output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
     async execute(args: { query: string; maxTokens?: number }, exec: ToolRunContext) {
@@ -938,17 +950,17 @@ export function buildChaptersTools(
   const chaptersArtifact = defineTool({
     name: 'chapters_artifact',
     description:
-      'Query a stored artifact (a tool result too large to sit in context — deferred blobs and arrival-stored documents alike) '
+      'Query a stored artifact (a large tool result or arrival-stored document the archive keeps as a file) '
       + 'WITHOUT loading it whole: action "toc" = heading map with line numbers (structured/markdown files), '
       + '"search" = query (regex or phrase) → small matched blocks with line numbers, "read" = exact line range. '
-      + 'path accepts the artifacts/… path or the bare sha256 from the stub line.',
+      + 'path accepts the artifacts/… path or the bare sha256 from the reference line.',
     parameters: {
       path: { type: 'string', required: true, description: 'Artifact reference from the stub: artifacts/<xx>/<sha>.txt path or the 64-hex sha.' },
       action: { type: 'string', required: true, description: 'One of: toc | search | read.' },
       query: { type: 'string', description: 'Required for search: regex or literal phrase (case-insensitive).' },
       offset: { type: 'number', description: 'read: first line (1-based). Default 1.' },
       limit: { type: 'number', description: 'read: line count (hard cap 400).' },
-      maxTokens: { type: 'number', description: 'search: budget for returned blocks (default 400).' },
+      maxTokens: { type: 'number', description: 'search: how many matched blocks to return (default 400).' },
     },
     output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
     async execute(args: { path: string; action: string; query?: string; offset?: number; limit?: number; maxTokens?: number }, exec: ToolRunContext) {
@@ -1029,12 +1041,12 @@ export function buildChaptersTools(
     name: 'chapters_rules',
     description:
       'Assemble the rules that govern a task: the approved project tier plus this session tree\u2019s '
-      + 'captured session rules, verbatim, within budget. Run it BEFORE starting a task. The answer '
+      + 'captured session rules, verbatim. Run it BEFORE starting a task. The answer '
       + 'names what it withheld, so "you are seeing all of them" is a fact rather than a guess.',
     parameters: {
       query: { type: 'string', required: true, description: 'What the session is about to do, in a sentence or two \u2014 it selects relevance.' },
       scope: { type: 'string', description: "'all' (default) or 'project' to see only the shared tier a branch would inherit." },
-      maxTokens: { type: 'number', description: 'Token ceiling for this answer (defaults to coreRulesBudgetTokens).' },
+      maxTokens: { type: 'number', description: 'Cap on the returned rules text (default: the configured core-rules budget).' },
     },
     output: jsonOutput((value: unknown) => JSON.stringify(value, null, 1)),
     async execute(args: { query: string; scope?: string; maxTokens?: number }, exec: ToolRunContext) {
@@ -1217,6 +1229,15 @@ export function buildChaptersTools(
 return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand, restoreCommand }
 }
 
+/**
+ * The realm-side registrar (#330): the seven `chapters_*` tools and the three
+ * continuation door commands mount on the plane that requested them — ONLY the
+ * `chapters-tools` row inside the preset composition calls this, from
+ * `src/tools-row.ts`. The host plane never calls it: a tool registered on the host
+ * plane rides EVERY session's request whatever preset composes (measured in the #319
+ * e2e logs as `chapters_*` schemas inside `standard`-preset headers), which is the leak
+ * #330 exists to close.
+ */
 export function registerChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
@@ -1234,11 +1255,10 @@ export function registerChaptersTools(
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
   if (commands?.register !== undefined) {
     try {
-      // Both deterministic doors register on the same seam. Keep EVERY disposer: a loop
-      // that overwrote `disposeCommand` would leak the first registration and unregister
-      // only whichever door was added last.
+      // Keep EVERY disposer: a loop that overwrote `disposeCommand` would leak the
+      // first registration and unregister only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand, built.restoreCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }
@@ -1252,4 +1272,32 @@ export function registerChaptersTools(
   // reordered the line. Semicolons, since this is the unload path a test cannot cover.
   return () => { disposeSegment(); disposeContinue(); disposeFork(); disposeSearch();
     disposeArtifact(); disposeRulePropose(); disposeRules(); disposeCommand?.() }
+}
+
+/**
+ * The host-side registrar (#330): `/chapters-repair` and `/chapters-restore` stay
+ * operator-side so a broken chapters archive is fixable FROM ANY SESSION — a poisoned
+ * chapters child may not compose its realm at all, and the restore door (#319) is the
+ * documented way in. Command text is not a model prompt surface; these registrations
+ * are human reach, not agent attention, which is the line #330 draws.
+ */
+export function registerChaptersRepairRestore(
+  ctx: ToolsCtx,
+  store: RegistryStore,
+  config: ToolsConfig,
+): () => void {
+  const built = buildChaptersTools(ctx, store, config)
+  const disposers: Array<() => void> = []
+  const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register !== undefined) {
+    try {
+      for (const def of [built.repairCommand, built.restoreCommand]) {
+        const disposer = commands.register(def)
+        if (typeof disposer === 'function') disposers.push(disposer as () => void)
+      }
+    } catch (error) {
+      ctx.logger?.warn?.(`dsh-chapters: repair/restore command registration failed (${String(error)})`)
+    }
+  }
+  return () => { for (const d of disposers) d() }
 }

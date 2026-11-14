@@ -1,7 +1,7 @@
 # Tape provenance — `plans` project
 
-**Distilled 2026-10-28** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
-Last recorded verdict: exit 0, 3 tape entries.
+**Distilled 2026-11-14** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
+Last recorded verdict: exit 0, 5 tape entries.
 
 - **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41738, threshold 0.99, arrival floor (realm default), auxiliary model calls off.
   The boot and every worker read those pins; replay boots the SAME regime, or the tape means

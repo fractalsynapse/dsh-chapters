@@ -35,8 +35,8 @@ test('a single indivisible event is NOT a refusal: it archives whole and warns',
   assert.equal(out.indivisible.length, 1)
   const w = out.indivisible[0]!
   assert.match(w, /ONE indivisible event \(seq 16027\)/, `the event is named: ${w}`)
-  assert.match(w, /77903 est tokens/)
-  assert.match(w, /ceiling 16000/, 'with the number it exceeded')
+  assert.match(w, /ONE indivisible event/)
+  assert.match(w, /chapter ceiling \(16000 = chapterTokenTarget 8000 × 2\)/, 'with the artifact ceiling it exceeded (#330: the number is the CHAPTER limit, never a session gauge)')
   assert.match(w, /archived whole/, 'and what actually happened')
   assert.match(w, /read offset\/limit/, 'plus how to get it back — a chapter larger than the window is only honest with a reload recipe')
   assert.match(w, /clipping is forbidden/, 'and the invariant it respects')

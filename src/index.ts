@@ -11,8 +11,11 @@
  *     (`src/preset.ts`). The old `$DSH_HOME/.agent-presets/` directory copy is
  *     gone — no 0.2.x host reads it, and shipping the row as a patch layer instead
  *     breaks the boot of every pre-0.1.7 host (measured; docs/contract.md).
- *  2. Open the dsh_chapters storage domain and register chapters_segment /
- *     chapters_continue (src/tools.ts adapts them to the pure core).
+ *  2. Open the dsh_chapters storage domain, register the OPERATOR command surface, the
+ *     prompt bar, and the repair/restore doors (src/tools.ts adapts the pure cores).
+ *     The MODEL surface — the seven `chapters_*` tools and the three continuation doors —
+ *     mounts in-realm through `src/tools-row.ts` (#330): a host-plane tool registration
+ *     rides every session's request whatever preset composes it.
  *  3. Witness/dev diagnostics.
  *
  * Protocol notes (each measured, docs/contract.md):
@@ -29,7 +32,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { appendChapters, reserve } from './registry.ts'
 import { acquireChapterStore, makeDomainStore, resolveStoreRoot} from './store.ts'
 import type { ChapterRecord } from './archive.ts'
-import { registerChaptersTools, type ToolsConfig } from './tools.ts'
+import { registerChaptersRepairRestore, type ToolsConfig } from './tools.ts'
 import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLike } from './preset.ts'
 import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
@@ -824,7 +827,13 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       },
       enrich,
     }
-    registerChaptersTools(ctx as never, store, toolsConfig)
+    // #330: the seven tools and the three continuation doors mount IN-REALM
+    // (src/tools-row.ts, row id `chapters-tools` in the bundle patch) — a host-plane
+    // `ctx.tools.register` rides every session's request whatever preset composes,
+    // which is how standard-preset agents started policing a context the plugin owns.
+    // The host plane keeps only the operator doors: repair/restore must be reachable
+    // from any session, including a broken chapters child that cannot compose its realm.
+    registerChaptersRepairRestore(ctx as never, store, toolsConfig)
     registerHostCommands(ctx as never, domain, {
       artifactStoreRoot: config.artifactStoreRoot,
       subagentAutoSave: config.subagentAutoSave,
@@ -1135,10 +1144,17 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
  * archive event finds a project record, so nothing network-shaped runs
  * before anything archives.
  */
+/** The keys `createScheduler` reads. The host `Config` satisfies it, and so does the
+ *  #330 realm row's narrower config (`src/tools-row.ts`) — one scheduler factory,
+ *  two planes, one structural contract. */
+export type SchedulerConfig = Pick<Config,
+  'artifactStoreRoot' | 'knowledgeRemote' | 'knowledgeProvider' | 'projectKeyOverride'
+  | 'syncDebounceMs' | 'vocabApply' | 'vocabCoMin' | 'vocabOverlapMin' | 'harnessId'>
+
 export function createScheduler(
   store: import('./store.ts').RegistryStore,
   domain: import('./store.ts').DomainLike,
-  config: Config,
+  config: SchedulerConfig,
   debounceOverride?: number,
   onSyncDone?: (cwd: string, ok: boolean) => void,
   warn?: (m: string) => void,

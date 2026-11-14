@@ -260,7 +260,7 @@ test('the plans block is COUNTED by the budget gate — no measurement exemption
     refusal = refusalResult(error)
   }
   assert.ok(refusal, 'refused, not clipped')
-  assert.match(refusal.reason ?? '', /continuation over budget: notice ~\d+ tokens > allowance \d+/, 'refuse WITH the numbers')
+  assert.match(refusal.reason ?? '', /continuation over budget: the notice is ~\d+ tokens against an allowance of \d+/, 'refuse WITH the numbers')
   assert.equal(refusal.budget?.usedTokens, withPlans)
   assert.ok((refusal.budget?.allowanceTokens ?? 0) < withPlans)
 

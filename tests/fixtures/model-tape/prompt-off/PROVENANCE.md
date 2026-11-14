@@ -1,6 +1,6 @@
 # Tape provenance — `prompt-off` project
 
-**Distilled 2026-10-28** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
+**Distilled 2026-11-14** against host `0.2.0-rc.2` (`dev/dsh-host-lock`).
 Last recorded verdict: exit 0, 2 tape entries.
 
 - **Regime as recorded (from `tests/e2e/rig-pins.ts`, the single authority):** port 41740, threshold 0.9, arrival floor (realm default), auxiliary model calls off.
