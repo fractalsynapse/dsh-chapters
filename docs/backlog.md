@@ -1,5 +1,21 @@
 # Open items — 2026-10-23 (host 0.2.0-rc.2)
 
+- **#330 — chapters tools in-realm + the model never measures its own context (2026-11-14, IN FLIGHT toward 0.2.32).**
+  Two shipped changes: the seven `chapters_*` tools and the three continuation doors mount through a
+  `chapters-tools` row INSIDE the preset composition (the host-plane registration rode every preset's request —
+  the #319 e2e logs measured `chapters_*` schemas inside `standard` headers), and the model-visible prose lost its
+  context gauges (per-result byte/token dumps, `budgetHint`, the arrival stub's `≈ N tok`/`NOT elsewhere in this
+  context`, TOC bullets' `(N est tokens)`, window arithmetic in refusal reasons); a new doctrine gate
+  (`tests/unit/no-pressure-language.test.ts`) reads the prompt-anchor surface plus the runtime templates and refuses
+  their return. The eager realm acquire also exposed a real race in `acquireChapterStore` (reserved-but-uncommitted
+  window) — now adopted with a bounded retry. OPEN when this bullet was written: the full 11-leg corpus re-distill
+  against the new bytes, replay green, `corpus:stamp`, then the PR. Follow-ups deliberately NOT in this issue:
+  (1) the client *Fork/Continue with chapters* buttons still render on non-chapters sessions and now surface the
+  host's unknown-command note — gate them on the session preset if the note proves unfriendly;
+  (2) the model-proxy `(N est tokens)` mask is dead for new recordings — retire it once the corpus anchor moves;
+  (3) a live negative leg (a standard-preset boot dumping its tool header) would prove cross-preset absence on a
+  real host instead of by construction + row tests.
+
 - **A live run must not have its tree changed under it — measured against myself (#143).** While a `heavy` live run was in
   flight I stashed its spec change and switched branches to send a docs PR. Playwright loads a spec at worker start, so the
   run in flight may have executed either version, and nothing in its output distinguishes them (the report header label was

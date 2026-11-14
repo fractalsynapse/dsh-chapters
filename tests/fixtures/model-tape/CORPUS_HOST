@@ -14,8 +14,8 @@ host = 0.2.0-rc.2
 # host this branch pins (dev/dsh-host-lock) — mismatch above is tracked by:
 pinned = 0.2.0-rc.2
 tracking = https://github.com/fractalsynapse/dsh-chapters/issues/56
-distilledAt = 2026-10-27
-reason = re-distilled 2026-10-23 under the PINNED hermetic host (`dev/dsh-host-lock`, booted by absolute
-path and recorded per boot as hostPinned=true) after closing the gate when the previous corpus proved to
-be distilled against a linked dev build (#89). One rig behavior: pin table, per-boot mirror, per-press
-delivery, window enforced in record AND replay.
+distilledAt = 2026-11-14
+reason = re-anchored 2026-11-14 for #330 under the PINNED hermetic host: tools mounted in-realm (chapters-tools row),
+model-visible prose purged of context gauges, the arrival/admission/stub byte families changed, and the annotate-prompt
+title line masked (#331 — a run-scheduling fact, HOSTPORT family). All eleven replay legs green on the final build,
+each under its own boot; BUILD_STAMP written on that point.

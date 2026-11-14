@@ -211,6 +211,17 @@ const VOLATILE: Array<[RegExp, string]> = [
   // family as (N est tokens) and the omitted-char markers: the line
   // identifies the chapter; the counts are not matching material.
   [/\d+ user \/ \d+ assistant messages?/g, '<MSGCOUNT>'],
+  // ANNOT-TITLE collapse (#331, found re-anchoring for #330, 2026-11-14): the
+  // enrich ladder's annotate prompt embeds `CURRENT TITLE: <the session title at
+  // drain time>` — and the title depends on whether the fork door's ASYNC rename
+  // landed before the drain, a pure scheduling race of the port-keyed rig. Measured:
+  // record ran `CURRENT TITLE: What does the read tool do? …`, replay ran
+  // `# Continuation: … — branch (1)` — the annotate request diverged at char 1280,
+  // missed every stored prefix, the ladder got no answer and the `generated:` marker
+  // never landed. Same family as HOSTPORT-BLIND and MSGCOUNT: a run-scheduling fact,
+  // never product content — the prompt IDENTIFIES the chapter by the body that follows,
+  // and the annotator re-derives a title anyway.
+  [/CURRENT TITLE:[^\n]*/g, 'CURRENT TITLE:<TITLE>'],
   // CH-ORDINAL collapse (2026-09-29, hosted fanout run): a continuation TOC
   // cites `chapters/NNN-<slug>.md`; NNN is a DERIVED COUNTER — how many
   // chapters the session had written when this compaction fired. The fanout

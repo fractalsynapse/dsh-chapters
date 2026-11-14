@@ -59,8 +59,21 @@ export function renderPinnedPreset(shipped: string, pins: RealmPin): string {
   }
   const block = lines.slice(start, end).map((l) => (l.startsWith(' '.repeat(4)) ? l.slice(4) : l))
   const out: string[] = []
+  // #330: the in-realm `chapters-tools` row carries its own store root (the two planes
+  // share no config channel — docs/contract.md § Tools). Exactly one `artifactStoreRoot:`
+  // line exists in the SHIPPED block (this row's — the engine's is an inserted extra
+  // below, never a loop input), and the counter makes a silent miss loud: a door pinned
+  // to nothing writes into the developer's store, which is the #56 class of failure.
+  let toolsRowStoreRewrites = 0
   for (const raw of block) {
     let l = raw
+    if (pins.artifactStoreRoot !== undefined && /^\s+artifactStoreRoot:\s*\S/.test(l)) {
+      const ind = /^ +/.exec(l)![0]
+      l = `${ind}artifactStoreRoot: '${pins.artifactStoreRoot}'`
+      toolsRowStoreRewrites += 1
+      out.push(l)
+      continue
+    }
     // the engine row carries the realm's compaction/arrival/enrichment config: everything the
     // rig's pins are about. Insert pins right after its `thresholdRatio:` line.
     if (/^\s+- id: chapters-engine\s*$/.test(l)) { out.push(l); continue }
@@ -85,6 +98,9 @@ export function renderPinnedPreset(shipped: string, pins: RealmPin): string {
       continue
     }
     out.push(l)
+  }
+  if (pins.artifactStoreRoot !== undefined && toolsRowStoreRewrites !== 1) {
+    throw new Error(`cordis.patch.yml: expected exactly one shipped artifactStoreRoot line on the chapters-tools row to pin, found ${String(toolsRowStoreRewrites)} — the #330 realm tool row moved or a second store root appeared (#330; #56's lesson)`)
   }
   return out.join('\n')
 }

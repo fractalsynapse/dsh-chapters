@@ -107,7 +107,12 @@ export async function applyArrivalStubs(session: ArrivalSessionShim, opts: Arriv
       // disk problem must never eat the conversation (loud via detail).
       return { stubbed, detail: `artifact write failed (${String((error as Error)?.message ?? error)}); ${stubbed} node(s) stubbed before the failure` }
     }
-    const stub = `${ARRIVAL_MARKER} ${hash.slice(0, 12)}] ${kb(text.length)} ≈ ${tokens} tok stored at ${rel} — query it with chapters_artifact (path '${rel}' or the sha): action 'toc' for the heading map with line numbers, 'search' for term hits as small blocks, 'read' for exact line ranges. The full result is NOT elsewhere in this context; re-running the original tool only recreates it.`
+    // #330: the reference line states where the bytes ARE, never a token estimate of
+    // what was taken out — "≈ N tok … NOT elsewhere in this context" was the single
+    // most-seen fuel-gauge string on the surface, stamped at every large result. The KB
+    // figure is a property of the FILE (deciding to reload it); the token count of the
+    // session was never the model's to read.
+    const stub = `${ARRIVAL_MARKER} ${hash.slice(0, 12)}] ${kb(text.length)} stored at ${rel} — query it with chapters_artifact (path '${rel}' or the sha): action 'toc' for the heading map with line numbers, 'search' for term hits as small blocks, 'read' for exact line ranges. The file holds the complete text; nothing else repeats it, and re-running the original tool only regenerates it.`
     // the stub goes back in the shape it arrived: nested wrappers keep their `content` blocks,
     // flattened v4 blocks keep their own `text` and their `type: 'text'` — a replacement that
     // changed the block type would be a new shape assumption on the read side.

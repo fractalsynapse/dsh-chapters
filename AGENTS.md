@@ -89,9 +89,23 @@ behavior. Check those facts against the exact host under investigation.
    door. The [birth contract](docs/contract.md) and [plan rules](docs/plans-carriage.md)
    hold the version-specific details.
 3. **Keep the TOC per continuation.** Never contribute a process-global system prompt
-   section. This is a scope rule. Cache effects require measurement.
+   section, and never register a process-global tool or model-visible command: the
+   chapters tools and door commands mount inside the chapters preset realm — a
+   host-plane tool registration rides every session's request whatever preset it
+   composes (#330, measured). This is a scope rule. Cache effects require measurement.
 4. **Render chapter bodies from the durable log.** The model proposes ranges, titles,
    summaries and sparse tool result overrides. The plugin renders the archived text.
+
+## The Model Never Measures Its Context
+
+The model has no readable gauge of its own context usage; handing it estimates teaches it
+to guess, and it then steers by the guess (#330). No agent-visible string — tool or
+parameter description, tool payload prose, continuation notice, TOC line, arrival stub —
+may state the model's context window, its fill, or a token estimate of the live session.
+The plugin keeps its own measurements: notice-size admission refuses with numbers, chapter
+targets and deferral floors are ours. State such numbers as properties of the artifact the
+plugin is writing, never as pressure the model must feel. Diagnostics sinks and human
+command output are exempt from this rule.
 
 ## Data Flow
 

@@ -323,9 +323,13 @@ export async function runContinue(
     ...(config.callArgArtifactTokens !== undefined ? { callArgArtifactTokens: config.callArgArtifactTokens } : {}),
   }
   const rendered = args.chapters.map((range) => renderChapter(below, range, renderConfig, args.toolResultOverrides, chapterTopics(below, range.startSeq, range.endSeq)))
+  // #330: the over-target warning names the CHAPTER (the artifact just written), never a
+  // token figure of the session — the model's lever here is "propose more ranges next
+  // time", and the chapter's identity is enough to act on. The size itself is the
+  // plugin's measurement, kept for the human door text and the stats.
   warnings.push(...rendered
     .filter((r) => r.stats.overTarget)
-    .map((r) => `chapter "${r.range.title}" is ${r.stats.estimatedTokens} est tokens over chapterTokenTarget — split at the next continuation, never clip`))
+    .map((r) => `chapter "${r.range.title}" came out larger than its target — split it across more chapters at the next continuation, never clipped`))
   // Same hard ceiling as the save door (#59), same ordering: refuse before anything is reserved.
   const oversize = oversizeRanges(rendered, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
   // A single indivisible event is not a refusal: it is delivered as a warning so the human can see the
@@ -566,11 +570,15 @@ async function finishChild(
     ratio: config.continuationBudgetRatio,
   })
   if (!budget.ok) {
+    // #330: refusal-with-numbers stays (AGENTS Data Flow) — but the numbers size THE
+    // NOTICE, the artifact being written. The admission inputs (window, header bound)
+    // measure the live session and stay in `budget.budget` for the human door text and
+    // the logs; the agent is never shown a gauge it cannot read for itself.
     throw new Refusal({
       ok: false,
       reason: budget.budget.windowTokens === null
-        ? 'cannot resolve the model context window for this caller — refusing to create an unbounded continuation (check agentDefaultModel selection / adapter metadata)'
-        : `continuation over budget: notice ~${budget.budget.usedTokens} tokens > allowance ${budget.budget.allowanceTokens} (${config.continuationBudgetRatio} × (window ${budget.budget.windowTokens} − header bound ${budget.budget.headerBoundTokens ?? 'unmeasured'})). Shorten the handoff note or split the archive.`,
+        ? `continuation cannot be admitted: no model route for this caller to size the notice against — retry once, and if it persists ask the human to check the session's model selection (nothing was created)`
+        : `continuation over budget: the notice is ~${budget.budget.usedTokens} tokens against an allowance of ${budget.budget.allowanceTokens} for this route — shorten the handoff note or split the archive.`,
       budget: budget.budget,
       warnings,
     })

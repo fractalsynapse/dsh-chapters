@@ -71,7 +71,7 @@ function world(events: Ev[]) {
   return { built, exec: { agent: caller }, tmp }
 }
 
-test('segment reports the plan, its verdict and its size — facts, never text', async () => {
+test('segment reports the plan and its verdict — facts, never text, never gauges (#330)', async () => {
   const { built, exec } = world([
     human(0, 'design the carriage feature'),
     ev(1, 'plan/mode', { active: true }),
@@ -89,7 +89,9 @@ test('segment reports the plan, its verdict and its size — facts, never text',
   assert.equal(plans[0]!.status, 'approved')
   assert.equal(plans[0]!.resultSeq, 3)
   assert.equal(plans[0]!.title, 'Carry the plan into chapters')
-  assert.ok(typeof plans[0]!.bytes === 'number' && (plans[0]!.bytes as number) > 40)
+  // #330: the plan row carries FACTS (seq/status/outline/verdict) — the size numbers
+  // (bytes/estimatedTokens) left the model-visible payload with the rest of the gauges.
+  assert.ok(!('bytes' in plans[0]!) && !('estimatedTokens' in plans[0]!), 'no size gauges on plan rows')
   assert.deepEqual(plans[0]!.outline, ['Goal'])
   assert.match(String(plans[0]!.verdict), /approved/i)
   assert.ok(Array.isArray(r.livePlans) && (r.livePlans as unknown[]).length === 0, 'nothing above the ceiling')
