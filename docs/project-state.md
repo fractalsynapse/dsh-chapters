@@ -11,6 +11,46 @@ history of a decision, not before every task.** The rules that lived inside it a
 ---
 
 ## Start Here
+## 2026-11-14 — #330: the tools go where the user pointed, and the agent stops reading gauges (shipped in 0.2.32)
+
+**The defect, measured.** The `chapters_*` tools registered on the HOST plane, and a host-plane tool
+rides EVERY session's request whatever preset composes — the #319 diagnostics' own logs showed the
+`chapters_*` schemas inside `standard`-preset headers with the chapters persona absent. Agents on
+presets that never chose chapters read an archive/context vocabulary in every prompt, obeyed the
+`chapters_rules` "run me before every task" description, and talked about their context window.
+Independently, the prose handed every chapters agent fuel gauges it cannot verify (arrival stub
+`≈ N tok … NOT elsewhere in this context`, per-result `estimatedTokens`/`budgetHint`, TOC bullets'
+`(N est tokens)`, `window × ratio − header` in refusal reasons) — and they steered by the guess.
+
+**The change.** (1) A `chapters-tools` realm row (`src/tools-row.ts`, export `./tools-row`) mounts
+the seven tools and the three continuation doors inside the `preset-chapters` composition — the host's
+own `dsh-tool-fs`/`dsh-tool-subagent` pattern; the host plane keeps only operator reach
+(`/chapters-repair`, `/chapters-restore`, commands/prompt-bar/settlement), because a poisoned child may
+not compose its realm (#319's way in must exist). Maintainer ruling: other presets lose the doors too.
+(2) The prose purge, now doctrine (AGENTS § The Model Never Measures Its Context) with a gate row that
+fails the build if the gauges return (`tests/unit/no-pressure-language.test.ts`): one shared predicate
+`defersAtArchive()` replaces per-result size dumps with a boolean, the stub cites the file not the
+cost, TOC summaries count messages, and the model-visible budget receipt shrinks to the notice's own
+size against its allowance — refuse-with-numbers survives because it sizes the artifact being written.
+
+**Found by the boot, not the unit.** The eager realm acquire raced `apply()`'s domain open — the
+facility reserves a name before awaiting the backend and commits it after, so the second opener saw
+`already-open` with nothing adoptable and the preset came back **DECLARED BUT BROKEN — chapters-tools**
+(first fork distill, 2026-11-14). `acquireChapterStore` now retries the adoption window bounded and
+re-raises the original error if the reservation never resolves; `acquire.test.ts` pins all arms.
+
+**Evidence, by class.** Deterministic: typecheck/build green, `ci-gate.sh` green (1491 tests, 0 fail —
+1 standing expected TODO; coverage 91.6/85.11/86.82/91.6) on the sealed tree. Pinned-host tape: full
+11-leg re-distill and a **chain-replay 11/11 green both locally and on GitHub runners**, each leg under
+its own boot; stamped `promptAnchor d3757708405049ee` / `lib 1e6ba9b1cdb4cdac`, CORPUS_HOST re-anchored
+2026-11-14. Integrated to staging as #332 (head `f3e7a78`). The re-anchor surfaced the `enrich`
+annotate-title nondeterminism — the annotate prompt embeds the async-renamed session title, so record
+and replay diverge by construction; masked per the HOSTPORT/MSGCOUNT family, deeper fix stays open as
+#331. A rig incident, recorded honestly: a symlink mistake of mine while building a control worktree
+clobbered `var/ms-playwright` mid-session (two apparent enrich failures were that, not the product);
+browsers were reinstalled via the documented path and every affected leg re-run. Installed-package
+smoke and live-host verification of 0.2.32 stay OPEN claims until the tag ships.
+
 ## 2026-10-22/23 — the host 0.2.0-rc.2 acceptance sweep (#56)
 
 **What actually happened, in order.** The pinned host moved to 0.2.x; the tape corpus stayed at
