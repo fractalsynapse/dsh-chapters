@@ -246,6 +246,20 @@
               sampleOverCapGlobResults: false
           - id: tool-jobs
             name: '@deepseek-ai/dsh-tool-jobs'
+          # OURS (#330): the seven `chapters_*` tools + the three continuation door
+          # commands, mounted IN-REALM so only a chapters session composes them. A
+          # host-plane `ctx.tools.register` rides EVERY session's request whatever
+          # preset composes (measured: `chapters_*` schemas in `standard` headers) — that
+          # is the leak this row closes. Repair/restore stay host-plane (operator reach
+          # into a broken archive). src/tools-row.ts.
+          - id: chapters-tools
+            name: '@fractalsynapse/dsh-chapters/tools-row'
+            config:
+              # The rig rewrites THIS line per boot (tests/e2e/rig-preset-pin.ts), the
+              # same way it pins the engine row's `artifactStoreRoot` — a profile that
+              # retunes any other row key sets it beside this one; every unset key
+              # keeps the default declared in src/tools-row.ts.
+              artifactStoreRoot: '.dsh-chapters'
           - id: tool-schedule
             name: '@deepseek-ai/dsh-tool-schedule'
           - id: skill-filesystem

@@ -1217,6 +1217,15 @@ export function buildChaptersTools(
 return { segment: chaptersSegment, chaptersContinue, chaptersFork, chaptersSearch, chaptersArtifact, chaptersRulePropose, chaptersRules, forkCommand, continueCommand, saveCommand, repairCommand, restoreCommand }
 }
 
+/**
+ * The realm-side registrar (#330): the seven `chapters_*` tools and the three
+ * continuation door commands mount on the plane that requested them — ONLY the
+ * `chapters-tools` row inside the preset composition calls this, from
+ * `src/tools-row.ts`. The host plane never calls it: a tool registered on the host
+ * plane rides EVERY session's request whatever preset composes (measured in the #319
+ * e2e logs as `chapters_*` schemas inside `standard`-preset headers), which is the leak
+ * #330 exists to close.
+ */
 export function registerChaptersTools(
   ctx: ToolsCtx,
   store: RegistryStore,
@@ -1234,11 +1243,10 @@ export function registerChaptersTools(
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
   if (commands?.register !== undefined) {
     try {
-      // Both deterministic doors register on the same seam. Keep EVERY disposer: a loop
-      // that overwrote `disposeCommand` would leak the first registration and unregister
-      // only whichever door was added last.
+      // Keep EVERY disposer: a loop that overwrote `disposeCommand` would leak the
+      // first registration and unregister only whichever door was added last.
       const commandDisposers: Array<() => void> = []
-      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand, built.repairCommand, built.restoreCommand]) {
+      for (const def of [built.forkCommand, built.continueCommand, built.saveCommand]) {
         const disposer = commands.register(def)
         if (typeof disposer === 'function') commandDisposers.push(disposer as () => void)
       }
@@ -1252,4 +1260,32 @@ export function registerChaptersTools(
   // reordered the line. Semicolons, since this is the unload path a test cannot cover.
   return () => { disposeSegment(); disposeContinue(); disposeFork(); disposeSearch();
     disposeArtifact(); disposeRulePropose(); disposeRules(); disposeCommand?.() }
+}
+
+/**
+ * The host-side registrar (#330): `/chapters-repair` and `/chapters-restore` stay
+ * operator-side so a broken chapters archive is fixable FROM ANY SESSION — a poisoned
+ * chapters child may not compose its realm at all, and the restore door (#319) is the
+ * documented way in. Command text is not a model prompt surface; these registrations
+ * are human reach, not agent attention, which is the line #330 draws.
+ */
+export function registerChaptersRepairRestore(
+  ctx: ToolsCtx,
+  store: RegistryStore,
+  config: ToolsConfig,
+): () => void {
+  const built = buildChaptersTools(ctx, store, config)
+  const disposers: Array<() => void> = []
+  const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register !== undefined) {
+    try {
+      for (const def of [built.repairCommand, built.restoreCommand]) {
+        const disposer = commands.register(def)
+        if (typeof disposer === 'function') disposers.push(disposer as () => void)
+      }
+    } catch (error) {
+      ctx.logger?.warn?.(`dsh-chapters: repair/restore command registration failed (${String(error)})`)
+    }
+  }
+  return () => { for (const d of disposers) d() }
 }
