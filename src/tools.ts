@@ -761,6 +761,30 @@ export function buildChaptersTools(
         if (out.skipped === 'nothing-new') {
           return { kind: 'success' as const, text: `Nothing to save: all ${out.priorChapters} chapter(s) already archived through seq ${out.lastArchived}. Content is searchable via chapters_search.` }
         }
+        // #344: an EXHAUSTIVE refusal arm, not one `if` per known reason. `oversize` and `payloadless`
+        // both fell through to the success line below, so the real run on eadc — `skipped='oversize'`,
+        // `records=0` — printed "Saved: 0 chapter(s) archived … Enrichment queued." A refusal read as a
+        // success, on the door whose whole job is to say what was archived. Handling the reason
+        // generically means a NEW skip reason cannot silently inherit the success wording; that is how
+        // this happened twice over, and a per-case list is how it happens a third time.
+        if (out.skipped !== null && out.records.length === 0) {
+          const why: Record<string, string> = {
+            oversize: 'a chapter is too large to archive whole even after subdividing at every event boundary',
+            payloadless: 'the event read carried shapes but no payloads, so nothing could be archived',
+            'no-completed-turn': 'the conversation has no completed turn yet',
+          }
+          const detail = out.warnings.length > 0
+            ? `\n  ${out.warnings.join('\n  ').slice(0, 900)}`
+            : ''
+          return {
+            kind: 'error' as const,
+            text: `chapters-save: NOTHING archived — refused (${why[out.skipped] ?? `reason: ${out.skipped}`}) for seqs ${out.fromSeq}..${out.anchor}.`
+              + `\n  Ceiling: chapterTokenTarget ${String(config.chapterTokenTarget)} × chapterOversizeFactor ${String(config.chapterOversizeFactor ?? 2)}.`
+              + ' Raise either knob, or archive the range with chapters_continue (model-chosen boundaries), which may cut inside a turn.'
+              + detail
+              + '\n  Nothing was reserved, so no chapter number was spent.',
+          }
+        }
 
         // Schedule enrichment asynchronously — do NOT await. Enrichment calls
         // the LLM per chapter and can exceed the command timeout. The idle and

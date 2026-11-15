@@ -108,6 +108,36 @@ Division of labour:
   a range is refused with its own number, on every door including compaction: the field produced an
   89,982-token chapter, an unrepaired 237,870-token orphan, and eleven chapters over 32K — against a
   8K target and 32K-class hardware. A chapter that cannot be re-read is not an archive.
+- **Subdivide before refusing, by size — and report a refusal as one** (#344). That refusal was being
+  reached by default in the deterministic doors, because `deriveRanges`/`composeChapters` emit one chapter
+  per **turn** and real opening turns are large. Measured with the shipped functions on three real logs:
+  eadc refused **2 of 3** turns, platfolio 55 of 153, arcnexus 32 of 308 — and in every log the refused
+  range was the session's **opening** turn, the one a later continuation most needs. So `/chapters-save`,
+  `/chapters-fork`, subagent settlement and forced-child archive could not archive real sessions; only
+  model-driven `chapters_continue` could. Worse, the tool had no `oversize` case, so the run on eadc
+  printed **"Saved: 0 chapter(s) archived … Enrichment queued."** — a success line for a refusal.
+
+  1. `splitOversize` now runs on **every** deterministic door (it sat inside the repair-only
+     `a.span !== undefined` arm) and packs greedily against `chapterTokenTarget`, cutting only **between
+     events**. Equal-*count* chunking — the previous form — left 42 of 121 eadc parts over the ceiling on
+     real, unevenly-sized turns while its own note claimed a split had happened. Same three logs after:
+     **0 refused** (275 / 3,248 / 3,081 parts). Packing targets the *target*, not the refusal *ceiling*,
+     because the splitter measures an event-payload proxy while the gate measures **rendered** markdown and
+     the proxy runs low.
+  2. The door branches on `skipped !== null && records.length === 0` rather than on an enumerated list of
+     reasons — `oversize` and `payloadless` had both fallen through to the success wording, and a per-case
+     list is how that recurs. The message names the size, both knobs, whether a chapter number was spent,
+     and the alternative that can still work (`chapters_continue`).
+
+  One row in `title-predicate-and-floors.test.ts` changed, and it is a **contract change, not a test fix**:
+  its fixture is a single ~120 KB assistant event that no boundary choice can reduce. #117's escape valve
+  already decided an indivisible single event is archived whole with a loud warning rather than refused,
+  because refusing an atom makes a long session permanently un-compactable (measured there:
+  `chapters_continue` refused four times over one 77,903-token event). Before #344 the deterministic doors
+  never reached that valve — equal-count splitting kept the giant inside a multi-event chapter, so it
+  errored. Now they reach it: the chapter is archived, with a warning naming the size, the knobs and how to
+  reload it in slices. The property the old row guarded — an un-readable chapter must not pass silently —
+  is carried by the warning instead of by losing the session's whole opening turn.
 - **A title is chosen by the same predicate that screens bodies** (#59). Bodies use `injections.ts`
   (`source.kind`); title derivation sees provider messages with no source, so it carried its own
   regex — which drifted behind the host and let an injected `time-context` snapshot become a chapter
