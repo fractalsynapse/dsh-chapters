@@ -120,3 +120,41 @@ test('importing the stamp tool does not read, write, or exit the process (#156)'
   assert.equal(fs.readFileSync(stampPath, 'utf8'), before,
     'importing must not stamp, refuse, or rewrite the corpus — the CLI path belongs to `isCli`, not to the module' )
 })
+
+// ───────────────────────────────────────────── #362: comments are not model-facing bytes
+
+test('#362: editing a COMMENT in a manifest file cannot move the anchor', async () => {
+  // The regression this closes: `src/preset.ts` was hashed whole-file, so an apostrophe in JSDoc
+  // opened a quoted span running to the next quote and swallowed the code between them. Every one of
+  // that file's tokens was comment prose, and a comment-only edit moved `promptAnchor` (measured on
+  // #339: dd3f545d -> 37a2415b with the token count unchanged at 77) — declaring a green corpus stale.
+  const { extractTokens } = await import('../../scripts/prompt-anchor.mjs')
+  const src = fs.readFileSync('src/tools.ts', 'utf8')
+  const base = extractTokens('src/tools.ts', src)
+  // The mechanism, narrowed by mutation testing rather than assumed: the whole-file regex matched
+  // `'([^'\n]*)'`, so a bogus "literal" needs TWO apostrophes on ONE line — the text between them. One
+  // lone apostrophe is skipped and the digest is unchanged, which is why an earlier draft of this row
+  // (a comment with a single `host's`) passed against the broken extractor and proved nothing. Real JSDoc
+  // routinely carries two (`the host's … it's …`), which is exactly why #339's comment edit moved the anchor.
+  const commented = extractTokens('src/tools.ts', src.replace('export function', "// the host's own view: it's unchanged\nexport function"))
+  assert.deepEqual(commented, base, 'a pure comment insertion — with two apostrophes on one line — changes nothing the model sees')
+  // And the mutation the OTHER way still fires: a real description is a corpus change.
+  const literalChanged = extractTokens('src/tools.ts', src.replace(/description: '([^'\n]{20,})'/, "description: 'ZZZ rewritten tool description ZZZ'"))
+  assert.notDeepEqual(literalChanged, base, 'a rewritten description MUST move the anchor — this fix cannot pass by hashing nothing')
+})
+
+test('#362: preset.ts stays out of the manifest, and the reason is policed', async () => {
+  const { PROMPT_SURFACE, extractTokens } = await import('../../scripts/prompt-anchor.mjs')
+  assert.equal(PROMPT_SURFACE.includes('src/preset.ts'), false,
+    '#362 removed it: preset.ts holds no model-facing bytes (the persona is cordis.patch.yml prefix/suffix)')
+  // Tripwire. If someone later writes persona prose into that file, it must go BACK into the manifest —
+  // otherwise the anchor quietly stops covering bytes the model reads, which is the opposite failure.
+  const src = fs.readFileSync('src/preset.ts', 'utf8')
+  const modelFacing = extractTokens('src/preset.ts', src)
+  assert.deepEqual(modelFacing, [],
+    `src/preset.ts now contains model-facing literals (${JSON.stringify(modelFacing.slice(0, 3))}) — add it back to PROMPT_SURFACE (#362)`)
+  // Structural form of the same claim, independent of the extractor's key list:
+  const personaish = /\b(prefix|suffix|personaPrompt|systemPrompt|promptText)\s*:\s*['"`]/.exec(src)
+  assert.equal(personaish, null,
+    `src/preset.ts gained persona text (${personaish?.[0]}) — the manifest removal in #362 must be reverted`)
+})
