@@ -1,7 +1,7 @@
 # dsh-chapters bundle patch — ACTIVE: package.json declares this file as the
 # plugin's composition patch, applied when a profile adds the plugin. The YAML
 # below the comment block is functional; everything in this comment is the
-# complete configuration reference (kept in sync with src/index.ts and
+# configuration reference for the HOST plane (kept in sync with src/index.ts and
 # src/engine.ts — verified 2026-10-01 against both schemas, including the
 # 2026-09-21 transport keys). The site's §17 (Configuration) is the readable
 # authority; this header mirrors it.
@@ -77,11 +77,14 @@
 #                                  #   DSH_CHAPTERS_ENGINE_ERRORS overrides it; the literal 'off' is the
 #                                  #   only silence. Before this, unset meant NO TRACE ON DISK — the three
 #                                  #   SAIP compaction finalization failures left none.
-#   childAutoArchive: true           # the seventh archive moment (#61): a ch-* continuation child is not a
+#   childAutoArchive: true           # INERT HERE (#354) — this is a key of the preset's `chapters-engine`
+#                                  #   realm row (src/engine.ts), and the host Schema has no such key, so setting it in a
+#                                  #   profile's plugin config: block changes nothing. Set it on the row. The seventh archive moment (#61): a ch-* continuation child is not a
 #                                  #   subagent, so door 5 never sees it. `ch-dc3be3ab` reached 2,363
 #                                  #   events and 3 completed turns with chapters: [] — nothing failed,
 #                                  #   NO MOMENT WAS WATCHING. Set false to close this door.
-#   childAutoArchiveMinTurns: 4    # after the first archive, how many unarchived completed turns re-arm it
+#   childAutoArchiveMinTurns: 4    # INERT HERE (#354) — realm-row key, as above. After the first
+#                                  #   archive, how many unarchived completed turns re-arm it
 #                                  #   (the first archive always fires: never-archived is the defect).
 #   chapterOversizeFactor: 2       # hard oversize multiple of chapterTokenTarget (#59): over the
 #                                  #   TARGET warns ("split at the next boundary, never clip"), over
@@ -142,9 +145,9 @@
 #                                  # '' ⇒ the feature does not exist (zero calls,
 #                                  # zero surface); setting one IS the enable.
 #                                  # Runtime: /chapters-prompt model <p/m|clear>
-#   promptContextChars: 4000       # hard budget on the assembled input slice
+#   promptContextChars: 32000      # hard budget on the assembled input slice
 #                                  # (chapter summaries + screened live tail)
-#   promptMaxChars: 240            # cap on the recommendation; over-cap ⇒ retry
+#   promptMaxChars: 4096           # cap on the recommendation; over-cap ⇒ retry
 #                                  # once ⇒ refuse with numbers, never truncate
 #
 #   # ---- transport (2026-09-21 provider-seam amendment) -------------------
@@ -157,8 +160,16 @@
 #   treedxLeaseRetries: 3          # pull-retry budget when the lease is held
 #   treedxLeaseRetryDelayMs: 1000  # delay between lease retries
 #
+# Keys the HOST config: block accepts and IGNORES (#354) — they exist in the host Schema.object, so a
+# profile patch parses, but no host-plane code reads them (the exported Config interface omits them and
+# the `as Schema<Config>` cast hides that from tsc), and they are absent from the shipped realm row.
+# To retune one, set it on the `chapters-engine` row of the `preset-chapters` composition:
+#   knowledgeMirrorDir, noticeIndexCap, openRequestCarryMaxChars, lastResortArtifact
+#
 # Realm-row-only keys (in the preset's engine row, not this patch):
-#   harnessId, sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   sessionRulesEnabled, rulesMarkerPrefix, coreRulesBudgetTokens,
+#   (harnessId is NOT in this list — it is declared on both planes: the host Config and the
+#    realm row. #354 removed the misclassification.)
 #   enrichmentMaxTokens (4000 — one auxiliary completion budget; sized to cover
 #   reasoning tokens, since the measured route reports reasoning inside completion usage
 #   and does not enforce max_tokens)
