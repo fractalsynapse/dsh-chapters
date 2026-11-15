@@ -24,6 +24,19 @@ export interface SessionState {
   parentSession: string | null
   /** Root of the ancestry tree; the store directory key. Self for a root session. */
   rootSession: string
+  /**
+   * The workspace this session's relative chapter/artifact paths resolve against (#348).
+   *
+   * Registry rows store paths RELATIVE to the session workspace, but the registry itself is
+   * PER HOME — one `dsh_chapters.json` holding sessions from every project on the machine. Without
+   * the owning workspace on the row, a consumer that holds only registry bytes cannot resolve a path:
+   * resolving all 3,623 entries against the current workspace reported 1,431 (39%) as "missing" while
+   * resolving against each session's log-header cwd gave 3,620/3,623 present. Nothing was corrupt —
+   * the addressing was unattributable, and every repair/restore/remove/blob-GC path that iterates rows
+   * inherits the ambiguity. Optional because rows written before this carry no cwd; recovery for those
+   * stays the durable log, which is exactly what "recovery needs a surviving source" means.
+   */
+  cwd?: string | undefined
   /** Next unallocated chapter number for THIS author session. */
   nextChapterNumber: number
   /**
@@ -78,10 +91,11 @@ export interface SessionState {
   collections: CollectionSignature[]
 }
 
-export const freshSession = (sessionId: string): SessionState => ({
+export const freshSession = (sessionId: string, cwd?: string): SessionState => ({
   rev: 0,
   parentSession: null,
   rootSession: sessionId,
+  ...(cwd !== undefined && cwd !== '' ? { cwd } : {}),
   nextChapterNumber: 1,
   nextPlanNumber: 1,
   collections: [],
@@ -231,7 +245,22 @@ export function isRemovedChapter(c: { status?: 'superseded' | 'removed' | undefi
   return c.status === 'removed'
 }
 
-export function appendChapters(state: SessionState, records: readonly ChapterRecord[]): SessionState {
+/**
+ * Record the owning workspace on a row, if we now know it and it changed.
+ * Returns the SAME object when there is nothing to write, so an idempotent retry does not bump `rev`
+ * (the shared-row rule in store.ts depends on "no change means no write").
+ */
+export function stampWorkspace(state: SessionState, cwd: string | undefined): SessionState {
+  if (cwd === undefined || cwd === '' || state.cwd === cwd) return state
+  return { ...state, cwd }
+}
+
+export function appendChapters(
+  state: SessionState,
+  records: readonly ChapterRecord[],
+  /** The workspace the records' relative paths resolve against — stamped, never guessed (#348). */
+  cwd?: string,
+): SessionState {
   const byNumber = new Map(state.chapters.map((c) => [c.number, c]))
   const fresh: ChapterRecord[] = []
   for (const r of records) {
@@ -249,7 +278,8 @@ export function appendChapters(state: SessionState, records: readonly ChapterRec
     fresh.push(r)
     byNumber.set(r.number, r)
   }
-  return fresh.length === 0 ? state : { ...state, chapters: [...state.chapters, ...fresh] }
+  if (fresh.length === 0) return stampWorkspace(state, cwd)
+  return stampWorkspace({ ...state, chapters: [...state.chapters, ...fresh] }, cwd)
 }
 
 /**
