@@ -186,7 +186,7 @@ const chaptersContinue = defineTool({
 
 Register **in-realm** (#330, 0.2.32): the seven chapters tools and the three continuation door commands
 (`/chapters-fork`, `/chapters-continue`, `/chapters-save`) mount through a `chapters-tools` row
-(`@fractalsynapse/dsh-chapters/tools`) inside the `preset-chapters` composition — the same seam the host's
+(`@fractalsynapse/dsh-chapters/tools-row`) inside the `preset-chapters` composition — the same seam the host's
 own `dsh-tool-fs` and `dsh-tool-subagent` rows use — and the host plane registers none of them.
 `/chapters-repair` and `/chapters-restore` stay on the host plane: they are operator surfaces that must
 reach a broken chapters archive from any session, and human command text is not model-visible. The measured
