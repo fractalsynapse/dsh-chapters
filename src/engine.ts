@@ -38,7 +38,7 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
 import { lastResortCeilingTokens } from './last-resort.ts'
-import { extractPlot } from './engine-core.ts'
+import { extractPlot, summarizeProvenance } from './engine-core.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
 import type { SessionState } from './registry.ts'
@@ -279,6 +279,26 @@ function isPressureConfigRejection(error: unknown): boolean {
   const keyed = typeof e.targetKey === 'string' && e.targetKey.length > 0
   const labelled = typeof e.message === 'string' && /compaction-basic:|BasicCompactionConfig/.test(e.message)
   return (keyed && labelled) || (named && labelled)
+}
+
+/**
+ * #360 — the durable key under which the realm engine records foreign-engine compaction counts.
+ *
+ * Per session, in the shared settings table, because the host plane and the preset realm are SEPARATE
+ * module instances under isolation: a process-local map here would read permanently empty from
+ * `/chapters-status` — the exact "green signal that is not connected to the thing it certifies" this
+ * issue is about. Same channel idiom as `enrichment.route` (#330 notes the planes have no other
+ * cross-channel).
+ */
+export const foreignCompactionKey = (sessionId: string): string => `engine.foreignCompaction:${sessionId}`
+
+/** The shape stored under `foreignCompactionKey()`. */
+export interface ForeignCompactionFact {
+  foreign: number
+  ours: number
+  providers: string
+  total: number
+  at: string
 }
 
 export class ChaptersCompactionEngine extends BasicCompactionEngine {
@@ -1058,6 +1078,36 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     } catch { /* a report must never become the reason compaction failed */ }
   }
 
+  /** Sessions already warned about in this process — one line per session, never per compaction. */
+  static readonly #foreignWarned = new Set<string>()
+
+  /** #360 — count foreign-provider compaction summaries for this session and deliver the fact. */
+  #noteForeignEngines(agent: Agent): void {
+    try {
+      const session = (agent as unknown as { session?: EngineSession & { id?: string } }).session
+      if (session === undefined || typeof session.seq !== 'number') return
+      const prov = summarizeProvenance(session)
+      if (prov.foreign === 0) return
+      const id = String((session as { id?: string }).id ?? '?')
+      const fact: ForeignCompactionFact = {
+        foreign: prov.foreign, ours: prov.ours, total: prov.total,
+        providers: prov.foreignProviders.join(', '),
+        at: new Date().toISOString(),
+      }
+      // Fire-and-forget, but a delivered failure if it goes wrong (#61): a witness that cannot
+      // persist must say so rather than look like "no foreign compactions anywhere".
+      void this.store().then(({ store }) => store.putSetting(foreignCompactionKey(id), JSON.stringify(fact)))
+        .catch((err: unknown) => { diagnosticWarn(this.ctx.logger, 'realm:engine:provenance', `foreign-compaction fact could not be persisted for ${id}`, err) })
+      if (ChaptersCompactionEngine.#foreignWarned.has(id)) return
+      ChaptersCompactionEngine.#foreignWarned.add(id)
+      diagnosticWarn(this.ctx.logger, 'realm:engine:provenance',
+        `this chapters-preset session was compacted by ANOTHER engine: ${String(prov.foreign)} summary event(s) not provider=${CHAPTERS_PROVIDER} (seen: ${prov.foreignProviders.join(', ')}; seqs ${prov.foreignSeqs.slice(0, 6).join(',')}${prov.foreignSeqs.length > 6 ? ',…' : ''}). Our engine served ${String(prov.ours)}. The archive is not being written for these compactions — check that the chapters-engine row is enabled and ACTIVE in the composed preset. Full detail: /chapters-status.`)
+    } catch (error) {
+      // A witness must never be the reason compaction fails; but say that it degraded (#61).
+      diagnosticWarn(this.ctx.logger, 'realm:engine:provenance', 'provenance witness degraded — foreign-engine detection is OFF for this call', error)
+    }
+  }
+
   #noteDecision(where: string, trigger: unknown, result: CompactionResult | null, agent: Agent): void {
     // The INPUTS, not just the verdict: `decided: none` is one word covering two opposite bugs —
     // no routed target (the base returns null on line one) and under-threshold (a real decision).
@@ -1104,6 +1154,14 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // makes "is context relief wired at all?" answerable from a session log instead of inferred.
     diagnosticNote(this.ctx.logger, 'realm:engine:compact',
       `compactIfNeeded entered (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')})`)
+    // #360: a session composing the chapters preset may STILL be served by a foreign compaction
+    // engine (a disabled row, a mount that resolved but never activated, a preset the operator
+    // composed differently). The old behaviour was to skip those summaries in silence — the one
+    // place that looked at provenance did `continue`. Warn ONCE per session and record the count
+    // where /chapters-status can print it; deliberately NOT a refusal, because an operator may have
+    // disabled our engine row on purpose, and a loud truthful statement beats either silence or a
+    // hard failure that breaks their sessions.
+    this.#noteForeignEngines(agent)
     this.#observeRoute(agent)
     await this.#arrive(agent)
     // Finalization runs whether super resolves OR throws: the pressure retry
