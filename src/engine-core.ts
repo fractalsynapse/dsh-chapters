@@ -241,6 +241,49 @@ export function findOpenCompactionId(session: EngineSession): string | null {
 }
 
 /** All OUR finalized-or-not summary events (provider-tagged), oldest first. */
+/**
+ * Who actually served this session's compactions — #360.
+ *
+ * `scanChaptersSummaries` above answers a different question (which of OUR summaries to
+ * reconstruct) and answers it by `continue`-ing past every foreign one. That skip is the only place
+ * in the codebase that looks at summary provenance, which is why this needed an audit to discover:
+ * two real sessions labelled `agentPreset: "chapters"` were compacted entirely by the host's basic
+ * engine — 6 and 8 routed-LLM summaries with provider `qwen-token-plan`, zero chapters involvement,
+ * no TOC in any checkpoint, no store on disk — for a week, while every health signal stayed green.
+ *
+ * Counting is deliberately separated from reconstructing: the same fact answers "is my engine
+ * actually serving this preset's sessions?" and must not be inferred from the absence of our own
+ * summaries (a session that simply never compacted has none either, and that is not a fault).
+ */
+export interface SummaryProvenance {
+  /** Compactions this plugin's engine served (provider `dsh-chapters` or `-degraded`). */
+  ours: number
+  /** Compactions some OTHER engine served — the number that must be zero for a chapters session. */
+  foreign: number
+  /** Provider names seen on the foreign summaries, de-duplicated, for the report text. */
+  foreignProviders: string[]
+  /** Seqs of the foreign summaries, so a human can go read the one that fired. */
+  foreignSeqs: number[]
+  /** Total `compaction/summary` events, ours and theirs. */
+  total: number
+}
+
+export function summarizeProvenance(session: EngineSession): SummaryProvenance {
+  const acc: SummaryProvenance = { ours: 0, foreign: 0, foreignProviders: [], foreignSeqs: [], total: 0 }
+  for (let seq = 0; seq < session.seq; seq += 1) {
+    const ev = session.eventAt(seq)
+    if (ev?.type !== 'compaction/summary') continue
+    acc.total += 1
+    const provider = (ev.data as { provider?: unknown } | undefined)?.provider
+    if (typeof provider === 'string' && provider.startsWith(CHAPTERS_PROVIDER)) { acc.ours += 1; continue }
+    acc.foreign += 1
+    const name = typeof provider === 'string' && provider !== '' ? provider : '(no provider field)'
+    if (!acc.foreignProviders.includes(name)) acc.foreignProviders.push(name)
+    acc.foreignSeqs.push(seq)
+  }
+  return acc
+}
+
 export function scanChaptersSummaries(session: EngineSession): Array<{ compactionId: string; summarySeq: number; shadowedSeqs: number[] }> {
   const out: Array<{ compactionId: string; summarySeq: number; shadowedSeqs: number[] }> = []
   for (let seq = 0; seq < session.seq; seq += 1) {
