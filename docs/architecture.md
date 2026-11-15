@@ -288,6 +288,43 @@ is **going on**, authored while the model still holds the thread:
 - Invariant check: the model authors *state*, never archive text (invariant 4 intact); the note rides
   the replacement event append-only; every byte of the conversation still lives in chapters.
 
+## What a chapter contains: coverage is a decision, never a default (#346)
+
+The audit reported that ~75% of durable events never render into a chapter and asked for that to be
+fixed. Measured against three real production logs — **55,334 events across 35 distinct types** — the
+percentage was right and the implied conclusion was not: most of that mass is lifecycle bookkeeping an
+archive should not contain. What was actually missing was not coverage but **a record of which absences
+were chosen**, because "excluded" and "forgotten" were indistinguishable — and a new host event type
+would land in the same silent place as the interesting ones.
+
+`EXCLUDED_EVENT_TYPES` in `src/render.ts` is now that record: every type the renderer deliberately does
+not write, with the reason. The `default:` branch counts a type as unrendered **unless it is listed**, so
+judged silence is possible only where a reason is written down, and an unjudged type still surfaces in the
+existing *"N event(s) rendered no output"* warning. The asymmetry is the entire design.
+
+Three types did carry unique content and are now rendered:
+
+- **`command/run`** — a human invoking a slash command, with its arguments. Verified unique against every
+  user/assistant message and tool call/result in all three logs. AGENTS already requires "always preserve
+  invocations and arguments in the body"; a command invocation was the one invocation being dropped.
+- **`command/done`** — its outcome, because an invocation without its result is half a fact.
+- **`goal/change`** — the goal **ledger** as one compact fact (operation, revision, id, a 120-char prefix,
+  the seq). Not the objective text: that arrives as `<goal_round>` user messages, which render verbatim, so
+  a full copy would duplicate them. The ledger points; the round holds the bytes.
+
+And the most valuable finding here is a **negative** one, because it is the fix that must not be made.
+`agent/inbox/spliced` is 2.4% of all events with ~2 MB of payload — the single largest "uncovered" type,
+and the obvious candidate for a new case. Measured: **658 of 659** spliced messages are byte-identical to a
+`user/message` the renderer already writes. Rendering the channel would have duplicated two megabytes of a
+person's own words into every chapter that spans them, while making coverage look better. So it is excluded
+*by measurement*, and the row that pins the non-render carries the count.
+
+Consequences to keep in mind when extending this: an exclusion list makes the renderer quieter, and quieter
+is not the same as correct — so the gate (`tests/unit/render-coverage.test.ts`) checks coverage against the
+committed inventory of *observed* types, not against a hand-written list, rejects thin reasons, and asserts
+that an unlisted type still warns. Add a type to the table only with a reason that would survive being read
+in six months.
+
 ## The archive moments
 
 Chapters are written by exactly five doors, and knowledge that trips none of them is knowledge
