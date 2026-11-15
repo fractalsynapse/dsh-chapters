@@ -141,13 +141,34 @@ export function isInjectedProse(text: string): boolean {
 }
 
 const REMINDER_SPAN = /<system-reminder>[\s\S]*?(?:<\/system-reminder>|$)/g
+/**
+ * #347: the BALANCED form — a span counts only when the host actually closed it.
+ *
+ * The open-ended (|end-of-input) arm of REMINDER_SPAN above is right for host-injected events, where an unterminated tag
+ * really does mean "injected prose to the end of the field". Applied to text a HUMAN typed, it deletes
+ * their own words from the first tag quote to the end of the message.
+ *
+ * Measured on real bytes on this machine (session 17f7c1d6, seq 8 — decompressed and re-derived, not
+ * quoted from the audit): 5,061 chars, ONE opening tag, NO closing one, because the human was quoting
+ * the marker while listing injected strings for the agent to search for. The archive kept 2,543 chars
+ * and discarded the last **2,518**, then asserted
+ *   "omitted:host-injected <system-reminder> span(s) … project state, not conversation"
+ * naming a person's own instruction as host state. This module's own header says the opposite: "a human
+ * typing the words AGENTS.md in prose is conversation and stays verbatim".
+ */
+const REMINDER_SPAN_BALANCED = /<system-reminder>[\s\S]*?<\/system-reminder>/g
 
 /** Strip every injected span from a message's text; deterministic, idempotent
  * (the marker we emit below cannot re-trigger this rule). */
-export function stripReminderSpans(text: string): { text: string; removedChars: number } {
-  const removed = text.match(REMINDER_SPAN)?.join('').length ?? 0
+export function stripReminderSpans(
+  text: string,
+  /** Human-authored text keeps everything outside a CLOSED tag (#347). */
+  opts: { balancedOnly?: boolean } = {},
+): { text: string; removedChars: number } {
+  const re = opts.balancedOnly === true ? REMINDER_SPAN_BALANCED : REMINDER_SPAN
+  const removed = text.match(re)?.join('').length ?? 0
   if (removed === 0) return { text, removedChars: 0 }
-  return { text: text.replace(REMINDER_SPAN, '').trim(), removedChars: removed }
+  return { text: text.replace(re, '').trim(), removedChars: removed }
 }
 
 /** The visible, greppable, countable marker an omission leaves behind. One
@@ -179,6 +200,11 @@ export function screenConversation(data: Record<string, unknown>, rawText: strin
   // Assistant text is model output, but a runtime snapshot has been observed
   // appended to role user|system by the harness — screening assistant spans
   // too costs one regex and can only ever mark, never invent, text.
-  const { text, removedChars } = stripReminderSpans(rawText)
+  // #347: the rule is chosen by PROVENANCE, here and nowhere else. This is the one shared site —
+  // render.ts:415 (the archive) and prompt.ts:142 (the director's tail) both route through it, so a
+  // caller cannot forget a flag, which is what "one predicate per semantic decision" is for.
+  // Injected user events never reach here: the guard above has already returned them as a marker.
+  const { text, removedChars } = stripReminderSpans(rawText,
+    { balancedOnly: role === 'user' && isHumanAuthored(data) })
   return { text, omittedEvent: false, removedChars, sourceKind: 'user' }
 }
