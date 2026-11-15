@@ -333,6 +333,18 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     chapterLimit: z.number().step(1).min(1).default(8000),
     syncDebounceMs: z.number().step(1).min(0).default(30000),
     toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
+    // #354: five keys the constructor destructures but this schema never declared, so they had no
+    // default, no validation and no visibility in the config editor — they arrived ONLY because
+    // installed schemastery 3.18.2 preserves unknown keys (`Schema.object({a}).validate({a:1,b:2})`
+    // -> `{a:1,b:2}`, measured), which is exactly the accident line ~330 below already records as a
+    // past bug ("destructured by the constructor, stripped by the schema"). Declared now, with the
+    // defaults the constructor was already applying via `??`, so behaviour is unchanged and the drift
+    // is what changes: `tests/unit/config-surface.test.ts` fails if a destructured key goes undeclared.
+    noticeIndexCap: z.number().step(1).min(0).default(6),
+    planInlineChars: z.number().step(1).min(0).default(900),
+    callArgArtifactTokens: z.number().step(1).min(0).default(0),
+    plansInCheckpoint: z.boolean().default(true),
+    planCheckpointChars: z.number().step(1).min(0).default(1600),
     // #61 Amendment A — the seventh archive moment. A `ch-*` continuation child has origin `user`, so
     // door 5 never sees it: the field case archived NOTHING across 2,363 events because no moment was
     // watching. Save-only, fires at turn/end, thresholds are config and never literals.
