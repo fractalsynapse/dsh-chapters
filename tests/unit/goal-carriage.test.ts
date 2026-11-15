@@ -170,3 +170,99 @@ test('#349: the fold is fed the CALLER log, so a child of a goal session inherit
   assert.match(notice, /Goal is paused\. The child cannot change that — only the human can send \/goal resume\./,
     'the instruction matches the phase — an active-goal sentence on a paused goal would be a new lie')
 })
+
+// ───────────────────────────────────────── the defensive arms, exercised rather than assumed
+// Precedent: `readActiveGoal: the malformed-row and sticky-complete branches`. A guard that no test
+// reaches is a guard whose behaviour nobody has seen, and #349's whole risk is trusting host-shaped data.
+
+test('#349: a blocked goal renders its reason, and the re-arm wording follows the phase', () => {
+  const g = foldGoalFromLog([
+    goalEvent(1, 'create', { objective: 'Land the release', maxGoalRounds: 8 }),
+    goalEvent(4, 'block', { objective: 'Land the release', blockedReason: 'the rig needs a Node 24 host' }),
+  ])!
+  assert.equal(g.phase, 'blocked', 'the block operation sets phase even if the payload says otherwise')
+  assert.equal(g.blockedReason, 'the rig needs a Node 24 host')
+  const text = renderGoalCarriage(g, 600)
+  assert.match(text, /Blocked on: the rig needs a Node 24 host/, 'and the reason is stated to the child')
+  assert.match(text, /Goal is blocked\. The child cannot change that — only the human can send \/goal resume\./,
+    'a blocked goal does not get the active-goal sentence')
+})
+
+test('#349: an empty blockedReason does not print an empty label', () => {
+  const g = foldGoalFromLog([goalEvent(1, 'block', { blockedReason: '' })])!
+  assert.equal(g.blockedReason, undefined, 'blank is treated as absent, not as a value')
+  assert.doesNotMatch(renderGoalCarriage(g, 600), /Blocked on:/)
+})
+
+test('#349: a goal with no round cap says unbounded rather than inventing a number', () => {
+  const g = foldGoalFromLog([goalEvent(1, 'create', { maxGoalRounds: undefined })])!
+  assert.equal(g.maxGoalRounds, undefined)
+  assert.match(renderGoalCarriage(g, 600), /round cap unbounded, revision 1/)
+})
+
+test('#349: malformed host data degrades to a stated default, never to a crash or a fabricated value', () => {
+  // Every field the fold reads is checked with the wrong type present.
+  const weird = foldGoalFromLog([
+    { type: 'goal/change', seq: 1, data: { operation: 42, goal: { id: 7, revision: 'two', objective: null, phase: 5 } } } as never,
+  ])
+  assert.equal(weird, null, 'an operation that is not a string is not a known operation, so nothing is folded')
+  const noId = foldGoalFromLog([
+    { type: 'goal/change', seq: 1, data: { operation: 'create', goal: {} } } as never,
+  ])
+  assert.equal(noId, null, 'a goal event with no id cannot be attributed, and is skipped')
+  const noData = foldGoalFromLog([
+    { type: 'goal/change', seq: 1 } as never,
+    goalEvent(2, 'create', { objective: 'still works' }),
+  ])!
+  assert.equal(noData.objective, 'still works', 'a data-less event is skipped, not fatal')
+  const badTypes = foldGoalFromLog([
+    { type: 'goal/change', seq: 3, data: { operation: 'create', goal: { id: 'g', revision: 'x', objective: 12, phase: true, maxGoalRounds: 'lots', blockedReason: 9 } } } as never,
+  ])!
+  assert.deepEqual(
+    { revision: badTypes.revision, objective: badTypes.objective, phase: badTypes.phase, cap: badTypes.maxGoalRounds, reason: badTypes.blockedReason },
+    { revision: 0, objective: '', phase: 'active', cap: undefined, reason: undefined },
+    'each wrong type falls back to its stated default, not to a coerced guess')
+  assert.equal(renderGoalCarriage(badTypes, 600), '', 'and an objective-less goal injects no block')
+})
+
+test('#349: a bare `complete` event with no objective still renders as finished, not as nothing', () => {
+  const g = foldGoalFromLog([
+    goalEvent(1, 'create', { objective: 'Finish the migration' }),
+    { type: 'goal/change', seq: 9, data: { operation: 'complete', goal: { id: 'goal-d93c8613', phase: 'complete' } } } as never,
+  ])!
+  assert.equal(g.finished, true)
+  assert.equal(g.objective, 'Finish the migration', 'the carried objective survives an objective-free event')
+  assert.match(renderGoalCarriage(g, 600), /## Goal \(completed — do not resume it\)/)
+})
+
+test('#349: a `resume` after `block` clears the stale blocked reason from the notice', () => {
+  const g = foldGoalFromLog([
+    goalEvent(1, 'create', { objective: 'Keep going' }),
+    goalEvent(2, 'block', { objective: 'Keep going', blockedReason: 'waiting on CI' }),
+    goalEvent(3, 'resume', { objective: 'Keep going' }),
+  ])!
+  assert.equal(g.phase, 'active', 'resume wins by operation, not by a stale payload phase')
+  const text = renderGoalCarriage(g, 600)
+  assert.doesNotMatch(text, /Blocked on:/, 'the reason belongs to the blocked state, not to the goal forever')
+  assert.match(text, /This goal is NOT armed in the child/)
+})
+
+test('#349: whitespace and newlines in the objective are normalised into the single block it needs', () => {
+  const g = foldGoalFromLog([goalEvent(1, 'create', { objective: 'line one\n\n   line two\t\tline three  ' })])!
+  const text = renderGoalCarriage(g, 600)
+  assert.match(text, /^Objective: line one line two line three$/m, 'one line, collapsed runs, trimmed')
+  assert.ok(!text.includes('\n\n\n'), 'and the block does not fragment the notice structure')
+})
+
+test('#349: completion carried in `phase` (not the operation) is still treated as finished', () => {
+  // The host records `goal/change` with operation `edit` and phase already `complete` in one observed
+  // shape; a fold that only trusts `operation` would present a finished goal as live direction — the
+  // exact failure mode #349 is about, arriving from a field choice rather than a missing feature.
+  const g = foldGoalFromLog([goalEvent(1, 'edit', { objective: 'Wrap up the release', phase: 'complete' })])!
+  assert.equal(g.finished, true, 'phase alone marks the end')
+  const text = renderGoalCarriage(g, 600)
+  assert.match(text, /## Goal \(completed — do not resume it\)/)
+  assert.doesNotMatch(text, /NOT armed in the child/, 'a finished goal is not told how to resume it')
+  // And `roundsStarted` survives the fold for anyone reading the numbers later.
+  assert.equal(g.roundsStarted, 0)
+})
