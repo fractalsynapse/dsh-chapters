@@ -127,6 +127,10 @@ export interface Config {
   planInlineChars: number
   callArgArtifactTokens: number
   plansInNotice: boolean
+  /** #349: carry the parent session's goal into the child's continuation notice. */
+  goalInNotice: boolean
+  /** #349: budget in chars for the objective text inside that block. */
+  goalNoticeChars: number
   /** Teach the child its lookup verbs (read / chapters_artifact / chapters_search). */
   retrievalHints: boolean
   /** Seed plan mode into continuation children (plans-carriage § 10). */
@@ -269,6 +273,8 @@ export const Config = Schema.object({
   // Renders zero bytes when the path holds no plans, so the default-on cost for
   // sessions that never enter plan mode is exactly nothing.
   plansInNotice: Schema.boolean().default(true),
+  goalInNotice: Schema.boolean().default(true),
+  goalNoticeChars: Schema.number().step(1).min(120).default(600),
   retrievalHints: Schema.boolean().default(true),
   // Seeding is measured-safe (kernel accepts the two-event seed and the host's own
   // plan projection folds it to active) and it is what keeps the agent anchored to
@@ -862,6 +868,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       planInlineChars: config.planInlineChars,
       callArgArtifactTokens: config.callArgArtifactTokens,
       plansInNotice: config.plansInNotice,
+      goalInNotice: config.goalInNotice,
+      goalNoticeChars: config.goalNoticeChars,
       retrievalHints: config.retrievalHints,
       planSeedMode: config.planSeedMode,
       searchMaxTokens: config.searchDefaultMaxTokens,
