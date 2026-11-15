@@ -11,6 +11,41 @@ history of a decision, not before every task.** The rules that lived inside it a
 ---
 
 ## Start Here
+## 2026-11-15 (later) — 0.2.33 is on npm: the release steps, and what they proved
+
+**Executed:** PR #385 merged to `main` (`42d66c7`) -> annotated tag `0.2.33` pushed -> tag-triggered release run
+`43753268463` green end to end -> `main` merged back into `staging` (`c7de7c0`).
+
+**What the release job proved, in its own words rather than mine:**
+- `version / tag consistency` passed — the tag string equals `package.json.version`.
+- The deterministic suite ran under the **85/85/85/85 coverage gate on pinned Node 24** — the DoD line this
+  audit could never evidence locally (Node 22.22.1) is satisfied by CI, at the shipping commit.
+- Publish carried a **sigstore provenance attestation** (logIndex 3909060018), so the documented 409
+  publish-without-attestation fallback was not needed this time. Worth stating because the fallback exists
+  precisely so that a transport collision cannot hold a release hostage — and a silent success would not
+  tell us whether it fired.
+- **The published tarball was re-downloaded and unpacked: its `package.json` and `package/lib/version.js`
+  both read `0.2.33`.** That is the 0.2.20 class caught at the only point it can be caught — after
+  publication, from the registry, not from the working tree.
+
+**Census after release, read back from GitHub rather than totalled by hand: 23 findings closed, 7 issues
+open** — #335 (maintainer decision), #340 and #379 (built and green except the tape chain, held for one
+`prompt`-leg re-record; the runbook is on #340), #349 (fallback merged post-cut, so 0.2.34; the rest needs a
+live host and an authority decision), #372 (browser rig), #389 (the deferred corpus gate), and the umbrella
+#355.
+
+**Landed after the cut, therefore shipping in 0.2.34:** #391 (goal carried into the child's notice as text,
+with the sentence that only a human can arm it), #392 (item Z's host-shape contract gate), #394 (#393's
+tag-protection mis-attribution). None of them changes what 0.2.33 does; #394 in particular only corrects
+comments in the release tooling plus adds a test that pins the real semver gate.
+
+**One thing this release did not do, and should not be mistaken for having done:** the audit's own headline
+finding — a check that cannot fail — was found **twice more in the release machinery itself** while cutting
+this version (#386: the manual trigger published by default; #393: a claimed tag-protection rule that does
+not exist on this repo). Both were fixed, one inside the release and one after it. The standing lesson is that
+verifying "did the release run green" is not the same as verifying "does the guard it relies on exist", which
+is the same distinction as testing a metric versus checking the mechanism behind it.
+
 ## 2026-11-15 — #355: the audit worked end to end, and shipped as 0.2.33
 
 **What was asked.** Deep-analyze the implementation, file the findings, fix them one at a time with tests
