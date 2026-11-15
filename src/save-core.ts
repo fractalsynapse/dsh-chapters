@@ -299,6 +299,7 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     storeRoot: config.artifactStoreRoot,
     cwd,  // #69: records are stored workspace-relative
     rootSessionId: state.rootSession,
+    authorSessionId: sessionId, // #337
     chapters: rendered,
     attemptId: attemptKey(sessionId, anchor, a.attemptSalt),
   })
