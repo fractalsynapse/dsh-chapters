@@ -981,6 +981,41 @@ The rule now: **arming prompt autorun displaces the goal's continuation, and the
 - Re-arming the goal (`/goal resume`, or the bar's next human Run of a `GOAL:` step) is a human act, matching
   the host's own rule that a model may not resume a paused goal (`GOAL_TOOL_RESUME_PAUSED`).
 
+### The director's input assembly is bounded work, and dedupes by path (#350)
+
+The suggestion director is assembled at a turn boundary **on the host's event loop**, so its cost is not a
+detail: measured at real project scale (800 chapters / 36 MB) the pre-#350 code took **9,482 ms** for one
+input. Three causes were identified; two are fixed, and the third is named here so it is not mistaken for
+gone.
+
+1. **Duplicate lineage rows.** `promptChaptersForLineage` concatenated every ancestor row with no
+   dedupe, while the registry holds rows carrying copies of their parent's entries — measured 391 identical
+   number+path records, and a lineage call returning 507 rows for **56 distinct paths**. Each duplicate also
+   re-read its file, so 419 bodies / ~19 MB were read synchronously per boundary, and up to 43% of the
+   director's chapter block was the same text twice. Now deduped by **path**, the same key the TOC
+   accumulation uses (`engine-core.ts:214`), with one body read per distinct file. Path and not number
+   because numbers legitimately repeat across roots — a `number`-keyed dedupe would drop real chapters.
+2. **A quadratic drop search.** Over budget, the oldest chapter is dropped until the input fits; the loop
+   re-assembled the *entire* candidate string for every drop value. Since dropping only shortens the input,
+   `assemble(d).length` is non-increasing and the first fit is findable in `O(log n)` probes — `firstFitDrop`.
+   Measured after the change: **136 ms** at the same scale, a 70× reduction.
+   Two things this must not paper over. (a) The binary search is exact **only** for a non-increasing length
+   function; that precondition is asserted by a row that measures the real assembly across 120 chapters, and
+   a runtime neighbour check falls back to the linear scan if it is ever violated — worst case is the old
+   behaviour, never a wrong answer. (b) The remaining 136 ms is dominated by constructing tens of megabytes
+   of string **once**, which the budget makes inevitable — see 3.
+3. **Still open: the budget itself.** `resolvePromptLimits` derives `contextChars = floor(window ×
+   promptContextRatio × 4)`, so a 1M-token route yields ~2,000,000 chars ≈ 500K tokens of auxiliary input
+   per turn, and the chapter block dominates so thoroughly that the newest turn is about one character in
+   two million — the third mechanism behind "suggestions are not about my last message" (#7). Bounding the
+   chapter block as a *share* of the budget (with a floor share guaranteed to the newest turn) is the fix
+   that removes the megabytes, not the milliseconds-squared, and it is a policy change to the director's
+   input, so it is tracked separately rather than folded into a performance PR.
+
+**Acceptance note, stated rather than quietly missed:** #350 asked for "< 50 ms at 800 chapters / 36 MB".
+These changes deliver 136 ms, not 50 — and the gap is cause 3, not the search. Quoting the target as met
+would make the number mean nothing.
+
 ## Seeded-continuation load deadlock — the fold rule vs the header recorder (measured 2026-11-05, #314)
 
 The native-V4 relationships validator (`@deepseek-ai/dsh-session-format-v3-to-v4`, entered as
