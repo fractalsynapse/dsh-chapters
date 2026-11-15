@@ -567,6 +567,19 @@ catch built a full diagnostic — and then the value was discarded. So the rule 
   still wins; the literal `off` is honoured, because an operator must be able to silence it — but
   silence is now a choice, never a default. `diagnosticsLog` in the profile config sets the path
   declaratively; resolution order is env → config → `<store-root>/diagnostics.log`.
+- **Every plane writes to it, not just the engine (#352).** The prompt plane was the exception: one
+  project's `diagnostics.log` held 21,138 `realm:*` lines, 4 `rules-section`, 4 `auto-save` and **zero**
+  prompt lines, so the door's own verdicts — did it see the turn boundary at all, did the model spec
+  reach the plane, why was this round skipped, was the registration refused — existed only in a terminal
+  and in a `ctx.logger` a rig boot throws away. That absence is why "suggestions are one turn behind"
+  (#340) and "the prompt door vanished with `subagentAutoSave`" (#341) each needed a full audit to find.
+  The runner's `log`/`warn`, the reload self-check, the boot reclaim and a refused door registration now
+  go through the sink under a `prompt:` tag — **keeping the stderr copy**, since the two channels serve
+  different readers and #61 added stderr precisely because the logger is not retained. High-frequency
+  per-turn witnesses stay on stderr only: the file carries decisions, not a firehose.
+  `tests/unit/prompt-diagnostics.test.ts` asserts both halves — the wiring calls the sink, *and* a
+  `prompt:`-tagged note really lands in the file — because a structural grep alone passes happily
+  against a no-op.
 - **Warnings reach humans, with a limit and a withheld count.** `(86 warning(s))` told a user nothing
   about 86 real findings; the ones that mattered named the husk and the unarchived 0–4082 hole. Doors
   print the first `warningsDisplayCap` texts and `…and M more`, through ONE formatter — a per-door copy
