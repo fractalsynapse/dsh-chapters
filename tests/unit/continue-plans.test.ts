@@ -205,8 +205,65 @@ test('a continuation while plan mode is ACTIVE seeds the child with its own stat
   assert.equal(created.modeEvents.length, 1, 'one synthetic mode event…')
   assert.deepEqual(
     { type: created.modeEvents[0]!.type, seq: created.modeEvents[0]!.seq, active: (created.modeEvents[0]!.data as { active: boolean }).active },
-    { type: 'plan/mode', seq: 1, active: true },
-    '…at seq 1, contiguous after the notice@0 (the shape the kernel was measured to accept)')
+    { type: 'plan/mode', seq: 0, active: true },
+    // #338: this asserted `seq: 1` — the number the kernel REJECTS — while every test faked
+    // `createChild`, so a flagship flow stayed broken behind a green row. The seed is
+    // contiguous from seq 0 (dsh-session lib/index.js:1330) and holds state events only since
+    // #319 part 2 moved the notice to an authored turn. The row below hands THIS seed to the
+    // real Session; this one pins the shape, that one proves the admission.
+    '…at seq 0, the first contiguous seed position (the shape the kernel admits)')
+})
+
+// ----------------------------------------------------------------- the seed really is admitted
+
+/**
+ * #338's gate: the seed the birth path ACTUALLY builds, handed to the INSTALLED kernel.
+ *
+ * Every other row here fakes `createChild`, which is exactly how a seed the kernel refuses —
+ * `seed event at index 0 has seq 1 (expected 0)` — survived 1,275 green tests while breaking
+ * every continuation from an active-plan session. A seed claim is worth only what the current
+ * installed kernel says about it (AGENTS: "Inspect actual host payload fields and use fixtures
+ * of the real shape"). If the host packages do not resolve, the row says SKIP in its NAME —
+ * an unmeasured gate must never look like a passed one (the `host-seed-contract` pattern).
+ */
+const kernel = await import('@deepseek-ai/dsh-session').catch(() => null)
+
+test(`${kernel === null ? 'SKIP' : 'RUN'} — the real kernel ADMITS the plan-mode seed the birth path emits`, { skip: kernel === null ? '@deepseek-ai/dsh-session not installed' : false }, async () => {
+  assert.ok(kernel !== null)
+  const h = harness()
+  const r = await continueWith(h.ports)
+  assert.ok(r.ok, r.reason)
+  const seed = h.created[0]!.modeEvents as Array<Record<string, unknown>>
+  assert.equal(seed.length, 1, 'this row is about the seeded case; the empty seed needs no admission')
+  // The kernel requires seed[i].seq === i; build it exactly as ctx.agents.create receives it.
+  const built = seed.map((e, i) => ({ ...e, time: 1_794_600_000_000 + i }))
+  let session
+  try {
+    session = kernel.Session.create(kernel.SessionId('ch-338-admission'), built as never, undefined, 0)
+  } catch (error) {
+    assert.fail(`the installed kernel refused the birth path's own seed: ${(error as Error).message}`)
+  }
+  // It admitted it — and our event is at index 0, with the kernel's own marker after it.
+  const log = session.snapshotEvents()
+  assert.equal(log[0]?.type, 'plan/mode', 'the seeded state event is seed[0]')
+  assert.equal(log[0]?.seq, 0, 'at seq 0')
+  assert.ok(log.length > 1, 'the kernel appended its own setup events after the seed, as measured')
+  // Log-only: the child is gated, not handed the event in context.
+  assert.deepEqual([...session.surface.nodes], [], 'a seeded plan/mode must not become a surface node')
+  assert.equal(kernel.KNOWN_SESSION_EVENT_TYPES.has(String(seed[0]!.type)), true, 'plan/mode is still kernel-known')
+  assert.equal(kernel.isSurfaceEligibleType(String(seed[0]!.type)), false,
+    'the kernel made plan/mode surface-eligible: a seeded child would now carry it in context')
+})
+
+test(`${kernel === null ? 'SKIP' : 'RUN'} — the kernel still refuses a non-contiguous seed (the #338 regression, red where anyone looks)`, { skip: kernel === null ? '@deepseek-ai/dsh-session not installed' : false }, async () => {
+  assert.ok(kernel !== null)
+  // Control: proves the row above is not vacuously green. seq 1 at index 0 is the exact shape
+  // #319 left behind, and it must still be refused by the installed kernel.
+  const bad = [{ type: 'plan/mode', seq: 1, time: 1_794_600_000_000, data: { active: true } }]
+  assert.throws(
+    () => kernel.Session.create(kernel.SessionId('ch-338-control'), bad as never, undefined, 0),
+    /contiguous from 0|index 0 has seq 1/,
+    'the kernel stopped enforcing seed contiguity — update the contract, do not silently rely on it')
 })
 
 test('an APPROVED plan leaves plan mode, so nothing is seeded — the child implements', async () => {

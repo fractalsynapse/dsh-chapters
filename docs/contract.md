@@ -236,7 +236,13 @@ callback exactly as session-controller's `composeAgent` does it
 ```ts
 ctx.agents.create({
   sessionId: newId,
-  seed: [tocNoticeEvent],                      // exactly one event at seq 0 (invariant 2)
+  // #319 part 2: the TOC notice is AUTHORED as the child's first turn, never seeded. The seed
+  // carries synthetic STATE events only — today `plan/mode`, and only for an eligible
+  // continuation — so the normal seed is EMPTY. The kernel admits `seed[i]` only when
+  // `seed[i].seq === i` ("seed must be contiguous from 0", dsh-session lib/index.js:1330), so a
+  // lone state event is seq **0**, not seq 1. Invariant 2 constrains what the seed may contain
+  // (nothing from the parent's log), not how many events it holds.
+  seed: [...modeEvents],                       // contiguous from seq 0, or empty
   inheritedEventCount: 0,
   meta: { cwd: parentCwd, agentPreset: presetId },
   agentOptions: ctx.get('agentDefaultModel').currentSelection(),
