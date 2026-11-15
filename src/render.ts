@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto'
 import { DEFAULT_REDACTIONS, redactText } from './redact.ts'
 import { omittedMarker, screenConversation, stripReminderSpans } from './injections.ts'
-import { blocksOf, callArgsText, resultCallId, sameCall, textOfBlocks, toolResultText } from './log-shape.ts'
+import { blocksOf, callArgsText, resultCallId, resultRenderPlan, sameCall, textOfBlocks, toolResultText } from './log-shape.ts'
 import { detectPlans, planTopicsOf, PLAN_TOOL, type PlanFact } from './plans.ts'
 import type {
   ArtifactRef, ChapterRange, PlanDocFile, RenderConfig, RenderedChapter,
@@ -45,6 +45,29 @@ export function longerFence(body: string): string {
   return '`'.repeat(Math.max(3, max + 1))
 }
 
+/**
+ * One text span as INLINE code, delimited so the content cannot close its own span (#345).
+ *
+ * `longerFence` solves this for fenced blocks and the file's own header calls fence collision
+ * hazard #1 — but the invocation head was written as a bare `` ` `` + `args.slice(0, 400)` + `` ` ``,
+ * and real arguments are full of backticks (72 / 1,724 / 837 tool-calls across three production
+ * sessions). Measured effect on real whole-log chapters: 12 / 130 / 88 rendered lines whose inline
+ * code spans do not balance, so everything after the stray backtick — the seq citation included —
+ * renders as code or as emphasis instead of text. A chapter that mangles its own citations is a
+ * quieter version of the same class of failure as a chapter that loses them.
+ *
+ * CommonMark: the delimiter must be longer than any backtick run inside, and content that begins or
+ * ends with a backtick needs padding spaces so the run is not read as the delimiter.
+ */
+export function inlineCode(text: string): string {
+  const oneLine = text.replace(/\s*\n\s*/g, ' ')
+  let max = 0
+  for (const match of oneLine.matchAll(/`+/g)) max = Math.max(max, match[0].length)
+  const tick = '`'.repeat(max + 1)
+  const pad = /^`|`$/.test(oneLine) ? ' ' : ''
+  return `${tick}${pad}${oneLine}${pad}${tick}`
+}
+
 /** Wrapped in a fence long enough to survive any content, including nested fences. */
 export function fenced(content: string, info = ''): string {
   const fence = longerFence(content)
@@ -52,6 +75,34 @@ export function fenced(content: string, info = ''): string {
 }
 
 export const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
+
+/**
+ * A citation a reader can actually follow (#348).
+ *
+ * `artifactPath` is deliberately STORE-relative — it is what the writer hands back, and it is stable
+ * across workspaces. But the citation line prints it into a chapter file that a model reads with a
+ * `read` tool rooted at the WORKSPACE, so `artifacts/e3/e3b0c442….txt` resolved from nowhere: verified
+ * on a real archive, where the bytes live at
+ * `.dsh-chapters/17f7c1d6-…/artifacts/e3/e3b0c442….txt`. The audit's finding was that the reference is
+ * "routable only through chapters_artifact", i.e. a pointer to a tool the text never names.
+ *
+ * So: prefix when the door told us where the session's store sits inside the workspace; otherwise say
+ * plainly which tool retrieves it. Never print a bare path that cannot be opened -- a wrong path is
+ * worse than an honest "use the other tool", because a model will retry a path rather than question it.
+ */
+export function citationBaseOf(storeRoot: string | undefined, rootSessionId: string | undefined, cwd?: string): string | undefined {
+  if (storeRoot === undefined || storeRoot === '' || rootSessionId === undefined || rootSessionId === '') return undefined
+  const root = storeRoot.replace(/\/+$/, '')
+  if (!root.startsWith('/')) return root + '/' + rootSessionId
+  // Absolute: reachable only when it is INSIDE the workspace, and then as a workspace-relative path.
+  if (cwd !== undefined && cwd !== '' && root.startsWith(cwd.replace(/\/+$/, '') + '/')) {
+    return root.slice(cwd.length + 1) + '/' + rootSessionId
+  }
+  return undefined
+}
+
+export const citationOf = (path: string, base: string | undefined): string =>
+  base !== undefined && base !== '' ? base + '/' + path : path + ' (via chapters_artifact)'
 
 /** `artifacts/8f/8f3a1c9d….txt` — sharded so one directory never holds the whole subtree. */
 export const artifactPath = (hash: string): string => `artifacts/${hash.slice(0, 2)}/${hash}.txt`
@@ -127,7 +178,58 @@ export function validateRanges(
       + `seqs ${archiveFloor}-${chapters[0]!.startSeq - 1} would be dropped without a word (a gap is loss, AGENTS.md)`,
     )
   }
+  // #336: the floor was ONE-SIDED. Starting above the watermark drops bytes; starting BELOW it
+  // re-archives seqs that are already committed, and the door mints fresh numbers for them — the same
+  // text archived twice, in two live chapters, which is what "keep chapter numbers and bodies
+  // immutable" forbids. Live registry before this fix: 42 of 64 rows self-overlapping, 1,453 duplicate
+  // records. Nothing could see it either: `coverage()` starts its cursor AT the floor, so an
+  // under-floor start yields `gaps: []` while inflating its own covered count (302 "covered" for 201
+  // real seqs), and `repair.ts` keeps coverage in a `Set`, which cannot express "in two chapters".
+  // A deliberate re-derivation below the watermark is REPAIR's job (#60), through save-core's `span`
+  // arm — which never calls this function — and it supersedes under a new number instead of resting
+  // beside the old one. A door submission simply has no reason to start before the watermark.
+  if (chapters[0]!.startSeq < archiveFloor) {
+    throw new Error(
+      `chapter 0 ("${chapters[0]!.title}") starts at seq ${chapters[0]!.startSeq}, below the watermark ${archiveFloor} — `
+      + `seqs ${chapters[0]!.startSeq}-${archiveFloor - 1} are already archived, and this call would store them AGAIN under new `
+      + `chapter numbers. Archive from the watermark; re-deriving committed bytes is what /chapters-repair is for (#336).`,
+    )
+  }
   return chapters
+}
+
+/**
+ * The first seq that is NOT yet archived — the ONE derivation doors may use (#336).
+ *
+ * There were two, and they disagreed exactly where it matters. `continue-core.ts` reduced over
+ * `endSeq` seeded at `-1` (empty ⇒ fromSeq 0); `save-core.ts` seeded at `0` and then wrote
+ * `lastArchived > 0 ? lastArchived + 1 : 0`. Both are right until a chapter legitimately covers
+ * seq 0 — every real log begins with `permission/preset` at seq 0 — after which save-core's form
+ * re-archives seq 0 forever and continue-core's does not. One decision, one predicate.
+ */
+export const nextUnarchivedSeq = (chapters: readonly { endSeq: number }[]): number =>
+  chapters.length === 0 ? 0 : chapters.reduce((m, c) => Math.max(m, c.endSeq), -1) + 1
+
+/**
+ * Seqs archived by MORE THAN ONE active chapter (#336) — the detector the archive path never had.
+ *
+ * `repair.ts` built a `Set<number>` and looked only for seqs MISSING from it, so a duplicate is
+ * invisible to the one audit that exists: a Set has no cardinality. This counts.
+ */
+export function duplicateCoveredSeqs(
+  chapters: readonly { number: number; startSeq: number; endSeq: number }[],
+): Map<number, number[]> {
+  const owners = new Map<number, number[]>()
+  for (const c of chapters) {
+    for (let s = c.startSeq; s <= c.endSeq; s++) {
+      const list = owners.get(s)
+      if (list === undefined) owners.set(s, [c.number])
+      else if (!list.includes(c.number)) list.push(c.number)
+    }
+  }
+  const dupes = new Map<number, number[]>()
+  for (const [seq, list] of owners) if (list.length > 1) dupes.set(seq, list)
+  return dupes
 }
 
 /**
@@ -173,25 +275,22 @@ export function oversizeRanges(
 /** Every oversized tool result in a range, ranked by size DESCENDING (dedupe keeps the last copy). */
 function collectCandidates(events: SessionEventLike[], range: ChapterRange): ToolResultCandidate[] {
   const out: ToolResultCandidate[] = []
-  for (const ev of events) {
-    if (ev.type !== 'tool/result' || ev.seq < range.startSeq || ev.seq > range.endSeq) continue
-    {
-      const msg = (ev.data as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined
-      const cid = (msg?.source as Record<string, unknown> | undefined)?.callId
-      if (typeof cid === 'string') {
-        let last = -1
-        for (const o of events) if (o.type === 'tool/result' && o.seq >= range.startSeq && o.seq <= range.endSeq) {
-          const om = (o.data as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined
-          if ((om?.source as Record<string, unknown> | undefined)?.callId === cid && o.seq > last) last = o.seq
-        }
-        if (ev.seq !== last) continue // keep last copy of a redelivery
-      }
-    }
-    const text = toolResultText(ev.data ?? {})
-    const call = events.find((c) => c.type === 'tool/call' && c.seq < ev.seq && sameCall(c, ev))
+  // #343/#334: the SAME predicate the chapter body uses. Duplicated keep-last logic here is what let
+  // the door list a stub while the archive held the payload (or vice versa), and it kept the last
+  // copy — so a shadowed full payload was never even offered for `toolResultOverrides` to name.
+  const inRange = events.filter((ev) => ev.seq >= range.startSeq && ev.seq <= range.endSeq)
+  const resultPlan = resultRenderPlan(events, inRange)
+  for (const ev of inRange) {
+    if (ev.type !== 'tool/result') continue
+    const carrier = resultPlan.render.get(ev)
+    if (carrier === undefined) continue // a duplicate position whose bytes another row carries
+    const text = toolResultText(carrier.data ?? {})
+    // #345 (part): pair by callId, never by adjacency — the shadowing replacements this now surfaces
+    // sit far from their call, which is exactly where an adjacency guess is wrong.
+    const call = events.find((c) => c.type === 'tool/call' && sameCall(c, carrier))
     out.push({
-      seq: ev.seq,
-      toolName: String((call?.data as Record<string, unknown> | undefined)?.name ?? (ev.data as Record<string, unknown> | undefined)?.toolName ?? 'tool'),
+      seq: carrier.seq,
+      toolName: String((call?.data as Record<string, unknown> | undefined)?.name ?? (carrier.data as Record<string, unknown> | undefined)?.toolName ?? 'tool'),
       bytes: Buffer.byteLength(text, 'utf8'),
       estimatedTokens: estimateTokens(text),
       excerpt: text.slice(0, 160),
@@ -204,10 +303,37 @@ function collectCandidates(events: SessionEventLike[], range: ChapterRange): Too
 }
 
 /**
+ * What ONE candidate row costs the model when `chapters_segment` prints it.
+ *
+ * #343: the cap was written against `c.estimatedTokens` — the size of the RESULT PAYLOAD — but the
+ * door never emits the payload. It emits `{seq, toolName, excerpt(≤160 chars), deferred}`. So the
+ * budget was spent on bytes that are not in the output, and one result larger than the cap consumed
+ * the entire allowance: real sessions were offered exactly ONE candidate (`listing 1 of 370 tool
+ * results`), which is not a bound on the door's output, it is a blindfold. #330 then removed the
+ * per-result size numbers from the emitted row, so the quantity being budgeted no longer appears in
+ * the response at all.
+ *
+ * This is the ONE place that quantity is decided; the caller's row shape in `tools.ts` must stay in
+ * step with it.
+ */
+export function candidateListingTokens(c: ToolResultCandidate): number {
+  return estimateTokens(`${c.seq} ${c.toolName} ${c.excerpt}`)
+}
+
+/**
  * The capped public form (#61). `chapters_segment` once emitted 49,932 characters of its OWN output while
  * also reporting `(Omitted 275266 bytes …)` — ≈81K est tokens into a 32K-class window, asking a small
- * model to judge a candidate list it never received. Ranking is by size descending, so what a cap
+ * model to judge a candidate list it never received. Ranking is by payload size descending, so what a cap
  * removes is the SMALL stuff: the judgment the model is actually asked for stays intact.
+ *
+ * Two separate mistakes are corrected here (#343), and the second is why fixing only the first changed
+ * nothing on real data:
+ *  - the scan STOPPED at the first item that did not fit. With a descending ranking that is item #2
+ *    whenever the largest result alone busts the cap, so the list never exceeded one entry.
+ *  - the budget summed the RESULT PAYLOADS' tokens, while the door emits one short excerpt row per
+ *    candidate (see `candidateListingTokens`), so a single oversized payload spent the whole allowance
+ *    on bytes the model never sees. A `continue` alone leaves that case at exactly one row — which is
+ *    how this second half was found, by mutating the fix and watching the row stay red.
  *
  * The caller reports what was withheld — see `candidateTotals` — because a capped list that does not say
  * it is capped is a silent truncation, and AGENTS.md forbids truncating to fit.
@@ -222,9 +348,13 @@ export function toolResultCandidates(
   let used = 0
   const kept: ToolResultCandidate[] = []
   for (const c of ranked) {
-    if (used + c.estimatedTokens > capTokens && kept.length > 0) break
+    // `continue`, never `break`: an item that does not fit says nothing about the ones after it.
+    // The FIRST row is kept even over budget — the largest payload is the consequential judgment —
+    // and everything after it is bounded by what the LIST costs, not by what the payloads cost.
+    const cost = candidateListingTokens(c)
+    if (used + cost > capTokens && kept.length > 0) continue
     kept.push(c)
-    used += c.estimatedTokens
+    used += cost
   }
   return kept
 }
@@ -260,6 +390,67 @@ export function defersAtArchive(estimatedTokens: number, floorTokens: number): b
  * would report an approved plan as `pending`. The plans block is appended AFTER the verbatim
  * transcript, so the transcript stays exactly what the log said.
  */
+/**
+ * #346 — which durable event types the renderer writes, and which it knowingly does not.
+ *
+ * The audit said ~75% of durable events never reach a chapter. Measured against three real session logs
+ * (55,334 events, 35 distinct types) most of that is lifecycle bookkeeping an archive should not contain
+ * — but the reason was written down nowhere, so "excluded" and "forgotten" were indistinguishable and a
+ * NEW host event type landed in the same silent place as the interesting ones. This table is the
+ * difference: a type is excluded only if it is listed here with a reason; anything else is still counted
+ * as unrendered and reported.
+ *
+ * The duplication numbers are measured, not assumed. They are why `agent/inbox/spliced` — 2.4% of all
+ * events, ~2 MB of payload across three logs — is NOT rendered: 658 of 659 spliced messages are
+ * byte-identical to a `user/message` the renderer already writes. Adding a case for it, which is the
+ * obvious reading of "cover the missing types", would have duplicated two megabytes of a person's own
+ * words into every chapter spanning them.
+ */
+export const EXCLUDED_EVENT_TYPES: Readonly<Record<string, string>> = {
+  // Lifecycle: no content, and the ranges are already recorded in the frontmatter.
+  'turn/start': 'structural: defines a turn range, which the frontmatter records',
+  'turn/end': 'structural: defines a turn range, which the frontmatter records',
+  'step/start': 'structural: a model step boundary, no payload text',
+  'step/end': 'structural: a model step boundary, no payload text',
+  // A derived record of delivery, not new content (measured 658/659 identical to a user/message).
+  'agent/inbox/spliced': 'derived duplicate: every spliced message is also a user/message that renders (measured 658 of 659 identical across three logs; rendering it would duplicate ~2 MB of human text)',
+  // Host-injected configuration: invariant 1 plus the #59 screen — never conversation, never corpus.
+  'system/message': 'host-injected configuration (the system prompt itself); excluded by the injection-screen rule',
+  'developer/message': 'host-injected configuration (tool-registry deltas), not conversation',
+  // Transport/provider plumbing: per-request wire detail, not what was said.
+  'request/header': 'provider transport metadata',
+  'request/context': 'provider transport metadata',
+  'assistant/attempt': 'provider transport: one record per outbound attempt',
+  'llm/retry': 'provider transport: retry bookkeeping',
+  'llm/retry-started': 'provider transport: retry bookkeeping',
+  // Compaction mechanics. The durable log keeps every shadowed event, so nothing is lost by not
+  // re-archiving a summary of it; #360 covers the provenance question separately.
+  'compaction/start': 'surface mechanics: shadowing is recorded in the log, originals stay retrievable',
+  'compaction/end': 'surface mechanics: shadowing is recorded in the log, originals stay retrievable',
+  'compaction/summary': 'surface mechanics: a summary OF shadowed events, which this archive keeps verbatim from the log',
+  'compaction/notice': 'surface mechanics: the notice the plugin injected, not conversation',
+  'compaction/prune': 'surface mechanics: token accounting',
+  // UI/transport state with no narrative content.
+  'workspace/changes': 'file-change accounting; the edits themselves are tool calls that render',
+  'subagent/catalog': 'transport state: the roster snapshot offered to the model',
+  'approval/asked': 'permission flow: an interactive prompt, resolved in-session',
+  'approval/decided': 'permission flow: the click that resolved it, not a message to the agent',
+  'approval/policy': 'configuration event: the approval policy in force, recorded by the host and visible in the session header',
+  'permission/preset': 'configuration event: which permission preset was active; the host records it and the header carries it',
+  'sandbox/mode': 'configuration event: a file-sandbox mode change, restated on every runtime-context snapshot the model sees',
+  'agent-preset/selected': 'configuration event: which preset composed this session, already carried by the durable session header',
+  'session/end-seed': 'transport state: the seed marker the host appends at session end, no narrative content',
+  'session/title-llm-request': 'transport state: the outbound request for title generation, not what was said',
+  // Decided surface-local earlier and unchanged here.
+  'todo/write': 'surface-local by decision (docs/backlog.md): a task list the model already carries',
+  'note': 'surface-local annotation channel, not conversation',
+  // Titles are surfaced by the session header and the TOC, not repeated per chapter.
+  'session/title': 'metadata: the label is in the store header and the TOC already',
+}
+
+/** #346 — the goal ledger renders as one compact fact, never a second copy of the objective. */
+export const GOAL_FACT_PREFIX = '- **[goal]**'
+
 export function renderChapter(
   events: SessionEventLike[],
   range: ChapterRange,
@@ -279,16 +470,11 @@ export function renderChapter(
     .filter((e) => e.seq >= range.startSeq && e.seq <= range.endSeq)
     .sort((a, b) => a.seq - b.seq)
 
-  // Host redelivery (measured 2026-09-28, treeseed run: 25 calls carried TWO
-  // tool/result events for one callId — read x17, chapters_artifact x3,
-  // web_fetch x2): keep only the LAST result per callId, else the verbatim
-  // body inflates with the same text twice and counts double.
-  const lastResultSeq = new Map<string, number>()
-  for (const ev of inRange) {
-    if (ev.type !== 'tool/result') continue
-    const cid = resultCallId(ev)
-    if (cid !== undefined) lastResultSeq.set(cid, ev.seq)
-  }
+  // #334: one predicate, over the whole log, decides which copy of a callId carries the payload.
+  // (This used to be a range-local "keep the last per callId", duplicated here and in
+  // collectCandidates — which is why the same session archived the 49 KB original or its 500 B
+  // shadowing stub depending on where the model put the chapter edge.)
+  const resultPlan = resultRenderPlan(events, inRange)
   // Plans are scanned over the WHOLE event list, not just this range: a verdict
   // can land past a chapter boundary, and pairing inside one range only would
   // report an APPROVED plan as pending (docs/plans-carriage.md § 1).
@@ -365,13 +551,13 @@ export function renderChapter(
           const ref = artifactRef(args, { toolName: name, sourceSeq: ev.seq, inlined: false })
           artifacts.push(ref)
           invocationArtifacts += 1
-          body.push(`- ↳ **${name}** \`${args.slice(0, CALL_HEAD_CHARS)}\`${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`
-            + ` — full arguments: ${ref.bytes} B ≈ ${estimateTokens(args)} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${ref.path}\``)
+          body.push(`- ↳ **${name}** ${inlineCode(args.slice(0, CALL_HEAD_CHARS))}${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`
+            + ` — full arguments: ${ref.bytes} B ≈ ${estimateTokens(args)} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${citationOf(ref.path, config.citationBase)}\``)
           break
         }
         // Invocations stay inline as a bounded head: this is the "what was
         // attempted" half of the record (docs/architecture.md § Chapter Rendering).
-        body.push(`- ↳ **${name}** \`${args.slice(0, CALL_HEAD_CHARS)}\`${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`)
+        body.push(`- ↳ **${name}** ${inlineCode(args.slice(0, CALL_HEAD_CHARS))}${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`)
         break
       }
       case 'plan/mode':
@@ -381,11 +567,24 @@ export function renderChapter(
         // look like a silently dropped byte (verify.md P4).
         break
       case 'tool/result': {
-        {
-          const cid = resultCallId(ev)
-          if (cid !== undefined && lastResultSeq.get(cid) !== ev.seq) break // earlier copy of a redelivery
+        // #334: which copy of a callId's result carries the bytes is decided over the WHOLE log by
+        // resultRenderPlan (largest payload wins). The old rule kept the LAST copy, and on current
+        // host bytes the last copy is this plugin's arrival-time stub, so chapters archived the
+        // ~500-byte pointer and discarded the payload — silently, with no mention of the dropped seq.
+        const carrier = resultPlan.render.get(ev)
+        if (carrier === undefined) {
+          // #334: this position is the shadowing stub. The payload is archived at the seq named
+          // here, so the substitution is on the record instead of silent in either direction.
+          const original = resultPlan.shadowedBy.get(ev.seq)
+          if (original !== undefined) body.push(`  - result (seq ${ev.seq}) is a shadowing stub; the full payload is archived at seq ${original}`)
+          break
         }
-        const text = redact(toolResultText(data))
+        // #345 (part): name the call by callId, never by adjacency. This mattered more once a
+        // position could carry another event's bytes.
+        const callForThis = [...events].reverse().find((c) => c.type === 'tool/call' && sameCall(c, carrier))
+        const toolName = String((callForThis?.data as Record<string, unknown> | undefined)?.name
+          ?? (carrier.data as Record<string, unknown> | undefined)?.toolName ?? 'tool')
+        const text = redact(toolResultText(carrier.data ?? {}))
         // #59 — an empty result defers NOTHING. `arrival.ts` has always skipped the empty string;
         // the renderer did not, so a payload-less read wrote hundreds of references to sha256("") and
         // the chapter claimed `artifacts: 102` while its tree held one 0-byte file. Say it is empty.
@@ -394,27 +593,66 @@ export function renderChapter(
           break
         }
         const tokens = estimateTokens(text)
-        const wantsInline = inline.get(ev.seq) ?? !defersAtArchive(tokens, config.toolResultDeferFloorTokens)
-        const priorCall = [...inRange].reverse().find((c) => c.type === 'tool/call' && c.seq < ev.seq)
-        const toolName = String((priorCall?.data as Record<string, unknown> | undefined)?.name ?? 'tool')
-        const ref = artifactRef(text, { toolName, sourceSeq: ev.seq, inlined: wantsInline })
+        const wantsInline = (inline.get(ev.seq) ?? inline.get(carrier.seq)) ?? !defersAtArchive(tokens, config.toolResultDeferFloorTokens)
+        const ref = artifactRef(text, { toolName, sourceSeq: carrier.seq, inlined: wantsInline })
         artifacts.push(ref)
+        if (carrier !== ev) {
+          // Say so. A chapter position that carries bytes from another seq is exactly the fact a
+          // reader needs to reconcile a citation against the log, and #334's whole failure mode was
+          // a substitution nobody could see.
+          body.push(`  - result (seq ${ev.seq} is a shadowing replacement of seq ${carrier.seq}; the full payload below is the durable original)`)
+        }
         if (wantsInline) {
           inlinedCount += 1
-          body.push(`  - result (seq ${ev.seq}, ${ref.bytes} B, also at \`${ref.path}\`):`, '', fenced(text), '')
+          body.push('  - result (seq ' + String(ev.seq) + ', ' + ref.bytes + ' B, also at `' + citationOf(ref.path, config.citationBase) + '`):', '', fenced(text), '')
         } else {
           deferredCount += 1
-          body.push(`  - result: ${ref.bytes} B ≈ ${tokens} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${ref.path}\``)
+          body.push('  - result: ' + ref.bytes + ' B ≈ ' + String(tokens) + ' tok, `' + ref.sha256.slice(0, 7) + '…` → `' + citationOf(ref.path, config.citationBase) + '`')
         }
+        break
+      }
+      // #346 — a human running a slash command is conversation-level intent, recorded nowhere else:
+      // verified unique against user/message, assistant/message and every tool call/result in all three
+      // real logs. AGENTS already requires "always preserve invocations and arguments in the body"; a
+      // command invocation was the one invocation being dropped.
+      case 'command/run': {
+        const name = typeof data.name === 'string' ? data.name : '?'
+        const args = typeof data.args === 'string' ? data.args.trim() : ''
+        const srcKind = (data.source as { kind?: string } | undefined)?.kind ?? 'user'
+        body.push('> **[command]** /' + name + ' ' + redact(args) + ' (source: ' + srcKind + ', seq ' + String(ev.seq) + ')')
+        break
+      }
+      case 'command/done': {
+        // The outcome of that invocation. Kept because an invocation without its result is half a fact.
+        const kind = typeof data.kind === 'string' ? data.kind : '?'
+        const text = typeof data.text === 'string' ? data.text : ''
+        body.push('> **[command result]** ' + kind + ' (seq ' + String(ev.seq) + ')')
+        if (text.trim() !== '') body.push(redact(text.trim()))
+        break
+      }
+      // #346 — the goal LEDGER (created/paused/resumed/completed, at which revision). The objective TEXT
+      // is not repeated: it arrives as <goal_round> user messages, which render verbatim, so copying it
+      // would duplicate them. One fact line, with the seq so a reader can go read the round.
+      case 'goal/change': {
+        const g = (data.goal ?? {}) as { id?: string, revision?: number, objective?: string }
+        const op = typeof data.operation === 'string' ? data.operation : 'change'
+        const rev = typeof g.revision === 'number' ? ' rev ' + String(g.revision) : ''
+        const head = typeof g.objective === 'string'
+          ? ' — "' + g.objective.slice(0, 120) + (g.objective.length > 120 ? '…' : '') + '"'
+          : ''
+        body.push(GOAL_FACT_PREFIX + ' ' + op + rev + ' (' + String(g.id ?? '?') + ')' + head + ' seq ' + String(ev.seq))
         break
       }
       case 'turn/start':
       case 'turn/end':
       case 'step/start':
       case 'step/end':
-        break // lifecycle noise: intentionally absent from the body, ranges still recorded in frontmatter
+        break // lifecycle: see EXCLUDED_EVENT_TYPES; handled here so it never reaches default:
       default:
-        unrenderedSeqs.push(ev.seq)
+        // #346: a type LISTED as excluded is a decision; anything else is an accident and still lands in
+        // unrenderedSeqs, where the existing "N event(s) rendered no output" warning reports it. That
+        // asymmetry is the whole point — silence is only allowed where a reason is written down.
+        if (EXCLUDED_EVENT_TYPES[ev.type] === undefined) unrenderedSeqs.push(ev.seq)
     }
   }
 
@@ -561,18 +799,28 @@ export interface NoticeBullet { path: string, title: string, summary: string }
  * The cap is the difference between a notice whose size tracks history and one that settles. Each line costs
  * ~120 characters, so an uncapped index moves the surface across the compaction trigger depending on how many
  * chapters a run happened to write — which makes a leg parked on that boundary undistillable as a tape (measured
- * on `heavy`: identical served bytes, boundary one assistant/tool round apart between two runs). Past the cap the
- * text is byte-identical, and the omission is STATED rather than silent, because a model that cannot see the
- * list must still know to search for it.
+ * on `heavy`: identical served bytes, boundary one assistant/tool round apart between two runs). What #56 needs
+ * is therefore a **bounded-size** block with the omission STATED, because a model that cannot see the list must
+ * still know to search for it. Which END is kept is a separate choice, and #342 moved it to the newest `cap`:
+ * the reader index has to contain the chapter that was just archived.
  */
 export function noticeIndexSection(entries: readonly NoticeBullet[], cap: number): string {
   if (cap <= 0 || entries.length <= cap) return renderIndex(entries)
-  return renderIndex(entries.slice(0, cap))
+  // #342: the cap keeps the section's SIZE bounded (what #56 actually needs — a fixed-size block so
+  // the surface crosses the trigger on the conversation, not on a chapter accumulator), but it bounds
+  // it at the WRONG END. Bullets accumulate oldest-first (`engine-core.ts:451,478`), so `slice(0, cap)`
+  // listed the six oldest forever: from chapter cap+1 on, no checkpoint ever cited the chapter it had
+  // just written, while the section claimed the ones it dropped were the OLDER ones — the sentence was
+  // the opposite of the code, and AGENTS.md makes this list the only reader index.
+  // The overflow line stays free of the omitted COUNT, so the constant-size property survives.
+  const start = entries.length - cap
+  return renderIndex(entries.slice(start), start + 1)
     + '\n… and older chapters are not listed here — use chapters_search to reach them.'
 }
 
-export function renderIndex(entries: readonly { path: string; title: string; summary: string }[]): string {
+/** `N. [Title](path) — summary`, numbered from `startAt` (#342: a capped tail keeps its true numbers). */
+export function renderIndex(entries: readonly { path: string; title: string; summary: string }[], startAt = 1): string {
   return entries
-    .map((e, i) => `${i + 1}. [${e.title}](${e.path}) — ${e.summary}`)
+    .map((e, i) => `${i + startAt}. [${e.title}](${e.path}) — ${e.summary}`)
     .join('\n')
 }

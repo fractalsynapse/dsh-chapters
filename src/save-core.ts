@@ -14,7 +14,7 @@
  */
 import { composeChapters } from './compose.ts'
 import { deriveRanges } from './continue-core.ts'
-import { estimateTokens, oversizeRanges, renderChapter } from './render.ts'
+import { citationBaseOf, estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter } from './render.ts'
 import { chapterTopics } from './signature.ts'
 import { makeArchiveFs, commitChapters, type RegistryStore } from './store.ts'
 import { releaseReservation, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -118,7 +118,11 @@ export interface SaveSessionOutcome {
  * consecutive ranges instead of one unreadable one. The rule that binds is completeness, not "one chapter
  * per turn" — and a chapter nobody can `read` back is not an archive.
  */
-function splitOversize(
+/**
+ * #344: exported so the deterministic doors' real behaviour can be measured on real logs in a test,
+ * rather than re-derived by a replica in the test that could drift from the thing it checks.
+ */
+export function splitOversize(
   chapters: ChapterRange[],
   events: readonly SessionEventLike[],
   chapterTokenTarget: number,
@@ -131,15 +135,45 @@ function splitOversize(
     const inRange = events.filter((e) => e.seq >= c.startSeq && e.seq <= c.endSeq)
     const total = inRange.reduce((m, e) => m + estimateTokens(JSON.stringify(e.data ?? {})), 0)
     if (total <= ceiling) { out.push(c); continue }
-    const parts = Math.ceil(total / ceiling)
-    const perPart = Math.ceil(inRange.length / parts)
-    let title = c.title
-    for (let i = 0, n = 0; i < inRange.length; i += perPart, n++) {
-      const from = inRange[i]!.seq
-      const to = inRange[Math.min(i + perPart, inRange.length) - 1]!.seq
-      out.push({ ...c, title: n === 0 ? title : `${title} (part ${n + 1})`, startSeq: from, endSeq: to })
+    // #344: GREEDY and size-aware, cutting at the event boundary before a part would pass the target.
+    //
+    // The form below divided the range into `ceil(total/ceiling)` chunks of EQUAL EVENT COUNT. Real turns
+    // are wildly uneven — one tool result can be 200 KB beside a dozen two-token events — so equal counts
+    // leave parts still over the ceiling and the door refuses again. Measured on the real logs after one
+    // pass of the old split: 42 of 121 eadc parts, 528 of 1,397 platfolio parts, 453 of 1,386 arcnexus
+    // parts remained over-limit. Subdividing "but not really" is worse than not doing it, because the
+    // note claims a split happened.
+    //
+    // Packing greedily against `chapterTokenTarget` rather than the refusal `ceiling` keeps the
+    // factor-of-two margin for the gap between this proxy — estimateTokens over the event payload — and
+    // what the gate actually measures, the RENDERED markdown length. The proxy runs under the rendered
+    // size, so a target-sized part can still land above target; only the ceiling refuses.
+    //
+    // Cuts happen between events only: a range is never re-derived or re-ordered, and one event larger
+    // than the pack target travels alone rather than being sliced (invariant 1).
+    const packTo = Math.max(1, Math.floor(chapterTokenTarget))
+    let partStart = inRange[0]!.seq
+    let partTokens = 0
+    let partIndex = 0
+    const flush = (endSeq: number): void => {
+      out.push({
+        ...c,
+        title: partIndex === 0 ? c.title : `${c.title} (part ${String(partIndex + 1)})`,
+        startSeq: partStart, endSeq: Math.max(partStart, endSeq),
+      })
+      partIndex += 1
     }
-    notes.push(`"${c.title}" (seqs ${c.startSeq}-${c.endSeq}) is ${total} est tokens in a single unfinished turn — split into ${parts} chapters at event boundaries (repair path; nothing truncated)`)
+    for (const e of inRange) {
+      const t = estimateTokens(JSON.stringify(e.data ?? {}))
+      if (partTokens > 0 && partTokens + t > packTo) {
+        flush(e.seq - 1)
+        partStart = e.seq
+        partTokens = 0
+      }
+      partTokens += t
+    }
+    flush(inRange[inRange.length - 1]!.seq)
+    notes.push(`"${c.title}" (seqs ${String(c.startSeq)}-${String(c.endSeq)}) is ${String(total)} est tokens over a ${String(packTo)}-token target — packed into ${String(partIndex)} chapters at event boundaries (nothing truncated)`)
   }
   return { ranges: out, notes }
 }
@@ -184,8 +218,12 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
 
   // Watermark: only archive what is newer than the last saved chapter.
   const state = await store.get(sessionId)
-  const lastArchived = state.chapters.reduce((m, c) => Math.max(m, c.endSeq), 0)
-  const fromSeq = a.span !== undefined ? a.span.fromSeq : (lastArchived > 0 ? lastArchived + 1 : 0)
+  const fromSeq = a.span !== undefined ? a.span.fromSeq : nextUnarchivedSeq(state.chapters)
+  // Derived from the SAME predicate as fromSeq (#336), never a second reduce. The old form seeded at 0
+  // and special-cased `lastArchived > 0`, so a chapter that legitimately covered seq 0 — every real log
+  // begins with `permission/preset` at seq 0 — made this door re-archive seq 0 forever while
+  // continue-core's twin did not. -1 now honestly means "nothing archived yet".
+  const lastArchived = nextUnarchivedSeq(state.chapters) - 1
   // A REPAIR span is deliberate re-derivation of seqs the watermark has already passed (#60): the
   // nothing-new guard is about not re-archiving a tail, and would otherwise refuse to fix the hole a
   // hollow chapter sits exactly on top of. The span caller has already decided what needs re-rendering.
@@ -201,22 +239,34 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   let chapters = composed.chapters.length > 0
     ? composed.chapters
     : deriveRanges(events, anchor, config.chapterTokenTarget, fromSeq).chapters
-  const repairNotes: string[] = []
+  const compositionNotes: string[] = []
   if (a.span !== undefined) {
     // A repair's span is bounded by the finding, so force exactly that range: composition inside a hole
     // may cut it into topics, and a cut is fine, but nothing may start above `fromSeq` or end below the
     // last completed turn inside the span.
     chapters = clampSpan(chapters, a.span.fromSeq, a.span.toSeq, events)
-    // A repair span may be one enormous turn; the oversize gate would refuse it and leave the husk
-    // un-replaced. Split inside it at event boundaries — see `splitOversize`.
-    const split = splitOversize(chapters, events, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
-    chapters = split.ranges
-    repairNotes.push(...split.notes)
   }
+  // #344: subdivide over-ceiling chapters in EVERY deterministic door, not only in repair. This call used
+  // to sit inside the `a.span !== undefined` arm, so `/chapters-save`, `/chapters-fork`, subagent
+  // settlement and forced-child archive all refused instead — measured with the real functions on real
+  // logs: eadc refused 2 of 3 turns (67%), platfolio 55 of 152, arcnexus 32 of 307, and the refused
+  // range was the OPENING turn in every one. A session's first turn is exactly the thing a later
+  // continuation needs, and it was the thing no deterministic door could archive.
+  //
+  // `splitOversize` cuts at event boundaries, so a range is never re-derived or re-ordered; only where a
+  // single event exceeds the ceiling does the gate below still refuse — and now says so in the door's
+  // own reply instead of reporting success.
+  const split = splitOversize(chapters, events, config.chapterTokenTarget, config.chapterOversizeFactor ?? 2)
+  chapters = split.ranges
+  // Named for what it holds now: split notes arrive on EVERY path, not only repair.
+  compositionNotes.push(...split.notes.map((n) => a.span !== undefined ? n : `subdivided to fit the ceiling: ${n}`))
 
   // Render + write archive (same as runContinue steps 2-3, minus child creation).
   const below = events.filter((e) => e.seq <= anchor)
   const renderConfig: RenderConfig = {
+    // #348: the door already knows all three values (it passes the first two to
+    // writeArchive below); the renderer needs them so a citation is a path `read` can open.
+    citationBase: citationBaseOf(config.artifactStoreRoot, state.rootSession, cwd),
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     chapterTokenTarget: config.chapterTokenTarget,
     ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),
@@ -295,6 +345,7 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     storeRoot: config.artifactStoreRoot,
     cwd,  // #69: records are stored workspace-relative
     rootSessionId: state.rootSession,
+    authorSessionId: sessionId, // #337
     chapters: rendered,
     attemptId: attemptKey(sessionId, anchor, a.attemptSalt),
   })
@@ -305,8 +356,8 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     // marked, or the mark without its replacement (#60).
     await store.mutate(sessionId, (fresh) => supersedeChapter(fresh, a.supersede!.over, wrote.records, a.supersede!.reason))
   } else {
-    await commitChapters(store, sessionId, wrote.records)
+    await commitChapters(store, sessionId, wrote.records, cwd)
   }
 
-  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...hollowNotes, ...oversize.indivisible, ...wrote.warnings] }
+  return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...compositionNotes, ...hollowNotes, ...oversize.indivisible, ...wrote.warnings] }
 }

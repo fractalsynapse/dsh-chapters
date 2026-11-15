@@ -49,7 +49,7 @@ import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, typ
 import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
-import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } from './diag.ts'
+import { configureDiagnostics, configureDiagnosticsCap, diagnosticNote, diagnosticStatusLine, diagnosticWarn } from './diag.ts'
 import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
@@ -57,6 +57,7 @@ import { removedGuard } from './removal.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
 import { providerKindFor, registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
+import { arrivalTallyKey, foreignCompactionKey, type ForeignCompactionFact } from './engine.ts'
 
 /** The cordis surface this entry touches; widened in later stages. */
 interface HostCtx {
@@ -354,6 +355,60 @@ const PKG_ROOT = join(HERE, '..')
  *  domain in r35. */
 const heldDisposers: Array<() => Promise<void>> = []
 
+/**
+ * #360 — the host-plane half of the engine-ownership witness. Prints what the realm engine recorded,
+ * or the explicit "never observed" line: absence of a complaint must never read as evidence of health,
+ * which is how the original foreign-engine week stayed invisible.
+ */
+/**
+ * #351 — print the arrival floor actually in force, and what it deferred.
+ *
+ * The audit's point was that relief is invisible AND tunable only by guessing which of two similarly
+ * named knobs matters. The realm records its effective value durably (`engine.arrival:<id>`, written
+ * because host and realm are separate module instances -- the #360 idiom); this reads it back. With no
+ * record yet the line says so plainly rather than staying silent, because silence here is indistinguishable
+ * from "the feature is off", which is precisely the state #351 is about.
+ */
+function arrivalFloorLines(store: { sessions(): IterableIterator<[string, { chapters?: unknown[] }]>; getSetting(k: string): string | undefined }): string[] {
+  const rows: string[] = []
+  for (const [id] of store.sessions()) {
+    const raw = store.getSetting(arrivalTallyKey(id))
+    if (raw === undefined) continue
+    try {
+      const t = JSON.parse(raw) as { floorTokens: number, entered: number, stubbed: number, degraded?: boolean }
+      rows.push(`  ${id}: floor ${String(t.floorTokens)} tok, ${String(t.stubbed)} result(s) deferred across ${String(t.entered)} arrival(s)${t.degraded === true ? ' [DEGRADED at least once]' : ''}`)
+    } catch {
+      rows.push(`  ${id}: arrival tally unreadable -- NOT evidence the floor is off`)
+    }
+  }
+  const head = ['Arrival deferral (toolResultArtifactTokens -- ARRIVAL-time; distinct from toolResultDeferFloorTokens, which is ARCHIVE-time):']
+  if (rows.length === 0) {
+    return [...head, '  no session has recorded an arrival pass yet -- the floor in force is the realm row default (1,600 tok, derived as 5% of the smallest served window, #351)']
+  }
+  return [...head, ...rows]
+}
+
+function engineProvenanceLines(store: { sessions(): IterableIterator<[string, { chapters?: unknown[] }]>; getSetting(k: string): string | undefined }): string[] {
+  const flagged: string[] = []
+  let observed = 0
+  for (const [id] of store.sessions()) {
+    const raw = store.getSetting(foreignCompactionKey(id))
+    if (raw === undefined) continue
+    let fact: ForeignCompactionFact | undefined
+    try { fact = JSON.parse(raw) as ForeignCompactionFact } catch { flagged.push(`  ${id}: unreadable provenance record — NOT evidence of health`); continue }
+    if (fact === undefined) continue
+    observed += 1
+    flagged.push(`  ${id}: ${String(fact.foreign)} compaction(s) by another engine (${fact.providers || 'provider absent'}), ours: ${String(fact.ours)}`)
+  }
+  if (flagged.length === 0) {
+    return observed === 0
+      ? ['  compaction engine: no foreign-provider summary seen in any registered session',
+        '    (absence is NOT proof — the witness only speaks when a chapters session compacts at all; /chapters-repair reads the logs directly)']
+      : ['  compaction engine: ours on every session that recorded one']
+  }
+  return ['  compaction engine: FOREIGN ENGINE SEEN — this preset\'s sessions were compacted without the chapters archive:', ...flagged]
+}
+
 export async function apply(ctx: HostCtx, config: Config): Promise<void> {
   // #61: the diagnostics sink defaults ON. An operator who set `diagnosticsLog` in the profile gets
   // that path; `DSH_CHAPTERS_ENGINE_ERRORS` beats it; the literal `off` is the only silence. With
@@ -646,7 +701,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         }
       }
       if (reclaimed > 0) {
-        console.error(`[chapters-prompt] boot: released ${String(reclaimed)} zombie analyzing claim(s)`)
+        diagnosticNote(ctx.logger, 'prompt:boot', `released ${String(reclaimed)} zombie analyzing claim(s)`)
         ctx.logger?.info?.(`dsh-chapters: released ${String(reclaimed)} zombie prompt claim(s) at boot`)
       }
     }
@@ -886,6 +941,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           lines.push(`Prompt plane: model ${spec !== '' ? `${spec} (${source})` : 'UNSET — the bar is absent (§28)'}`)
           lines.push(`  transport: ${pushWriter === null ? 'pull (this host has no appendPluginRecord — state reads are commands)' : 'push LIVE (plugin records; the bar rides the projection)'}`)
           lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
+          lines.push(...engineProvenanceLines(store))
+          lines.push(...arrivalFloorLines(store))
           return lines
         },
         sessionRow: async (sessionId: string): Promise<string> => {
@@ -976,102 +1033,116 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // Save-only: creates no session, so the "no continuation-creating actions
     // mid-step" rule is not engaged; a settled child's turns are all completed
     // by construction, and the anchor is its last `turn/end`.
-    if (config.subagentAutoSave) {
-      // #113: one suggestion per completed turn, and a human prompt that suspends the loop. Registered
-      // beside the other turn/end doors rather than as a new timing of our own (AGENTS: no second automatic
-      // engine), and inert whenever the model is unset — the model IS the switch.
-      const promptRunner = makePromptRoundRunner({
-        enabled: () => prompt.effective().spec !== '',
-        eligible: (session) => (session as { header?: { origin?: string } }).header?.origin !== 'subagent',
-        store: store as unknown as Parameters<typeof makePromptRoundRunner>[0]['store'],
-        // #194: every durable row write mirrors to the push transport (order serialized per session).
-        pushRow: (session: unknown, sessionId: string) => { pushBar(session, sessionId) },
-        generate: async (session, turnSeq) => {
-          // The live session object carries the events; this is the same read the archive door uses, and it
-          // is payload-bearing. The GOAL is folded from those events so a suggestion cannot ignore the
-          // purpose it is supposed to advance — the maintainer's rule that the two compose.
-          void turnSeq
-          const events = [...((session as { snapshotEvents?: () => readonly unknown[] }).snapshotEvents?.() ?? [])] as import('./types.ts').SessionEventLike[]
-          const goal = readActiveGoal(events)
-          const r = await prompt.suggest({
-            id: session.id,
-            // #188: the workspace the chapter paths resolve against — without it the lineage walk
-            // cannot read chapter bodies, and the plots (the trajectory) would silently vanish.
-            cwd: (session as { header?: { cwd?: string } }).header?.cwd ?? '',
-            events,
-            goalDirective: goalDirectiveOf(goal),
-          })
-          // Built as an object with ONLY the keys that hold a value: `exactOptionalPropertyTypes` is on, so
-          // `quiet: undefined` is not the same as omitting `quiet`, and a spread that always writes the key
-          // would not compile — which is the right outcome, because the runner branches on presence.
-          if (r.ok) return { ok: true, text: r.text }
-          return { ok: false, reason: r.reason ?? r.text, ...(r.quiet === undefined ? {} : { quiet: r.quiet }) }
-        },
-        onReady: (sessionId, state) => {
-          // Fire only through the loop's own gate, against the LIVE goal signal: armed/idle/budget/one-per-offer
-          // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
-          promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
-        },
-        now: () => new Date().toISOString(),
-        // The rig's legs run in a throwaway home whose `ctx.logger` output is not retained, so the prompt
-        // plane's own narration is copied to stderr — where the boot's server log keeps it. Every "why did the
-        // bar not move" answer tonight depended on lines that were being thrown away (#61).
-        log: (m) => { console.error(`[chapters-prompt] ${m}`); ctx.logger?.info?.(`dsh-chapters: ${m}`) },
-        warn: (m) => { console.error(`[chapters-prompt] WARN ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
-      })
-      const reloadSelfCheck = makeReloadSelfCheckListener({
-        store: store as unknown as ReloadCheckDeps['store'],
-        warn: (m) => { console.error(`[chapters-reload] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
-      })
-      try {
-        ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
-          if (session?.id === undefined) return
-          // #319 part 3: the reload self-check — one predicate over the child's own events at its
-          // first turn/end; doomed shapes announce themselves NOW (stderr + registry fact) instead
-          // of ambushing a restart. The factory owns all its failure; see src/reload-check.ts.
-          reloadSelfCheck(session as { id?: string; snapshotEvents?: () => readonly import('./reload-check.ts').ReloadEvent[] }, event as { type?: string })
-          if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
-          // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
-          // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
-          // captured by the boot's server log, so the answer survives the leg (#61).
-          if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
-          if (event?.type === 'turn/end') promptBoundariesSighted += 1
-          // #225: the re-enable path needs a witness too. The maintainer ran `/chapters-prompt model
-          // …` at 18:16 and NO first-boundary line ever followed — meaning either no turn ended after
-          // it in this process, or the setting did not reach the plane. One line per enable tells
-          // which: `enable seen` with the effective spec immediately after the write.
-          if (event?.type === 'user/message' && event.data?.source?.kind === 'command') {
-            const argsV = String((event.data as { args?: unknown }).args ?? '')
-            if (/^\s*model\s+\S/.test(argsV) || /^\s*suggest\b/.test(argsV)) {
-              const specN = prompt.effective().spec
-              console.error(`[chapters-prompt] enable/suggest command seen for ${String(session.id)}: model now ${specN !== '' ? specN : 'STILL UNSET(→ writes landed elsewhere)'}`)
-            }
+    // #341: the suggested-next-step door, the reload self-check and the subagent-settlement
+    // archiver are THREE INDEPENDENT doors that happen to share a turn/log boundary. They used
+    // to sit inside one `if (config.subagentAutoSave)` block, so turning archiving OFF also
+    // silenced the prompt bar (while /chapters-prompt kept reporting ON) and removed the #319
+    // seed-doom detector. Each door now carries its own switch: the prompt plane is gated by its
+    // model spec being set (the model IS the enable), archiving by subagentAutoSave.
+    // #113: one suggestion per completed turn, and a human prompt that suspends the loop. Registered
+    // beside the other turn/end doors rather than as a new timing of our own (AGENTS: no second automatic
+    // engine), and inert whenever the model is unset — the model IS the switch.
+    const promptRunner = makePromptRoundRunner({
+      enabled: () => prompt.effective().spec !== '',
+      eligible: (session) => (session as { header?: { origin?: string } }).header?.origin !== 'subagent',
+      store: store as unknown as Parameters<typeof makePromptRoundRunner>[0]['store'],
+      // #194: every durable row write mirrors to the push transport (order serialized per session).
+      pushRow: (session: unknown, sessionId: string) => { pushBar(session, sessionId) },
+      generate: async (session, turnSeq) => {
+        // The live session object carries the events; this is the same read the archive door uses, and it
+        // is payload-bearing. The GOAL is folded from those events so a suggestion cannot ignore the
+        // purpose it is supposed to advance — the maintainer's rule that the two compose.
+        void turnSeq
+        const events = [...((session as { snapshotEvents?: () => readonly unknown[] }).snapshotEvents?.() ?? [])] as import('./types.ts').SessionEventLike[]
+        const goal = readActiveGoal(events)
+        const r = await prompt.suggest({
+          id: session.id,
+          // #188: the workspace the chapter paths resolve against — without it the lineage walk
+          // cannot read chapter bodies, and the plots (the trajectory) would silently vanish.
+          cwd: (session as { header?: { cwd?: string } }).header?.cwd ?? '',
+          events,
+          goalDirective: goalDirectiveOf(goal),
+        })
+        // Built as an object with ONLY the keys that hold a value: `exactOptionalPropertyTypes` is on, so
+        // `quiet: undefined` is not the same as omitting `quiet`, and a spread that always writes the key
+        // would not compile — which is the right outcome, because the runner branches on presence.
+        if (r.ok) return { ok: true, text: r.text }
+        return { ok: false, reason: r.reason ?? r.text, ...(r.quiet === undefined ? {} : { quiet: r.quiet }) }
+      },
+      onReady: (sessionId, state) => {
+        // Fire only through the loop's own gate, against the LIVE goal signal: armed/idle/budget/one-per-offer
+        // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
+        promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
+      },
+      now: () => new Date().toISOString(),
+      // THREE sinks, because every one of them has been the only surviving copy of an answer:
+      //  - the diagnostics FILE (#352). Until now the prompt plane was the one subsystem with no durable
+      //    trace: this repo's own diagnostics.log carried 21,138 realm lines and ZERO prompt lines, so
+      //    "why did the bar do nothing" was answerable only by reading the source. AGENTS.md: a detected
+      //    failure is delivered to the user or to a file.
+      //  - stderr, because the rig's legs run in a throwaway home whose ctx.logger output is not retained
+      //    and the boot's server log does keep stderr (#61).
+      //  - ctx.logger, the profile's normal channel.
+      // The file line keeps the `realm:`-shaped `where` tag so one grep finds every door.
+      log: (m) => { diagnosticNote(ctx.logger, 'prompt:door', m); console.error(`[chapters-prompt] ${m}`) },
+      warn: (m) => { diagnosticWarn(ctx.logger, 'prompt:door', m); console.error(`[chapters-prompt] WARN ${m}`) },
+    })
+    const reloadSelfCheck = makeReloadSelfCheckListener({
+      store: store as unknown as ReloadCheckDeps['store'],
+      warn: (m) => { diagnosticWarn(ctx.logger, 'prompt:reload-check', m); console.error(`[chapters-reload] ${m}`) },
+    })
+    try {
+      ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
+        if (session?.id === undefined) return
+        // #319 part 3: the reload self-check — one predicate over the child's own events at its
+        // first turn/end; doomed shapes announce themselves NOW (stderr + registry fact) instead
+        // of ambushing a restart. The factory owns all its failure; see src/reload-check.ts.
+        reloadSelfCheck(session as { id?: string; snapshotEvents?: () => readonly import('./reload-check.ts').ReloadEvent[] }, event as { type?: string })
+        if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
+        // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
+        // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
+        // captured by the boot's server log, so the answer survives the leg (#61).
+        if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
+        if (event?.type === 'turn/end') promptBoundariesSighted += 1
+        // #225: the re-enable path needs a witness too. The maintainer ran `/chapters-prompt model
+        // …` at 18:16 and NO first-boundary line ever followed — meaning either no turn ended after
+        // it in this process, or the setting did not reach the plane. One line per enable tells
+        // which: `enable seen` with the effective spec immediately after the write.
+        if (event?.type === 'user/message' && event.data?.source?.kind === 'command') {
+          const argsV = String((event.data as { args?: unknown }).args ?? '')
+          if (/^\s*model\s+\S/.test(argsV) || /^\s*suggest\b/.test(argsV)) {
+            const specN = prompt.effective().spec
+            console.error(`[chapters-prompt] enable/suggest command seen for ${String(session.id)}: model now ${specN !== '' ? specN : 'STILL UNSET(→ writes landed elsewhere)'}`)
           }
-          if (event?.type === 'turn/end' && !promptVerdictSighted.has(String(session.id))) {
-            promptVerdictSighted.add(String(session.id))
-            const specV = prompt.effective().spec
-            const originV = (session as { header?: { origin?: string } }).header?.origin
-            console.error(`[chapters-prompt] first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`)
-          }
-          // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
-          // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
-          // watched a chapters-prompt node land BEFORE their first message, and that node was the
-          // discovery. Rows only change at turn/end, so a session born before its first turn has
-          // nothing to say — `idle` is the whole truth — and saying it through the projection costs
-          // zero commands forever.
-          if (pushWriter !== null && !seenBirthSessions.has(session.id)) {
-            seenBirthSessions.add(session.id)
-            if (prompt.effective().spec !== '') pushBar(session, session.id)
-          }
-          promptRunner(session as never, event as never)
-        }) as never)
-        console.error('[chapters-prompt] turn/end door armed')
-        ctx.logger?.info?.('dsh-chapters: suggested-next-step door armed — one offer per completed turn when a prompt model is set (state: /chapters-prompt state)')
-      } catch (error) {
-        console.error(`[chapters-prompt] turn/end door REFUSED: ${String((error as Error)?.message ?? error)}`)
-        ctx.logger?.warn?.(`dsh-chapters: suggested-next-step door registration REFUSED — no turn will offer a suggestion (${String((error as Error)?.message ?? error).slice(0, 160)})`)
-      }
+        }
+        if (event?.type === 'turn/end' && !promptVerdictSighted.has(String(session.id))) {
+          promptVerdictSighted.add(String(session.id))
+          const specV = prompt.effective().spec
+          const originV = (session as { header?: { origin?: string } }).header?.origin
+          { const l = `first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`; diagnosticNote(ctx.logger, 'prompt:door', l); console.error(`[chapters-prompt] ${l}`) }
+        }
+        // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
+        // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
+        // watched a chapters-prompt node land BEFORE their first message, and that node was the
+        // discovery. Rows only change at turn/end, so a session born before its first turn has
+        // nothing to say — `idle` is the whole truth — and saying it through the projection costs
+        // zero commands forever.
+        if (pushWriter !== null && !seenBirthSessions.has(session.id)) {
+          seenBirthSessions.add(session.id)
+          if (prompt.effective().spec !== '') pushBar(session, session.id)
+        }
+        promptRunner(session as never, event as never)
+      }) as never)
+      console.error('[chapters-prompt] turn/end door armed')
+      ctx.logger?.info?.('dsh-chapters: suggested-next-step door armed — one offer per completed turn when a prompt model is set (state: /chapters-prompt state)')
+    } catch (error) {
+      diagnosticWarn(ctx.logger, 'prompt:door', 'turn/end door registration REFUSED — no turn will offer a suggestion', error)
+      ctx.logger?.warn?.(`dsh-chapters: suggested-next-step door registration REFUSED — no turn will offer a suggestion (${String((error as Error)?.message ?? error).slice(0, 160)})`)
+    }
 
+    // Door 5 (issue #47): the fifth archive moment — subagent settlement. Gated by
+    // subagentAutoSave ALONE (#341): nothing above this line may depend on it.
+    if (config.subagentAutoSave) {
       const autoSaveListener = wireSubagentAutoSave(ctx as never, store, {
         presetId: CHAPTERS_PRESET_ID,
         artifactStoreRoot: config.artifactStoreRoot,
@@ -1130,7 +1201,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
   const marker = process.env.DSH_CHAPTERS_WITNESS
   let roster: Promise<RosterVerdict> | undefined
   const rosterCheck = (): Promise<RosterVerdict> =>
-    roster ??= reportPresetRoster(ctx, config.fallbackPreset)
+    roster ??= reportPresetRoster(ctx, CHAPTERS_PRESET_ID) // #353: was config.fallbackPreset — a CHILD-MOUNT knob. Setting it to another preset made this line certify that other preset and print an UNHEALTHY verdict naming the wrong id with the wrong remedy. The id we register is CHAPTERS_PRESET_ID, which the witness two lines away already uses.
   setTimeout(() => {
     void rosterCheck().then((verdict) => {
       if (marker !== undefined) void witness(ctx, marker, domain, verdict)
@@ -1283,7 +1354,7 @@ export async function reportPresetRoster(
     } else ctx.logger?.info?.(message)
   }
   if (verdict.state === 'present' && verdict.broken === undefined) {
-    line(`dsh-chapters: preset "${presetId}" is in the host roster${mounted} — chapter-form compaction and continuations will compose`, false)
+    line(rosterHealthyLine(presetId, mounted), false)
   } else if (verdict.state === 'present') {
     line(`dsh-chapters: preset "${presetId}" is DECLARED BUT BROKEN — ${verdict.broken} — sessions choosing it will not compose. `
       + 'A preset row whose child plugin no longer resolves fails here; the plugin drops rows this host cannot import, '
@@ -1298,6 +1369,19 @@ export async function reportPresetRoster(
   return verdict
 }
 
+/**
+ * The healthy boot line, in one place so the site can be TESTED against it (#355 docs audit).
+ *
+ * `operations/install.md` tells a user to compare their boot output with a quoted sample and treats any
+ * difference as a named problem — which makes a drifted sample actively harmful. The line this plugin
+ * prints carries a trailing clause (` — chapter-form compaction and continuations will compose`) and the
+ * page showed the short form without it, so a correctly installed system looked wrong by the page's own
+ * rule. The sample is now derived from this function by `tests/unit/roster-line-docs.test.ts`, so the two
+ * cannot separate again — the same shape of fix as #351's recompute-the-table row: stop trusting that a
+ * quoted string matches its source, and make a test fail when it does not.
+ */
+export const rosterHealthyLine = (presetId: string, mounted: string): string =>
+  `dsh-chapters: preset "${presetId}" is in the host roster${mounted} — chapter-form compaction and continuations will compose`
 /** One phrase describing what the host's inventory says about the preset's own rows.
  *  Never throws: an unavailable inventory must degrade the line, not the boot check. */
 export async function describeMountedRows(presets: PresetRegistryLike | undefined, presetId: string): Promise<string> {

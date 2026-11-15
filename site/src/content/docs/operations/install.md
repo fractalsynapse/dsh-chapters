@@ -66,7 +66,7 @@ mounted and then asks the host's own roster:
 
 ```
 dsh-chapters: preset "chapters" registered as a declaration row
-dsh-chapters: preset "chapters" is in the host roster — 30 mounted rows all active
+dsh-chapters: preset "chapters" is in the host roster — 30 mounted rows all active — chapter-form compaction and continuations will compose
 ```
 
 The second line counts the rows on purpose: **declared and usable are different facts.** A row can resolve

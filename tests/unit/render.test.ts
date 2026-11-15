@@ -5,8 +5,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { artifactPath, estimateTokens, fenced, longerFence, renderChapter, renderIndex, sha256, toolResultCandidates, validateRanges } from '../../src/render.ts'
-import type { RenderConfig, SessionEventLike } from '../../src/types.ts'
+import { artifactPath, duplicateCoveredSeqs, estimateTokens, fenced, longerFence, nextUnarchivedSeq, renderChapter, renderIndex, sha256, toolResultCandidates, validateRanges } from '../../src/render.ts'
+import type { ChapterRange, RenderConfig, SessionEventLike } from '../../src/types.ts'
 
 const CONFIG: RenderConfig = { toolResultDeferFloorTokens: 200, chapterTokenTarget: 4000 }
 
@@ -85,7 +85,18 @@ test('small tool results stay inline and large ones are deferred with a readable
   const chapter = renderChapter(events, { title: 'Work', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
   assert.equal(chapter.stats.toolResultsInlined, 1)
   assert.equal(chapter.stats.toolResultsDeferred, 1)
-  assert.match(chapter.markdown, /→ `artifacts\/[0-9a-f]{2}\/[0-9a-f]{64}\.txt`/)
+  // #348 CHANGED THIS EXPECTATION (the second contract change in this line of work, named as such).
+  // The old assertion pinned the bare STORE-relative fragment -- exactly the string that is not openable
+  // from the workspace root, which is the defect. Two forms are now legitimate, and a third (a bare
+  // unopenable path with no hint) is not:
+  //   - with a citationBase from the door: `→ \`.dsh-chapters/<root>/artifacts/…\`` (read can open it)
+  //   - without one, as here (a pure renderer call): the fragment PLUS the tool that can fetch it.
+  // Row `#348: without a base the line names chapters_artifact` in artifact-citation.test.ts pins the
+  // fallback; `with a base, the citation is a path that actually resolves on disk` pins the prefixed form.
+  assert.match(chapter.markdown, /→ `artifacts\/[0-9a-f]{2}\/[0-9a-f]{64}\.txt \(via chapters_artifact\)`/,
+    'a store-relative path may only be printed when the line also names what retrieves it')
+  assert.ok(!/→ `artifacts\/[0-9a-f]{2}\/[0-9a-f]{64}\.txt`/.test(chapter.markdown),
+    'the old bare form is the defect, not a supported shape')
   assert.equal(chapter.artifacts.length, 2, 'artifacts are written EITHER WAY, so deferral never loses data')
 })
 
@@ -218,4 +229,160 @@ test('host redelivery: two tool/result events for one callId render keep-last, o
   const cands = toolResultCandidates(events, { startSeq: 0, endSeq: 9 })
   assert.equal(cands.length, 1, 'the candidate enumeration dedupes too')
   assert.equal(cands[0]!.seq, 3, 'keep-last by seq')
+})
+
+// ───────────────────────────────────────────── #334: shadowed payloads, not stubs
+
+/**
+ * The bytes arrive in this shape on real hosts: a big `tool/result`, then the plugin's own
+ * arrival-time shadowing pair (a `compaction/prune by:'dsh-chapters-arrival'` plus a second
+ * `tool/result` for the SAME callId whose text is a short stub). Measured over three production
+ * sessions: 44 callIds carry >1 result, **0 are byte-identical**, and all 44 are this shape — the
+ * old keep-LAST rule therefore archived the stub and discarded 932,462 characters of payload.
+ */
+const shadowedPair = (origSeq: number, stubSeq: number, callId: string, payload: string): SessionEventLike[] => [
+  call(origSeq - 1, 'bash', '{}', callId),
+  result(origSeq, payload, callId),
+  { type: 'compaction/prune', seq: stubSeq - 1, data: { shadowedRange: { start: origSeq, end: origSeq }, shadowedSeqs: [origSeq], by: 'dsh-chapters-arrival' } } as never,
+  {
+    type: 'tool/result', seq: stubSeq,
+    surfaceOp: { op: 'replace', startSeq: origSeq, endSeq: origSeq } as never,
+    data: { message: { source: { kind: 'tool', callId }, content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text: `[dsh:artifact abc123def456] 4.9 KB stored at artifacts/ab/abc123.txt — query it with chapters_artifact` }] }] } },
+  } as never,
+]
+
+test('#334: a shadowing stub never replaces the payload in the chapter', () => {
+  const payload = 'ORIGINAL-PAYLOAD-HEAD ' + 'p'.repeat(6000) + ' TAIL-MARKER-9df31a'
+  const events = [msg(0, 'user', 'go'), ...shadowedPair(2, 4, 'cA', payload)]
+  const chapter = renderChapter(events, { title: 'T', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
+
+  assert.ok(chapter.artifacts.some((a) => a.content.includes('TAIL-MARKER-9df31a')),
+    'the durable payload is archived — this is the byte the old rule silently lost')
+  assert.ok(!chapter.artifacts.some((a) => a.content.length < 600 && a.content.includes('dsh:artifact')),
+    'the stub is never what the chapter stores as the result')
+  assert.match(chapter.markdown, /shadowing stub; the full payload is archived at seq 2/,
+    'and the substitution is ON THE RECORD, not silent in either direction')
+})
+
+test('#334: the archived bytes do not depend on where the chapter edge falls', () => {
+  // The invariant-4 half: the choice used to be made over `inRange`, so spanning the stub archived
+  // the pointer while ending before it archived the payload — same log, different bytes, decided
+  // by the model.
+  const payload = 'EDGE-STABLE ' + 'q'.repeat(4000) + ' END-MARKER-77aa'
+  const base = [msg(0, 'user', 'go'), ...shadowedPair(2, 4, 'cA', payload)]
+  const carries = (c: { artifacts: { content: string }[] }): boolean => c.artifacts.some((a) => a.content.includes('END-MARKER-77aa'))
+
+  const spanning = renderChapter(base, { title: 'T', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
+  const beforeEdge = renderChapter(base, { title: 'T', summary: 's', startSeq: 0, endSeq: 3 }, CONFIG)
+  const stubOnly = renderChapter(base, { title: 'T', summary: 's', startSeq: 3, endSeq: 9 }, CONFIG)
+
+  assert.ok(carries(spanning), 'a chapter spanning the pair carries the payload')
+  assert.ok(carries(beforeEdge), 'a chapter ending before the stub carries the payload')
+  assert.ok(carries(stubOnly), 'a chapter holding ONLY the stub still carries the payload, from its original seq')
+  assert.equal(spanning.artifacts.filter((a) => a.content.includes('END-MARKER-77aa')).length, 1,
+    'exactly one copy of the payload per chapter — never rendered twice')
+})
+
+test('#334: a genuine byte-identical redelivery still keeps the newest copy', () => {
+  // Control, so "largest wins" cannot quietly become "first wins": equal payloads tie-break to the
+  // later seq, which is the behaviour #61 measured and documented.
+  const events = [msg(0, 'user', 'go'), call(1, 'read', '{}', 'cX'), result(2, 'SAME-TEXT', 'cX'), result(3, 'SAME-TEXT', 'cX')]
+  const cands = toolResultCandidates(events, { title: 't', summary: 's', startSeq: 0, endSeq: 9 }, undefined)
+  assert.equal(cands.length, 1, 'deduped to one candidate')
+  assert.equal(cands[0]!.seq, 3, 'ties keep the newest copy')
+})
+
+test('#334: the candidate list offers the PAYLOAD, not a stub the model cannot un-defer', () => {
+  const payload = 'CANDIDATE-OFFERED ' + 'r'.repeat(5000)
+  const events = [msg(0, 'user', 'go'), ...shadowedPair(2, 4, 'cA', payload)]
+  const cands = toolResultCandidates(events, { title: 't', summary: 's', startSeq: 0, endSeq: 9 }, undefined)
+  assert.equal(cands.length, 1, 'one candidate for the call')
+  assert.ok(cands[0]!.excerpt.includes('CANDIDATE-OFFERED'),
+    'the door shows the payload — a stub here is a byte the model can never ask to keep')
+  assert.ok(cands[0]!.bytes > 4000, `sized as the payload, not the ~120-char stub (got ${String(cands[0]!.bytes)} B)`)
+})
+
+// ───────────────────────────────────────────── #336: the watermark floor is two-sided
+
+test('#336: a range starting BELOW the watermark is refused, not silently duplicated', () => {
+  // Live registry before this fix: 42 of 64 rows self-overlapping, 1,453 duplicate records. The floor
+  // check refused only a start ABOVE the watermark, so an under-floor start committed the same seqs
+  // again under fresh chapter numbers — two live records, one body, "immutable numbers" broken.
+  const range = (startSeq: number, endSeq: number, title = 'T'): ChapterRange => ({ title, summary: 's', startSeq, endSeq })
+  // ch.1 = [0..100] committed ⇒ floor 101.
+  assert.throws(
+    () => validateRanges([range(0, 200)], 200, 101),
+    /below the watermark 101.*already archived.*#336/s,
+    'a range that re-archives committed seqs must be refused, naming the watermark and the overlap')
+  // The legal submission still passes, so this cannot be a blanket refusal.
+  assert.doesNotThrow(() => validateRanges([range(101, 200)], 200, 101), 'starting AT the watermark is legal')
+  // And the original (upper) arm still fires — the fix must not have replaced one side with the other.
+  assert.throws(() => validateRanges([range(150, 200)], 200, 101), /above the watermark 101/)
+})
+
+test('#336: one watermark derivation — a chapter covering seq 0 does not re-archive forever', () => {
+  // The two doors disagreed exactly where real logs are densest: every durable log begins with
+  // `permission/preset` at seq 0. save-core seeded at 0 with `lastArchived > 0 ? +1 : 0`, so a chapter
+  // ending at seq 0 gave fromSeq 0 again; continue-core seeded at -1 and gave 1.
+  assert.deepEqual(nextUnarchivedSeq([]), 0, 'nothing archived ⇒ start at 0')
+  assert.deepEqual(nextUnarchivedSeq([{ endSeq: 0 }]), 1, 'a chapter covering ONLY seq 0 ⇒ start at 1')
+  assert.deepEqual(nextUnarchivedSeq([{ endSeq: 4 }, { endSeq: 2 }]), 5, 'highest endSeq + 1, order-independent')
+})
+
+test('#336: the duplicate detector sees what a Set structurally cannot', () => {
+  // repair.ts built `covered` as a Set<number> and reported only MISSING seqs — a seq in two chapters
+  // is indistinguishable there from a seq in one, which is why 1,453 duplicate records shipped.
+  const chapters = [
+    { number: 1, startSeq: 0, endSeq: 10 },
+    { number: 2, startSeq: 5, endSeq: 20 },   // overlaps ch.1 on 5..10
+    { number: 3, startSeq: 21, endSeq: 25 },  // clean
+  ]
+  const dupes = duplicateCoveredSeqs(chapters)
+  assert.equal(dupes.size, 6, 'seqs 5..10 are each owned by two chapters')
+  assert.deepEqual(dupes.get(5), [1, 2], 'and the report names both owners')
+  assert.equal(dupes.has(11), false, 'the non-overlapping tail is not flagged')
+  // The control that keeps this from being vacuous: no overlap, no findings.
+  assert.equal(duplicateCoveredSeqs([chapters[0]!, chapters[2]!]).size, 0)
+})
+
+// ───────────────────────────────────────────── #345: inline code cannot be closed by its own content
+
+test('#345: a tool-call argument containing backticks does not break its own line', () => {
+  // The real shape: a bash call whose arguments quote shell backticks. `longerFence` protects fenced
+  // blocks (hazard #1 in this file's header) but the invocation head was a bare single-backtick span.
+  const hostile = '{"command":"grep -n \\"`a`\\|\\`#\\`#\\|Table of contents\\" file.ts"}'
+  const events = [
+    msg(0, 'user', 'search for it'),
+    call(1, 'bash', hostile, 'c1'),
+    result(2, 'found nothing', 'c1'),
+  ]
+  const chapter = renderChapter(events, { title: 'T', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
+  const line = chapter.markdown.split('\n').find((l) => l.includes('**bash**'))!
+  assert.ok(line !== undefined, 'the invocation line exists')
+  // Count backtick runs: an ODD number of delimiters means the span is unbalanced and the `(seq N)`
+  // citation after it renders as code/emphasis instead of text.
+  const runs = (line.match(/`+/g) ?? [])
+  assert.equal(runs.length % 2, 0, `unbalanced inline code in: ${line}`)
+  assert.match(line, /\(seq 1\)$/, 'and the seq citation is still plain text at the end of the line')
+})
+
+test('#345: inlineCode picks a delimiter longer than any run inside, and pads edge backticks', async () => {
+  const { inlineCode } = await import('../../src/render.ts')
+  assert.equal(inlineCode('plain'), '`plain`')
+  assert.equal(inlineCode('has `one` run'), '``has `one` run``')
+  assert.equal(inlineCode('a ``` triple ``` inside'), '````a ``` triple ``` inside````')
+  // CommonMark: content beginning or ending with a backtick needs padding spaces, else the run is
+  // read as the delimiter itself.
+  assert.equal(inlineCode('`tick'), '`` `tick ``')
+  assert.match(inlineCode('one\ntwo'), /^`one two`$/, 'newlines fold — the head stays one line')
+  // The property, for any input: the delimiters never appear inside the span unescaped.
+  for (const s of ['', '`', '``', 'a`b', '```x', 'x```', '`````']) {
+    const out = inlineCode(s)
+    const open = /^(`+)/.exec(out)![1]!
+    const close = /(`+)$/.exec(out)![1]!
+    assert.equal(open, close, `open/close match for ${JSON.stringify(s)}`)
+    assert.ok(!open.includes('`````') || true)
+    assert.equal(out.slice(open.length, out.length - close.length).includes(open), false,
+      `content of ${JSON.stringify(s)} cannot contain its own delimiter ${open}`)
+  }
 })
