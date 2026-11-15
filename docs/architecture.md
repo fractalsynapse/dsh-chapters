@@ -282,7 +282,13 @@ that never enters the index. Four are session-facing, all idempotent over a per-
    is compacted. Enrichment is **queued** per settlement — a 10-child fanout must not `runNow` ten
    annotator passes — and an empty or refused chapter is never enqueued (#61). A continuable child
    settles repeatedly; the watermark makes every repeat after the first a save of only-new-turns.
-   Config: `subagentAutoSave` (default on).
+   Config: `subagentAutoSave` (default on) — and **that flag gates this moment alone (#341)**. The
+suggested-next-step door and the #319 reload self-check are separate doors that merely share the
+turn/log boundary; they were nested inside this flag until #341, so disabling archiving also silenced
+the prompt bar while `/chapters-prompt` kept reporting ON. The prompt plane's switch stays what it
+always was — a configured prompt model, one knob, no second boolean.
+`tests/unit/host-plane-door-gating.test.ts` pins the nesting structurally, because `apply()` has no
+deterministic harness and an unobserved wiring block is exactly how this drifted.
 
 **Amendment 2026-10-22 (#61, item 5) — the seventh moment: a rooted child that has never archived.**
 A `ch-*` continuation child is a real session with a real `parentSession`, and door 5 does NOT cover it
