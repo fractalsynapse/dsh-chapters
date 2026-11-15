@@ -210,6 +210,38 @@ rewrite costs the prefix nothing, unlike the pruner's mid-history cliff. Row con
 `toolResultArtifactTokens` is pinned per e2e project (500 for arrival, default
 8000 elsewhere).
 
+### Amendment (#334, 2026-11-14): a shadowed result's PAYLOAD is what a chapter archives
+
+Arrival-time artifacting has a consumer the design did not account for: **the renderer**. A
+shadowing replacement appends a second `tool/result` for the same callId whose text is the stub, and
+the chapter renderer's copy rule — "keep the LAST result per callId", written 2026-09-29 against a
+host redelivery where the two copies were byte-identical — therefore kept the stub. On current bytes
+that premise never fires: measured across three production sessions, 44 callIds carry more than one
+result, **0 are identical, and 44 are this exact shadow shape**. The chapter recorded the pointer,
+discarded 932,462 characters of payload, named the dropped seq nowhere (not even in
+`unrenderedSeqs`), and still counted it in `events:`.
+
+The rule is now stated by **size, over the whole log**, in one predicate
+(`resultRenderPlan`, `src/log-shape.ts`), consumed by both the chapter body and `chapters_segment`'s
+candidate list:
+
+- **largest copy wins**, ties break to the newest — so a true redelivery keeps the behaviour #61
+  documented, and a ~500-byte stub can never out-weigh what it replaced;
+- **decided over the full log, not the range.** The old range-local choice made the archived bytes a
+  function of where the model put a chapter edge (span the pair → stub; stop before it → payload),
+  which is what invariant 4 forbids;
+- a chapter containing **only** a stub renders the original's bytes at that position, accepting the
+  duplicate across two chapters. Duplication is bounded, visible, and stored once (the artifact store
+  is content-addressed); silent loss is none of those;
+- the substitution is **written into the chapter** (`seq N is a shadowing stub; the full payload is
+  archived at seq M`), because a correction nobody can see is how this class of bug survived a year.
+
+Invariant 1 was never at risk — the durable log keeps every copy, and the compaction finalizer
+already resolves through the replacement chain (`resolveOriginalEvent`). The defect was entirely in
+what the archive claimed. Note also that integrity checks pass over this: chapter `sha256` and
+artifact hashes were verified consistent, **of the stub**. Internal consistency is not fidelity to
+the log, and #334 is why the two must be asserted separately.
+
 ### Amendment (user-directed, 2026-09-19, APPROVED, **landed**): the plot note across in-place compaction
 
 > Shipped: the forward path is the preset persona suffix (the agent is told to end substantive turns
