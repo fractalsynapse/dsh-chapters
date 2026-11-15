@@ -532,13 +532,16 @@ async function finishChild(
   const callerEvents = await ports.readCallerEvents()
   // The parent's CURRENT mode, folded last-value-wins exactly like the host
   // projection does. Measured against the installed kernel (docs/plans-carriage.md
-  // § 10): a two-event seed `notice@0, plan/mode@1` is accepted in the production
-  // header shape, and the host's own plan projection then folds the child's log to
-  // `active: true` — so the seeded child really IS gated, not merely told.
+  // § 10): the host's plan projection folds a seeded `plan/mode` to `active: true`, so the
+  // seeded child really IS gated, not merely told.
   const modeActive = detectPlans(callerEvents).modeActive
   const seedMode = intent === 'continue' && config.planSeedMode !== false && modeActive === true
+  // #338: the seed is CONTIGUOUS FROM SEQ 0 — the kernel rejects `seed[i].seq !== i`
+  // (`dsh-session lib/index.js:1330`), and since #319 part 2 moved the TOC notice out of the
+  // seed this state event IS `seed[0]`. It kept `seq: 1` from when the notice held 0, which
+  // refused every continuation from an active-plan session at `agents.create`.
   const modeEvents: SessionEventLike[] = seedMode
-    ? [{ type: PLAN_MODE_EVENT, seq: 1, time: ports.now(), data: { active: true } }]
+    ? [{ type: PLAN_MODE_EVENT, seq: 0, time: ports.now(), data: { active: true } }]
     : []
 
   let plansSection = ''

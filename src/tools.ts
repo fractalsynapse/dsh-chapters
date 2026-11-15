@@ -195,17 +195,19 @@ export function buildChaptersTools(
       diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
       createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
         const callerOptions = caller.options
-        // The seed is contiguous from seq 0: the notice, then any STATE events this
-        // plugin authors for the child (plan mode). Invariant 2 holds — nothing from
-        // the parent's log is copied; a seeded `plan/mode` is a synthetic fact about
-        // the boundary, and the kernel's own setup events still append after it
-        // (measured: notice@0 → plan/mode@1 → end-seed@2 → permission/sandbox/…).
+        // The seed is contiguous from seq 0 and holds only STATE events this plugin authors
+        // for the child (plan mode). Invariant 2 holds — nothing from the parent's log is
+        // copied; a seeded `plan/mode` is a synthetic fact about the boundary, and the
+        // kernel's own setup events still append after it (measured #338: with a seed,
+        // plan/mode@0 → end-seed@1 → permission/sandbox/…; without one, end-seed@0).
         // #319 part 2 (invariant-2 amendment 2026-11-05): the SEED carries STATE events only.
         // A seeded user/message at surface[0] is what poisoned every continuation child against
         // the host's own cold-load validator (issue #314: the kernel records its first-request
         // header AFTER our notice, and its reader then refuses the log). The TOC notice is now
         // AUTHORED as the child's first turn — the position every loadable session has always
         // had for its first content: inside an open turn, after the kernel's own header.
+        // #338: that move left `plan/mode` as seed[0] while it still carried seq 1, so the
+        // kernel refused the child for every continuation from an active-plan session.
         const handle = await ctx.agents.create({
           sessionId,
           seed: [...modeEvents],
