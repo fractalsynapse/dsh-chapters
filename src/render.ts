@@ -204,10 +204,37 @@ function collectCandidates(events: SessionEventLike[], range: ChapterRange): Too
 }
 
 /**
+ * What ONE candidate row costs the model when `chapters_segment` prints it.
+ *
+ * #343: the cap was written against `c.estimatedTokens` — the size of the RESULT PAYLOAD — but the
+ * door never emits the payload. It emits `{seq, toolName, excerpt(≤160 chars), deferred}`. So the
+ * budget was spent on bytes that are not in the output, and one result larger than the cap consumed
+ * the entire allowance: real sessions were offered exactly ONE candidate (`listing 1 of 370 tool
+ * results`), which is not a bound on the door's output, it is a blindfold. #330 then removed the
+ * per-result size numbers from the emitted row, so the quantity being budgeted no longer appears in
+ * the response at all.
+ *
+ * This is the ONE place that quantity is decided; the caller's row shape in `tools.ts` must stay in
+ * step with it.
+ */
+export function candidateListingTokens(c: ToolResultCandidate): number {
+  return estimateTokens(`${c.seq} ${c.toolName} ${c.excerpt}`)
+}
+
+/**
  * The capped public form (#61). `chapters_segment` once emitted 49,932 characters of its OWN output while
  * also reporting `(Omitted 275266 bytes …)` — ≈81K est tokens into a 32K-class window, asking a small
- * model to judge a candidate list it never received. Ranking is by size descending, so what a cap
+ * model to judge a candidate list it never received. Ranking is by payload size descending, so what a cap
  * removes is the SMALL stuff: the judgment the model is actually asked for stays intact.
+ *
+ * Two separate mistakes are corrected here (#343), and the second is why fixing only the first changed
+ * nothing on real data:
+ *  - the scan STOPPED at the first item that did not fit. With a descending ranking that is item #2
+ *    whenever the largest result alone busts the cap, so the list never exceeded one entry.
+ *  - the budget summed the RESULT PAYLOADS' tokens, while the door emits one short excerpt row per
+ *    candidate (see `candidateListingTokens`), so a single oversized payload spent the whole allowance
+ *    on bytes the model never sees. A `continue` alone leaves that case at exactly one row — which is
+ *    how this second half was found, by mutating the fix and watching the row stay red.
  *
  * The caller reports what was withheld — see `candidateTotals` — because a capped list that does not say
  * it is capped is a silent truncation, and AGENTS.md forbids truncating to fit.
@@ -222,9 +249,13 @@ export function toolResultCandidates(
   let used = 0
   const kept: ToolResultCandidate[] = []
   for (const c of ranked) {
-    if (used + c.estimatedTokens > capTokens && kept.length > 0) break
+    // `continue`, never `break`: an item that does not fit says nothing about the ones after it.
+    // The FIRST row is kept even over budget — the largest payload is the consequential judgment —
+    // and everything after it is bounded by what the LIST costs, not by what the payloads cost.
+    const cost = candidateListingTokens(c)
+    if (used + cost > capTokens && kept.length > 0) continue
     kept.push(c)
-    used += c.estimatedTokens
+    used += cost
   }
   return kept
 }
