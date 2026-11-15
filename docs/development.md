@@ -871,6 +871,16 @@ Rules that follow, in the order they bite:
    rather than a judgement call; logging keys, store paths and `maxBytes` are deliberately outside the anchor, and a
    manifest file that contributes no tokens fails its own row, so a silently-dead extraction rule cannot masquerade as
    protection.
+
+1a. **A file belongs in the anchor only while it contains literals that reach the model (#362).** `src/preset.ts` was
+    listed on the stated premise that it *is* the persona; it is not — the persona is `cordis.patch.yml`'s
+    `prefix`/`suffix`, already covered — and the whole-file extraction it used matched `'([^'\n]*)'`, so two apostrophes
+    on one line of ordinary JSDoc manufactured a token out of comment prose. All 77 of its "model-facing bytes" were
+    artifacts of that rule, and editing a comment moved `promptAnchor`: a green corpus was declared stale and the tool
+    demanded a full re-record of every project. It is removed from `PROMPT_SURFACE`, with a tripwire row that fails if
+    persona literals ever appear in that file, so the removal cannot quietly become a hole. The general shape to guard
+    against is the one the item above already names for the opposite case: a rule that measures more than the model
+    sees trains people to route around it, exactly like a rule that measures nothing.
 2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it cannot
    say "this leg predates three plugin commits". The stamp is what says that, and #156's split is what stops the stamp from
    crying wolf on every rebuild.
