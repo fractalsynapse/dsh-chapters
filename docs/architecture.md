@@ -500,6 +500,44 @@ Trade-off to keep honest: a workspace-relative root makes a chain **cwd-scoped**
 means an absolute configured root, at which point `read` reachability must be re-verified — do not assume
 an absolute path inside one workspace stays reachable in another.
 
+### The registry must state which workspace its paths belong to (#348)
+
+The two halves of that trade-off were mixed in a way that made the registry unable to address its own
+archive: chapter and artifact paths are stored **relative to the session workspace**, but the storage
+domain is **per home** — one `~/.dsh/storages/dsh_chapters.json` holding the sessions of every project on
+the machine. A consumer holding only registry bytes therefore had no correct thing to resolve against.
+
+Measured on this machine rather than reasoned about: resolving all 3,623 chapter entries against the
+*current* workspace — the only choice available without an owning cwd — reports **1,431 (39%) as
+"missing"**. Resolving each against its own session's workspace gives **3,620/3,623 present**. Nothing was
+corrupt; the addressing was unattributable. Every path-iterating consumer inherits it: repair, restore,
+`/chapters-remove`'s blob GC ("delete shared blobs only when no active record references them"), mirror
+rehydration, and the knowledge sync's per-workspace projection.
+
+The contract now:
+
+- **A row carries the workspace its paths are relative to** (`SessionState.cwd`), stamped by
+  `appendChapters` — the one predicate every door's row write already passes through, which is why the
+  stamp lives there and not in each door. `commitChapters`, the save door, the continue/fork doors and the
+  compaction finalizer each supply the cwd they already resolved for `makeArchiveFs`; a door that does not
+  know one leaves the field absent rather than guessing, because a wrong workspace is worse than none.
+- **Optional, so durable state keeps opening.** Rows written before this field must parse — the registry
+  has no shutdown migration hook — so `cwd` is `z.string().min(1).optional()`. Absent means "recovery for
+  this row stays the durable log", which is what *Recovery needs a surviving source* has always meant;
+  it must never mean "resolve against wherever we happen to be".
+- **`''` is not a workspace.** The schema rejects it: an empty path resolves every relative chapter
+  against nothing and looks plausible while pointing nowhere.
+- **`stampWorkspace` returns the same object** when the cwd is absent or unchanged, because
+  `store.mutate` treats object identity as "no change" — an unconditional stamp would turn every
+  idempotent retry into a write and a `rev` bump.
+
+Separately, the same audit found a second dialect in live rows: `#finalizeOne` passed an **absolute**
+`resolveStoreRoot(...)` as `storeRoot` with no `cwd`, so `writeArchive` minted absolute stored paths
+while the checkpoint TOC cited the workspace-relative form for the same file — the split #69 had already
+settled ("relative is the right winner"). It now passes raw root + `cwd`, exactly as the save door does.
+Consumers must still compare with `sameStoredPath`, never `===`, and a row that predates this still holds
+the absolute form.
+
 ## Atomicity
 
 Writing files, allocating numbers, creating a session, and committing registry state is not

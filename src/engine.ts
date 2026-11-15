@@ -1379,7 +1379,14 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const wrote = await writeArchive({
       fs,
       allocator: makeAllocator(store, session.id),
-      storeRoot: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+      // #348 / #69: pass the RAW store root plus the cwd, exactly as the save door does
+      // (save-core.ts:299). This call used to hand writeArchive an ABSOLUTE resolveStoreRoot(...) and no
+      // cwd, so writeArchive minted absolute stored paths while the checkpoint TOC cited the
+      // workspace-relative form for the same file — two dialects for one chapter row, which is the
+      // split #69 already settled ("relative is the right winner"). Raw + cwd is also what makes
+      // ChapterRecord.artifacts[].path a third dialect stop diverging.
+      storeRoot: this.chaptersConfig.artifactStoreRoot,
+      cwd,
       rootSessionId: state.rootSession,
       authorSessionId: session.id, // #337
       chapters: renderedList,
@@ -1397,7 +1404,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // #59: `state` was read BEFORE writeArchive (render + every artifact write). Committing from it
     // would erase anything another door committed meanwhile — which is how the SAIP compaction lost
     // its record while its 960 KB file stayed on disk. The commit re-reads inside one section.
-    await store.mutate(session.id, (fresh) => markFinalized(appendChapters(fresh, records), compactionId, numbers))
+    await store.mutate(session.id, (fresh) => markFinalized(appendChapters(fresh, records, cwd), compactionId, numbers))
     // §5.1: compaction finalization is a push point (debounced).
     const cwdNow = (session as unknown as { header?: { cwd?: string } }).header?.cwd
     if (cwdNow !== undefined) void this.#scheduler().then((s) => s.schedule(cwdNow, 'archive:compaction')).catch(() => undefined)

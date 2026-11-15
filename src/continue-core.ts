@@ -619,7 +619,7 @@ async function finishChild(
     // #101: this write lands after `agents.create`, the longest await in the flow. A snapshot taken before
     // it and put here would delete whatever the turn/end listener archived meanwhile — records gone, files
     // on disk, which is the signature that made repair look like a twin-maker.
-    await ports.mutateState(args.callerSessionId, (live) => appendChapters(live, commitRecords))
+    await ports.mutateState(args.callerSessionId, (live) => appendChapters(live, commitRecords, config.workspaceCwd))
   }
   await ports.putState(childId, linkChild(freshSession(childId), args.callerSessionId, callerState.rootSession))
 
