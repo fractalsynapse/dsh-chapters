@@ -127,7 +127,58 @@ export function validateRanges(
       + `seqs ${archiveFloor}-${chapters[0]!.startSeq - 1} would be dropped without a word (a gap is loss, AGENTS.md)`,
     )
   }
+  // #336: the floor was ONE-SIDED. Starting above the watermark drops bytes; starting BELOW it
+  // re-archives seqs that are already committed, and the door mints fresh numbers for them — the same
+  // text archived twice, in two live chapters, which is what "keep chapter numbers and bodies
+  // immutable" forbids. Live registry before this fix: 42 of 64 rows self-overlapping, 1,453 duplicate
+  // records. Nothing could see it either: `coverage()` starts its cursor AT the floor, so an
+  // under-floor start yields `gaps: []` while inflating its own covered count (302 "covered" for 201
+  // real seqs), and `repair.ts` keeps coverage in a `Set`, which cannot express "in two chapters".
+  // A deliberate re-derivation below the watermark is REPAIR's job (#60), through save-core's `span`
+  // arm — which never calls this function — and it supersedes under a new number instead of resting
+  // beside the old one. A door submission simply has no reason to start before the watermark.
+  if (chapters[0]!.startSeq < archiveFloor) {
+    throw new Error(
+      `chapter 0 ("${chapters[0]!.title}") starts at seq ${chapters[0]!.startSeq}, below the watermark ${archiveFloor} — `
+      + `seqs ${chapters[0]!.startSeq}-${archiveFloor - 1} are already archived, and this call would store them AGAIN under new `
+      + `chapter numbers. Archive from the watermark; re-deriving committed bytes is what /chapters-repair is for (#336).`,
+    )
+  }
   return chapters
+}
+
+/**
+ * The first seq that is NOT yet archived — the ONE derivation doors may use (#336).
+ *
+ * There were two, and they disagreed exactly where it matters. `continue-core.ts` reduced over
+ * `endSeq` seeded at `-1` (empty ⇒ fromSeq 0); `save-core.ts` seeded at `0` and then wrote
+ * `lastArchived > 0 ? lastArchived + 1 : 0`. Both are right until a chapter legitimately covers
+ * seq 0 — every real log begins with `permission/preset` at seq 0 — after which save-core's form
+ * re-archives seq 0 forever and continue-core's does not. One decision, one predicate.
+ */
+export const nextUnarchivedSeq = (chapters: readonly { endSeq: number }[]): number =>
+  chapters.length === 0 ? 0 : chapters.reduce((m, c) => Math.max(m, c.endSeq), -1) + 1
+
+/**
+ * Seqs archived by MORE THAN ONE active chapter (#336) — the detector the archive path never had.
+ *
+ * `repair.ts` built a `Set<number>` and looked only for seqs MISSING from it, so a duplicate is
+ * invisible to the one audit that exists: a Set has no cardinality. This counts.
+ */
+export function duplicateCoveredSeqs(
+  chapters: readonly { number: number; startSeq: number; endSeq: number }[],
+): Map<number, number[]> {
+  const owners = new Map<number, number[]>()
+  for (const c of chapters) {
+    for (let s = c.startSeq; s <= c.endSeq; s++) {
+      const list = owners.get(s)
+      if (list === undefined) owners.set(s, [c.number])
+      else if (!list.includes(c.number)) list.push(c.number)
+    }
+  }
+  const dupes = new Map<number, number[]>()
+  for (const [seq, list] of owners) if (list.length > 1) dupes.set(seq, list)
+  return dupes
 }
 
 /**

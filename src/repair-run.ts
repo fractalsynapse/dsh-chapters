@@ -101,6 +101,8 @@ const ACTABLE: Record<FindingClass, boolean> = {
   // duplicate number is fixed by re-spending it correctly. Half-fixing them separately would leave a
   // record citing a file we moved. Report-only until their parent finding runs.
   'empty-artifact': false, 'duplicate-number': false, 'orphan-file': false, 'unregistered-file': true,
+  // #336: which duplicate to supersede is an operator call, never a heuristic (see REMEDY).
+  'duplicate-coverage': false,
   'tampered-file': false, 'test-litter': false, unrecoverable: false,
 }
 
