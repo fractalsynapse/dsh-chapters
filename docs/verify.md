@@ -77,6 +77,39 @@ result only for a live `Session`, so pin such claims in the leg or on a pure fun
 (b) a field printed from a config key the realm does not carry reads `?` forever — measure the shape you *read*
 (#153's `window=?`).
 
+### A quoted sample is a contract (#389)
+
+When a page shows output and tells the reader to compare against it — `operations/install.md` does exactly
+this, and adds that anything else is a named problem — the quoted string stops being prose and becomes an
+interface. It then has two failure modes, and the second is worse: the code changes and the sample goes
+stale (a correct install looks broken, which happened for the roster line's trailing clause, fixed in #388),
+or **the check built to catch that cannot fail.**
+
+So the standing rule, and `tests/unit/doc-line-contract.test.ts` enforces all of it:
+
+- **Derive, or compare to the derived value.** The strongest form is what #388 did — export the function
+  that builds the line and have the test compose the documented sample from it. A general matcher is a
+  backstop, not a substitute.
+- **Whole-line anchored, always.** Prefix matching structurally cannot see truncation, which is the exact
+  defect class.
+- **Exclude vacuous patterns and say so out loud.** `dsh-chapters: ${m}` is a log wrapper, not a message;
+  as a matcher it accepts every line. The first version of this audit reported a clean zero-findings that
+  way, and the tell was a match attributed to the wrong file — a suspicious *attribution*, not a suspicious
+  count. The gate asserts the excluded set is non-empty and prints it on every run.
+- **Plant the failure.** The gate must reject a fabricated line AND accept the real one; without both, a
+  zero means nothing.
+- **Discover the corpus, do not list it.** A hand-written list of ten pages here contained two paths that
+  never existed, and its own completeness check caught that — walking the tree found 37 real pages instead.
+  A list narrows silently whenever anyone renames something.
+- **Exclude history on purpose.** Changelog, project-state and backlog quote what older builds printed.
+  "Fixing" them would erase the record, which is why they are filtered by an explicit pattern rather than
+  omitted by silence.
+
+Honest scope note: measured across those 37 current-state pages there are exactly **two** quoted
+`dsh-chapters:` lines today, both in `install.md`, both matching. The value of the gate is prospective —
+it is cheap insurance that the next quoted sample cannot drift the way this one did, and it is only trusted
+because it demonstrably rejects a line that was never emitted.
+
 ### Correctness Checks
 
 | # | Check | Procedure | Passes when |
