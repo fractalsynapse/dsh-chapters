@@ -110,6 +110,35 @@ Honest scope note: measured across those 37 current-state pages there are exactl
 it is cheap insurance that the next quoted sample cannot drift the way this one did, and it is only trusted
 because it demonstrably rejects a line that was never emitted.
 
+### Host-shaped readers are checked against the installed dist (#355 item Z)
+
+AGENTS has the rule — *"Inspect actual host payload fields and use fixtures of the real shape"* — and this
+release proved the rule right and the enforcement missing: a fixture hand-written in the shape the code
+*expected* passes against a reader that cannot work on real bytes. Three separate findings were that bug
+(#339's `fiberState` stubs, #345's block-level `isError`, #355's item Z list), and every fix so far was
+case-by-case. The mechanical form of the rule is now `tests/unit/host-shape-contract.test.ts`, which parses
+the **installed** packages and asserts both directions:
+
+- **What the host declares.** `@deepseek-ai/dsh-llm`'s `ToolResultMessage` carries `isError?: boolean` at
+  **message** level, and the type surface contains **no block-level `isError` at all** — the fact that made
+  the old reader return false for 13 of 13 real failures. `cordis`'s `FiberState` is a **numeric
+  `const enum`** (`PENDING=0 … ACTIVE=2 … UNLOADING=5`), which is why comparing it to `'active'` is always
+  false — the #339 defect.
+- **What our code does with it.** `src/log-shape.ts` must read the message-level field; `src/preset.ts` must
+  not compare `fiberState` to a string literal. A reader that silently stops matching the declared shape
+  fails here rather than in production.
+
+Every assertion is **non-vacuous by construction**: the test requires the interface it searched for to have
+been found (`throw` if absent), so a renamed type or a moved declaration fails the run instead of quietly
+producing an empty match set — the failure mode that made this release's first version of the corpus gate
+report a false all-clear. Versions are printed on each run, so a dependency bump shows up as changed facts
+rather than a green suite.
+
+What this does **not** claim: that every fixture is dist-derived. It pins the two host shapes this audit
+actually got wrong, and the mechanism by which new ones can be added. The residual gap (a fixture for some
+other host field, unverified) stays open on #355 item Z rather than being ticked by the existence of this
+file.
+
 ### Correctness Checks
 
 | # | Check | Procedure | Passes when |
