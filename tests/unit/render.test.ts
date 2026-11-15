@@ -219,3 +219,74 @@ test('host redelivery: two tool/result events for one callId render keep-last, o
   assert.equal(cands.length, 1, 'the candidate enumeration dedupes too')
   assert.equal(cands[0]!.seq, 3, 'keep-last by seq')
 })
+
+// ───────────────────────────────────────────── #334: shadowed payloads, not stubs
+
+/**
+ * The bytes arrive in this shape on real hosts: a big `tool/result`, then the plugin's own
+ * arrival-time shadowing pair (a `compaction/prune by:'dsh-chapters-arrival'` plus a second
+ * `tool/result` for the SAME callId whose text is a short stub). Measured over three production
+ * sessions: 44 callIds carry >1 result, **0 are byte-identical**, and all 44 are this shape — the
+ * old keep-LAST rule therefore archived the stub and discarded 932,462 characters of payload.
+ */
+const shadowedPair = (origSeq: number, stubSeq: number, callId: string, payload: string): SessionEventLike[] => [
+  call(origSeq - 1, 'bash', '{}', callId),
+  result(origSeq, payload, callId),
+  { type: 'compaction/prune', seq: stubSeq - 1, data: { shadowedRange: { start: origSeq, end: origSeq }, shadowedSeqs: [origSeq], by: 'dsh-chapters-arrival' } } as never,
+  {
+    type: 'tool/result', seq: stubSeq,
+    surfaceOp: { op: 'replace', startSeq: origSeq, endSeq: origSeq } as never,
+    data: { message: { source: { kind: 'tool', callId }, content: [{ type: 'tool-result', toolCallId: callId, content: [{ type: 'text', text: `[dsh:artifact abc123def456] 4.9 KB stored at artifacts/ab/abc123.txt — query it with chapters_artifact` }] }] } },
+  } as never,
+]
+
+test('#334: a shadowing stub never replaces the payload in the chapter', () => {
+  const payload = 'ORIGINAL-PAYLOAD-HEAD ' + 'p'.repeat(6000) + ' TAIL-MARKER-9df31a'
+  const events = [msg(0, 'user', 'go'), ...shadowedPair(2, 4, 'cA', payload)]
+  const chapter = renderChapter(events, { title: 'T', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
+
+  assert.ok(chapter.artifacts.some((a) => a.content.includes('TAIL-MARKER-9df31a')),
+    'the durable payload is archived — this is the byte the old rule silently lost')
+  assert.ok(!chapter.artifacts.some((a) => a.content.length < 600 && a.content.includes('dsh:artifact')),
+    'the stub is never what the chapter stores as the result')
+  assert.match(chapter.markdown, /shadowing stub; the full payload is archived at seq 2/,
+    'and the substitution is ON THE RECORD, not silent in either direction')
+})
+
+test('#334: the archived bytes do not depend on where the chapter edge falls', () => {
+  // The invariant-4 half: the choice used to be made over `inRange`, so spanning the stub archived
+  // the pointer while ending before it archived the payload — same log, different bytes, decided
+  // by the model.
+  const payload = 'EDGE-STABLE ' + 'q'.repeat(4000) + ' END-MARKER-77aa'
+  const base = [msg(0, 'user', 'go'), ...shadowedPair(2, 4, 'cA', payload)]
+  const carries = (c: { artifacts: { content: string }[] }): boolean => c.artifacts.some((a) => a.content.includes('END-MARKER-77aa'))
+
+  const spanning = renderChapter(base, { title: 'T', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
+  const beforeEdge = renderChapter(base, { title: 'T', summary: 's', startSeq: 0, endSeq: 3 }, CONFIG)
+  const stubOnly = renderChapter(base, { title: 'T', summary: 's', startSeq: 3, endSeq: 9 }, CONFIG)
+
+  assert.ok(carries(spanning), 'a chapter spanning the pair carries the payload')
+  assert.ok(carries(beforeEdge), 'a chapter ending before the stub carries the payload')
+  assert.ok(carries(stubOnly), 'a chapter holding ONLY the stub still carries the payload, from its original seq')
+  assert.equal(spanning.artifacts.filter((a) => a.content.includes('END-MARKER-77aa')).length, 1,
+    'exactly one copy of the payload per chapter — never rendered twice')
+})
+
+test('#334: a genuine byte-identical redelivery still keeps the newest copy', () => {
+  // Control, so "largest wins" cannot quietly become "first wins": equal payloads tie-break to the
+  // later seq, which is the behaviour #61 measured and documented.
+  const events = [msg(0, 'user', 'go'), call(1, 'read', '{}', 'cX'), result(2, 'SAME-TEXT', 'cX'), result(3, 'SAME-TEXT', 'cX')]
+  const cands = toolResultCandidates(events, { title: 't', summary: 's', startSeq: 0, endSeq: 9 }, undefined)
+  assert.equal(cands.length, 1, 'deduped to one candidate')
+  assert.equal(cands[0]!.seq, 3, 'ties keep the newest copy')
+})
+
+test('#334: the candidate list offers the PAYLOAD, not a stub the model cannot un-defer', () => {
+  const payload = 'CANDIDATE-OFFERED ' + 'r'.repeat(5000)
+  const events = [msg(0, 'user', 'go'), ...shadowedPair(2, 4, 'cA', payload)]
+  const cands = toolResultCandidates(events, { title: 't', summary: 's', startSeq: 0, endSeq: 9 }, undefined)
+  assert.equal(cands.length, 1, 'one candidate for the call')
+  assert.ok(cands[0]!.excerpt.includes('CANDIDATE-OFFERED'),
+    'the door shows the payload — a stub here is a byte the model can never ask to keep')
+  assert.ok(cands[0]!.bytes > 4000, `sized as the payload, not the ~120-char stub (got ${String(cands[0]!.bytes)} B)`)
+})
