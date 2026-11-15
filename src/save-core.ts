@@ -14,7 +14,7 @@
  */
 import { composeChapters } from './compose.ts'
 import { deriveRanges } from './continue-core.ts'
-import { estimateTokens, oversizeRanges, renderChapter } from './render.ts'
+import { estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter } from './render.ts'
 import { chapterTopics } from './signature.ts'
 import { makeArchiveFs, commitChapters, type RegistryStore } from './store.ts'
 import { releaseReservation, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -184,8 +184,12 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
 
   // Watermark: only archive what is newer than the last saved chapter.
   const state = await store.get(sessionId)
-  const lastArchived = state.chapters.reduce((m, c) => Math.max(m, c.endSeq), 0)
-  const fromSeq = a.span !== undefined ? a.span.fromSeq : (lastArchived > 0 ? lastArchived + 1 : 0)
+  const fromSeq = a.span !== undefined ? a.span.fromSeq : nextUnarchivedSeq(state.chapters)
+  // Derived from the SAME predicate as fromSeq (#336), never a second reduce. The old form seeded at 0
+  // and special-cased `lastArchived > 0`, so a chapter that legitimately covered seq 0 — every real log
+  // begins with `permission/preset` at seq 0 — made this door re-archive seq 0 forever while
+  // continue-core's twin did not. -1 now honestly means "nothing archived yet".
+  const lastArchived = nextUnarchivedSeq(state.chapters) - 1
   // A REPAIR span is deliberate re-derivation of seqs the watermark has already passed (#60): the
   // nothing-new guard is about not re-archiving a tail, and would otherwise refuse to fix the hole a
   // hollow chapter sits exactly on top of. The span caller has already decided what needs re-rendering.

@@ -169,7 +169,12 @@ test('a tampered prior chapter is marked in the notice, not silently trusted', a
   h.fs.files.set(forged.path, 'tampered content')
   const seen: string[][] = []
   h.ports.onIntegrity = (ref, p, v) => { seen.push([ref, p, v]) }
-  const result = await runContinue(h.ports, baseArgs as never, CONFIG)
+  // #336: this fixture used to submit the default [0..4] over a prior chapter that already covers
+  // seq 0 — i.e. it archived seq 0 TWICE under two chapter numbers, and only passed because nothing
+  // checked. The subject here is integrity marking, so the submission is now legal instead: start at
+  // the watermark. baseArgs otherwise unchanged.
+  const legal = { title: 'Setup', summary: 'project scaffold', startSeq: 1, endSeq: 4 }
+  const result = await runContinue(h.ports, { ...baseArgs, chapters: [legal, { title: 'Model changes', summary: 'widget model edits', startSeq: 5, endSeq: 10 }] } as never, CONFIG)
   assert.equal(result.ok, true)
   assert.ok(result.warnings?.some((w) => w.includes('000-old.md') && w.includes('modified since archived')))
   const notice = h.created[0]!.noticeEvent.data as { content: [{ text: string }] }
@@ -188,7 +193,15 @@ test('#255: an ACTIVE record whose bytes vanished fires onIntegrity(missing) —
   // deliberately NO h.fs.files entry: the store lost what the registry still cites (2026-10-11 shape)
   const seen: string[][] = []
   h.ports.onIntegrity = (ref, p, v) => { seen.push([ref, p, v]) }
-  const r = await runContinue(h.ports, baseArgs as never, CONFIG)
+  // #336: same fixture correction as the tampered-chapter row — the prior record covers seq 0, so the
+  // submission must start at the watermark rather than re-archiving it under a second number.
+  const r = await runContinue(h.ports, {
+    ...baseArgs,
+    chapters: [
+      { title: 'Setup', summary: 'project scaffold', startSeq: 1, endSeq: 4 },
+      { title: 'Model changes', summary: 'widget model edits', startSeq: 5, endSeq: 10 },
+    ],
+  } as never, CONFIG)
   assert.equal(r.ok, true)
   assert.ok(seen.some((s) => s[1] === orphan.path && s[2] === 'missing'), 'missing is delivered with its referrer')
 })
@@ -275,4 +288,29 @@ test('#54: a workspace attach warning reaches the door result, not just the log'
   assert.equal(result.ok, true, 'an unlisted child is still a durable continuation — it must not be refused')
   assert.ok((result.warnings ?? []).some((w) => /does not appear in the session list/.test(w)),
     `the attach warning never surfaced: ${JSON.stringify(result.warnings)}`)
+})
+
+test('#336: an exact replay stays idempotent while a differing range list is refused', async () => {
+  // The exemption that keeps the retry contract (# plans-carriage "a retry of the same archive reuses
+  // numbers") must not become a way to re-archive anything. Committed ch.1 = [0..4].
+  const h = harness()
+  const prior = {
+    number: 1, path: '.dsh-chapters/A/chapters/000-a.md', title: 'A', summary: 's',
+    startSeq: 0, endSeq: 4, sha256: 'b'.repeat(64), estimatedTokens: 10, artifacts: [],
+  }
+  h.states.set('A', appendChapters(freshSession('A'), [prior]))
+  const ranges = (startSeq: number, endSeq: number) => [{ title: 'Re', summary: 'r', startSeq, endSeq }]
+
+  // (a) faithful replay of the committed span: allowed, so a doubled door call is a no-op.
+  const replay = await runContinue(h.ports, { ...baseArgs, chapters: ranges(0, 4) } as never, CONFIG)
+  assert.equal((replay as { ok: boolean }).ok, true,
+    `an exact replay must not be refused — the attempt key makes it idempotent: ${JSON.stringify((replay as { reason?: string }).reason ?? '')}`)
+
+  // (b) same start, LONGER end: re-archives seqs 0-4 under a second number. Refused — and refused by
+  // THROWING Refusal, which is what runContinue does at this layer; the door adapter is what turns it
+  // into `{ok:false}`. Same convention as the other refusal rows in this file.
+  await assert.rejects(
+    () => runContinue(h.ports, { ...baseArgs, chapters: ranges(0, 10) } as never, CONFIG),
+    /below the watermark 5.*already archived.*#336/s,
+    'a range list that differs from what is committed is NOT a replay; the #336 floor refuses it, naming the watermark')
 })
