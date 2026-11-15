@@ -38,7 +38,7 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
 import { lastResortCeilingTokens } from './last-resort.ts'
-import { extractPlot, summarizeProvenance } from './engine-core.ts'
+import { ARRIVAL_FLOOR_DEFAULT_TOKENS, extractPlot, summarizeProvenance } from './engine-core.ts'
 import { citationBaseOf } from './render.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
@@ -293,6 +293,15 @@ function isPressureConfigRejection(error: unknown): boolean {
  */
 export const foreignCompactionKey = (sessionId: string): string => `engine.foreignCompaction:${sessionId}`
 
+/**
+ * #351 — the durable key holding one session's arrival-deferral tally, and the process-side mirror of it.
+ * Same cross-plane idiom as `foreignCompactionKey`: the host plane's `/chapters-status` reads what the
+ * realm engine recorded, because the two planes are separate module instances.
+ */
+export const arrivalTallyKey = (sessionId: string): string => `engine.arrival:${sessionId}`
+
+const ARRIVAL_TALLY = new Map<string, { floorTokens: number, entered: number, stubbed: number, degraded: boolean, at: string }>()
+
 /** The shape stored under `foreignCompactionKey()`. */
 export interface ForeignCompactionFact {
   foreign: number
@@ -353,7 +362,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     mergeThreshold: z.number().default(0.3),
     chapterLimit: z.number().step(1).min(1).default(8000),
     syncDebounceMs: z.number().step(1).min(0).default(30000),
-    toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
+    toolResultArtifactTokens: z.number().step(1).min(256).default(ARRIVAL_FLOOR_DEFAULT_TOKENS),
     // #354: five keys the constructor destructures but this schema never declared, so they had no
     // default, no validation and no visibility in the config editor — they arrived ONLY because
     // installed schemastery 3.18.2 preserves unknown keys (`Schema.object({a}).validate({a:1,b:2})`
@@ -476,7 +485,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
       chapterLimit: chapterLimit ?? 8000,
-      toolResultArtifactTokens: toolResultArtifactTokens ?? 8000,
+      toolResultArtifactTokens: toolResultArtifactTokens ?? ARRIVAL_FLOOR_DEFAULT_TOKENS,
       childAutoArchive: childAutoArchive ?? true,
       childAutoArchiveMinTurns: childAutoArchiveMinTurns ?? 4,
       planInlineChars: planInlineChars ?? 900,
@@ -944,13 +953,33 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       diagnosticNote(this.ctx.logger, 'realm:engine:arrive', 'arrival stubbing skipped: no tokenMeter on the realm context')
       return
     }
+    const floorTokens = this.chaptersConfig.toolResultArtifactTokens
     const r = await applyArrivalStubs(session, {
       cwd,
       storeRoot: this.chaptersConfig.artifactStoreRoot,
-      floorTokens: this.chaptersConfig.toolResultArtifactTokens,
+      floorTokens,
       estimate: (m: unknown) => meter.estimateMessage(m),
     })
     if (r.detail !== undefined) this.ctx.logger?.warn?.(`dsh-chapters: arrival stubbing degraded (${r.detail})`)
+    // #351: record the floor ACTUALLY in force and what it deferred, in the durable settings table.
+    // The realm cannot print into /chapters-status itself (host plane, separate module instance -- the
+    // #360 lesson), and the issue's naming trap is exactly a question an operator can only answer by
+    // reading source today: `toolResultDeferFloorTokens` (archive-time, 200) and
+    // `toolResultArtifactTokens` (arrival-time, now 1,600) look interchangeable and are not.
+    const sessionId = String((session as { id?: string }).id ?? '')
+    if (sessionId !== '') {
+      const prior = ARRIVAL_TALLY.get(sessionId)
+      const tally = {
+        floorTokens,
+        entered: (prior?.entered ?? 0) + 1,
+        stubbed: (prior?.stubbed ?? 0) + r.stubbed,
+        degraded: r.detail !== undefined,
+        at: new Date().toISOString(),
+      }
+      ARRIVAL_TALLY.set(sessionId, tally)
+      void this.store().then(({ store }) => store.putSetting(arrivalTallyKey(sessionId), JSON.stringify(tally)))
+        .catch((err: unknown) => { diagnosticWarn(this.ctx.logger, 'realm:engine:arrive', `arrival tally could not be persisted for ${sessionId}`, err) })
+    }
   }
 
   /**
