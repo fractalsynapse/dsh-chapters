@@ -39,6 +39,7 @@ import { auxPromptMessage } from './aux-message.ts'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
 import { lastResortCeilingTokens } from './last-resort.ts'
 import { extractPlot, summarizeProvenance } from './engine-core.ts'
+import { citationBaseOf } from './render.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
 import type { SessionState } from './registry.ts'
@@ -1371,7 +1372,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const cwd = (session as unknown as { header?: { cwd?: string } }).header?.cwd
     if (cwd === undefined) throw new Error('chapters: session has no cwd — nowhere reachable to write')
 
+    const finalizeCitationBase = citationBaseOf(this.chaptersConfig.artifactStoreRoot, state.rootSession, cwd)
     const renderedList = buildFinalizedChapters(session, shadowedSeqs, {
+      // #348: the compaction door cites artifacts the same way the save doors now do -- one
+      // convention across all seven archive moments, computed where rootSession and cwd are both known.
+      ...(finalizeCitationBase !== undefined ? { citationBase: finalizeCitationBase } : {}),
       tocText: '', numbers, chapter: plan, ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
     }, this.chaptersConfig)
 

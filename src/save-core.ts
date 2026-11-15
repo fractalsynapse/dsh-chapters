@@ -14,7 +14,7 @@
  */
 import { composeChapters } from './compose.ts'
 import { deriveRanges } from './continue-core.ts'
-import { estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter } from './render.ts'
+import { citationBaseOf, estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter } from './render.ts'
 import { chapterTopics } from './signature.ts'
 import { makeArchiveFs, commitChapters, type RegistryStore } from './store.ts'
 import { releaseReservation, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -264,6 +264,9 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
   // Render + write archive (same as runContinue steps 2-3, minus child creation).
   const below = events.filter((e) => e.seq <= anchor)
   const renderConfig: RenderConfig = {
+    // #348: the door already knows all three values (it passes the first two to
+    // writeArchive below); the renderer needs them so a citation is a path `read` can open.
+    citationBase: citationBaseOf(config.artifactStoreRoot, state.rootSession, cwd),
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     chapterTokenTarget: config.chapterTokenTarget,
     ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),
