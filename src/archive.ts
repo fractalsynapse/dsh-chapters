@@ -161,6 +161,17 @@ export interface WriteInput {
   cwd?: string | undefined
   /** Directory key — the root of the ancestry tree, not the per-fork id. One dir per tree. */
   rootSessionId: string
+  /**
+   * The session AUTHOURING this chapter — the one whose registry row owns the numbers. #337: the tree
+   * directory is keyed by chain root ("one dir per tree") while chapter numbers are per authoring
+   * session, and every freshSession starts at 1. A continuation child therefore mints `001-<slug>.md`
+   * into the SAME directory as its parent's. With a matching title the paths are identical, the write
+   * was an unconditional overwrite, and the per-call `seenFile` guard could not see the earlier one.
+   * Measured live: 40 paths claimed by two chapters with DIFFERENT sha256; 393 (tree dir, number)
+   * pairs owned by more than one session. Absent, the collision is still refused — only the
+   * disambiguated name is less informative.
+   */
+  authorSessionId?: string | undefined
   chapters: readonly RenderedChapter[]
   /** Reuse a prior attempt's allocation when this is a retry of identical work. */
   attemptId: string
@@ -196,7 +207,37 @@ export async function writeArchive(input: WriteInput): Promise<WriteResult> {
       warnings.push(`title collision resolved for "${chapter.range.title}" → ${fileName}`)
     }
     seenFile.add(fileName)
-    const chapterPath = join(treeDir, 'chapters', fileName)
+    let chapterPath = join(treeDir, 'chapters', fileName)
+    // #337: a chapter body is IMMUTABLE, so landing a DIFFERENT chapter on an existing path is data
+    // loss with a citation left pointing at the wrong bytes. Identical bytes are a retry — rewriting
+    // them is a no-op by definition, so the attempt key's idempotence is untouched.
+    if (await fs.exists(chapterPath)) {
+      const held = await fs.read(chapterPath)
+      if (held !== undefined && held !== chapter.markdown) {
+        const tag = input.authorSessionId !== undefined
+          ? String(input.authorSessionId).replace(/^ch-/, '').slice(-8)
+          : 'session-' + String(number)
+        const altName = fileName.replace(/\.md$/, '-' + tag + '.md')
+        const altPath = join(treeDir, 'chapters', altName)
+        const altHeld = await fs.read(altPath)
+        if (altHeld !== undefined && altHeld !== chapter.markdown) {
+          // Both names are held. Refuse: inventing names until one is free would strand the record
+          // that cites this path, and a silent overwrite is the bug being fixed.
+          throw new Error(
+            `writeArchive: ${chapterPath} and ${altPath} are both held by different chapter bodies — `
+            + 'refusing to overwrite an immutable chapter (#337). This is a registry/tree collision: run '
+            + '/chapters-repair and supersede one of the two under a new number.',
+          )
+        }
+        warnings.push(
+          `chapter path collision resolved for "${chapter.range.title}" (number ${String(number)} is already `
+          + `authored in this tree by another session): wrote ${altName} instead of overwriting ${fileName} (#337)`,
+        )
+        fileName = altName
+        chapterPath = altPath
+        seenFile.add(altName)
+      }
+    }
 
     // 2. Artifacts first: the chapter body cites these paths, so they must exist before it does.
     for (const artifact of chapter.artifacts) {
