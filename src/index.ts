@@ -57,7 +57,7 @@ import { removedGuard } from './removal.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
 import { providerKindFor, registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
-import { foreignCompactionKey, type ForeignCompactionFact } from './engine.ts'
+import { arrivalTallyKey, foreignCompactionKey, type ForeignCompactionFact } from './engine.ts'
 
 /** The cordis surface this entry touches; widened in later stages. */
 interface HostCtx {
@@ -360,6 +360,34 @@ const heldDisposers: Array<() => Promise<void>> = []
  * or the explicit "never observed" line: absence of a complaint must never read as evidence of health,
  * which is how the original foreign-engine week stayed invisible.
  */
+/**
+ * #351 — print the arrival floor actually in force, and what it deferred.
+ *
+ * The audit's point was that relief is invisible AND tunable only by guessing which of two similarly
+ * named knobs matters. The realm records its effective value durably (`engine.arrival:<id>`, written
+ * because host and realm are separate module instances -- the #360 idiom); this reads it back. With no
+ * record yet the line says so plainly rather than staying silent, because silence here is indistinguishable
+ * from "the feature is off", which is precisely the state #351 is about.
+ */
+function arrivalFloorLines(store: { sessions(): IterableIterator<[string, { chapters?: unknown[] }]>; getSetting(k: string): string | undefined }): string[] {
+  const rows: string[] = []
+  for (const [id] of store.sessions()) {
+    const raw = store.getSetting(arrivalTallyKey(id))
+    if (raw === undefined) continue
+    try {
+      const t = JSON.parse(raw) as { floorTokens: number, entered: number, stubbed: number, degraded?: boolean }
+      rows.push(`  ${id}: floor ${String(t.floorTokens)} tok, ${String(t.stubbed)} result(s) deferred across ${String(t.entered)} arrival(s)${t.degraded === true ? ' [DEGRADED at least once]' : ''}`)
+    } catch {
+      rows.push(`  ${id}: arrival tally unreadable -- NOT evidence the floor is off`)
+    }
+  }
+  const head = ['Arrival deferral (toolResultArtifactTokens -- ARRIVAL-time; distinct from toolResultDeferFloorTokens, which is ARCHIVE-time):']
+  if (rows.length === 0) {
+    return [...head, '  no session has recorded an arrival pass yet -- the floor in force is the realm row default (1,600 tok, derived as 5% of the smallest served window, #351)']
+  }
+  return [...head, ...rows]
+}
+
 function engineProvenanceLines(store: { sessions(): IterableIterator<[string, { chapters?: unknown[] }]>; getSetting(k: string): string | undefined }): string[] {
   const flagged: string[] = []
   let observed = 0
@@ -914,6 +942,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           lines.push(`  transport: ${pushWriter === null ? 'pull (this host has no appendPluginRecord — state reads are commands)' : 'push LIVE (plugin records; the bar rides the projection)'}`)
           lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
           lines.push(...engineProvenanceLines(store))
+          lines.push(...arrivalFloorLines(store))
           return lines
         },
         sessionRow: async (sessionId: string): Promise<string> => {
