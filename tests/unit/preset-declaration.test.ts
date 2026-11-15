@@ -404,10 +404,14 @@ test('RUN — the roster verdict is the health signal (absent is not silently fi
   assert.equal((await readRosterVerdict({ list: async () => { throw new Error('loader not settled') } }, PRESET_ID)).state, 'unknown')
 
   // The inventory answers the question the roster cannot: are the ROWS active?
+  // #339: `fiberState` is NUMERIC here, as the installed cordis sends it (`FiberState`,
+  // lib/types/fiber.d.ts:67-74). These fixtures previously used the strings 'active'/'failed' —
+  // a shape no host emits — which is how `unusableRows` stayed green while returning [] for
+  // every real row. The string arm is still supported and is covered in preset-row-health.test.ts.
   const inventory = [{ id: PRESET_ID, rows: [
-    { entryId: 'chapters:tool-fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true, fiberState: 'active' },
-    { entryId: 'chapters:bad', moduleName: '@deepseek-ai/dsh-bad', enabled: true, fiberState: 'failed' },
-    { entryId: 'chapters:off', moduleName: '@deepseek-ai/dsh-off', enabled: false, fiberState: 'failed' },
+    { entryId: 'chapters:tool-fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true, fiberState: 2 },
+    { entryId: 'chapters:bad', moduleName: '@deepseek-ai/dsh-bad', enabled: true, fiberState: 3 },
+    { entryId: 'chapters:off', moduleName: '@deepseek-ai/dsh-off', enabled: false, fiberState: 3 },
   ] }]
   const entry = inventoryEntry(inventory, PRESET_ID)
   assert.ok(entry !== undefined)
@@ -459,16 +463,19 @@ test('RUN — the roster line says the true thing for every verdict, in the loud
 test('RUN — the verification line says whether the ROWS are active, not just that the preset is declared', async () => {
   // "declared" and "usable" are different facts, and the operator reads one line. A row can
   // resolve and never start, and the roster alone cannot see it.
+  // #339: numeric states, as the installed host sends them. With the old string fixtures this row
+  // passed while `unusableRows` returned [] for every real inventory — the line could only ever
+  // read "all active", which is the bug.
   const rows = (extra: Record<string, unknown> = {}) => [{
     id: PRESET_ID, rows: [
-      { entryId: 'chapters:tool-fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true, fiberState: 'active' },
-      { entryId: 'chapters:gone', moduleName: '@deepseek-ai/dsh-gone', enabled: true, fiberState: 'failed' },
+      { entryId: 'chapters:tool-fs', moduleName: '@deepseek-ai/dsh-tool-fs', enabled: true, fiberState: 2 },
+      { entryId: 'chapters:gone', moduleName: '@deepseek-ai/dsh-gone', enabled: true, fiberState: 3 },
       extra,
     ],
   }]
   assert.match(await describeMountedRows({ compositionInventory: async () => rows() } as never, PRESET_ID),
     /1 of 3 rows NOT active/)
-  assert.match(await describeMountedRows({ compositionInventory: async () => [{ id: PRESET_ID, rows: [{ enabled: true, fiberState: 'active', entryId: 'a' }] }] } as never, PRESET_ID),
+  assert.match(await describeMountedRows({ compositionInventory: async () => [{ id: PRESET_ID, rows: [{ enabled: true, fiberState: 2, entryId: 'a' }] }] } as never, PRESET_ID),
     /1 mounted rows all active/, 'the healthy case must read as healthy')
   assert.match(await describeMountedRows({} as never, PRESET_ID), /rows not reported by this host/,
     'an older host without the inventory method degrades the line, never the check')
