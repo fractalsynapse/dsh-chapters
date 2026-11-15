@@ -61,15 +61,30 @@ the source of the wrong design**; measuring beat obeying.
 **Deferred, not dropped.** #334 repaired the archive going forward — sessions whose arrival shadowing
 fired before this release still hold stubs, and #334's report is the inventory. #336/#337 damage stays
 report-only pending an operator decision under the deletion exception (#348's per-workspace `cwd` is what
-makes deciding possible). #335 awaits the maintainer. #349 and #372 need a browser rig, and were left
-unbuilt rather than shipped as unobserved wiring — that would have been the same defect being fixed.
+makes deciding possible). #335 awaits the maintainer. #372 needs a browser rig and was left unbuilt rather
+than shipped as unobserved wiring — that would have been the same defect being fixed.
 
-**Verification state at the candidate.** Per-PR: all four checks green at each of 21 heads. Integrated
-locally: typecheck clean, 1,388 unit tests / 1,387 pass / 0 fail / **0 cancelled**, integration 189 pass /
-5 `treedx-live` (service unreachable — that suite fails rather than skips), `corpus:check` agreeing with
-the build. **The tape chain for this integrated head is this PR's own CI**, and is pending: `ci.yml`
-triggers on `push: [main]` and `pull_request`, so staging deliberately carries no push CI. Per the release
-procedure the chain must be green on the candidate before a maintainer merges to `main`; agents do not
+**#349 was mislabelled here for four rounds and is corrected in place:** I recorded it as "needs a browser
+rig", conflating it with #372. Its data is server-side; what actually blocks its fuller ask is (a) a
+**live host plus a real model call** for the acceptance item "a child whose goal view reports the objective
+and whose first reply follows it", and (b) a **maintainer authority decision** on plugin-authored
+`goals.create`, which the issue itself reserves. The issue also names a fallback — carry the objective into
+the child's notice and say loudly that only a human can arm it — and **that fallback is now built**
+(PR #391), which is the point of re-reading a blocker rather than repeating it.
+
+**Verification state at the candidate — re-measured on this tree, not carried forward from when the
+paragraph was first drafted.** Per-PR: all four checks green at each of the 24 merged heads. Integrated here:
+typecheck clean · unit **1,404 tests / 1,403 pass / 0 fail / 0 cancelled** · integration 189 pass /
+5 `treedx-live` (service unreachable — that suite fails rather than skips) · `corpus:check` agreeing with
+the build (`lib=3674369893be9447`, `promptAnchor=b40304ee3e35a94f`). The earlier text of this section claimed
+1,388 tests and a different `lib` hash; both were stale by one merged PR (#388 added rows and changed
+`index.ts`), which is precisely the failure this release is a study in, caught in my own release record.
+
+**The chain has now run at this head and passed.** `acceptance — ten tape-replay legs` and the
+coverage-gated job are green on the candidate's own PR run — the only place it can be measured, since
+`ci.yml` triggers on `push: [main]` and `pull_request` and staging deliberately carries no push CI. Per the
+release procedure the chain must be green on the candidate before a maintainer merges to `main`; agents do
+not approve or merge it, so the merge, the tag and publication remain the maintainer's.
 approve or merge it.
 
 ## 2026-11-14 — #330: the tools go where the user pointed, and the agent stops reading gauges (shipped in 0.2.32)
