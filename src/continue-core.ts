@@ -18,7 +18,7 @@
  */
 import type { ChapterRange, NoticePlan, RenderConfig, SessionEventLike, ToolResultOverride } from './types.ts'
 import { chapterTopics } from './signature.ts'
-import { estimateTokens, oversizeRanges, renderChapter, validateRanges } from './render.ts'
+import { estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter, validateRanges } from './render.ts'
 import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
 import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -283,10 +283,21 @@ export async function runContinue(
   // also what step 2 needs, so this is a hoist, not an extra round-trip — and every later step
   // re-reads through a fresh getState inside its own section.
   const callerState0 = await ports.getState(args.callerSessionId)
-  const watermark = callerState0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
-  const fromSeq = watermark + 1
+  // #336: one derivation for "first unarchived seq", shared with save-core (the two used to seed
+  // differently and disagreed once a chapter legitimately covered seq 0, which every real log has).
+  const fromSeq = nextUnarchivedSeq(callerState0.chapters)
+  // #336's lower floor must not defeat the retry contract. A re-submission of the EXACT range list
+  // already committed is not a duplicate archive — it is the same door call landing twice (the
+  // tool-result row that proved it: "a retry of the same archive reuses numbers and never duplicates
+  // the blob"), and the attempt key `sessionId@ceiling` makes it a no-op that reuses its numbers.
+  // Only a range list that DIFFERS from what is committed re-archives seqs under fresh numbers, and
+  // that is what the refusal is for. So the floor this call is held to is its own start when it is a
+  // faithful replay, and the watermark otherwise.
+  const exactReplay = args.chapters.length > 0 && args.chapters.every((r) => callerState0.chapters
+    .some((c) => c.startSeq === r.startSeq && c.endSeq === r.endSeq))
+  const rangeFloor = exactReplay ? Math.min(...args.chapters.map((r) => r.startSeq)) : fromSeq
   try {
-    validateRanges(args.chapters, ceiling, fromSeq)
+    validateRanges(args.chapters, ceiling, rangeFloor)
   } catch (error) {
     throw new Refusal({ ok: false, reason: `ranges refused: ${(error as Error).message}` })
   }

@@ -5,8 +5,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { artifactPath, estimateTokens, fenced, longerFence, renderChapter, renderIndex, sha256, toolResultCandidates, validateRanges } from '../../src/render.ts'
-import type { RenderConfig, SessionEventLike } from '../../src/types.ts'
+import { artifactPath, duplicateCoveredSeqs, estimateTokens, fenced, longerFence, nextUnarchivedSeq, renderChapter, renderIndex, sha256, toolResultCandidates, validateRanges } from '../../src/render.ts'
+import type { ChapterRange, RenderConfig, SessionEventLike } from '../../src/types.ts'
 
 const CONFIG: RenderConfig = { toolResultDeferFloorTokens: 200, chapterTokenTarget: 4000 }
 
@@ -289,4 +289,47 @@ test('#334: the candidate list offers the PAYLOAD, not a stub the model cannot u
   assert.ok(cands[0]!.excerpt.includes('CANDIDATE-OFFERED'),
     'the door shows the payload — a stub here is a byte the model can never ask to keep')
   assert.ok(cands[0]!.bytes > 4000, `sized as the payload, not the ~120-char stub (got ${String(cands[0]!.bytes)} B)`)
+})
+
+// ───────────────────────────────────────────── #336: the watermark floor is two-sided
+
+test('#336: a range starting BELOW the watermark is refused, not silently duplicated', () => {
+  // Live registry before this fix: 42 of 64 rows self-overlapping, 1,453 duplicate records. The floor
+  // check refused only a start ABOVE the watermark, so an under-floor start committed the same seqs
+  // again under fresh chapter numbers — two live records, one body, "immutable numbers" broken.
+  const range = (startSeq: number, endSeq: number, title = 'T'): ChapterRange => ({ title, summary: 's', startSeq, endSeq })
+  // ch.1 = [0..100] committed ⇒ floor 101.
+  assert.throws(
+    () => validateRanges([range(0, 200)], 200, 101),
+    /below the watermark 101.*already archived.*#336/s,
+    'a range that re-archives committed seqs must be refused, naming the watermark and the overlap')
+  // The legal submission still passes, so this cannot be a blanket refusal.
+  assert.doesNotThrow(() => validateRanges([range(101, 200)], 200, 101), 'starting AT the watermark is legal')
+  // And the original (upper) arm still fires — the fix must not have replaced one side with the other.
+  assert.throws(() => validateRanges([range(150, 200)], 200, 101), /above the watermark 101/)
+})
+
+test('#336: one watermark derivation — a chapter covering seq 0 does not re-archive forever', () => {
+  // The two doors disagreed exactly where real logs are densest: every durable log begins with
+  // `permission/preset` at seq 0. save-core seeded at 0 with `lastArchived > 0 ? +1 : 0`, so a chapter
+  // ending at seq 0 gave fromSeq 0 again; continue-core seeded at -1 and gave 1.
+  assert.deepEqual(nextUnarchivedSeq([]), 0, 'nothing archived ⇒ start at 0')
+  assert.deepEqual(nextUnarchivedSeq([{ endSeq: 0 }]), 1, 'a chapter covering ONLY seq 0 ⇒ start at 1')
+  assert.deepEqual(nextUnarchivedSeq([{ endSeq: 4 }, { endSeq: 2 }]), 5, 'highest endSeq + 1, order-independent')
+})
+
+test('#336: the duplicate detector sees what a Set structurally cannot', () => {
+  // repair.ts built `covered` as a Set<number> and reported only MISSING seqs — a seq in two chapters
+  // is indistinguishable there from a seq in one, which is why 1,453 duplicate records shipped.
+  const chapters = [
+    { number: 1, startSeq: 0, endSeq: 10 },
+    { number: 2, startSeq: 5, endSeq: 20 },   // overlaps ch.1 on 5..10
+    { number: 3, startSeq: 21, endSeq: 25 },  // clean
+  ]
+  const dupes = duplicateCoveredSeqs(chapters)
+  assert.equal(dupes.size, 6, 'seqs 5..10 are each owned by two chapters')
+  assert.deepEqual(dupes.get(5), [1, 2], 'and the report names both owners')
+  assert.equal(dupes.has(11), false, 'the non-overlapping tail is not flagged')
+  // The control that keeps this from being vacuous: no overlap, no findings.
+  assert.equal(duplicateCoveredSeqs([chapters[0]!, chapters[2]!]).size, 0)
 })
