@@ -196,4 +196,12 @@ test('the version literal cannot drift from package.json (#61)', async () => {
   const pkg = JSON.parse(await fs.promises.readFile(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }
   assert.equal(PLUGIN_VERSION, pkg.version,
     'PLUGIN_VERSION is hand-mirrored into chapter provenance; if it drifts, attribution lies about the build that wrote a row')
+
+  // #355 (release 0.2.33): the lock file is the THIRD copy, and the release procedure requires all three
+  // to agree -- a bump that misses it ships a manifest the installer contradicts. It has two places (root
+  // and packages[""]), so both are checked rather than trusting the file's first match.
+  const lock = JSON.parse(await fs.promises.readFile(new URL('../../package-lock.json', import.meta.url), 'utf8')) as
+    { version: string; packages: Record<string, { version?: string }> }
+  assert.equal(lock.version, pkg.version, 'package-lock.json root version must match the manifest')
+  assert.equal(lock.packages['']?.version, pkg.version, 'and so must packages[""]')
 })
