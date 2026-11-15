@@ -508,12 +508,36 @@ shape (`isSeeded:false`, `inheritedEventCount:0`):
 | is it surface-visible? | **no** — surface nodes stay `[0]`, matching the host's own log-only `plan/mode` |
 | does the HOST's own projection fold it? | **yes** — `planProjectionDefinition.apply` over the child's log yields `active: true`; the one-event control yields `active: false` |
 
+**Amended by #338 (2026-11-14) — the first row of this table is retired, and its retirement is
+what broke continuations.** #319 part 2 moved the TOC notice out of the seed (a seeded
+`user/message` at `surface[0]` is what the host's cold-load validator refuses — #314), leaving
+`plan/mode` as the **only** seed event. It kept the number it had when the notice was `seq 0`, so
+the seed became `[plan/mode@1]` with nothing at index 0, and the kernel rejects it outright:
+`seed event at index 0 has seq 1 (expected 0); seed must be contiguous from 0`
+(`dsh-session` `lib/index.js:1330`, reproduced against the installed dist). Every continuation from
+an active-plan session failed at `agents.create`, after the archive had already been written.
+
+| probe (re-measured, `dsh-session@0.2.0-rc.2`) | result |
+|---|---|
+| seed `[plan/mode@1]` accepted? | **no** — contiguity rejection above |
+| seed `[plan/mode@0]` accepted? | **yes** — log becomes `0:plan/mode → 1:session/end-seed → …` |
+| surface-visible / projection fold | unchanged from the 0.1.5 measurement above: log-only, and the host's own projection yields `active: true` |
+
+So the rule is now stated by **position, not by count**: the seed is contiguous from `seq 0` and
+holds synthetic state events only. Invariant 2 constrains *what* may be seeded (never a slice of the
+parent's log), not *how many* — the old "exactly one event" letter is gone from this file and from
+`docs/contract.md`, which is where a future re-anchor should look.
+
 So the seeded child is genuinely gated, not merely told. The surface validator narrows by type
 rather than whitelisting (`assertSessionEventEnvelope` checks the envelope and continuity),
 which is why this works without touching the kernel. **Invariant 2 is intact in substance**: the
 seeded event is a synthetic fact this plugin authors about the boundary, never a slice of the
-parent's log — the rule's letter ("exactly one event") is amended here and in AGENTS, and the
-amendment is only safe because it was measured.
+parent's log.
+
+The durable lesson is recorded in #355 item Z: this passed 1,275 green tests because the row here
+asserted the *number* the kernel rejects (`continue-plans.test.ts`) and the drift gate above pinned
+a shape the code no longer produced. A seed claim is only as good as the current installed kernel
+row that admits it — see `tests/unit/host-seed-contract.test.ts`.
 
 Seeding is refused — correctly, not defensively — when the fold says inactive, which is the
 normal case after an approval: **approving a plan exits plan mode**, so a continuation whose plan
