@@ -18,7 +18,7 @@
  */
 import type { ChapterRange, NoticePlan, RenderConfig, SessionEventLike, ToolResultOverride } from './types.ts'
 import { chapterTopics } from './signature.ts'
-import { estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter, validateRanges } from './render.ts'
+import { citationBaseOf, estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter, validateRanges } from './render.ts'
 import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
 import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -328,6 +328,7 @@ export async function runContinue(
   // ---- 2. Render + reserve + write (idempotent per attempt key).
   const callerState = callerState0
   const renderConfig: RenderConfig = {
+    citationBase: citationBaseOf(config.artifactStoreRoot, callerState.rootSession, config.workspaceCwd),
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     chapterTokenTarget: config.chapterTokenTarget,
     ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),

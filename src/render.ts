@@ -76,6 +76,34 @@ export function fenced(content: string, info = ''): string {
 
 export const sha256 = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex')
 
+/**
+ * A citation a reader can actually follow (#348).
+ *
+ * `artifactPath` is deliberately STORE-relative — it is what the writer hands back, and it is stable
+ * across workspaces. But the citation line prints it into a chapter file that a model reads with a
+ * `read` tool rooted at the WORKSPACE, so `artifacts/e3/e3b0c442….txt` resolved from nowhere: verified
+ * on a real archive, where the bytes live at
+ * `.dsh-chapters/17f7c1d6-…/artifacts/e3/e3b0c442….txt`. The audit's finding was that the reference is
+ * "routable only through chapters_artifact", i.e. a pointer to a tool the text never names.
+ *
+ * So: prefix when the door told us where the session's store sits inside the workspace; otherwise say
+ * plainly which tool retrieves it. Never print a bare path that cannot be opened -- a wrong path is
+ * worse than an honest "use the other tool", because a model will retry a path rather than question it.
+ */
+export function citationBaseOf(storeRoot: string | undefined, rootSessionId: string | undefined, cwd?: string): string | undefined {
+  if (storeRoot === undefined || storeRoot === '' || rootSessionId === undefined || rootSessionId === '') return undefined
+  const root = storeRoot.replace(/\/+$/, '')
+  if (!root.startsWith('/')) return root + '/' + rootSessionId
+  // Absolute: reachable only when it is INSIDE the workspace, and then as a workspace-relative path.
+  if (cwd !== undefined && cwd !== '' && root.startsWith(cwd.replace(/\/+$/, '') + '/')) {
+    return root.slice(cwd.length + 1) + '/' + rootSessionId
+  }
+  return undefined
+}
+
+export const citationOf = (path: string, base: string | undefined): string =>
+  base !== undefined && base !== '' ? base + '/' + path : path + ' (via chapters_artifact)'
+
 /** `artifacts/8f/8f3a1c9d….txt` — sharded so one directory never holds the whole subtree. */
 export const artifactPath = (hash: string): string => `artifacts/${hash.slice(0, 2)}/${hash}.txt`
 
@@ -524,7 +552,7 @@ export function renderChapter(
           artifacts.push(ref)
           invocationArtifacts += 1
           body.push(`- ↳ **${name}** ${inlineCode(args.slice(0, CALL_HEAD_CHARS))}${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`
-            + ` — full arguments: ${ref.bytes} B ≈ ${estimateTokens(args)} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${ref.path}\``)
+            + ` — full arguments: ${ref.bytes} B ≈ ${estimateTokens(args)} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${citationOf(ref.path, config.citationBase)}\``)
           break
         }
         // Invocations stay inline as a bounded head: this is the "what was
@@ -576,10 +604,10 @@ export function renderChapter(
         }
         if (wantsInline) {
           inlinedCount += 1
-          body.push(`  - result (seq ${ev.seq}, ${ref.bytes} B, also at \`${ref.path}\`):`, '', fenced(text), '')
+          body.push('  - result (seq ' + String(ev.seq) + ', ' + ref.bytes + ' B, also at `' + citationOf(ref.path, config.citationBase) + '`):', '', fenced(text), '')
         } else {
           deferredCount += 1
-          body.push(`  - result: ${ref.bytes} B ≈ ${tokens} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${ref.path}\``)
+          body.push('  - result: ' + ref.bytes + ' B ≈ ' + String(tokens) + ' tok, `' + ref.sha256.slice(0, 7) + '…` → `' + citationOf(ref.path, config.citationBase) + '`')
         }
         break
       }

@@ -618,6 +618,34 @@ The contract now:
   `store.mutate` treats object identity as "no change" — an unconditional stamp would turn every
   idempotent retry into a write and a `rev` bump.
 
+### Artifact citations must be paths a reader can follow (#348, third defect)
+
+The audit's third finding was that a citation prints `artifacts/8f/<sha>.txt`, which is relative to
+`<storeRoot>/<rootSessionId>/` — neither workspace-relative nor absolute — so the `read` tool cannot open
+it, while `chapters_artifact` can. Verified on this machine's real archive: the bytes sit at
+`.dsh-chapters/17f7c1d6-…/artifacts/e3/e3b0c442….txt`, and every chapter said
+`` `artifacts/e3/e3b0c442….txt` `` without ever naming the tool that could fetch it.
+
+`artifactPath` is store-relative **on purpose** — it is what the writer returns and it stays stable across
+workspaces. The defect was printing that internal form as if a reader could follow it. So `RenderConfig`
+now carries an optional `citationBase`, computed by `citationBaseOf(storeRoot, rootSessionId, cwd)` —
+workspace-relative when the store is inside the workspace, and **no base at all** when it is not:
+
+- with a base, the line reads `` → `.dsh-chapters/<root>/artifacts/8f/<sha>.txt` ``, which `read` opens;
+- without one, the line reads `` → `artifacts/8f/<sha>.txt (via chapters_artifact)` ``, naming the tool.
+
+What is deliberately **not** allowed is a bare unopenable path with no hint. A model will retry a path
+rather than question it, so an honest pointer to the retrieval tool beats a confident wrong location. Every
+door supplies the base from values it already passes to `writeArchive` (save, continue/fork, and the
+compaction finalizer, where the base is computed at finalize time because it depends on the session's
+`rootSession`, not just the configured store root) — one convention across the archive moments rather than
+a per-door dialect, which is the same mistake #69 settled for stored paths.
+
+One existing row in `render.test.ts` asserted the bare store-relative fragment and had to change: it was
+pinning the defect as the expected shape. It now requires the annotated fallback, and asserts the old form
+is *absent* — so a regression to "confident unopenable path" fails loudly rather than matching the old
+expectation.
+
 Separately, the same audit found a second dialect in live rows: `#finalizeOne` passed an **absolute**
 `resolveStoreRoot(...)` as `storeRoot` with no `cwd`, so `writeArchive` minted absolute stored paths
 while the checkpoint TOC cited the workspace-relative form for the same file — the split #69 had already
