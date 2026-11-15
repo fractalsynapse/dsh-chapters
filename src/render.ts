@@ -561,18 +561,28 @@ export interface NoticeBullet { path: string, title: string, summary: string }
  * The cap is the difference between a notice whose size tracks history and one that settles. Each line costs
  * ~120 characters, so an uncapped index moves the surface across the compaction trigger depending on how many
  * chapters a run happened to write — which makes a leg parked on that boundary undistillable as a tape (measured
- * on `heavy`: identical served bytes, boundary one assistant/tool round apart between two runs). Past the cap the
- * text is byte-identical, and the omission is STATED rather than silent, because a model that cannot see the
- * list must still know to search for it.
+ * on `heavy`: identical served bytes, boundary one assistant/tool round apart between two runs). What #56 needs
+ * is therefore a **bounded-size** block with the omission STATED, because a model that cannot see the list must
+ * still know to search for it. Which END is kept is a separate choice, and #342 moved it to the newest `cap`:
+ * the reader index has to contain the chapter that was just archived.
  */
 export function noticeIndexSection(entries: readonly NoticeBullet[], cap: number): string {
   if (cap <= 0 || entries.length <= cap) return renderIndex(entries)
-  return renderIndex(entries.slice(0, cap))
+  // #342: the cap keeps the section's SIZE bounded (what #56 actually needs — a fixed-size block so
+  // the surface crosses the trigger on the conversation, not on a chapter accumulator), but it bounds
+  // it at the WRONG END. Bullets accumulate oldest-first (`engine-core.ts:451,478`), so `slice(0, cap)`
+  // listed the six oldest forever: from chapter cap+1 on, no checkpoint ever cited the chapter it had
+  // just written, while the section claimed the ones it dropped were the OLDER ones — the sentence was
+  // the opposite of the code, and AGENTS.md makes this list the only reader index.
+  // The overflow line stays free of the omitted COUNT, so the constant-size property survives.
+  const start = entries.length - cap
+  return renderIndex(entries.slice(start), start + 1)
     + '\n… and older chapters are not listed here — use chapters_search to reach them.'
 }
 
-export function renderIndex(entries: readonly { path: string; title: string; summary: string }[]): string {
+/** `N. [Title](path) — summary`, numbered from `startAt` (#342: a capped tail keeps its true numbers). */
+export function renderIndex(entries: readonly { path: string; title: string; summary: string }[], startAt = 1): string {
   return entries
-    .map((e, i) => `${i + 1}. [${e.title}](${e.path}) — ${e.summary}`)
+    .map((e, i) => `${i + startAt}. [${e.title}](${e.path}) — ${e.summary}`)
     .join('\n')
 }
