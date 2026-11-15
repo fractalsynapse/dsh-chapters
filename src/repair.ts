@@ -29,6 +29,7 @@ import { appendChapters, isActiveChapter, isRemovedChapter, releaseReservation, 
 import type { ChapterRecord } from './archive.ts'
 import { sameStoredPath } from './archive.ts'
 import type { RenderConfig } from './types.ts'
+import { duplicateCoveredSeqs } from './render.ts'
 
 // ─────────────────────────────────────────────────── findings (pure)
 
@@ -40,6 +41,7 @@ export type FindingClass =
   | 'orphan-file'             // a RECORD whose chapter file is gone (re-render it from the log)
   | 'unregistered-file'       // a FILE on disk that no record cites (re-register it; its bytes ARE the archive)
   | 'duplicate-number'        // two records spent on one number (#59)
+  | 'duplicate-coverage'      // one SEQ archived by two live chapters (#336) — a Set could never see it
   | 'countervalue-drift'      // a counter at or below the numbers already spent
   | 'ghost-plan-manifest'     // a finalize manifest whose chapter never landed
   | 'unreleased-reservation'  // a retry key whose files never landed
@@ -113,6 +115,12 @@ const REMEDY: Record<FindingClass, Remedy> = {
   'orphan-file': 'materialize-chapter',
   'unregistered-file': 're-register-file',
   'duplicate-number': 'reread-span',
+  // #336 report-only on purpose, and NOT because it is unfixable: choosing which of the two live
+  // chapters to supersede is a decision about which bytes the citation was meant to name, and the
+  // durable log holds both copies either way. Auto-picking would mutate an immutable chapter record on
+  // a heuristic. The operator decides; the finding carries the seqs and both numbers so the choice is
+  // one line to read. Same posture as 'duplicate-number' above.
+  'duplicate-coverage': 'report-only',
   'countervalue-drift': 'raise-counter',
   'ghost-plan-manifest': 'expire-manifest',
   'unreleased-reservation': 'release-reservation',
@@ -205,6 +213,35 @@ export function audit(input: AuditInput): { findings: RepairFinding[]; blindSpot
   //    the old note inferred "unfinished" from a missing signature and was wrong (#59).
   const covered = new Set<number>()
   for (const c of active) for (let s = c.startSeq; s <= c.endSeq; s++) covered.add(s)
+  // #336: the coverage pass below can only ever see a HOLE, because a Set has no cardinality — a seq
+  // archived by two chapters looks identical to one archived once. Counting is the only way this audit
+  // can report the duplicate condition at all (live registry: 42/64 rows self-overlapping).
+  // One finding per contiguous run sharing the SAME owner set, so 51,521 twice-covered seqs is a
+  // handful of lines an operator can read rather than a report that buries the finding.
+  {
+    let lastDupSeq = -2
+    const dupes = duplicateCoveredSeqs(active)
+    const seqs = [...dupes.keys()].sort((x, y) => x - y)
+    let runFrom = -1
+    let runOwners: number[] = []
+    const flushRun = (to: number): void => {
+      if (runFrom < 0) return
+      add({
+        class: 'duplicate-coverage',
+        detail: `seqs ${String(runFrom)}-${String(to)} are each archived by chapters ${runOwners.join(' and ')} — the same bytes hold two live chapter numbers (immutable-numbers rule, #336)`,
+        target: { fromSeq: runFrom, toSeq: to },
+      })
+      runFrom = -1
+    }
+    for (const seq of seqs) {
+      const owners = dupes.get(seq)!
+      const sameRun = runFrom >= 0 && seq === lastDupSeq + 1 && owners.length === runOwners.length && owners.every((o, i) => o === runOwners[i])
+      if (!sameRun) { flushRun(seq - 1); runFrom = seq; runOwners = owners }
+      lastDupSeq = seq
+    }
+    flushRun(seqs.length > 0 ? seqs[seqs.length - 1]! : -1)
+  }
+
   const lastEnd = log.turnEndSeqs.length > 0 ? Math.max(...log.turnEndSeqs) : -1
   let holeStart = -1
   const flushHole = (to: number): void => {
