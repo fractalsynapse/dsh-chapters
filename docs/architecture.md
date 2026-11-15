@@ -344,6 +344,45 @@ actions mid-step" rule is not engaged — the same reasoning that let door 5 exi
 (`childAutoArchive`, `childAutoArchiveMinTurns`), never literals. Knowledge that trips none of the seven
 never enters the index: when adding a door, **extend this list, never copy the pipeline**.
 
+### The watermark is one predicate with two arms (#336)
+
+The watermark is `max(endSeq)` over all records, `-1` when there are none, and the door that accepts a
+submission holds it to a floor. That floor was **one-sided**: it refused a range starting *above* the
+watermark (the seqs in between would be dropped, and a gap is loss) but accepted a range starting
+*below* it, which re-archives committed seqs under **fresh chapter numbers** — the same text living in
+two active records, against "keep chapter numbers and bodies immutable".
+
+The refusal had no partner either, so nothing could see the result. `coverage()` starts its cursor at
+the floor, so an under-floor submission reports `gaps: []` while inflating its own covered count (302
+"covered" for 201 real seqs), and the repair auditor keeps coverage in a `Set<number>` and looks only
+for seqs *missing* from it — a Set has no cardinality, so "in two chapters" and "in one" are the same
+value to it. Live registry when this was measured: **42 of 64 rows self-overlapping, 1,453 duplicate
+records, 29,871 seqs archived more than once.**
+
+The rule now, in one place:
+
+- `nextUnarchivedSeq(chapters)` is the ONLY derivation of "first seq not yet archived". The two doors
+  previously had different ones — `continue-core` seeded `max()` at `-1`, `save-core` at `0` and then
+  wrote `lastArchived > 0 ? lastArchived + 1 : 0`. Both are correct until a chapter legitimately covers
+  seq 0, which every real log is positioned to do (a durable log begins with `permission/preset` at
+  seq 0), after which save-core's form re-archives seq 0 on every call.
+- `validateRanges` refuses on **both** sides of the floor and names which side was crossed.
+- `duplicateCoveredSeqs(chapters)` counts owners per seq; `repair.ts` reports a `duplicate-coverage`
+  finding per contiguous run sharing one owner set. It is **report-only by decision**: choosing which
+  of two records to supersede is a call about which citation was meant to name which bytes, and the
+  durable log holds both copies either way. Auto-picking would mutate an immutable record on a
+  heuristic — the same posture `duplicate-number` already takes.
+
+One exemption keeps a documented guarantee from being broken by the lower arm: a submission whose range
+list is **exactly** what is already committed is a retry, not a duplicate. The attempt key
+(`sessionId@ceiling`) makes that call reuse its numbers and write nothing new — `saveSession`'s
+idempotence, pinned by `tests/integration/plans-carriage.test.ts` ("a retry of the same archive reuses
+numbers and never duplicates the blob"), which the naive two-sided floor turned red. Only a range list
+that *differs* from what is committed re-archives under new numbers, and that is what the refusal is
+for. `chapters_continue`'s own retry path relies on this, so the exemption is load-bearing, not a
+convenience — and it is pinned in both directions (`an exact replay stays idempotent while a differing
+range list is refused`) so it cannot widen into a hole.
+
 ## Budgets and the Reserve Margin
 
 Two distinct ceilings. Conflating them caused the original design's silent-failure mode.
