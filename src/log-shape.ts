@@ -39,9 +39,22 @@ export function toolResultText(data: Record<string, unknown>): string {
   return parts.filter((p) => p.length > 0).join('\n')
 }
 
-/** True when the paired tool-result carries an error flag (a failed call). */
+/**
+ * True when the paired tool-result carries an error flag (a failed call).
+ *
+ * #345: the flag is on the MESSAGE, not the content block. `@deepseek-ai/dsh-llm` declares
+ * `ToolResultMessage { role: 'tool'; toolCallId; isError?: boolean }` — message-level — and the real
+ * bytes agree: across 505 tool/results in one production session `isError` appears on `data.message`
+ * 13 times and on a content block **0** times. Reading only the blocks made this return false for
+ * every failed call in every real log, and `plans.ts` feeds it the plan verdict, where `failed` is
+ * documented as "the family where the host threw". Verdicts survived only because the prose regexes
+ * happened to match the error text — one host wording change and a FAILED review reads as APPROVED.
+ *
+ * The block arm stays as the 0.1.x fallback, where the wrapper nested `isError` inside the block.
+ */
 export function toolResultIsError(data: Record<string, unknown>): boolean {
   const message = data.message as Record<string, unknown> | undefined
+  if (message?.isError === true || data.isError === true) return true
   const inner = blocksOf(message?.content ?? data.content)
   return inner.some((b) => (b as { isError?: boolean }).isError === true)
 }
