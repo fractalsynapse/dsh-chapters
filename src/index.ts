@@ -1144,7 +1144,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
   const marker = process.env.DSH_CHAPTERS_WITNESS
   let roster: Promise<RosterVerdict> | undefined
   const rosterCheck = (): Promise<RosterVerdict> =>
-    roster ??= reportPresetRoster(ctx, config.fallbackPreset)
+    roster ??= reportPresetRoster(ctx, CHAPTERS_PRESET_ID) // #353: was config.fallbackPreset — a CHILD-MOUNT knob. Setting it to another preset made this line certify that other preset and print an UNHEALTHY verdict naming the wrong id with the wrong remedy. The id we register is CHAPTERS_PRESET_ID, which the witness two lines away already uses.
   setTimeout(() => {
     void rosterCheck().then((verdict) => {
       if (marker !== undefined) void witness(ctx, marker, domain, verdict)

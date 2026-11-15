@@ -76,6 +76,7 @@
     "@deepseek-ai/dsh-compaction": "*",
     "@deepseek-ai/dsh-compaction-basic": "*",
     "@deepseek-ai/dsh-home-paths": "*",
+    "@deepseek-ai/dsh-llm": "*",
     "@deepseek-ai/dsh-storage-domain": "*",
     "@deepseek-ai/dsh-tools": "*",
     "@deepseek-ai/schemastery": "*"
@@ -100,6 +101,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-home-paths": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-llm": {
       "optional": true
     },
     "@deepseek-ai/cordis-plugin-loader": {
