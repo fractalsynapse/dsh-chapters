@@ -310,7 +310,7 @@ export async function saveSession(a: SaveSessionArgs): Promise<SaveSessionOutcom
     // marked, or the mark without its replacement (#60).
     await store.mutate(sessionId, (fresh) => supersedeChapter(fresh, a.supersede!.over, wrote.records, a.supersede!.reason))
   } else {
-    await commitChapters(store, sessionId, wrote.records)
+    await commitChapters(store, sessionId, wrote.records, cwd)
   }
 
   return { skipped: null, fromSeq, anchor, lastArchived, priorChapters: state.chapters.length, records: wrote.records, warnings: [...repairNotes, ...hollowNotes, ...oversize.indivisible, ...wrote.warnings] }
