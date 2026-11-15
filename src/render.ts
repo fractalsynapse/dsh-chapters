@@ -45,6 +45,29 @@ export function longerFence(body: string): string {
   return '`'.repeat(Math.max(3, max + 1))
 }
 
+/**
+ * One text span as INLINE code, delimited so the content cannot close its own span (#345).
+ *
+ * `longerFence` solves this for fenced blocks and the file's own header calls fence collision
+ * hazard #1 — but the invocation head was written as a bare `` ` `` + `args.slice(0, 400)` + `` ` ``,
+ * and real arguments are full of backticks (72 / 1,724 / 837 tool-calls across three production
+ * sessions). Measured effect on real whole-log chapters: 12 / 130 / 88 rendered lines whose inline
+ * code spans do not balance, so everything after the stray backtick — the seq citation included —
+ * renders as code or as emphasis instead of text. A chapter that mangles its own citations is a
+ * quieter version of the same class of failure as a chapter that loses them.
+ *
+ * CommonMark: the delimiter must be longer than any backtick run inside, and content that begins or
+ * ends with a backtick needs padding spaces so the run is not read as the delimiter.
+ */
+export function inlineCode(text: string): string {
+  const oneLine = text.replace(/\s*\n\s*/g, ' ')
+  let max = 0
+  for (const match of oneLine.matchAll(/`+/g)) max = Math.max(max, match[0].length)
+  const tick = '`'.repeat(max + 1)
+  const pad = /^`|`$/.test(oneLine) ? ' ' : ''
+  return `${tick}${pad}${oneLine}${pad}${tick}`
+}
+
 /** Wrapped in a fence long enough to survive any content, including nested fences. */
 export function fenced(content: string, info = ''): string {
   const fence = longerFence(content)
@@ -439,13 +462,13 @@ export function renderChapter(
           const ref = artifactRef(args, { toolName: name, sourceSeq: ev.seq, inlined: false })
           artifacts.push(ref)
           invocationArtifacts += 1
-          body.push(`- ↳ **${name}** \`${args.slice(0, CALL_HEAD_CHARS)}\`${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`
+          body.push(`- ↳ **${name}** ${inlineCode(args.slice(0, CALL_HEAD_CHARS))}${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`
             + ` — full arguments: ${ref.bytes} B ≈ ${estimateTokens(args)} tok, \`${ref.sha256.slice(0, 7)}…\` → \`${ref.path}\``)
           break
         }
         // Invocations stay inline as a bounded head: this is the "what was
         // attempted" half of the record (docs/architecture.md § Chapter Rendering).
-        body.push(`- ↳ **${name}** \`${args.slice(0, CALL_HEAD_CHARS)}\`${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`)
+        body.push(`- ↳ **${name}** ${inlineCode(args.slice(0, CALL_HEAD_CHARS))}${args.length > CALL_HEAD_CHARS ? ' …' : ''} (seq ${ev.seq})`)
         break
       }
       case 'plan/mode':
