@@ -57,6 +57,7 @@ import { removedGuard } from './removal.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
 import { providerKindFor, registerProvider } from './provider.ts'
 import { createTreedxProvider } from './treedx/provider.ts'
+import { foreignCompactionKey, type ForeignCompactionFact } from './engine.ts'
 
 /** The cordis surface this entry touches; widened in later stages. */
 interface HostCtx {
@@ -353,6 +354,32 @@ const PKG_ROOT = join(HERE, '..')
  *  while the roster came back without `chapters`). The same apply-fiber trap bit the storage
  *  domain in r35. */
 const heldDisposers: Array<() => Promise<void>> = []
+
+/**
+ * #360 — the host-plane half of the engine-ownership witness. Prints what the realm engine recorded,
+ * or the explicit "never observed" line: absence of a complaint must never read as evidence of health,
+ * which is how the original foreign-engine week stayed invisible.
+ */
+function engineProvenanceLines(store: { sessions(): IterableIterator<[string, { chapters?: unknown[] }]>; getSetting(k: string): string | undefined }): string[] {
+  const flagged: string[] = []
+  let observed = 0
+  for (const [id] of store.sessions()) {
+    const raw = store.getSetting(foreignCompactionKey(id))
+    if (raw === undefined) continue
+    let fact: ForeignCompactionFact | undefined
+    try { fact = JSON.parse(raw) as ForeignCompactionFact } catch { flagged.push(`  ${id}: unreadable provenance record — NOT evidence of health`); continue }
+    if (fact === undefined) continue
+    observed += 1
+    flagged.push(`  ${id}: ${String(fact.foreign)} compaction(s) by another engine (${fact.providers || 'provider absent'}), ours: ${String(fact.ours)}`)
+  }
+  if (flagged.length === 0) {
+    return observed === 0
+      ? ['  compaction engine: no foreign-provider summary seen in any registered session',
+        '    (absence is NOT proof — the witness only speaks when a chapters session compacts at all; /chapters-repair reads the logs directly)']
+      : ['  compaction engine: ours on every session that recorded one']
+  }
+  return ['  compaction engine: FOREIGN ENGINE SEEN — this preset\'s sessions were compacted without the chapters archive:', ...flagged]
+}
 
 export async function apply(ctx: HostCtx, config: Config): Promise<void> {
   // #61: the diagnostics sink defaults ON. An operator who set `diagnosticsLog` in the profile gets
@@ -886,6 +913,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           lines.push(`Prompt plane: model ${spec !== '' ? `${spec} (${source})` : 'UNSET — the bar is absent (§28)'}`)
           lines.push(`  transport: ${pushWriter === null ? 'pull (this host has no appendPluginRecord — state reads are commands)' : 'push LIVE (plugin records; the bar rides the projection)'}`)
           lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
+          lines.push(...engineProvenanceLines(store))
           return lines
         },
         sessionRow: async (sessionId: string): Promise<string> => {
