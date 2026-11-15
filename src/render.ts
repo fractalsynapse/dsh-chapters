@@ -362,6 +362,67 @@ export function defersAtArchive(estimatedTokens: number, floorTokens: number): b
  * would report an approved plan as `pending`. The plans block is appended AFTER the verbatim
  * transcript, so the transcript stays exactly what the log said.
  */
+/**
+ * #346 — which durable event types the renderer writes, and which it knowingly does not.
+ *
+ * The audit said ~75% of durable events never reach a chapter. Measured against three real session logs
+ * (55,334 events, 35 distinct types) most of that is lifecycle bookkeeping an archive should not contain
+ * — but the reason was written down nowhere, so "excluded" and "forgotten" were indistinguishable and a
+ * NEW host event type landed in the same silent place as the interesting ones. This table is the
+ * difference: a type is excluded only if it is listed here with a reason; anything else is still counted
+ * as unrendered and reported.
+ *
+ * The duplication numbers are measured, not assumed. They are why `agent/inbox/spliced` — 2.4% of all
+ * events, ~2 MB of payload across three logs — is NOT rendered: 658 of 659 spliced messages are
+ * byte-identical to a `user/message` the renderer already writes. Adding a case for it, which is the
+ * obvious reading of "cover the missing types", would have duplicated two megabytes of a person's own
+ * words into every chapter spanning them.
+ */
+export const EXCLUDED_EVENT_TYPES: Readonly<Record<string, string>> = {
+  // Lifecycle: no content, and the ranges are already recorded in the frontmatter.
+  'turn/start': 'structural: defines a turn range, which the frontmatter records',
+  'turn/end': 'structural: defines a turn range, which the frontmatter records',
+  'step/start': 'structural: a model step boundary, no payload text',
+  'step/end': 'structural: a model step boundary, no payload text',
+  // A derived record of delivery, not new content (measured 658/659 identical to a user/message).
+  'agent/inbox/spliced': 'derived duplicate: every spliced message is also a user/message that renders (measured 658 of 659 identical across three logs; rendering it would duplicate ~2 MB of human text)',
+  // Host-injected configuration: invariant 1 plus the #59 screen — never conversation, never corpus.
+  'system/message': 'host-injected configuration (the system prompt itself); excluded by the injection-screen rule',
+  'developer/message': 'host-injected configuration (tool-registry deltas), not conversation',
+  // Transport/provider plumbing: per-request wire detail, not what was said.
+  'request/header': 'provider transport metadata',
+  'request/context': 'provider transport metadata',
+  'assistant/attempt': 'provider transport: one record per outbound attempt',
+  'llm/retry': 'provider transport: retry bookkeeping',
+  'llm/retry-started': 'provider transport: retry bookkeeping',
+  // Compaction mechanics. The durable log keeps every shadowed event, so nothing is lost by not
+  // re-archiving a summary of it; #360 covers the provenance question separately.
+  'compaction/start': 'surface mechanics: shadowing is recorded in the log, originals stay retrievable',
+  'compaction/end': 'surface mechanics: shadowing is recorded in the log, originals stay retrievable',
+  'compaction/summary': 'surface mechanics: a summary OF shadowed events, which this archive keeps verbatim from the log',
+  'compaction/notice': 'surface mechanics: the notice the plugin injected, not conversation',
+  'compaction/prune': 'surface mechanics: token accounting',
+  // UI/transport state with no narrative content.
+  'workspace/changes': 'file-change accounting; the edits themselves are tool calls that render',
+  'subagent/catalog': 'transport state: the roster snapshot offered to the model',
+  'approval/asked': 'permission flow: an interactive prompt, resolved in-session',
+  'approval/decided': 'permission flow: the click that resolved it, not a message to the agent',
+  'approval/policy': 'configuration event: the approval policy in force, recorded by the host and visible in the session header',
+  'permission/preset': 'configuration event: which permission preset was active; the host records it and the header carries it',
+  'sandbox/mode': 'configuration event: a file-sandbox mode change, restated on every runtime-context snapshot the model sees',
+  'agent-preset/selected': 'configuration event: which preset composed this session, already carried by the durable session header',
+  'session/end-seed': 'transport state: the seed marker the host appends at session end, no narrative content',
+  'session/title-llm-request': 'transport state: the outbound request for title generation, not what was said',
+  // Decided surface-local earlier and unchanged here.
+  'todo/write': 'surface-local by decision (docs/backlog.md): a task list the model already carries',
+  'note': 'surface-local annotation channel, not conversation',
+  // Titles are surfaced by the session header and the TOC, not repeated per chapter.
+  'session/title': 'metadata: the label is in the store header and the TOC already',
+}
+
+/** #346 — the goal ledger renders as one compact fact, never a second copy of the objective. */
+export const GOAL_FACT_PREFIX = '- **[goal]**'
+
 export function renderChapter(
   events: SessionEventLike[],
   range: ChapterRange,
@@ -522,13 +583,48 @@ export function renderChapter(
         }
         break
       }
+      // #346 — a human running a slash command is conversation-level intent, recorded nowhere else:
+      // verified unique against user/message, assistant/message and every tool call/result in all three
+      // real logs. AGENTS already requires "always preserve invocations and arguments in the body"; a
+      // command invocation was the one invocation being dropped.
+      case 'command/run': {
+        const name = typeof data.name === 'string' ? data.name : '?'
+        const args = typeof data.args === 'string' ? data.args.trim() : ''
+        const srcKind = (data.source as { kind?: string } | undefined)?.kind ?? 'user'
+        body.push('> **[command]** /' + name + ' ' + redact(args) + ' (source: ' + srcKind + ', seq ' + String(ev.seq) + ')')
+        break
+      }
+      case 'command/done': {
+        // The outcome of that invocation. Kept because an invocation without its result is half a fact.
+        const kind = typeof data.kind === 'string' ? data.kind : '?'
+        const text = typeof data.text === 'string' ? data.text : ''
+        body.push('> **[command result]** ' + kind + ' (seq ' + String(ev.seq) + ')')
+        if (text.trim() !== '') body.push(redact(text.trim()))
+        break
+      }
+      // #346 — the goal LEDGER (created/paused/resumed/completed, at which revision). The objective TEXT
+      // is not repeated: it arrives as <goal_round> user messages, which render verbatim, so copying it
+      // would duplicate them. One fact line, with the seq so a reader can go read the round.
+      case 'goal/change': {
+        const g = (data.goal ?? {}) as { id?: string, revision?: number, objective?: string }
+        const op = typeof data.operation === 'string' ? data.operation : 'change'
+        const rev = typeof g.revision === 'number' ? ' rev ' + String(g.revision) : ''
+        const head = typeof g.objective === 'string'
+          ? ' — "' + g.objective.slice(0, 120) + (g.objective.length > 120 ? '…' : '') + '"'
+          : ''
+        body.push(GOAL_FACT_PREFIX + ' ' + op + rev + ' (' + String(g.id ?? '?') + ')' + head + ' seq ' + String(ev.seq))
+        break
+      }
       case 'turn/start':
       case 'turn/end':
       case 'step/start':
       case 'step/end':
-        break // lifecycle noise: intentionally absent from the body, ranges still recorded in frontmatter
+        break // lifecycle: see EXCLUDED_EVENT_TYPES; handled here so it never reaches default:
       default:
-        unrenderedSeqs.push(ev.seq)
+        // #346: a type LISTED as excluded is a decision; anything else is an accident and still lands in
+        // unrenderedSeqs, where the existing "N event(s) rendered no output" warning reports it. That
+        // asymmetry is the whole point — silence is only allowed where a reason is written down.
+        if (EXCLUDED_EVENT_TYPES[ev.type] === undefined) unrenderedSeqs.push(ev.seq)
     }
   }
 
