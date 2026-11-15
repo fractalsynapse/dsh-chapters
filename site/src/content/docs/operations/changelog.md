@@ -80,8 +80,17 @@ remediation is an operator decision under the deletion exception, and the per-wo
 what makes it possible to decide. The #340 freshness fix and #379's block cap are built, green on every
 check except the tape chain, and **held for one `prompt`-leg re-record** rather than merged around a stale
 corpus. (#351's arrival floor was expected to need the same re-anchor; all ten legs came back green, so it IS in this release -- see the operator note below.) #335 (arguments
-artifact-backed by default, as the docs already promise) awaits the maintainer's call. #349 and #372 need a
-browser rig to verify and were left unbuilt rather than shipped as unobserved wiring.
+artifact-backed by default, as the docs already promise) awaits the maintainer's call. #372 needs a
+browser rig to verify and was left unbuilt rather than shipped as unobserved wiring.
+**A correction to this paragraph as first written:** it claimed *"#349 and #372 need a browser rig to verify and were left
+unbuilt."* Wrong twice, and wrong in the way this release exists to catch. #349 does not need a browser rig
+— that was a mislabel I had already corrected elsewhere but never propagated here, because a comment in one
+place is not a fix to the fact. And #349 was not left unbuilt: its conservative fallback (carry the parent
+goal into the child's notice, and state that only a human can arm it) merged to `staging` AFTER this
+candidate was cut, so it is absent from 0.2.33 and present in 0.2.34 — which is a scope fact, not the same
+thing as "unbuilt". What #349 still needs is a **live host plus a real model call** for its behavioural
+acceptance, and a maintainer decision on plugin-authored goal creation. `docs/project-state.md` already said
+all of this correctly, so the two shipped records disagreed with each other until this edit.
 
 **What is verified.** All 24 merged PRs in this range passed all four checks — including the ten
 tape-replay legs — **at their own heads** before merging. Measured **at this candidate tree**, not carried
