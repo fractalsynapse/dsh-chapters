@@ -163,12 +163,40 @@ export async function registerPrunedPreset(
 /** One mounted row of a live preset composition, as the host's inventory reports it.
  *  `fiberState` is the Loader's state for that row; an enabled row that is not `active`
  *  cannot serve a session, and the roster's `broken` flag reports that only for the whole
- *  mount — which is why the witness asks for the rows as well. */
+ *  mount — which is why the witness asks for the rows as well.
+ *
+ *  #339: the host sends a NUMBER, not a name. `AgentPresetCompositionRow.fiberState?: FiberState`
+ *  (`agent-preset-registry/src/composition-inventory.ts:34`, filled from `entry.fiber.state` at
+ *  `:201`), and `FiberState` is a numeric const enum in cordis (`lib/types/fiber.d.ts:67-74`,
+ *  `ACTIVE = 2`). The host converts values to names for its own inventory the same way
+ *  (`plugin-inventory/src/index.ts:41-48`). Typed `string | number` so a host that names its
+ *  states keeps working; the `string`-only comparison is what made `unusableRows` return `[]`
+ *  forever, including for a FAILED row. */
 export interface InventoryRow {
   entryId?: string
   moduleName?: string
   enabled?: boolean
-  fiberState?: string
+  fiberState?: string | number
+}
+
+/** The host's `FiberState` enum values (`PENDING, LOADING, ACTIVE, FAILED, DISPOSED, UNLOADING`).
+ *  `ACTIVE` is the only state that can serve a session. */
+export const FIBER_STATE_ACTIVE = 2
+const FIBER_STATE_NAMES: Record<number, string> = {
+  0: 'pending',
+  1: 'loading',
+  2: 'active',
+  3: 'failed',
+  4: 'disposed',
+  5: 'unloading',
+}
+
+/** One row's state as a NAME, whether the host sent the enum value or a string. An UNKNOWN
+ *  number is named as such rather than treated as active: a state this file has never seen is
+ *  precisely what an operator needs reported. */
+export function fiberStateName(state: string | number | undefined): string | undefined {
+  if (typeof state === 'number') return FIBER_STATE_NAMES[state] ?? `unknown-state-${String(state)}`
+  return state
 }
 
 /** One preset's entry in a `compositionInventory()` response. */
@@ -188,8 +216,10 @@ export function inventoryEntry(raw: unknown, presetId: string): InventoryEntry |
 export function unusableRows(entry: InventoryEntry | undefined): string[] {
   if (!Array.isArray(entry?.rows)) return []
   return (entry.rows as InventoryRow[])
-    .filter((row) => row.enabled !== false && typeof row.fiberState === 'string' && row.fiberState !== 'active')
-    .map((row) => `${row.entryId ?? '?'} (${row.moduleName ?? '?'}) ${row.fiberState}`)
+    .map((row) => ({ row, state: fiberStateName(row.fiberState) }))
+    // #339: compare the NAME, so the numeric enum the host actually emits is understood.
+    .filter(({ row, state }) => row.enabled !== false && state !== undefined && state !== 'active')
+    .map(({ row, state }) => `${row.entryId ?? '?'} (${row.moduleName ?? '?'}) ${String(state)}`)
 }
 
 /**
