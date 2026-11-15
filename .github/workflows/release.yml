@@ -22,7 +22,9 @@ name: Release
 #
 # Two ways in:
 #   1. push a version tag:  git tag 0.1.1 && git push origin 0.1.1
-#      (bare semver — the 'Production' environment's tag protection is *.*.*)
+#      (bare semver. The gate is THIS workflow's own trigger filter, tags: ['*.*.*'] —
+#       NOT GitHub tag protection, which is NOT configured on this repo: the 'Production'
+#       environment carries only branch_policy + NPM_TOKEN, no tag rules (#393).)
 #   2. Actions tab → "Run workflow" (manual dispatch; REHEARSES by default -- check
 #      "publish" AND type the matching version to actually ship. #386: the input used to
 #      be dry_run default:false, so a forgotten tick published an immutable version.)
@@ -59,8 +61,13 @@ jobs:
     name: build · test · publish
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # 'Production' enforces tag protection *.*.* — a non-semver tag never
-    # reaches this job. (#261: the environment ALSO carries NPM_TOKEN, the
+    # The ONLY thing that keeps a non-semver tag out of this job is the trigger filter
+    # `tags: ['*.*.*']` above. 'Production' supplies branch_policy and NPM_TOKEN — it does NOT
+    # enforce tag protection, and no repo ruleset or tag-protection rule exists (#393, verified
+    # via the API 2026-11-15). Consequence worth knowing before you tag: a malformed tag costs
+    # nothing (no job runs), but a WELL-FORMED WRONG tag publishes an immutable version, because
+    # the version/tag equality step below only ever sees tags that already matched *.*.*. The
+    # immutability rule in the release notes is discipline, not a server-side guard.
     # publish credential; it was empty on the OIDC path.)
     environment: Production
     permissions:
