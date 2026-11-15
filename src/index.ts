@@ -976,102 +976,110 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // Save-only: creates no session, so the "no continuation-creating actions
     // mid-step" rule is not engaged; a settled child's turns are all completed
     // by construction, and the anchor is its last `turn/end`.
-    if (config.subagentAutoSave) {
-      // #113: one suggestion per completed turn, and a human prompt that suspends the loop. Registered
-      // beside the other turn/end doors rather than as a new timing of our own (AGENTS: no second automatic
-      // engine), and inert whenever the model is unset — the model IS the switch.
-      const promptRunner = makePromptRoundRunner({
-        enabled: () => prompt.effective().spec !== '',
-        eligible: (session) => (session as { header?: { origin?: string } }).header?.origin !== 'subagent',
-        store: store as unknown as Parameters<typeof makePromptRoundRunner>[0]['store'],
-        // #194: every durable row write mirrors to the push transport (order serialized per session).
-        pushRow: (session: unknown, sessionId: string) => { pushBar(session, sessionId) },
-        generate: async (session, turnSeq) => {
-          // The live session object carries the events; this is the same read the archive door uses, and it
-          // is payload-bearing. The GOAL is folded from those events so a suggestion cannot ignore the
-          // purpose it is supposed to advance — the maintainer's rule that the two compose.
-          void turnSeq
-          const events = [...((session as { snapshotEvents?: () => readonly unknown[] }).snapshotEvents?.() ?? [])] as import('./types.ts').SessionEventLike[]
-          const goal = readActiveGoal(events)
-          const r = await prompt.suggest({
-            id: session.id,
-            // #188: the workspace the chapter paths resolve against — without it the lineage walk
-            // cannot read chapter bodies, and the plots (the trajectory) would silently vanish.
-            cwd: (session as { header?: { cwd?: string } }).header?.cwd ?? '',
-            events,
-            goalDirective: goalDirectiveOf(goal),
-          })
-          // Built as an object with ONLY the keys that hold a value: `exactOptionalPropertyTypes` is on, so
-          // `quiet: undefined` is not the same as omitting `quiet`, and a spread that always writes the key
-          // would not compile — which is the right outcome, because the runner branches on presence.
-          if (r.ok) return { ok: true, text: r.text }
-          return { ok: false, reason: r.reason ?? r.text, ...(r.quiet === undefined ? {} : { quiet: r.quiet }) }
-        },
-        onReady: (sessionId, state) => {
-          // Fire only through the loop's own gate, against the LIVE goal signal: armed/idle/budget/one-per-offer
-          // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
-          promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
-        },
-        now: () => new Date().toISOString(),
-        // The rig's legs run in a throwaway home whose `ctx.logger` output is not retained, so the prompt
-        // plane's own narration is copied to stderr — where the boot's server log keeps it. Every "why did the
-        // bar not move" answer tonight depended on lines that were being thrown away (#61).
-        log: (m) => { console.error(`[chapters-prompt] ${m}`); ctx.logger?.info?.(`dsh-chapters: ${m}`) },
-        warn: (m) => { console.error(`[chapters-prompt] WARN ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
-      })
-      const reloadSelfCheck = makeReloadSelfCheckListener({
-        store: store as unknown as ReloadCheckDeps['store'],
-        warn: (m) => { console.error(`[chapters-reload] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
-      })
-      try {
-        ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
-          if (session?.id === undefined) return
-          // #319 part 3: the reload self-check — one predicate over the child's own events at its
-          // first turn/end; doomed shapes announce themselves NOW (stderr + registry fact) instead
-          // of ambushing a restart. The factory owns all its failure; see src/reload-check.ts.
-          reloadSelfCheck(session as { id?: string; snapshotEvents?: () => readonly import('./reload-check.ts').ReloadEvent[] }, event as { type?: string })
-          if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
-          // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
-          // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
-          // captured by the boot's server log, so the answer survives the leg (#61).
-          if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
-          if (event?.type === 'turn/end') promptBoundariesSighted += 1
-          // #225: the re-enable path needs a witness too. The maintainer ran `/chapters-prompt model
-          // …` at 18:16 and NO first-boundary line ever followed — meaning either no turn ended after
-          // it in this process, or the setting did not reach the plane. One line per enable tells
-          // which: `enable seen` with the effective spec immediately after the write.
-          if (event?.type === 'user/message' && event.data?.source?.kind === 'command') {
-            const argsV = String((event.data as { args?: unknown }).args ?? '')
-            if (/^\s*model\s+\S/.test(argsV) || /^\s*suggest\b/.test(argsV)) {
-              const specN = prompt.effective().spec
-              console.error(`[chapters-prompt] enable/suggest command seen for ${String(session.id)}: model now ${specN !== '' ? specN : 'STILL UNSET(→ writes landed elsewhere)'}`)
-            }
+    // #341: the suggested-next-step door, the reload self-check and the subagent-settlement
+    // archiver are THREE INDEPENDENT doors that happen to share a turn/log boundary. They used
+    // to sit inside one `if (config.subagentAutoSave)` block, so turning archiving OFF also
+    // silenced the prompt bar (while /chapters-prompt kept reporting ON) and removed the #319
+    // seed-doom detector. Each door now carries its own switch: the prompt plane is gated by its
+    // model spec being set (the model IS the enable), archiving by subagentAutoSave.
+    // #113: one suggestion per completed turn, and a human prompt that suspends the loop. Registered
+    // beside the other turn/end doors rather than as a new timing of our own (AGENTS: no second automatic
+    // engine), and inert whenever the model is unset — the model IS the switch.
+    const promptRunner = makePromptRoundRunner({
+      enabled: () => prompt.effective().spec !== '',
+      eligible: (session) => (session as { header?: { origin?: string } }).header?.origin !== 'subagent',
+      store: store as unknown as Parameters<typeof makePromptRoundRunner>[0]['store'],
+      // #194: every durable row write mirrors to the push transport (order serialized per session).
+      pushRow: (session: unknown, sessionId: string) => { pushBar(session, sessionId) },
+      generate: async (session, turnSeq) => {
+        // The live session object carries the events; this is the same read the archive door uses, and it
+        // is payload-bearing. The GOAL is folded from those events so a suggestion cannot ignore the
+        // purpose it is supposed to advance — the maintainer's rule that the two compose.
+        void turnSeq
+        const events = [...((session as { snapshotEvents?: () => readonly unknown[] }).snapshotEvents?.() ?? [])] as import('./types.ts').SessionEventLike[]
+        const goal = readActiveGoal(events)
+        const r = await prompt.suggest({
+          id: session.id,
+          // #188: the workspace the chapter paths resolve against — without it the lineage walk
+          // cannot read chapter bodies, and the plots (the trajectory) would silently vanish.
+          cwd: (session as { header?: { cwd?: string } }).header?.cwd ?? '',
+          events,
+          goalDirective: goalDirectiveOf(goal),
+        })
+        // Built as an object with ONLY the keys that hold a value: `exactOptionalPropertyTypes` is on, so
+        // `quiet: undefined` is not the same as omitting `quiet`, and a spread that always writes the key
+        // would not compile — which is the right outcome, because the runner branches on presence.
+        if (r.ok) return { ok: true, text: r.text }
+        return { ok: false, reason: r.reason ?? r.text, ...(r.quiet === undefined ? {} : { quiet: r.quiet }) }
+      },
+      onReady: (sessionId, state) => {
+        // Fire only through the loop's own gate, against the LIVE goal signal: armed/idle/budget/one-per-offer
+        // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
+        promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
+      },
+      now: () => new Date().toISOString(),
+      // The rig's legs run in a throwaway home whose `ctx.logger` output is not retained, so the prompt
+      // plane's own narration is copied to stderr — where the boot's server log keeps it. Every "why did the
+      // bar not move" answer tonight depended on lines that were being thrown away (#61).
+      log: (m) => { console.error(`[chapters-prompt] ${m}`); ctx.logger?.info?.(`dsh-chapters: ${m}`) },
+      warn: (m) => { console.error(`[chapters-prompt] WARN ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
+    })
+    const reloadSelfCheck = makeReloadSelfCheckListener({
+      store: store as unknown as ReloadCheckDeps['store'],
+      warn: (m) => { console.error(`[chapters-reload] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
+    })
+    try {
+      ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
+        if (session?.id === undefined) return
+        // #319 part 3: the reload self-check — one predicate over the child's own events at its
+        // first turn/end; doomed shapes announce themselves NOW (stderr + registry fact) instead
+        // of ambushing a restart. The factory owns all its failure; see src/reload-check.ts.
+        reloadSelfCheck(session as { id?: string; snapshotEvents?: () => readonly import('./reload-check.ts').ReloadEvent[] }, event as { type?: string })
+        if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
+        // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
+        // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
+        // captured by the boot's server log, so the answer survives the leg (#61).
+        if (event?.type === 'turn/end') console.error(`[chapters-prompt] turn/end sighted session=${String(session.id)} seq=${String((event as { seq?: number }).seq ?? '?')}`)
+        if (event?.type === 'turn/end') promptBoundariesSighted += 1
+        // #225: the re-enable path needs a witness too. The maintainer ran `/chapters-prompt model
+        // …` at 18:16 and NO first-boundary line ever followed — meaning either no turn ended after
+        // it in this process, or the setting did not reach the plane. One line per enable tells
+        // which: `enable seen` with the effective spec immediately after the write.
+        if (event?.type === 'user/message' && event.data?.source?.kind === 'command') {
+          const argsV = String((event.data as { args?: unknown }).args ?? '')
+          if (/^\s*model\s+\S/.test(argsV) || /^\s*suggest\b/.test(argsV)) {
+            const specN = prompt.effective().spec
+            console.error(`[chapters-prompt] enable/suggest command seen for ${String(session.id)}: model now ${specN !== '' ? specN : 'STILL UNSET(→ writes landed elsewhere)'}`)
           }
-          if (event?.type === 'turn/end' && !promptVerdictSighted.has(String(session.id))) {
-            promptVerdictSighted.add(String(session.id))
-            const specV = prompt.effective().spec
-            const originV = (session as { header?: { origin?: string } }).header?.origin
-            console.error(`[chapters-prompt] first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`)
-          }
-          // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
-          // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
-          // watched a chapters-prompt node land BEFORE their first message, and that node was the
-          // discovery. Rows only change at turn/end, so a session born before its first turn has
-          // nothing to say — `idle` is the whole truth — and saying it through the projection costs
-          // zero commands forever.
-          if (pushWriter !== null && !seenBirthSessions.has(session.id)) {
-            seenBirthSessions.add(session.id)
-            if (prompt.effective().spec !== '') pushBar(session, session.id)
-          }
-          promptRunner(session as never, event as never)
-        }) as never)
-        console.error('[chapters-prompt] turn/end door armed')
-        ctx.logger?.info?.('dsh-chapters: suggested-next-step door armed — one offer per completed turn when a prompt model is set (state: /chapters-prompt state)')
-      } catch (error) {
-        console.error(`[chapters-prompt] turn/end door REFUSED: ${String((error as Error)?.message ?? error)}`)
-        ctx.logger?.warn?.(`dsh-chapters: suggested-next-step door registration REFUSED — no turn will offer a suggestion (${String((error as Error)?.message ?? error).slice(0, 160)})`)
-      }
+        }
+        if (event?.type === 'turn/end' && !promptVerdictSighted.has(String(session.id))) {
+          promptVerdictSighted.add(String(session.id))
+          const specV = prompt.effective().spec
+          const originV = (session as { header?: { origin?: string } }).header?.origin
+          console.error(`[chapters-prompt] first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`)
+        }
+        // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
+        // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
+        // watched a chapters-prompt node land BEFORE their first message, and that node was the
+        // discovery. Rows only change at turn/end, so a session born before its first turn has
+        // nothing to say — `idle` is the whole truth — and saying it through the projection costs
+        // zero commands forever.
+        if (pushWriter !== null && !seenBirthSessions.has(session.id)) {
+          seenBirthSessions.add(session.id)
+          if (prompt.effective().spec !== '') pushBar(session, session.id)
+        }
+        promptRunner(session as never, event as never)
+      }) as never)
+      console.error('[chapters-prompt] turn/end door armed')
+      ctx.logger?.info?.('dsh-chapters: suggested-next-step door armed — one offer per completed turn when a prompt model is set (state: /chapters-prompt state)')
+    } catch (error) {
+      console.error(`[chapters-prompt] turn/end door REFUSED: ${String((error as Error)?.message ?? error)}`)
+      ctx.logger?.warn?.(`dsh-chapters: suggested-next-step door registration REFUSED — no turn will offer a suggestion (${String((error as Error)?.message ?? error).slice(0, 160)})`)
+    }
 
+    // Door 5 (issue #47): the fifth archive moment — subagent settlement. Gated by
+    // subagentAutoSave ALONE (#341): nothing above this line may depend on it.
+    if (config.subagentAutoSave) {
       const autoSaveListener = wireSubagentAutoSave(ctx as never, store, {
         presetId: CHAPTERS_PRESET_ID,
         artifactStoreRoot: config.artifactStoreRoot,
