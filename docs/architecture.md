@@ -115,6 +115,26 @@ Division of labour:
   live checkpoint). `isInjectedProse` is now the one predicate, fed by the same list of injected
   shapes; a row pins that both callers use it and that the regex file is gone.
 
+- **The injection screen is chosen by provenance, not applied uniformly** (#347). Screening removes host
+  spans of two different kinds, and one regex was doing both. For a host-**injected** event an
+  unterminated `<system-reminder>` genuinely means "injected prose to the end of the field", so the
+  open-ended arm is right. For text a **human typed**, the same arm silently deletes their own words from
+  the first tag quote to the end of the message. Measured on the real event (session `17f7c1d6`, seq 8,
+  kept as `tests/fixtures/reminder-tail-seq8.json`): 5,061 characters, one opening tag, no closing tag —
+  a person quoting the marker while listing injected strings for an agent to search for. The archive kept
+  2,543 characters, discarded the last **2,518**, and labelled the loss
+  *"omitted:host-injected … project state, not conversation"* — a human instruction reported as host
+  state, contradicting this module's own header ("a human typing the words AGENTS.md in prose is
+  conversation and stays verbatim").
+  So human-authored text is screened **balanced-only**: a span counts when the host closed it, and a
+  quoted marker plus everything after it stays. The decision lives in `screenConversation`, the single
+  shared site that already holds the event's `data` — the archive (`render.ts`) and the director's tail
+  (`prompt.ts`) both route through it, so no caller can forget a flag. That is #59's rule again: one
+  predicate per semantic decision, chosen where the fact is known rather than passed around.
+  Not widened to assistant text: a model's own words are verbatim for a different reason, and a runtime
+  snapshot has been observed appended under `role: user|system` — the existing behaviour there is left
+  alone and scoped deliberately.
+
 - **Model submits exceptions only**: `toolResultOverrides: [{seq, inline}]`. Usually empty or one entry, so
   the judgment costs almost no output tokens — which is why this is affordable where "the model writes the
   chapter bodies" was not.
