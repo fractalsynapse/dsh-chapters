@@ -25,6 +25,7 @@
  * non-archive is either a quiet, expected skip (wrong preset, no completed turn)
  * or a LOUD warn (unreadable, save failed).
  */
+import { CHAPTERS_PRESET_ID } from './preset.ts'
 import { diagnosticWarn } from './diag.ts'
 import { formatWarnings } from './warnings.ts'
 import { isActiveChapter } from './registry.ts'
@@ -255,7 +256,7 @@ export function shouldForceChildArchive(input: {
   enabled: boolean
 }): { fire: boolean; reason: string } {
   if (!input.enabled) return { fire: false, reason: 'childAutoArchive is off in config' }
-  if (input.header.agentPreset !== 'chapters') return { fire: false, reason: 'not a chapters-preset session' }
+  if (input.header.agentPreset !== CHAPTERS_PRESET_ID) return { fire: false, reason: 'not a chapters-preset session' } // #353: the durable preset id had a second literal copy outside its single predicate
   // door 5 owns delegation; two doors on one child would double-write the same span
   if (input.header.origin === 'subagent') return { fire: false, reason: 'owned by subagent settlement (door 5)' }
   // Only a ROOTED child: a session with no parent anywhere is the user's own session, whose doors are

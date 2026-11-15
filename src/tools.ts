@@ -1254,7 +1254,16 @@ export function registerChaptersTools(
   const disposeRulePropose = ctx.tools.register(built.chaptersRulePropose)
   const disposeRules = ctx.tools.register(built.chaptersRules)
   let disposeCommand: (() => void) | null = null
+  // #353: `commands` is deliberately NOT in the realm row's `inject`, and cordis `ctx.get(name)` is
+  // STRICT — it returns undefined unless the providing fiber is ACTIVE (cordis lib/index.js:763-769).
+  // The branch below silently skipped door registration when that happened, while the row went on to
+  // log "seven tools + three continuation doors, this realm only". A mount that did not happen must
+  // not be reported as one that did (AGENTS: deliver detected failures).
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register === undefined) {
+    const why = commands === undefined ? 'commands service absent from this context' : 'commands service has no register()'
+    diagnosticWarn(ctx.logger, 'realm:tools:doors', `the three continuation door commands are NOT mounted — ${why}. The seven chapters_* tools work; nothing offers /chapters-continue, /chapters-fork or /chapters-save as a command.`)
+  }
   if (commands?.register !== undefined) {
     try {
       // Keep EVERY disposer: a loop that overwrote `disposeCommand` would leak the
@@ -1291,6 +1300,11 @@ export function registerChaptersRepairRestore(
   const built = buildChaptersTools(ctx, store, config)
   const disposers: Array<() => void> = []
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register === undefined) {
+    // #353: same silent-skip on the OPERATOR doors. These are the way into a broken child, so their
+    // absence is the one thing the host plane must never claim it registered.
+    diagnosticWarn(ctx.logger, 'host:tools:repair-restore', '/chapters-repair and /chapters-restore are NOT mounted — commands service unavailable on the host plane. A child that cannot compose its realm now has no documented way in.')
+  }
   if (commands?.register !== undefined) {
     try {
       for (const def of [built.repairCommand, built.restoreCommand]) {
