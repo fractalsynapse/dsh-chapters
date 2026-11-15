@@ -475,6 +475,23 @@ Layout:
 Add `<store-root>/` to `.gitignore` on first write and say so — polluting a user's tree silently is its
 own small bug.
 
+**The chapter file name is unique by AUTHOR, not only by number (#337).** The directory above is keyed
+by *chain root* — one dir per tree, deliberately, so a lineage shares its artifact store — while chapter
+numbers restart at 1 for every `freshSession`. Parent and continuation child therefore both mint
+`001-<slug>.md` into the same directory, and with a matching title the two paths are identical.
+`writeArchive` used to overwrite unconditionally: the per-call `seenFile` set that "resolves title
+collisions" cannot see a write made by another session, and the registry kept two records citing one
+file — measured live, 40 paths claimed with different `sha256` and 393 `(tree dir, number)` pairs owned
+by more than one session, where at most one citation of each pair can be true.
+
+The rule now, in `writeArchive`: a chapter position is written only when it is free or already holds
+**these exact bytes**. Identical bytes are a retry and keep the name, so the attempt-key idempotence
+guarantee is untouched. Different bytes get a name carrying the authoring session's id; if even that is
+held, the write **throws** rather than appending `-2`, `-3` until something is free — a record must not
+cite a path nobody predicted, and a collision the plugin cannot resolve is precisely the fact to hand
+the operator, with `/chapters-repair` named as the way out. Every resolution is reported as a warning,
+never taken silently.
+
 **Registry: a DSH storage domain.** Ancestry, numbering, hashes, ranges, bullet lists. Sanctioned
 durability, survives restart, and gives the append-only counter a real allocation home instead of a
 directory scan racing a restart.

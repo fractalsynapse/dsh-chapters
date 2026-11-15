@@ -372,6 +372,7 @@ export async function runContinue(
     storeRoot: config.artifactStoreRoot,
     cwd: config.workspaceCwd,  // #69: records are stored workspace-relative
     rootSessionId: callerState.rootSession,
+    authorSessionId: args.callerSessionId, // #337
     chapters: rendered,
     attemptId: attemptKey(args.callerSessionId, ceiling),
   })

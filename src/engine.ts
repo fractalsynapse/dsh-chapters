@@ -1311,6 +1311,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       allocator: makeAllocator(store, session.id),
       storeRoot: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
       rootSessionId: state.rootSession,
+      authorSessionId: session.id, // #337
       chapters: renderedList,
       attemptId: `compaction:${compactionId}`,
     })
