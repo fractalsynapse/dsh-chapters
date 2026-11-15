@@ -18,7 +18,7 @@
  */
 import type { ChapterRange, NoticePlan, RenderConfig, SessionEventLike, ToolResultOverride } from './types.ts'
 import { chapterTopics } from './signature.ts'
-import { estimateTokens, oversizeRanges, renderChapter, validateRanges } from './render.ts'
+import { citationBaseOf, estimateTokens, nextUnarchivedSeq, oversizeRanges, renderChapter, validateRanges } from './render.ts'
 import { attemptKey, coverage, verifyChapter, writeArchive } from './archive.ts'
 import type { ChapterRecord } from './archive.ts'
 import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, reservePlan as reservePlanNumber } from './registry.ts'
@@ -283,10 +283,21 @@ export async function runContinue(
   // also what step 2 needs, so this is a hoist, not an extra round-trip — and every later step
   // re-reads through a fresh getState inside its own section.
   const callerState0 = await ports.getState(args.callerSessionId)
-  const watermark = callerState0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
-  const fromSeq = watermark + 1
+  // #336: one derivation for "first unarchived seq", shared with save-core (the two used to seed
+  // differently and disagreed once a chapter legitimately covered seq 0, which every real log has).
+  const fromSeq = nextUnarchivedSeq(callerState0.chapters)
+  // #336's lower floor must not defeat the retry contract. A re-submission of the EXACT range list
+  // already committed is not a duplicate archive — it is the same door call landing twice (the
+  // tool-result row that proved it: "a retry of the same archive reuses numbers and never duplicates
+  // the blob"), and the attempt key `sessionId@ceiling` makes it a no-op that reuses its numbers.
+  // Only a range list that DIFFERS from what is committed re-archives seqs under fresh numbers, and
+  // that is what the refusal is for. So the floor this call is held to is its own start when it is a
+  // faithful replay, and the watermark otherwise.
+  const exactReplay = args.chapters.length > 0 && args.chapters.every((r) => callerState0.chapters
+    .some((c) => c.startSeq === r.startSeq && c.endSeq === r.endSeq))
+  const rangeFloor = exactReplay ? Math.min(...args.chapters.map((r) => r.startSeq)) : fromSeq
   try {
-    validateRanges(args.chapters, ceiling, fromSeq)
+    validateRanges(args.chapters, ceiling, rangeFloor)
   } catch (error) {
     throw new Refusal({ ok: false, reason: `ranges refused: ${(error as Error).message}` })
   }
@@ -317,6 +328,7 @@ export async function runContinue(
   // ---- 2. Render + reserve + write (idempotent per attempt key).
   const callerState = callerState0
   const renderConfig: RenderConfig = {
+    citationBase: citationBaseOf(config.artifactStoreRoot, callerState.rootSession, config.workspaceCwd),
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
     chapterTokenTarget: config.chapterTokenTarget,
     ...(config.planInlineChars !== undefined ? { planInlineChars: config.planInlineChars } : {}),
@@ -361,6 +373,7 @@ export async function runContinue(
     storeRoot: config.artifactStoreRoot,
     cwd: config.workspaceCwd,  // #69: records are stored workspace-relative
     rootSessionId: callerState.rootSession,
+    authorSessionId: args.callerSessionId, // #337
     chapters: rendered,
     attemptId: attemptKey(args.callerSessionId, ceiling),
   })
@@ -532,13 +545,16 @@ async function finishChild(
   const callerEvents = await ports.readCallerEvents()
   // The parent's CURRENT mode, folded last-value-wins exactly like the host
   // projection does. Measured against the installed kernel (docs/plans-carriage.md
-  // § 10): a two-event seed `notice@0, plan/mode@1` is accepted in the production
-  // header shape, and the host's own plan projection then folds the child's log to
-  // `active: true` — so the seeded child really IS gated, not merely told.
+  // § 10): the host's plan projection folds a seeded `plan/mode` to `active: true`, so the
+  // seeded child really IS gated, not merely told.
   const modeActive = detectPlans(callerEvents).modeActive
   const seedMode = intent === 'continue' && config.planSeedMode !== false && modeActive === true
+  // #338: the seed is CONTIGUOUS FROM SEQ 0 — the kernel rejects `seed[i].seq !== i`
+  // (`dsh-session lib/index.js:1330`), and since #319 part 2 moved the TOC notice out of the
+  // seed this state event IS `seed[0]`. It kept `seq: 1` from when the notice held 0, which
+  // refused every continuation from an active-plan session at `agents.create`.
   const modeEvents: SessionEventLike[] = seedMode
-    ? [{ type: PLAN_MODE_EVENT, seq: 1, time: ports.now(), data: { active: true } }]
+    ? [{ type: PLAN_MODE_EVENT, seq: 0, time: ports.now(), data: { active: true } }]
     : []
 
   let plansSection = ''
@@ -604,7 +620,7 @@ async function finishChild(
     // #101: this write lands after `agents.create`, the longest await in the flow. A snapshot taken before
     // it and put here would delete whatever the turn/end listener archived meanwhile — records gone, files
     // on disk, which is the signature that made repair look like a twin-maker.
-    await ports.mutateState(args.callerSessionId, (live) => appendChapters(live, commitRecords))
+    await ports.mutateState(args.callerSessionId, (live) => appendChapters(live, commitRecords, config.workspaceCwd))
   }
   await ports.putState(childId, linkChild(freshSession(childId), args.callerSessionId, callerState.rootSession))
 

@@ -108,12 +108,62 @@ Division of labour:
   a range is refused with its own number, on every door including compaction: the field produced an
   89,982-token chapter, an unrepaired 237,870-token orphan, and eleven chapters over 32K — against a
   8K target and 32K-class hardware. A chapter that cannot be re-read is not an archive.
+- **Subdivide before refusing, by size — and report a refusal as one** (#344). That refusal was being
+  reached by default in the deterministic doors, because `deriveRanges`/`composeChapters` emit one chapter
+  per **turn** and real opening turns are large. Measured with the shipped functions on three real logs:
+  eadc refused **2 of 3** turns, platfolio 55 of 153, arcnexus 32 of 308 — and in every log the refused
+  range was the session's **opening** turn, the one a later continuation most needs. So `/chapters-save`,
+  `/chapters-fork`, subagent settlement and forced-child archive could not archive real sessions; only
+  model-driven `chapters_continue` could. Worse, the tool had no `oversize` case, so the run on eadc
+  printed **"Saved: 0 chapter(s) archived … Enrichment queued."** — a success line for a refusal.
+
+  1. `splitOversize` now runs on **every** deterministic door (it sat inside the repair-only
+     `a.span !== undefined` arm) and packs greedily against `chapterTokenTarget`, cutting only **between
+     events**. Equal-*count* chunking — the previous form — left 42 of 121 eadc parts over the ceiling on
+     real, unevenly-sized turns while its own note claimed a split had happened. Same three logs after:
+     **0 refused** (275 / 3,248 / 3,081 parts). Packing targets the *target*, not the refusal *ceiling*,
+     because the splitter measures an event-payload proxy while the gate measures **rendered** markdown and
+     the proxy runs low.
+  2. The door branches on `skipped !== null && records.length === 0` rather than on an enumerated list of
+     reasons — `oversize` and `payloadless` had both fallen through to the success wording, and a per-case
+     list is how that recurs. The message names the size, both knobs, whether a chapter number was spent,
+     and the alternative that can still work (`chapters_continue`).
+
+  One row in `title-predicate-and-floors.test.ts` changed, and it is a **contract change, not a test fix**:
+  its fixture is a single ~120 KB assistant event that no boundary choice can reduce. #117's escape valve
+  already decided an indivisible single event is archived whole with a loud warning rather than refused,
+  because refusing an atom makes a long session permanently un-compactable (measured there:
+  `chapters_continue` refused four times over one 77,903-token event). Before #344 the deterministic doors
+  never reached that valve — equal-count splitting kept the giant inside a multi-event chapter, so it
+  errored. Now they reach it: the chapter is archived, with a warning naming the size, the knobs and how to
+  reload it in slices. The property the old row guarded — an un-readable chapter must not pass silently —
+  is carried by the warning instead of by losing the session's whole opening turn.
 - **A title is chosen by the same predicate that screens bodies** (#59). Bodies use `injections.ts`
   (`source.kind`); title derivation sees provider messages with no source, so it carried its own
   regex — which drifted behind the host and let an injected `time-context` snapshot become a chapter
   **title, slug and filename** (`020-time-sampled-while-preparing-turn-11-step-24-202.md`, cited in a
   live checkpoint). `isInjectedProse` is now the one predicate, fed by the same list of injected
   shapes; a row pins that both callers use it and that the regex file is gone.
+
+- **The injection screen is chosen by provenance, not applied uniformly** (#347). Screening removes host
+  spans of two different kinds, and one regex was doing both. For a host-**injected** event an
+  unterminated `<system-reminder>` genuinely means "injected prose to the end of the field", so the
+  open-ended arm is right. For text a **human typed**, the same arm silently deletes their own words from
+  the first tag quote to the end of the message. Measured on the real event (session `17f7c1d6`, seq 8,
+  kept as `tests/fixtures/reminder-tail-seq8.json`): 5,061 characters, one opening tag, no closing tag —
+  a person quoting the marker while listing injected strings for an agent to search for. The archive kept
+  2,543 characters, discarded the last **2,518**, and labelled the loss
+  *"omitted:host-injected … project state, not conversation"* — a human instruction reported as host
+  state, contradicting this module's own header ("a human typing the words AGENTS.md in prose is
+  conversation and stays verbatim").
+  So human-authored text is screened **balanced-only**: a span counts when the host closed it, and a
+  quoted marker plus everything after it stays. The decision lives in `screenConversation`, the single
+  shared site that already holds the event's `data` — the archive (`render.ts`) and the director's tail
+  (`prompt.ts`) both route through it, so no caller can forget a flag. That is #59's rule again: one
+  predicate per semantic decision, chosen where the fact is known rather than passed around.
+  Not widened to assistant text: a model's own words are verbatim for a different reason, and a runtime
+  snapshot has been observed appended under `role: user|system` — the existing behaviour there is left
+  alone and scoped deliberately.
 
 - **Model submits exceptions only**: `toolResultOverrides: [{seq, inline}]`. Usually empty or one entry, so
   the judgment costs almost no output tokens — which is why this is affordable where "the model writes the
@@ -210,6 +260,38 @@ rewrite costs the prefix nothing, unlike the pruner's mid-history cliff. Row con
 `toolResultArtifactTokens` is pinned per e2e project (500 for arrival, default
 8000 elsewhere).
 
+### Amendment (#334, 2026-11-14): a shadowed result's PAYLOAD is what a chapter archives
+
+Arrival-time artifacting has a consumer the design did not account for: **the renderer**. A
+shadowing replacement appends a second `tool/result` for the same callId whose text is the stub, and
+the chapter renderer's copy rule — "keep the LAST result per callId", written 2026-09-29 against a
+host redelivery where the two copies were byte-identical — therefore kept the stub. On current bytes
+that premise never fires: measured across three production sessions, 44 callIds carry more than one
+result, **0 are identical, and 44 are this exact shadow shape**. The chapter recorded the pointer,
+discarded 932,462 characters of payload, named the dropped seq nowhere (not even in
+`unrenderedSeqs`), and still counted it in `events:`.
+
+The rule is now stated by **size, over the whole log**, in one predicate
+(`resultRenderPlan`, `src/log-shape.ts`), consumed by both the chapter body and `chapters_segment`'s
+candidate list:
+
+- **largest copy wins**, ties break to the newest — so a true redelivery keeps the behaviour #61
+  documented, and a ~500-byte stub can never out-weigh what it replaced;
+- **decided over the full log, not the range.** The old range-local choice made the archived bytes a
+  function of where the model put a chapter edge (span the pair → stub; stop before it → payload),
+  which is what invariant 4 forbids;
+- a chapter containing **only** a stub renders the original's bytes at that position, accepting the
+  duplicate across two chapters. Duplication is bounded, visible, and stored once (the artifact store
+  is content-addressed); silent loss is none of those;
+- the substitution is **written into the chapter** (`seq N is a shadowing stub; the full payload is
+  archived at seq M`), because a correction nobody can see is how this class of bug survived a year.
+
+Invariant 1 was never at risk — the durable log keeps every copy, and the compaction finalizer
+already resolves through the replacement chain (`resolveOriginalEvent`). The defect was entirely in
+what the archive claimed. Note also that integrity checks pass over this: chapter `sha256` and
+artifact hashes were verified consistent, **of the stub**. Internal consistency is not fidelity to
+the log, and #334 is why the two must be asserted separately.
+
 ### Amendment (user-directed, 2026-09-19, APPROVED, **landed**): the plot note across in-place compaction
 
 > Shipped: the forward path is the preset persona suffix (the agent is told to end substantive turns
@@ -235,6 +317,43 @@ is **going on**, authored while the model still holds the thread:
   would, and only when the free path failed.
 - Invariant check: the model authors *state*, never archive text (invariant 4 intact); the note rides
   the replacement event append-only; every byte of the conversation still lives in chapters.
+
+## What a chapter contains: coverage is a decision, never a default (#346)
+
+The audit reported that ~75% of durable events never render into a chapter and asked for that to be
+fixed. Measured against three real production logs — **55,334 events across 35 distinct types** — the
+percentage was right and the implied conclusion was not: most of that mass is lifecycle bookkeeping an
+archive should not contain. What was actually missing was not coverage but **a record of which absences
+were chosen**, because "excluded" and "forgotten" were indistinguishable — and a new host event type
+would land in the same silent place as the interesting ones.
+
+`EXCLUDED_EVENT_TYPES` in `src/render.ts` is now that record: every type the renderer deliberately does
+not write, with the reason. The `default:` branch counts a type as unrendered **unless it is listed**, so
+judged silence is possible only where a reason is written down, and an unjudged type still surfaces in the
+existing *"N event(s) rendered no output"* warning. The asymmetry is the entire design.
+
+Three types did carry unique content and are now rendered:
+
+- **`command/run`** — a human invoking a slash command, with its arguments. Verified unique against every
+  user/assistant message and tool call/result in all three logs. AGENTS already requires "always preserve
+  invocations and arguments in the body"; a command invocation was the one invocation being dropped.
+- **`command/done`** — its outcome, because an invocation without its result is half a fact.
+- **`goal/change`** — the goal **ledger** as one compact fact (operation, revision, id, a 120-char prefix,
+  the seq). Not the objective text: that arrives as `<goal_round>` user messages, which render verbatim, so
+  a full copy would duplicate them. The ledger points; the round holds the bytes.
+
+And the most valuable finding here is a **negative** one, because it is the fix that must not be made.
+`agent/inbox/spliced` is 2.4% of all events with ~2 MB of payload — the single largest "uncovered" type,
+and the obvious candidate for a new case. Measured: **658 of 659** spliced messages are byte-identical to a
+`user/message` the renderer already writes. Rendering the channel would have duplicated two megabytes of a
+person's own words into every chapter that spans them, while making coverage look better. So it is excluded
+*by measurement*, and the row that pins the non-render carries the count.
+
+Consequences to keep in mind when extending this: an exclusion list makes the renderer quieter, and quieter
+is not the same as correct — so the gate (`tests/unit/render-coverage.test.ts`) checks coverage against the
+committed inventory of *observed* types, not against a hand-written list, rejects thin reasons, and asserts
+that an unlisted type still warns. Add a type to the table only with a reason that would survive being read
+in six months.
 
 ## The archive moments
 
@@ -282,7 +401,13 @@ that never enters the index. Four are session-facing, all idempotent over a per-
    is compacted. Enrichment is **queued** per settlement — a 10-child fanout must not `runNow` ten
    annotator passes — and an empty or refused chapter is never enqueued (#61). A continuable child
    settles repeatedly; the watermark makes every repeat after the first a save of only-new-turns.
-   Config: `subagentAutoSave` (default on).
+   Config: `subagentAutoSave` (default on) — and **that flag gates this moment alone (#341)**. The
+suggested-next-step door and the #319 reload self-check are separate doors that merely share the
+turn/log boundary; they were nested inside this flag until #341, so disabling archiving also silenced
+the prompt bar while `/chapters-prompt` kept reporting ON. The prompt plane's switch stays what it
+always was — a configured prompt model, one knob, no second boolean.
+`tests/unit/host-plane-door-gating.test.ts` pins the nesting structurally, because `apply()` has no
+deterministic harness and an unobserved wiring block is exactly how this drifted.
 
 **Amendment 2026-10-22 (#61, item 5) — the seventh moment: a rooted child that has never archived.**
 A `ch-*` continuation child is a real session with a real `parentSession`, and door 5 does NOT cover it
@@ -305,6 +430,45 @@ It is **save-only**: it creates no session and compacts no surface, so the "no c
 actions mid-step" rule is not engaged — the same reasoning that let door 5 exist. Thresholds are config
 (`childAutoArchive`, `childAutoArchiveMinTurns`), never literals. Knowledge that trips none of the seven
 never enters the index: when adding a door, **extend this list, never copy the pipeline**.
+
+### The watermark is one predicate with two arms (#336)
+
+The watermark is `max(endSeq)` over all records, `-1` when there are none, and the door that accepts a
+submission holds it to a floor. That floor was **one-sided**: it refused a range starting *above* the
+watermark (the seqs in between would be dropped, and a gap is loss) but accepted a range starting
+*below* it, which re-archives committed seqs under **fresh chapter numbers** — the same text living in
+two active records, against "keep chapter numbers and bodies immutable".
+
+The refusal had no partner either, so nothing could see the result. `coverage()` starts its cursor at
+the floor, so an under-floor submission reports `gaps: []` while inflating its own covered count (302
+"covered" for 201 real seqs), and the repair auditor keeps coverage in a `Set<number>` and looks only
+for seqs *missing* from it — a Set has no cardinality, so "in two chapters" and "in one" are the same
+value to it. Live registry when this was measured: **42 of 64 rows self-overlapping, 1,453 duplicate
+records, 29,871 seqs archived more than once.**
+
+The rule now, in one place:
+
+- `nextUnarchivedSeq(chapters)` is the ONLY derivation of "first seq not yet archived". The two doors
+  previously had different ones — `continue-core` seeded `max()` at `-1`, `save-core` at `0` and then
+  wrote `lastArchived > 0 ? lastArchived + 1 : 0`. Both are correct until a chapter legitimately covers
+  seq 0, which every real log is positioned to do (a durable log begins with `permission/preset` at
+  seq 0), after which save-core's form re-archives seq 0 on every call.
+- `validateRanges` refuses on **both** sides of the floor and names which side was crossed.
+- `duplicateCoveredSeqs(chapters)` counts owners per seq; `repair.ts` reports a `duplicate-coverage`
+  finding per contiguous run sharing one owner set. It is **report-only by decision**: choosing which
+  of two records to supersede is a call about which citation was meant to name which bytes, and the
+  durable log holds both copies either way. Auto-picking would mutate an immutable record on a
+  heuristic — the same posture `duplicate-number` already takes.
+
+One exemption keeps a documented guarantee from being broken by the lower arm: a submission whose range
+list is **exactly** what is already committed is a retry, not a duplicate. The attempt key
+(`sessionId@ceiling`) makes that call reuse its numbers and write nothing new — `saveSession`'s
+idempotence, pinned by `tests/integration/plans-carriage.test.ts` ("a retry of the same archive reuses
+numbers and never duplicates the blob"), which the naive two-sided floor turned red. Only a range list
+that *differs* from what is committed re-archives under new numbers, and that is what the refusal is
+for. `chapters_continue`'s own retry path relies on this, so the exemption is load-bearing, not a
+convenience — and it is pinned in both directions (`an exact replay stays idempotent while a differing
+range list is refused`) so it cannot widen into a hole.
 
 ## Budgets and the Reserve Margin
 
@@ -398,6 +562,23 @@ Layout:
 Add `<store-root>/` to `.gitignore` on first write and say so — polluting a user's tree silently is its
 own small bug.
 
+**The chapter file name is unique by AUTHOR, not only by number (#337).** The directory above is keyed
+by *chain root* — one dir per tree, deliberately, so a lineage shares its artifact store — while chapter
+numbers restart at 1 for every `freshSession`. Parent and continuation child therefore both mint
+`001-<slug>.md` into the same directory, and with a matching title the two paths are identical.
+`writeArchive` used to overwrite unconditionally: the per-call `seenFile` set that "resolves title
+collisions" cannot see a write made by another session, and the registry kept two records citing one
+file — measured live, 40 paths claimed with different `sha256` and 393 `(tree dir, number)` pairs owned
+by more than one session, where at most one citation of each pair can be true.
+
+The rule now, in `writeArchive`: a chapter position is written only when it is free or already holds
+**these exact bytes**. Identical bytes are a retry and keep the name, so the attempt-key idempotence
+guarantee is untouched. Different bytes get a name carrying the authoring session's id; if even that is
+held, the write **throws** rather than appending `-2`, `-3` until something is free — a record must not
+cite a path nobody predicted, and a collision the plugin cannot resolve is precisely the fact to hand
+the operator, with `/chapters-repair` named as the way out. Every resolution is reported as a warning,
+never taken silently.
+
 **Registry: a DSH storage domain.** Ancestry, numbering, hashes, ranges, bullet lists. Sanctioned
 durability, survives restart, and gives the append-only counter a real allocation home instead of a
 directory scan racing a restart.
@@ -405,6 +586,72 @@ directory scan racing a restart.
 Trade-off to keep honest: a workspace-relative root makes a chain **cwd-scoped**. Crossing workspaces
 means an absolute configured root, at which point `read` reachability must be re-verified — do not assume
 an absolute path inside one workspace stays reachable in another.
+
+### The registry must state which workspace its paths belong to (#348)
+
+The two halves of that trade-off were mixed in a way that made the registry unable to address its own
+archive: chapter and artifact paths are stored **relative to the session workspace**, but the storage
+domain is **per home** — one `~/.dsh/storages/dsh_chapters.json` holding the sessions of every project on
+the machine. A consumer holding only registry bytes therefore had no correct thing to resolve against.
+
+Measured on this machine rather than reasoned about: resolving all 3,623 chapter entries against the
+*current* workspace — the only choice available without an owning cwd — reports **1,431 (39%) as
+"missing"**. Resolving each against its own session's workspace gives **3,620/3,623 present**. Nothing was
+corrupt; the addressing was unattributable. Every path-iterating consumer inherits it: repair, restore,
+`/chapters-remove`'s blob GC ("delete shared blobs only when no active record references them"), mirror
+rehydration, and the knowledge sync's per-workspace projection.
+
+The contract now:
+
+- **A row carries the workspace its paths are relative to** (`SessionState.cwd`), stamped by
+  `appendChapters` — the one predicate every door's row write already passes through, which is why the
+  stamp lives there and not in each door. `commitChapters`, the save door, the continue/fork doors and the
+  compaction finalizer each supply the cwd they already resolved for `makeArchiveFs`; a door that does not
+  know one leaves the field absent rather than guessing, because a wrong workspace is worse than none.
+- **Optional, so durable state keeps opening.** Rows written before this field must parse — the registry
+  has no shutdown migration hook — so `cwd` is `z.string().min(1).optional()`. Absent means "recovery for
+  this row stays the durable log", which is what *Recovery needs a surviving source* has always meant;
+  it must never mean "resolve against wherever we happen to be".
+- **`''` is not a workspace.** The schema rejects it: an empty path resolves every relative chapter
+  against nothing and looks plausible while pointing nowhere.
+- **`stampWorkspace` returns the same object** when the cwd is absent or unchanged, because
+  `store.mutate` treats object identity as "no change" — an unconditional stamp would turn every
+  idempotent retry into a write and a `rev` bump.
+
+### Artifact citations must be paths a reader can follow (#348, third defect)
+
+The audit's third finding was that a citation prints `artifacts/8f/<sha>.txt`, which is relative to
+`<storeRoot>/<rootSessionId>/` — neither workspace-relative nor absolute — so the `read` tool cannot open
+it, while `chapters_artifact` can. Verified on this machine's real archive: the bytes sit at
+`.dsh-chapters/17f7c1d6-…/artifacts/e3/e3b0c442….txt`, and every chapter said
+`` `artifacts/e3/e3b0c442….txt` `` without ever naming the tool that could fetch it.
+
+`artifactPath` is store-relative **on purpose** — it is what the writer returns and it stays stable across
+workspaces. The defect was printing that internal form as if a reader could follow it. So `RenderConfig`
+now carries an optional `citationBase`, computed by `citationBaseOf(storeRoot, rootSessionId, cwd)` —
+workspace-relative when the store is inside the workspace, and **no base at all** when it is not:
+
+- with a base, the line reads `` → `.dsh-chapters/<root>/artifacts/8f/<sha>.txt` ``, which `read` opens;
+- without one, the line reads `` → `artifacts/8f/<sha>.txt (via chapters_artifact)` ``, naming the tool.
+
+What is deliberately **not** allowed is a bare unopenable path with no hint. A model will retry a path
+rather than question it, so an honest pointer to the retrieval tool beats a confident wrong location. Every
+door supplies the base from values it already passes to `writeArchive` (save, continue/fork, and the
+compaction finalizer, where the base is computed at finalize time because it depends on the session's
+`rootSession`, not just the configured store root) — one convention across the archive moments rather than
+a per-door dialect, which is the same mistake #69 settled for stored paths.
+
+One existing row in `render.test.ts` asserted the bare store-relative fragment and had to change: it was
+pinning the defect as the expected shape. It now requires the annotated fallback, and asserts the old form
+is *absent* — so a regression to "confident unopenable path" fails loudly rather than matching the old
+expectation.
+
+Separately, the same audit found a second dialect in live rows: `#finalizeOne` passed an **absolute**
+`resolveStoreRoot(...)` as `storeRoot` with no `cwd`, so `writeArchive` minted absolute stored paths
+while the checkpoint TOC cited the workspace-relative form for the same file — the split #69 had already
+settled ("relative is the right winner"). It now passes raw root + `cwd`, exactly as the save door does.
+Consumers must still compare with `sameStoredPath`, never `===`, and a row that predates this still holds
+the absolute form.
 
 ## Atomicity
 
@@ -473,6 +720,19 @@ catch built a full diagnostic — and then the value was discarded. So the rule 
   still wins; the literal `off` is honoured, because an operator must be able to silence it — but
   silence is now a choice, never a default. `diagnosticsLog` in the profile config sets the path
   declaratively; resolution order is env → config → `<store-root>/diagnostics.log`.
+- **Every plane writes to it, not just the engine (#352).** The prompt plane was the exception: one
+  project's `diagnostics.log` held 21,138 `realm:*` lines, 4 `rules-section`, 4 `auto-save` and **zero**
+  prompt lines, so the door's own verdicts — did it see the turn boundary at all, did the model spec
+  reach the plane, why was this round skipped, was the registration refused — existed only in a terminal
+  and in a `ctx.logger` a rig boot throws away. That absence is why "suggestions are one turn behind"
+  (#340) and "the prompt door vanished with `subagentAutoSave`" (#341) each needed a full audit to find.
+  The runner's `log`/`warn`, the reload self-check, the boot reclaim and a refused door registration now
+  go through the sink under a `prompt:` tag — **keeping the stderr copy**, since the two channels serve
+  different readers and #61 added stderr precisely because the logger is not retained. High-frequency
+  per-turn witnesses stay on stderr only: the file carries decisions, not a firehose.
+  `tests/unit/prompt-diagnostics.test.ts` asserts both halves — the wiring calls the sink, *and* a
+  `prompt:`-tagged note really lands in the file — because a structural grep alone passes happily
+  against a no-op.
 - **Warnings reach humans, with a limit and a withheld count.** `(86 warning(s))` told a user nothing
   about 86 real findings; the ones that mattered named the husk and the unarchived 0–4082 hole. Doors
   print the first `warningsDisplayCap` texts and `…and M more`, through ONE formatter — a per-door copy

@@ -195,17 +195,19 @@ export function buildChaptersTools(
       diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
       createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
         const callerOptions = caller.options
-        // The seed is contiguous from seq 0: the notice, then any STATE events this
-        // plugin authors for the child (plan mode). Invariant 2 holds — nothing from
-        // the parent's log is copied; a seeded `plan/mode` is a synthetic fact about
-        // the boundary, and the kernel's own setup events still append after it
-        // (measured: notice@0 → plan/mode@1 → end-seed@2 → permission/sandbox/…).
+        // The seed is contiguous from seq 0 and holds only STATE events this plugin authors
+        // for the child (plan mode). Invariant 2 holds — nothing from the parent's log is
+        // copied; a seeded `plan/mode` is a synthetic fact about the boundary, and the
+        // kernel's own setup events still append after it (measured #338: with a seed,
+        // plan/mode@0 → end-seed@1 → permission/sandbox/…; without one, end-seed@0).
         // #319 part 2 (invariant-2 amendment 2026-11-05): the SEED carries STATE events only.
         // A seeded user/message at surface[0] is what poisoned every continuation child against
         // the host's own cold-load validator (issue #314: the kernel records its first-request
         // header AFTER our notice, and its reader then refuses the log). The TOC notice is now
         // AUTHORED as the child's first turn — the position every loadable session has always
         // had for its first content: inside an open turn, after the kernel's own header.
+        // #338: that move left `plan/mode` as seed[0] while it still carried seq 1, so the
+        // kernel refused the child for every continuation from an active-plan session.
         const handle = await ctx.agents.create({
           sessionId,
           seed: [...modeEvents],
@@ -759,6 +761,30 @@ export function buildChaptersTools(
         if (out.skipped === 'nothing-new') {
           return { kind: 'success' as const, text: `Nothing to save: all ${out.priorChapters} chapter(s) already archived through seq ${out.lastArchived}. Content is searchable via chapters_search.` }
         }
+        // #344: an EXHAUSTIVE refusal arm, not one `if` per known reason. `oversize` and `payloadless`
+        // both fell through to the success line below, so the real run on eadc — `skipped='oversize'`,
+        // `records=0` — printed "Saved: 0 chapter(s) archived … Enrichment queued." A refusal read as a
+        // success, on the door whose whole job is to say what was archived. Handling the reason
+        // generically means a NEW skip reason cannot silently inherit the success wording; that is how
+        // this happened twice over, and a per-case list is how it happens a third time.
+        if (out.skipped !== null && out.records.length === 0) {
+          const why: Record<string, string> = {
+            oversize: 'a chapter is too large to archive whole even after subdividing at every event boundary',
+            payloadless: 'the event read carried shapes but no payloads, so nothing could be archived',
+            'no-completed-turn': 'the conversation has no completed turn yet',
+          }
+          const detail = out.warnings.length > 0
+            ? `\n  ${out.warnings.join('\n  ').slice(0, 900)}`
+            : ''
+          return {
+            kind: 'error' as const,
+            text: `chapters-save: NOTHING archived — refused (${why[out.skipped] ?? `reason: ${out.skipped}`}) for seqs ${out.fromSeq}..${out.anchor}.`
+              + `\n  Ceiling: chapterTokenTarget ${String(config.chapterTokenTarget)} × chapterOversizeFactor ${String(config.chapterOversizeFactor ?? 2)}.`
+              + ' Raise either knob, or archive the range with chapters_continue (model-chosen boundaries), which may cut inside a turn.'
+              + detail
+              + '\n  Nothing was reserved, so no chapter number was spent.',
+          }
+        }
 
         // Schedule enrichment asynchronously — do NOT await. Enrichment calls
         // the LLM per chapter and can exceed the command timeout. The idle and
@@ -1252,7 +1278,16 @@ export function registerChaptersTools(
   const disposeRulePropose = ctx.tools.register(built.chaptersRulePropose)
   const disposeRules = ctx.tools.register(built.chaptersRules)
   let disposeCommand: (() => void) | null = null
+  // #353: `commands` is deliberately NOT in the realm row's `inject`, and cordis `ctx.get(name)` is
+  // STRICT — it returns undefined unless the providing fiber is ACTIVE (cordis lib/index.js:763-769).
+  // The branch below silently skipped door registration when that happened, while the row went on to
+  // log "seven tools + three continuation doors, this realm only". A mount that did not happen must
+  // not be reported as one that did (AGENTS: deliver detected failures).
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register === undefined) {
+    const why = commands === undefined ? 'commands service absent from this context' : 'commands service has no register()'
+    diagnosticWarn(ctx.logger, 'realm:tools:doors', `the three continuation door commands are NOT mounted — ${why}. The seven chapters_* tools work; nothing offers /chapters-continue, /chapters-fork or /chapters-save as a command.`)
+  }
   if (commands?.register !== undefined) {
     try {
       // Keep EVERY disposer: a loop that overwrote `disposeCommand` would leak the
@@ -1289,6 +1324,11 @@ export function registerChaptersRepairRestore(
   const built = buildChaptersTools(ctx, store, config)
   const disposers: Array<() => void> = []
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register === undefined) {
+    // #353: same silent-skip on the OPERATOR doors. These are the way into a broken child, so their
+    // absence is the one thing the host plane must never claim it registered.
+    diagnosticWarn(ctx.logger, 'host:tools:repair-restore', '/chapters-repair and /chapters-restore are NOT mounted — commands service unavailable on the host plane. A child that cannot compose its realm now has no documented way in.')
+  }
   if (commands?.register !== undefined) {
     try {
       for (const def of [built.repairCommand, built.restoreCommand]) {

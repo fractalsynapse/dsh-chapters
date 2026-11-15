@@ -172,7 +172,14 @@ export default class ChaptersToolsRow {
       },
     }
     const dispose = registerChaptersTools(this.ctx as never, store, toolsConfig)
-    this.ctx.logger?.info?.('dsh-chapters: chapters-tools row mounted — seven tools + three continuation doors, this realm only (#330)')
+    // #353: this line used to assert "seven tools + three continuation doors" UNCONDITIONALLY, even
+    // when the strict `ctx.get('commands')` returned undefined and the doors were never registered —
+    // a log line claiming a mount that did not happen. The truthful form: tools are counted by this
+    // function (they always register), doors are only claimed when the warn branch did not fire.
+    const doorsMounted = (this.ctx.get?.('commands') as { register?: unknown } | undefined)?.register !== undefined
+    this.ctx.logger?.info?.('dsh-chapters: chapters-tools row mounted — seven chapters_* tools'
+      + (doorsMounted ? ' + three continuation doors' : ' (DOOR COMMANDS NOT MOUNTED — see the realm:tools:doors warning)')
+      + ', this realm only (#330)')
     // The store handle is NOT closed here: the storage facility owns domain teardown
     // (r35 — a close effect on this fiber closed the domain under later commands).
     yield dispose

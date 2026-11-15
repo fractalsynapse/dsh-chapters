@@ -391,7 +391,16 @@ export function makeDoorRunner(
           onAfter: (seen) => { adoptSaw = seen },
           onStep: (step) => { if (!steps.includes(step)) steps.push(step) },
         }, opts?.navigator) && await switchedOnce()) return { ok: true, message: '' }
-        if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300).unref?.() })
+        // #358: NO `.unref()` on an awaited pause. The continuation depends on this very timer, so
+        // releasing it from the event loop's refcount lets Node exit with the promise unresolved — the
+        // door call never returns at all. Observed as 21 of 28 rows in client-doors.test.ts cancelled
+        // by "Promise resolution is still pending but the event loop has already resolved" whenever the
+        // retry path is the only pending work (Node 22; CI on the pinned Node 24 does not hit it, which
+        // is precisely how it survived — an unobserved hang is not an absent one).
+        // Browsers are unaffected either way: `setTimeout` returns a number there and `.unref` does not
+        // exist, so the optional call was always a no-op in the only environment this ships to. The
+        // three other waits in this file already do it correctly without one.
+        if (i + 1 < maxAttempts) await new Promise((r) => { setTimeout(r, opts?.attemptPauseMs ?? 300) })
       }
       // the service path did not take — the sidebar row is the same affordance a human uses
       const title = doorTitle(door.noun).exec(text)?.[1]

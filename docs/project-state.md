@@ -11,6 +11,82 @@ history of a decision, not before every task.** The rules that lived inside it a
 ---
 
 ## Start Here
+## 2026-11-15 — #355: the audit worked end to end, and shipped as 0.2.33
+
+**What was asked.** Deep-analyze the implementation, file the findings, fix them one at a time with tests
+and docs-first commits, ship 0.2.33. The audit produced 24 issues (#334–#355 plus #358, #360, #362, #379);
+**24 PRs merged** into `staging` — 22 audit findings (#348 took two PRs) plus #386 and the install-page docs fix — with 2 findings held for one tape re-record, and the release candidate is this range.
+
+**The finding underneath the findings.** Not individual bugs — a class. Checks that cannot fail, signals
+that measure their own name, statements that outlived their truth:
+
+| claim | reality, measured |
+| --- | --- |
+| "preset rows: all active" | `fiberState` is a **number**, compared to `'active'` — false under every condition (#339) |
+| "integrity verified: bytes == original" | the hash covered arrival's stub, so truncation passed cleanly (#334) |
+| "the suite passes here" | `# fail 0` with **22 cancelled** — the tests had never run (#358) |
+| "seven tools + three doors mounted" | the strict `commands` lookup returned undefined and no door mounted (#353) |
+| "this is the complete configuration reference" | 19 host keys absent, two defaults stale, one key on the wrong plane (#354) |
+| "omitted: host-injected span" | 2,518 characters of a **human's own instruction** (#347) |
+| "Saved: 0 chapter(s) archived" | a success-shaped line for an oversize **refusal**, on every deterministic door (#344) |
+| "coverage is missing event types" | the biggest gap (2 MB, `agent/inbox/spliced`) is **658/659 already-rendered duplicate** (#346) |
+| "the archive keeps every byte" | untrue for shadowed results until #334; the seam doc still said it (#360) |
+| "the anchor pins the prompt surface" | it hashed **comment prose**, so docs edits demanded re-anchors while a real prompt change could slip past (#362) |
+
+**Method that earned its keep, because it kept catching me.** Reproduce against real bytes before changing
+anything; assert every patch and mutation actually applied; run a new gate against the defect **and**
+against known-good input; never default a field an assertion depends on; treat `# fail 0` as unproven until
+`# cancelled` is read. Applied to my own work this produced: a fixture of the shape the host does not emit
+(#355's item Z), a gate whose first draft flagged three **nonexistent** problems, a tautological "oracle"
+that called the function under test, an assertion passing for the wrong reason (`case`+`break` never
+reaching `default:`), a benchmark measuring 1/700th of its own claim, a `measure()`-vs-`assemble()` drift
+guard written only because the shortcut needed one, a fixture containing the string its assertion counted
+(twice), and `npx tsc | head; echo $?` reporting **`head`'s** exit status — which had been quietly
+validating several "tsc=0" lines all session.
+
+**One classification I had backwards for half the work.** I queued items into a "needs re-anchor" wave
+because they "change bytes". Seven of them replayed green. The actual rule: **only bytes inside the
+recorded model request matter** — archive, registry and door-output bytes are not in the hashed prefix.
+Re-derived properly for #351 by reading `rig-pins.ts` and `globalSetup.ts:106` (only the `arrival` leg pins
+`toolResultArtifactTokens`; every other leg inherits the default, so a default change **is** a request-byte
+change). The wave was three: #340, #379, #351. **CI then disagreed with me on #351** — I predicted its floor change would move request bytes and need a re-anchor; all ten legs came back green, because no committed fixture has a result in the 1,600–8,000 band on a recorded-request path. It merged (22nd fix), and the general rule was wrong where it met this corpus. Two PRs remain held: #340, #379.
+
+**A design rejected by measurement, recorded because the acceptance text asked for it.** #379's criterion
+said the newest turn must hold a guaranteed share of the director's input. The literal implementation —
+bounding history against the protected content — collapsed the whole input to **2 KB**: a perfect ratio
+obtained by deleting the context the director exists to weigh. Replaced with an absolute ceiling, and a row
+now asserts a real trajectory survives, so the regression fails loudly. **A criterion I wrote myself was
+the source of the wrong design**; measuring beat obeying.
+
+**Deferred, not dropped.** #334 repaired the archive going forward — sessions whose arrival shadowing
+fired before this release still hold stubs, and #334's report is the inventory. #336/#337 damage stays
+report-only pending an operator decision under the deletion exception (#348's per-workspace `cwd` is what
+makes deciding possible). #335 awaits the maintainer. #372 needs a browser rig and was left unbuilt rather
+than shipped as unobserved wiring — that would have been the same defect being fixed.
+
+**#349 was mislabelled here for four rounds and is corrected in place:** I recorded it as "needs a browser
+rig", conflating it with #372. Its data is server-side; what actually blocks its fuller ask is (a) a
+**live host plus a real model call** for the acceptance item "a child whose goal view reports the objective
+and whose first reply follows it", and (b) a **maintainer authority decision** on plugin-authored
+`goals.create`, which the issue itself reserves. The issue also names a fallback — carry the objective into
+the child's notice and say loudly that only a human can arm it — and **that fallback is now built**
+(PR #391), which is the point of re-reading a blocker rather than repeating it.
+
+**Verification state at the candidate — re-measured on this tree, not carried forward from when the
+paragraph was first drafted.** Per-PR: all four checks green at each of the 24 merged heads. Integrated here:
+typecheck clean · unit **1,404 tests / 1,403 pass / 0 fail / 0 cancelled** · integration 189 pass /
+5 `treedx-live` (service unreachable — that suite fails rather than skips) · `corpus:check` agreeing with
+the build (`lib=3674369893be9447`, `promptAnchor=b40304ee3e35a94f`). The earlier text of this section claimed
+1,388 tests and a different `lib` hash; both were stale by one merged PR (#388 added rows and changed
+`index.ts`), which is precisely the failure this release is a study in, caught in my own release record.
+
+**The chain has now run at this head and passed.** `acceptance — ten tape-replay legs` and the
+coverage-gated job are green on the candidate's own PR run — the only place it can be measured, since
+`ci.yml` triggers on `push: [main]` and `pull_request` and staging deliberately carries no push CI. Per the
+release procedure the chain must be green on the candidate before a maintainer merges to `main`; agents do
+not approve or merge it, so the merge, the tag and publication remain the maintainer's.
+approve or merge it.
+
 ## 2026-11-14 — #330: the tools go where the user pointed, and the agent stops reading gauges (shipped in 0.2.32)
 
 **The defect, measured.** The `chapters_*` tools registered on the HOST plane, and a host-plane tool
@@ -48,8 +124,16 @@ annotate-title nondeterminism — the annotate prompt embeds the async-renamed s
 and replay diverge by construction; masked per the HOSTPORT/MSGCOUNT family, deeper fix stays open as
 #331. A rig incident, recorded honestly: a symlink mistake of mine while building a control worktree
 clobbered `var/ms-playwright` mid-session (two apparent enrich failures were that, not the product);
-browsers were reinstalled via the documented path and every affected leg re-run. Installed-package
-smoke and live-host verification of 0.2.32 stay OPEN claims until the tag ships.
+browsers were reinstalled via the documented path and every affected leg re-run. **Post-tag, shipped**
+(2026-11-14): #333 merged to main (`4be41cb`), annotated tag `0.2.32` pushed at that commit, Release run
+43636628508 success. Registry verified directly, not by CLI cache: `0.2.32` present, `latest` moved,
+provenance attested, shasum `1fd309081de32a47d92b9a6c4994e1e9b01f88a3`; the published tarball was
+unpacked and inspected (manifest, `lib/version.js`, the `chapters-tools` row in the shipped
+`cordis.patch.yml`, the gauge-free arrival stub, the host registering no tools — all agree with the
+tag); installed-package smoke: a clean `npm install @fractalsynapse/dsh-chapters@0.2.32` resolves
+`./tools-row` (`ChaptersToolsRow`, inject list) and both registrars. Staging reconciled by back-merge.
+REMAINING OPEN CLAIM: live-host verification — a running DSH process loaded with 0.2.32 lands with the
+next restart of each deployment; not separately performed here.
 
 ## 2026-10-22/23 — the host 0.2.0-rc.2 acceptance sweep (#56)
 
