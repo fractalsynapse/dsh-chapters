@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto'
 import { DEFAULT_REDACTIONS, redactText } from './redact.ts'
 import { omittedMarker, screenConversation, stripReminderSpans } from './injections.ts'
-import { blocksOf, callArgsText, resultCallId, sameCall, textOfBlocks, toolResultText } from './log-shape.ts'
+import { blocksOf, callArgsText, resultCallId, resultRenderPlan, sameCall, textOfBlocks, toolResultText } from './log-shape.ts'
 import { detectPlans, planTopicsOf, PLAN_TOOL, type PlanFact } from './plans.ts'
 import type {
   ArtifactRef, ChapterRange, PlanDocFile, RenderConfig, RenderedChapter,
@@ -173,25 +173,22 @@ export function oversizeRanges(
 /** Every oversized tool result in a range, ranked by size DESCENDING (dedupe keeps the last copy). */
 function collectCandidates(events: SessionEventLike[], range: ChapterRange): ToolResultCandidate[] {
   const out: ToolResultCandidate[] = []
-  for (const ev of events) {
-    if (ev.type !== 'tool/result' || ev.seq < range.startSeq || ev.seq > range.endSeq) continue
-    {
-      const msg = (ev.data as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined
-      const cid = (msg?.source as Record<string, unknown> | undefined)?.callId
-      if (typeof cid === 'string') {
-        let last = -1
-        for (const o of events) if (o.type === 'tool/result' && o.seq >= range.startSeq && o.seq <= range.endSeq) {
-          const om = (o.data as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined
-          if ((om?.source as Record<string, unknown> | undefined)?.callId === cid && o.seq > last) last = o.seq
-        }
-        if (ev.seq !== last) continue // keep last copy of a redelivery
-      }
-    }
-    const text = toolResultText(ev.data ?? {})
-    const call = events.find((c) => c.type === 'tool/call' && c.seq < ev.seq && sameCall(c, ev))
+  // #343/#334: the SAME predicate the chapter body uses. Duplicated keep-last logic here is what let
+  // the door list a stub while the archive held the payload (or vice versa), and it kept the last
+  // copy — so a shadowed full payload was never even offered for `toolResultOverrides` to name.
+  const inRange = events.filter((ev) => ev.seq >= range.startSeq && ev.seq <= range.endSeq)
+  const resultPlan = resultRenderPlan(events, inRange)
+  for (const ev of inRange) {
+    if (ev.type !== 'tool/result') continue
+    const carrier = resultPlan.render.get(ev)
+    if (carrier === undefined) continue // a duplicate position whose bytes another row carries
+    const text = toolResultText(carrier.data ?? {})
+    // #345 (part): pair by callId, never by adjacency — the shadowing replacements this now surfaces
+    // sit far from their call, which is exactly where an adjacency guess is wrong.
+    const call = events.find((c) => c.type === 'tool/call' && sameCall(c, carrier))
     out.push({
-      seq: ev.seq,
-      toolName: String((call?.data as Record<string, unknown> | undefined)?.name ?? (ev.data as Record<string, unknown> | undefined)?.toolName ?? 'tool'),
+      seq: carrier.seq,
+      toolName: String((call?.data as Record<string, unknown> | undefined)?.name ?? (carrier.data as Record<string, unknown> | undefined)?.toolName ?? 'tool'),
       bytes: Buffer.byteLength(text, 'utf8'),
       estimatedTokens: estimateTokens(text),
       excerpt: text.slice(0, 160),
@@ -279,16 +276,11 @@ export function renderChapter(
     .filter((e) => e.seq >= range.startSeq && e.seq <= range.endSeq)
     .sort((a, b) => a.seq - b.seq)
 
-  // Host redelivery (measured 2026-09-28, treeseed run: 25 calls carried TWO
-  // tool/result events for one callId — read x17, chapters_artifact x3,
-  // web_fetch x2): keep only the LAST result per callId, else the verbatim
-  // body inflates with the same text twice and counts double.
-  const lastResultSeq = new Map<string, number>()
-  for (const ev of inRange) {
-    if (ev.type !== 'tool/result') continue
-    const cid = resultCallId(ev)
-    if (cid !== undefined) lastResultSeq.set(cid, ev.seq)
-  }
+  // #334: one predicate, over the whole log, decides which copy of a callId carries the payload.
+  // (This used to be a range-local "keep the last per callId", duplicated here and in
+  // collectCandidates — which is why the same session archived the 49 KB original or its 500 B
+  // shadowing stub depending on where the model put the chapter edge.)
+  const resultPlan = resultRenderPlan(events, inRange)
   // Plans are scanned over the WHOLE event list, not just this range: a verdict
   // can land past a chapter boundary, and pairing inside one range only would
   // report an APPROVED plan as pending (docs/plans-carriage.md § 1).
@@ -381,11 +373,24 @@ export function renderChapter(
         // look like a silently dropped byte (verify.md P4).
         break
       case 'tool/result': {
-        {
-          const cid = resultCallId(ev)
-          if (cid !== undefined && lastResultSeq.get(cid) !== ev.seq) break // earlier copy of a redelivery
+        // #334: which copy of a callId's result carries the bytes is decided over the WHOLE log by
+        // resultRenderPlan (largest payload wins). The old rule kept the LAST copy, and on current
+        // host bytes the last copy is this plugin's arrival-time stub, so chapters archived the
+        // ~500-byte pointer and discarded the payload — silently, with no mention of the dropped seq.
+        const carrier = resultPlan.render.get(ev)
+        if (carrier === undefined) {
+          // #334: this position is the shadowing stub. The payload is archived at the seq named
+          // here, so the substitution is on the record instead of silent in either direction.
+          const original = resultPlan.shadowedBy.get(ev.seq)
+          if (original !== undefined) body.push(`  - result (seq ${ev.seq}) is a shadowing stub; the full payload is archived at seq ${original}`)
+          break
         }
-        const text = redact(toolResultText(data))
+        // #345 (part): name the call by callId, never by adjacency. This mattered more once a
+        // position could carry another event's bytes.
+        const callForThis = [...events].reverse().find((c) => c.type === 'tool/call' && sameCall(c, carrier))
+        const toolName = String((callForThis?.data as Record<string, unknown> | undefined)?.name
+          ?? (carrier.data as Record<string, unknown> | undefined)?.toolName ?? 'tool')
+        const text = redact(toolResultText(carrier.data ?? {}))
         // #59 — an empty result defers NOTHING. `arrival.ts` has always skipped the empty string;
         // the renderer did not, so a payload-less read wrote hundreds of references to sha256("") and
         // the chapter claimed `artifacts: 102` while its tree held one 0-byte file. Say it is empty.
@@ -394,11 +399,15 @@ export function renderChapter(
           break
         }
         const tokens = estimateTokens(text)
-        const wantsInline = inline.get(ev.seq) ?? !defersAtArchive(tokens, config.toolResultDeferFloorTokens)
-        const priorCall = [...inRange].reverse().find((c) => c.type === 'tool/call' && c.seq < ev.seq)
-        const toolName = String((priorCall?.data as Record<string, unknown> | undefined)?.name ?? 'tool')
-        const ref = artifactRef(text, { toolName, sourceSeq: ev.seq, inlined: wantsInline })
+        const wantsInline = (inline.get(ev.seq) ?? inline.get(carrier.seq)) ?? !defersAtArchive(tokens, config.toolResultDeferFloorTokens)
+        const ref = artifactRef(text, { toolName, sourceSeq: carrier.seq, inlined: wantsInline })
         artifacts.push(ref)
+        if (carrier !== ev) {
+          // Say so. A chapter position that carries bytes from another seq is exactly the fact a
+          // reader needs to reconcile a citation against the log, and #334's whole failure mode was
+          // a substitution nobody could see.
+          body.push(`  - result (seq ${ev.seq} is a shadowing replacement of seq ${carrier.seq}; the full payload below is the durable original)`)
+        }
         if (wantsInline) {
           inlinedCount += 1
           body.push(`  - result (seq ${ev.seq}, ${ref.bytes} B, also at \`${ref.path}\`):`, '', fenced(text), '')
