@@ -1354,7 +1354,7 @@ export async function reportPresetRoster(
     } else ctx.logger?.info?.(message)
   }
   if (verdict.state === 'present' && verdict.broken === undefined) {
-    line(`dsh-chapters: preset "${presetId}" is in the host roster${mounted} — chapter-form compaction and continuations will compose`, false)
+    line(rosterHealthyLine(presetId, mounted), false)
   } else if (verdict.state === 'present') {
     line(`dsh-chapters: preset "${presetId}" is DECLARED BUT BROKEN — ${verdict.broken} — sessions choosing it will not compose. `
       + 'A preset row whose child plugin no longer resolves fails here; the plugin drops rows this host cannot import, '
@@ -1369,6 +1369,19 @@ export async function reportPresetRoster(
   return verdict
 }
 
+/**
+ * The healthy boot line, in one place so the site can be TESTED against it (#355 docs audit).
+ *
+ * `operations/install.md` tells a user to compare their boot output with a quoted sample and treats any
+ * difference as a named problem — which makes a drifted sample actively harmful. The line this plugin
+ * prints carries a trailing clause (` — chapter-form compaction and continuations will compose`) and the
+ * page showed the short form without it, so a correctly installed system looked wrong by the page's own
+ * rule. The sample is now derived from this function by `tests/unit/roster-line-docs.test.ts`, so the two
+ * cannot separate again — the same shape of fix as #351's recompute-the-table row: stop trusting that a
+ * quoted string matches its source, and make a test fail when it does not.
+ */
+export const rosterHealthyLine = (presetId: string, mounted: string): string =>
+  `dsh-chapters: preset "${presetId}" is in the host roster${mounted} — chapter-form compaction and continuations will compose`
 /** One phrase describing what the host's inventory says about the preset's own rows.
  *  Never throws: an unavailable inventory must degrade the line, not the boot check. */
 export async function describeMountedRows(presets: PresetRegistryLike | undefined, presetId: string): Promise<string> {
