@@ -48,6 +48,8 @@ export interface TocBullet {
 }
 
 export interface EngineConfig {
+  /** #348: workspace-relative store directory for artifact citations; set by the compaction door. */
+  citationBase?: string | undefined
   /** Workspace cwd, so a resolved-absolute store root still yields workspace-relative records (#69). */
   workspaceCwd?: string | undefined
   /** Workspace-relative archive root; must be reachable by the `read` tool. */
@@ -631,6 +633,7 @@ export function buildFinalizedChapter(
   }, {
     chapterTokenTarget: config.chapterTokenTarget,
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
+    ...(config.citationBase !== undefined ? { citationBase: config.citationBase } : {}),
     planInlineChars: config.planInlineChars,
     callArgArtifactTokens: config.callArgArtifactTokens,
     ...(lineage !== undefined ? { subagentOf: lineage } : {}),
@@ -669,6 +672,7 @@ export function buildFinalizedChapters(
   const renderCfg = {
     chapterTokenTarget: config.chapterTokenTarget,
     toolResultDeferFloorTokens: config.toolResultDeferFloorTokens,
+    ...(config.citationBase !== undefined ? { citationBase: config.citationBase } : {}),
     planInlineChars: config.planInlineChars,
     callArgArtifactTokens: config.callArgArtifactTokens,
     ...(lineage !== undefined ? { subagentOf: lineage } : {}),
