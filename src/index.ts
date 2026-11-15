@@ -49,7 +49,7 @@ import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, typ
 import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
-import { configureDiagnostics, configureDiagnosticsCap, diagnosticStatusLine } from './diag.ts'
+import { configureDiagnostics, configureDiagnosticsCap, diagnosticNote, diagnosticStatusLine, diagnosticWarn } from './diag.ts'
 import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
@@ -646,7 +646,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         }
       }
       if (reclaimed > 0) {
-        console.error(`[chapters-prompt] boot: released ${String(reclaimed)} zombie analyzing claim(s)`)
+        diagnosticNote(ctx.logger, 'prompt:boot', `released ${String(reclaimed)} zombie analyzing claim(s)`)
         ctx.logger?.info?.(`dsh-chapters: released ${String(reclaimed)} zombie prompt claim(s) at boot`)
       }
     }
@@ -1018,15 +1018,21 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
       },
       now: () => new Date().toISOString(),
-      // The rig's legs run in a throwaway home whose `ctx.logger` output is not retained, so the prompt
-      // plane's own narration is copied to stderr — where the boot's server log keeps it. Every "why did the
-      // bar not move" answer tonight depended on lines that were being thrown away (#61).
-      log: (m) => { console.error(`[chapters-prompt] ${m}`); ctx.logger?.info?.(`dsh-chapters: ${m}`) },
-      warn: (m) => { console.error(`[chapters-prompt] WARN ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
+      // THREE sinks, because every one of them has been the only surviving copy of an answer:
+      //  - the diagnostics FILE (#352). Until now the prompt plane was the one subsystem with no durable
+      //    trace: this repo's own diagnostics.log carried 21,138 realm lines and ZERO prompt lines, so
+      //    "why did the bar do nothing" was answerable only by reading the source. AGENTS.md: a detected
+      //    failure is delivered to the user or to a file.
+      //  - stderr, because the rig's legs run in a throwaway home whose ctx.logger output is not retained
+      //    and the boot's server log does keep stderr (#61).
+      //  - ctx.logger, the profile's normal channel.
+      // The file line keeps the `realm:`-shaped `where` tag so one grep finds every door.
+      log: (m) => { diagnosticNote(ctx.logger, 'prompt:door', m); console.error(`[chapters-prompt] ${m}`) },
+      warn: (m) => { diagnosticWarn(ctx.logger, 'prompt:door', m); console.error(`[chapters-prompt] WARN ${m}`) },
     })
     const reloadSelfCheck = makeReloadSelfCheckListener({
       store: store as unknown as ReloadCheckDeps['store'],
-      warn: (m) => { console.error(`[chapters-reload] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) },
+      warn: (m) => { diagnosticWarn(ctx.logger, 'prompt:reload-check', m); console.error(`[chapters-reload] ${m}`) },
     })
     try {
       ctx.on?.('session/event', ((session: { id?: string; header?: Record<string, unknown> }, event: { type?: string; data?: { source?: { kind?: string } } }) => {
@@ -1056,7 +1062,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           promptVerdictSighted.add(String(session.id))
           const specV = prompt.effective().spec
           const originV = (session as { header?: { origin?: string } }).header?.origin
-          console.error(`[chapters-prompt] first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`)
+          { const l = `first boundary for ${String(session.id)}: model=${specV !== '' ? specV : 'UNSET(→ skipped)'}, origin=${String(originV ?? '-')} (${originV === 'subagent' ? 'NOT eligible' : 'eligible'}), transport=${pushWriter === null ? 'pull' : 'push-live'}`; diagnosticNote(ctx.logger, 'prompt:door', l); console.error(`[chapters-prompt] ${l}`) }
         }
         // #218 BIRTH RECORD: the first event of a session gets an `idle` record, so the bar's
         // first mount reads a PUSHED value and the discovery pull cannot happen — the maintainer
@@ -1073,7 +1079,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       console.error('[chapters-prompt] turn/end door armed')
       ctx.logger?.info?.('dsh-chapters: suggested-next-step door armed — one offer per completed turn when a prompt model is set (state: /chapters-prompt state)')
     } catch (error) {
-      console.error(`[chapters-prompt] turn/end door REFUSED: ${String((error as Error)?.message ?? error)}`)
+      diagnosticWarn(ctx.logger, 'prompt:door', 'turn/end door registration REFUSED — no turn will offer a suggestion', error)
       ctx.logger?.warn?.(`dsh-chapters: suggested-next-step door registration REFUSED — no turn will offer a suggestion (${String((error as Error)?.message ?? error).slice(0, 160)})`)
     }
 
