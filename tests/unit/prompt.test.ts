@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   PROMPT_SETTING_KEY, buildSuggestInput, createPromptSurface, type ChapterHistoryEntry, effectivePromptSpec,
-  promptChaptersOf, resolvePromptRoute, tailFromEvents, validateSuggestion,
+  lastHumanTurnSeq, lastTurnFromEvents, promptChaptersOf, resolvePromptRoute, tailFromEvents, validateSuggestion,
   type PromptDeps, type PromptRoute,
 } from '../../src/prompt.ts'
 
@@ -52,11 +52,34 @@ test('the tail screens injected context through the ONE predicate and keeps conv
     ev(4, 'user/message', { role: 'user', content: [{ type: 'text', text: 'next one\n<system-reminder>workspace noise</system-reminder>' }] }),
   ]
   const tail = tailFromEvents(events as never)
+  // #340: user entries now carry `human`, because role 'user' alone cannot tell the human's request
+  // apart from narration the screen keeps as conversation (a subagent-settled notice, a "Continue"
+  // relay) — and lastTurnFromEvents must cut at the former, not the latter.
   assert.deepEqual(tail, [
-    { role: 'user', text: 'do the thing' },
+    { role: 'user', text: 'do the thing', human: true },
     { role: 'assistant', text: 'done.' },
-    { role: 'user', text: 'next one' },
+    { role: 'user', text: 'next one', human: true },
   ])
+})
+
+test('#340: kept narration is marked human:false, so it cannot masquerade as the request', () => {
+  const events = [
+    ev(1, 'user/message', { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'THE REAL REQUEST' }] }),
+    ev(2, 'assistant/message', { message: { content: [{ type: 'text', text: 'delegating' }] } }),
+    // The shape that used to START the last-turn block and cut the request out of it entirely.
+    ev(3, 'user/message', { role: 'user', source: { kind: 'subagent-settled', form: 'notice' }, content: [{ type: 'text', text: 'Background subagent abc finished and reported: done' }] }),
+    ev(4, 'assistant/message', { message: { content: [{ type: 'text', text: 'wrapping up' }] } }),
+  ]
+  const tail = tailFromEvents(events as never)
+  assert.deepEqual(tail.map((t) => [t.role, t.human ?? false]),
+    [['user', true], ['assistant', false], ['user', false], ['assistant', false]],
+    'all four survive the screen as conversation, but only the typed one is marked human')
+
+  const block = lastTurnFromEvents(events as never)
+  assert.equal(block[0]!.text, 'THE REAL REQUEST', 'the last-turn block starts at the request, not at the notice')
+  assert.ok(block.some((m) => m.text.includes('Background subagent abc')),
+    'and the notice is still IN the block — it is conversation, it just is not the boundary')
+  assert.equal(block.length, 4, 'nothing was dropped from the tail')
 })
 
 // ---------------------------------------------------------------- input assembly
@@ -354,4 +377,71 @@ test('#300: the GOAL: prefix is conditioned on an ACTIVE goal — never legal wi
   assert.ok(a.includes('prefix is legal ONLY when the goal block above names an ACTIVE goal'), 'the prefix is conditioned on the goal block, not on objective-flavored prose')
   assert.ok(a.includes('NEVER use the prefix'), 'with no active goal the sentence forbids it outright')
   assert.ok(a.includes('close out this release cycle'), 'the live mis-stamp is pinned as the named counter-example')
+})
+
+// ───────────────────────────────────────────── #340: the offer retires when the human speaks
+
+test('#340: a new human turn retires the cached offer, while more steps inside a turn do not', async () => {
+  // Both halves are load-bearing. The FIRST is the user-visible bug: the cache key was the last
+  // `turn/end` seq alone, so anything the human said after that boundary could not retire the offer,
+  // and /chapters-prompt suggest mid-turn answered with the PREVIOUS turn's request. The SECOND is
+  // #113's guarantee: a turn appends an event per step, and an event-scoped key regenerated on every
+  // step — which is how one turn once produced three different suggestions.
+  let calls = 0
+  const settings = new Map<string, string>([[PROMPT_SETTING_KEY, 'local/m']])
+  const surface = createPromptSurface({
+    getSetting: (k) => settings.get(k),
+    putSetting: async (k, v) => { settings.set(k, v) },
+    deleteSetting: async (k) => { settings.delete(k) },
+    chaptersOf: async () => [],
+    resolveWindow: async () => 128000,
+    config: { model: '', contextChars: 32000, maxChars: 4096, contextRatio: 0.5 },
+    conversationRoute: () => ROUTE,
+    fetch: async (input: string) => {
+      calls++
+      const m = /Human: ([^\n]*)/.exec(input)
+      return `next step after: ${m?.[1] ?? 'nothing'}`
+    },
+    warn: () => {},
+  } as never)
+
+  const events = [
+    ev(1, 'user/message', { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'FIRST REQUEST' }] }),
+    ev(2, 'assistant/message', { message: { content: [{ type: 'text', text: 'a1' }] } }),
+    ev(3, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+  ]
+  const first = await surface.suggest({ id: 'S', events: [...events] } as never)
+  assert.equal(first.ok, true)
+  assert.match(String((first as { text?: string }).text), /FIRST REQUEST/)
+  assert.equal(calls, 1, 'one generation for the completed turn')
+
+  // (a) more STEPS inside a new turn must not multiply generations (#113).
+  events.push(ev(4, 'assistant/message', { message: { content: [{ type: 'text', text: 'a2' }] } }))
+  events.push(ev(5, 'turn/end', { turn: 2, reason: { kind: 'completed' } }))
+  await surface.suggest({ id: 'S', events: [...events] } as never)
+  assert.equal(calls, 2, 'the new turn boundary is a new question — exactly one more call')
+
+  // (b) the human speaks again, BEFORE any new boundary. This is the case the old key could not see.
+  events.push(ev(6, 'user/message', { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'SECOND REQUEST' }] }))
+  const third = await surface.suggest({ id: 'S', events: [...events] } as never)
+  assert.equal(calls, 3,
+    '#340: a newer human turn must retire the cached offer even with no turn boundary yet — the old key held at seq 5 and returned turn 2\'s answer')
+  assert.match(String((third as { text?: string }).text), /SECOND REQUEST/,
+    'and the answer is generated from the newest request, not the previous turn\'s')
+
+  // (c) asking twice with nothing new in between must NOT call again — the fix is not a poll loop.
+  await surface.suggest({ id: 'S', events: [...events] } as never)
+  assert.equal(calls, 3, 'still one generation per (turn boundary, newest human turn) pair')
+})
+
+test('#340: lastHumanTurnSeq ignores injected and relayed user messages', () => {
+  const events = [
+    ev(1, 'user/message', { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'typed' }] }),
+    ev(2, 'user/message', { role: 'user', source: { kind: 'runtime-context', form: 'snapshot', sections: [] }, content: [{ type: 'text', text: 'injected' }] }),
+    ev(3, 'user/message', { role: 'user', source: { kind: 'agent-message', form: 'relay' }, content: [{ type: 'text', text: 'Continue' }] }),
+    ev(4, 'user/message', { role: 'user', source: { kind: 'goal', form: 'round', goalId: 'g', revision: 1, round: 1 }, content: [{ type: 'text', text: 'goal round' }] }),
+  ]
+  assert.equal(lastHumanTurnSeq(events as never), 1,
+    'only the typed message advances the key — a relay or a goal round is not the human speaking')
+  assert.equal(lastHumanTurnSeq([] as never), -1, 'no human turn at all')
 })
