@@ -20,7 +20,7 @@
  * @module dsh-chapters/src/prompt
  */
 import { textOfBlocks } from './log-shape.ts'
-import { screenConversation, stripReminderSpans } from './injections.ts'
+import { isHumanAuthored, screenConversation, stripReminderSpans } from './injections.ts'
 import { isActiveChapter, type SessionState } from './registry.ts'
 import type { SessionEventLike } from './types.ts'
 
@@ -134,15 +134,19 @@ export function resolvePromptRoute(spec: string, conversation: PromptRoute | nul
  * predicate (docs/contract.md, #59): injected events drop, injected spans strip.
  * Chronological; text-bearing human/assistant messages only.
  */
-export function tailFromEvents(events: SessionEventLike[]): { role: 'user' | 'assistant'; text: string }[] {
-  const out: { role: 'user' | 'assistant'; text: string }[] = []
+export function tailFromEvents(events: SessionEventLike[]): TailEntry[] {
+  const out: TailEntry[] = []
   for (const ev of events) {
     const data = (ev.data ?? {}) as Record<string, unknown>
     if (ev.type === 'user/message') {
       const screen = screenConversation(data, textOfBlocks(data.content), 'user')
       if (screen.omittedEvent) continue
       const text = stripReminderSpans(screen.text).text.trim()
-      if (text !== '') out.push({ role: 'user', text })
+      // #340: keep provenance. A tail entry can be role 'user' and still NOT be the human speaking —
+      // injections.ts deliberately keeps subagent-settled notices, agent-message relays, plan-mode
+      // flips and chapters' own offers as conversation. Anything downstream that asks "where did the
+      // human's turn begin?" must not mistake one of those for the request.
+      if (text !== '') out.push({ role: 'user', text, human: isHumanAuthored(data) })
     } else if (ev.type === 'assistant/message') {
       const message = (data.message ?? data) as Record<string, unknown>
       const text = stripReminderSpans(textOfBlocks(message.content)).text.trim()
@@ -218,17 +222,33 @@ export function resolvePromptLimits(input: {
 }
 
 /**
+ * One turn of the conversation as the director sees it.
+ * `human` is true only for a message the human actually typed. Role 'user' alone does not say that:
+ * `injections.ts` deliberately keeps some narration as conversation, and #340 needs the difference.
+ */
+export interface TailEntry { role: 'user' | 'assistant'; text: string; human?: boolean }
+
+/**
  * The LAST turn, whole (#188): from the final human request through every assistant text that
  * followed it. Reuses the tail's defusing machinery (host-injected context screened, reminder spans
  * stripped) and then keeps only the closing exchange — the present the director must follow from.
  * Never sliced: a message enters whole or the assembly refuses.
+ *
+ * #340: the cut is at the last HUMAN-AUTHORED entry, not the last role-`user` one. Narration the
+ * screen keeps as conversation (a subagent-settled notice, an `agent-message` relay whose whole text
+ * is often just "Continue") used to START the block, so the human's own request was cut out of the
+ * director's input entirely. Measured over every turn of three real sessions: 22 of 152 on platfolio
+ * (14%), 6 of 311 on arcnexus, 1 of 3 here. The kept block still contains that narration — it is
+ * conversation — it just can no longer stand in for the request.
  */
-export function lastTurnFromEvents(events: SessionEventLike[]): { role: 'user' | 'assistant'; text: string }[] {
+export function lastTurnFromEvents(events: SessionEventLike[]): TailEntry[] {
   const tail = tailFromEvents(events)
   let from = -1
   for (let i = tail.length - 1; i >= 0; i--) {
-    if (tail[i]!.role === 'user') { from = i; break }
+    if (tail[i]!.role === 'user' && tail[i]!.human === true) { from = i; break }
   }
+  // No human turn at all (a session driven by relays and goal rounds alone): fall back to the whole
+  // tail rather than an empty block. An empty "Last turn" tells the director nothing exists.
   return from === -1 ? tail : tail.slice(from)
 }
 
@@ -332,12 +352,36 @@ export function validateSuggestion(raw: string, maxChars: number): { ok: true; t
 }
 
 /**
- * The watermarks this surface caches per session: the seq of the last surface
- * event at generation. A new completed turn moves the seq and retires the
- * suggestion; a restart simply loses the cache (it is a convenience, never truth).
+ * The watermarks this surface caches per session.
+ *
+ * The doc above this function used to say "the seq of the last surface event at generation". It never
+ * was — the key was the last `turn/end` seq, which is what #113 wanted (one offer per completed turn,
+ * not one per step) and simultaneously what #340 made stale: a human message arriving after that
+ * boundary could not retire the cached offer, so `/chapters-prompt suggest` mid-turn answered with the
+ * PREVIOUS turn's text even though the log held a newer request.
+ *
+ * The key is now the pair (last turn boundary, newest human turn). Both are stable for every step
+ * inside a turn — so #113's guarantee, "inside a turn the human sees one stable offer", is unchanged
+ * and a turn still cannot generate three suggestions — while anything the human says (including a
+ * message spliced into the running turn) advances the second half and retires the offer. A restart
+ * simply loses the cache: it is a convenience, never truth.
  */
+export interface SuggestCacheEntry { text: string, seq: number, humanSeq: number }
+
+/** The newest seq of a HUMAN-authored `user/message`, or -1. Distinct from `turn/end`: a message the
+ *  human sent has no boundary yet. */
+export function lastHumanTurnSeq(events: readonly SessionEventLike[]): number {
+  let seq = -1
+  for (const ev of events) {
+    if (ev.type !== 'user/message') continue
+    if (!isHumanAuthored((ev.data ?? {}) as Record<string, unknown>)) continue
+    if (typeof ev.seq === 'number' && ev.seq > seq) seq = ev.seq
+  }
+  return seq
+}
+
 export function createPromptSurface(deps: PromptDeps): PromptSurface {
-  const cache = new Map<string, { text: string; seq: number }>()
+  const cache = new Map<string, SuggestCacheEntry>()
   const inflight = new Map<string, Promise<PromptSuggestionResult>>()
 
   const refuse = (reason: string, quiet = false): PromptSuggestionResult => ({ ok: false, text: reason, ...(quiet ? { quiet: true } : {}) })
@@ -364,7 +408,7 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
     })
   }
 
-  const run = async (session: SuggestSession, seq: number): Promise<PromptSuggestionResult> => {
+  const run = async (session: SuggestSession, key: { seq: number, humanSeq: number }): Promise<PromptSuggestionResult> => {
     const { spec } = effective()
     const { route, reason } = resolvePromptRoute(spec, deps.conversationRoute())
     if (route === null) return refuse(`prompt suggestions cannot run: ${reason ?? 'no route'}`)
@@ -402,7 +446,7 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
         verdict = validateSuggestion(text, limits.maxChars)
       }
       if (!verdict.ok) return refuse(`no recommendation: ${verdict.reason}`)
-      cache.set(session.id, { text: verdict.text, seq })
+      cache.set(session.id, { text: verdict.text, seq: key.seq, humanSeq: key.humanSeq })
       return { ok: true, text: verdict.text }
     } catch (error) {
       const message = `prompt model call failed: ${String((error as Error)?.message ?? error).slice(0, 160)}`
@@ -434,11 +478,14 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
       for (const ev of events) { if (ev.type === 'turn/end' && ev.seq > turnSeq) turnSeq = ev.seq }
       const tail = tailFromEvents(events)
       if (!tail.some((m) => m.role === 'assistant')) return refuse('nothing to recommend yet — no completed assistant turn', true)
+      // #340: BOTH halves must match. The turn boundary alone was stable across a new human message,
+      // which is how a mid-turn `/chapters-prompt suggest` returned the previous turn's offer.
+      const humanSeq = lastHumanTurnSeq(events)
       const fresh = cache.get(session.id)
-      if (fresh !== undefined && fresh.seq === turnSeq) return { ok: true, text: fresh.text }
+      if (fresh !== undefined && fresh.seq === turnSeq && fresh.humanSeq === humanSeq) return { ok: true, text: fresh.text }
       const pending = inflight.get(session.id)
       if (pending !== undefined) return await pending
-      const job = run(session, turnSeq).finally(() => { inflight.delete(session.id) })
+      const job = run(session, { seq: turnSeq, humanSeq }).finally(() => { inflight.delete(session.id) })
       inflight.set(session.id, job)
       return await job
     },
