@@ -83,16 +83,23 @@ corpus. (#351's arrival floor was expected to need the same re-anchor; all ten l
 artifact-backed by default, as the docs already promise) awaits the maintainer's call. #349 and #372 need a
 browser rig to verify and were left unbuilt rather than shipped as unobserved wiring.
 
-**What is verified, and what this candidate still has to earn.** Every one of the 24 merged PRs passed all four
-checks — including the ten tape-replay legs — **at its own head** before merging. Integrated locally at the
-release base: `npm run typecheck` clean · unit **1,388 tests / 1,387 pass / 0 fail / 0 cancelled** ·
-integration 189 pass with 5 `treedx-live` failures (that suite FAILS rather than skips when its service is
-down, and the service is not reachable here) · `corpus:check` agrees with the build
-(`lib=5af18648cc3aba29`, `promptAnchor=b40304ee3e35a94f`).
+**What is verified.** All 24 merged PRs in this range passed all four checks — including the ten
+tape-replay legs — **at their own heads** before merging. Measured **at this candidate tree**, not carried
+from any earlier base: `npm run typecheck` clean · unit **1,404 tests / 1,403 pass / 0 fail / 0
+cancelled** · integration **189 pass / 5 fail** (all five are `treedx-live`, which FAILS rather than skips
+when its service is down, and it is unreachable here) · `corpus:check` agrees with the build
+(`lib=3674369893be9447`, `promptAnchor=b40304ee3e35a94f`).
 
-**The tape chain has NOT been run against this integrated head, and it is not claimed here.** `ci.yml`
-triggers on `push: [main]` and `pull_request` — staging deliberately has no push CI — so the acceptance
-evidence for a release comes from this candidate's own PR run, which is the correct gate and is pending.
+**And the gate this candidate had to earn has been earned:** `acceptance — ten tape-replay legs` and the
+coverage-gated job are both **PASS on this PR's own run** (`ci.yml` triggers on `push: [main]` and
+`pull_request`; staging deliberately has no push CI, so the candidate's PR run is the release gate). That
+sentence was written as "not claimed here, pending" when the paragraph was first drafted; it is stated as
+observed now, and the earlier wording was itself the failure mode this release is named for — an evidence
+line that stayed true to its author's memory after the measurement had moved. Two figures in that paragraph
+were stale for the same reason: the unit count (1,388 → **1,404**, since #388's rows landed) and the build
+identity (`5af18648cc3aba29` → **`3674369893be9447`**, changed by that same PR's code). Both were re-measured
+on this tree before being written down, which is the correction, not the error, worth recording.
+
 Real-log measures quoted above were re-run at the merged heads, not carried over from the branch that first
 produced them.
 
