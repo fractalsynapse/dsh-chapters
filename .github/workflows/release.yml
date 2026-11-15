@@ -23,7 +23,9 @@ name: Release
 # Two ways in:
 #   1. push a version tag:  git tag 0.1.1 && git push origin 0.1.1
 #      (bare semver — the 'Production' environment's tag protection is *.*.*)
-#   2. Actions tab → "Run workflow" (manual dispatch; dry_run to rehearse)
+#   2. Actions tab → "Run workflow" (manual dispatch; REHEARSES by default -- check
+#      "publish" AND type the matching version to actually ship. #386: the input used to
+#      be dry_run default:false, so a forgotten tick published an immutable version.)
 # The gate is the FULL deterministic suite (incl. the 85/85/85 coverage gate);
 # we do not publish on a red suite. The tape-replay acceptance chain runs in
 # ci.yml on every push to main; here we re-run the deterministic plane.
@@ -32,10 +34,21 @@ on:
     tags: ['*.*.*']
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Run everything except the actual publish'
+      # #386: the manual trigger REHEARSES by default. It used to take `dry_run` with
+      # `default: false`, which meant Actions → "Run workflow" — the obvious way to check the release job
+      # still works — PUBLISHED. Versions and tags are immutable here (0.2.17, 0.2.18, 0.2.19 and the
+      # stale-tree 0.2.20 are the record), so one forgotten checkbox cost a version number permanently.
+      # The polarity is now positive: publishing takes a deliberate act, and a second one that names the
+      # version. A control must not assert by default the thing it exists to guard -- which is the shape
+      # of every finding in #334-#355, and the reason this one is filed as a bug rather than a nicety.
+      publish:
+        description: 'PUBLISH to npm. Leave UNCHECKED to rehearse: build, coverage gate and pack preview all run, the publish step is skipped.'
         type: boolean
         default: false
+      confirm_version:
+        description: 'With publish checked, type the exact version from package.json (e.g. 0.2.33). Ignored on a tag push, where the tag itself is the confirmation.'
+        type: string
+        default: ''
 
 concurrency:
   group: release
@@ -92,8 +105,26 @@ jobs:
       - name: pack preview
         run: npm pack --dry-run 2>&1 | tail -30
 
+      # #386: on a manual dispatch there is no tag to act as the confirmation, so publishing requires
+      # typing the version. It must match package.json -- the same discipline as the tag gate above, and
+      # the reason is the same: a number typed deliberately cannot be the number you meant to rehearse.
+      - name: manual publish confirmation
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          V="$(node -p "require('./package.json').version")"
+          if [ "${{ inputs.publish }}" != "true" ]; then
+            echo "Rehearsal (publish not requested). Everything above ran; the publish step will be skipped."
+            echo "manifest version: $V"
+            exit 0
+          fi
+          if [ "${{ inputs.confirm_version }}" != "$V" ]; then
+            echo "::error::publish requested but confirm_version='${{ inputs.confirm_version }}' != package.json version $V — refusing to publish"
+            exit 1
+          fi
+          echo "Publish CONFIRMED for $V by matching confirm_version."
+
       - name: publish (NPM_TOKEN from the Production environment; provenance via OIDC)
-        if: ${{ !inputs.dry_run }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish == true }}
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -133,7 +164,7 @@ jobs:
       # clean), so this step proves it for every ship: fetch the tarball npm stored,
       # assert manifest and bundle agree with the tag.
       - name: verify the published bundle is the build it claims
-        if: ${{ !inputs.dry_run }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish == true }}
         run: |
           V="$(node -p "require('./package.json').version")"
           ok=""
@@ -152,7 +183,7 @@ jobs:
           echo "bundle self-check OK: manifest and lib/version.js both say ${V}"
 
       - name: shipped
-        if: ${{ !inputs.dry_run }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.publish == true }}
         run: |
           echo "@fractalsynapse/dsh-chapters@$(node -p "require('./package.json').version") is on npm — https://www.npmjs.com/package/@fractalsynapse/dsh-chapters"
           echo "provenance state is in the publish step output; the TLOG-collision fallback ships WITHOUT attestation and says so"
