@@ -55,6 +55,21 @@ has an icon, a status label, the suggested prompt, and three actions:
   collapses, and carries a generic running line; the offer comes back through the normal
   post-turn flow (the suggestion generated for the turn that just ended). Acting on a stale
   offer is how a bar lies, and a running agent makes every on-screen offer obsolete (#282).
+- **Anything you type retires the offer — the bar never answers a new question with an old one (#340).**
+  A generation is triggered at a turn boundary, and the offer is cached against the pair
+  *(last turn boundary, newest human turn)* rather than the boundary alone. Both halves are needed and
+  they pull against each other: keyed on the boundary only, a message you sent afterwards could not
+  retire the cached offer, so `/chapters-prompt suggest` mid-turn returned the **previous** turn's
+  answer — the "one turn behind" report. Keyed on the newest event at all, every step would regenerate,
+  which is #113's original defect (one turn, three different suggestions). The pair keeps both
+  guarantees: stable for every step inside a turn, retired the moment you speak — including a message
+  spliced into a turn already running.
+- **What the director reads is your request, not the notice that followed it.** The prompt's "Last
+  turn" block starts at your most recent **typed** message. Some host narration is deliberately kept as
+  conversation — a settled-subagent notice, an `agent-message` relay whose whole text may be
+  "Continue" — and it used to be able to *start* that block, which cut your actual request out of the
+  input entirely (measured on real sessions: 22 of 152 turns on one project, 1 of 3 on another). The
+  narration stays in the block; it just is no longer mistaken for the boundary.
 - **Run** submits the offer as your own turn, through the same follow-up path autorun uses —
   one code path for "run it", whether you clicked it or the loop armed it. **A successful run
   consumes its offer:** the server retires the row's suggestion the moment it submits it, so no
