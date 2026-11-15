@@ -8,6 +8,110 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.33 — 2026-11-15 · the audit that kept finding green things that were not watching (#355)
+
+**Twenty-two audit findings closed by twenty-four merged PRs (one finding took two PRs, and a docs defect turned up during the release work itself), from a deep read of this plugin's own claims, and the pattern underneath all of them:
+a check that cannot fail, a signal that measures its own name, or a statement that outlived its truth.**
+The 2026-11-14 audit (#334–#355, plus #358/#360/#362/#379) was written up as findings and worked one
+branch at a time; every item below was reproduced against real bytes before it was changed, and most
+produced a number that contradicted what the code or the docs asserted.
+
+**Bytes that were silently not archived.** A shadowed tool result was archived as arrival's ~500-byte
+*stub*, with the real payload discarded before the model could ever ask for it — and the chapter's hash
+covered the stub, so every integrity check agreed with the truncated file (#334, **932,462 chars** across
+three sessions; now **0**). `isError` was read off the content block, where the host has never put it:
+across 505 real results the flag appeared on `data.message` **13 times and on a block 0 times**, so the
+reader returned false for every failure in every log — and `plans.ts` feeds the **plan verdict** from it,
+meaning a failed `exit_plan_mode` was classified `failed` only because prose regexes happened to match the
+error text (#345). A human message quoting `<system-reminder>` had **2,518 of its own 5,061 characters**
+deleted and the loss labelled `project state, not conversation` (#347). The deterministic doors — save,
+fork, settlement, forced-child — refused any multi-event chapter over the ceiling, which for real sessions
+was the **opening turn every time** (2 of 3 on eadc, 55 of 153 on platfolio, 32 of 308 on arcnexus), and
+the door then printed **"Saved: 0 chapter(s) archived … Enrichment queued."** (#344: subdivision in every
+door, packed by size; **0 refused** on all three logs).
+
+**Two health checks that could never fire.** The preset-row witness compared a **number** (`fiberState`) to
+a **string** (`'active'`), so it printed `all active` under every condition — including the week two
+`chapters`-preset sessions were compacted entirely by the host's basic engine (6 and 8 summaries, provider
+`qwen-token-plan`, zero `dsh-chapters`, no TOC, no store), while the one place that reads summary
+provenance answered by `continue` (#339, #360: numeric state, plus an ownership witness that counts, warns
+and prints through the durable store because host and realm are separate module instances).
+
+**Context relief that was configured off.** The arrival floor defaulted to **8,000 tokens** while the host
+caps a result near 12.5K, so 3 of 505 and 14 of 5,262 results deferred — the plugin added TOC, rules and
+notice **cost** with no relief. It is now **derived**: 5% of the smallest window the preset serves
+(32,768 × 0.05 = **1,600**), one constant feeding the schema, the fallback and the defaults, with
+`/chapters-status` printing the floor actually in force (#351). **Operators: this changes a default you can feel** — results previously kept inline are now stubbed above 1,600 tokens, with every payload still archived whole and answerable through `chapters_artifact`. The director's input was separately
+**9,482 ms per turn boundary** — 507 lineage rows over 56 distinct paths, each duplicate re-reading its
+file, and the drop search re-assembling the whole candidate per attempt (#350 → 136 ms, then **#379's block
+cap → 0.29 ms**), with the chapter block uncapped so the newest human turn sat at ~1 char in 2,000,000.
+
+**Quietness itself was the defect.** The prompt plane wrote nothing durable: 21,138 `realm:*` diagnostic
+lines and **zero** prompt lines, which is why "suggestions are one turn behind" needed a full audit to
+diagnose (#352). And the suite lied on this toolchain: the door runner awaited a `setTimeout` handle it had
+just `.unref()`'d, so **22 rows were cancelled behind a `# fail 0` summary** — the entire #77
+adoption/roster/verification path was untested-and-passing (#358; the suite now reports **0 cancelled**).
+
+**Truthfulness of the record.** A log line asserted "seven tools + three continuation doors" when the strict
+`commands` service was absent and no doors had mounted (#353). `docs/contract.md` named a row module with
+no default export — a re-anchor written from it would abort the preset (#353). Five engine keys were
+destructured but never declared, arriving only via undocumented unknown-key pass-through; four host keys
+parsed and did nothing; two documented defaults were stale (4000/240 against 32000/4096); and the config
+reference claimed to be complete with 19 keys missing (#354). `toolResultIsError`'s own test was named
+*"which is where the host puts it"* while its fixture fabricated that shape (#345). Coverage of the 35 real
+event types is now a table with reasons, and an unlisted type still warns (#346) — including the finding
+that `agent/inbox/spliced`, the biggest apparent gap at ~2 MB, is **658/659 a duplicate** of a
+`user/message` and must never be rendered. Registry rows carry their workspace, where 1,431 of 3,623 paths
+(39%) were unresolvable from registry bytes alone (#348), and artifact citations became paths `read` can
+open or the line names `chapters_artifact` (#348c).
+
+**The release machinery was audited too.** The release workflow's manual trigger shipped `dry_run: default: false`, so Actions → *Run workflow* **published** unless someone remembered the box — and versions here are immutable, with the ledger already in this page (0.2.17/18/19, and 0.2.20 whose bundled `lib/version.js` still said 0.2.18). Publishing now takes a positive `publish` input plus a `confirm_version` that must equal `package.json.version`, while the tag-push path stays sufficient on its own (the tag is its own confirmation). The disjunction is load-bearing: rewriting the gate to `inputs.publish == true` alone would have meant tag pushes never publish at all, since `inputs` is empty there — a green suite over a dead release path. `tests/unit/release-gate.test.ts` extracts the workflow's own shell and RUNS it across five input combinations rather than pattern-matching the YAML (#386).
+
+**A page that could condemn a healthy install (#388).** `operations/install.md` shows the two healthy boot lines and tells the reader that anything other than the above is a named problem — which makes a quoted sample a contract, not decoration. The roster line had gained a trailing clause the page still omitted, so a **correctly installed system failed the page's own test.** The line now has one definition (`rosterHealthyLine()`) and a test composes the documented sample from it, byte for byte — with a mutation check that re-truncating it fails the build. The general corpus sweep is deliberately NOT shipped as a gate yet (#389): its first version reported a clean zero-findings because eleven of 45 message templates are generic wrappers like `dsh-chapters: ${m}` that match anything — a detector that cannot fail, caught only because it credited the wrong file with a match. #389 requires a planted negative control before such a gate may be trusted.
+
+**Corpus and gates.** #362's anchor hashed comment prose, so a docs-only edit demanded a re-record while a
+real prompt change could slip past; the anchor is now structural, with a comment-blind drift guard and a
+stamp-equality assertion that refuses to pass on a vacuous `'' === ''`.
+
+**Included deficits, named rather than buried.** The archive #334 repairs is the archive from now on:
+sessions whose arrival shadowing fired before this release still hold stubs for those payloads (#334's
+report is the inventory). The #336 watermark and #337 path-collision damage stays **report-only** —
+remediation is an operator decision under the deletion exception, and the per-workspace `cwd` from #348 is
+what makes it possible to decide. The #340 freshness fix and #379's block cap are built, green on every
+check except the tape chain, and **held for one `prompt`-leg re-record** rather than merged around a stale
+corpus. (#351's arrival floor was expected to need the same re-anchor; all ten legs came back green, so it IS in this release -- see the operator note below.) #335 (arguments
+artifact-backed by default, as the docs already promise) awaits the maintainer's call. #372 needs a
+browser rig to verify and was left unbuilt rather than shipped as unobserved wiring.
+**A correction to this paragraph as first written:** it claimed *"#349 and #372 need a browser rig to verify and were left
+unbuilt."* Wrong twice, and wrong in the way this release exists to catch. #349 does not need a browser rig
+— that was a mislabel I had already corrected elsewhere but never propagated here, because a comment in one
+place is not a fix to the fact. And #349 was not left unbuilt: its conservative fallback (carry the parent
+goal into the child's notice, and state that only a human can arm it) merged to `staging` AFTER this
+candidate was cut, so it is absent from 0.2.33 and present in 0.2.34 — which is a scope fact, not the same
+thing as "unbuilt". What #349 still needs is a **live host plus a real model call** for its behavioural
+acceptance, and a maintainer decision on plugin-authored goal creation. `docs/project-state.md` already said
+all of this correctly, so the two shipped records disagreed with each other until this edit.
+
+**What is verified.** All 24 merged PRs in this range passed all four checks — including the ten
+tape-replay legs — **at their own heads** before merging. Measured **at this candidate tree**, not carried
+from any earlier base: `npm run typecheck` clean · unit **1,404 tests / 1,403 pass / 0 fail / 0
+cancelled** · integration **189 pass / 5 fail** (all five are `treedx-live`, which FAILS rather than skips
+when its service is down, and it is unreachable here) · `corpus:check` agrees with the build
+(`lib=3674369893be9447`, `promptAnchor=b40304ee3e35a94f`).
+
+**And the gate this candidate had to earn has been earned:** `acceptance — ten tape-replay legs` and the
+coverage-gated job are both **PASS on this PR's own run** (`ci.yml` triggers on `push: [main]` and
+`pull_request`; staging deliberately has no push CI, so the candidate's PR run is the release gate). That
+sentence was written as "not claimed here, pending" when the paragraph was first drafted; it is stated as
+observed now, and the earlier wording was itself the failure mode this release is named for — an evidence
+line that stayed true to its author's memory after the measurement had moved. Two figures in that paragraph
+were stale for the same reason: the unit count (1,388 → **1,404**, since #388's rows landed) and the build
+identity (`5af18648cc3aba29` → **`3674369893be9447`**, changed by that same PR's code). Both were re-measured
+on this tree before being written down, which is the correction, not the error, worth recording.
+
+Real-log measures quoted above were re-run at the merged heads, not carried over from the branch that first
+produced them.
+
 ### 0.2.32 — 2026-11-14 · the archive is chapters-only, and nobody reads gauges (#330)
 
 **The tools went where the user pointed.** The seven `chapters_*` tools and the three continuation doors were registered on the HOST plane, and a host-plane tool rides every session's request whatever preset composes it — the #319 diagnostics' own logs showed the whole archive vocabulary sitting inside `standard`-preset prompts, uninvited. They now mount through a `chapters-tools` row inside the preset composition (`src/tools-row.ts`), the same seam the host's own tool rows use: other presets lose the tools AND the doors (maintainer ruling — an agent that did not choose the archive should not police one), while the operator doors that must reach a broken archive from anywhere (`/chapters-repair`, `/chapters-restore`, #319's way in) stay host-side, where a command line is human reach and not model attention.
