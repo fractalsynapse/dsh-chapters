@@ -9,9 +9,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  archiveWatermark, archivedPlanRows, livePlanRows, preflight, refusalResult, runContinue, runFork,
+  archivedPlanRows, livePlanRows, preflight, refusalResult, runContinue, runFork,
   type ContinueConfig, type ContinuePorts,
 } from '../../src/continue-core.ts'
+import { nextUnarchivedSeq } from '../../src/render.ts'
 import { freshSession, appendChapters } from '../../src/registry.ts'
 import type { ChapterRecord } from '../../src/archive.ts'
 import type { SessionEventLike } from '../../src/types.ts'
@@ -352,11 +353,37 @@ test('livePlanRows takes only what sits above the watermark', () => {
   assert.equal(rows[0]!.status, 'pending')
 })
 
-test('the watermark is the highest archived seq (0 for an empty archive)', () => {
-  assert.equal(archiveWatermark([]), 0)
+// #396: the live/archived split is a fact about the CALLER's own seq space. A ceiling taken across the
+// ancestor path (where a root session's chapters can end at a far higher seq) silently reclassifies the
+// caller's open-tail plan as archived and drops it from the notice — violating plans-carriage § 5.
+test('a live-tail plan survives an ancestor whose chapters end far above it (#396)', async () => {
+  const rootChapter: ChapterRecord = {
+    number: 1, path: '.dsh-chapters/root-1/chapters/001-long-ago.md', title: 'root work', summary: 's',
+    startSeq: 0, endSeq: 5000, topics: [], sha256: 'a'.repeat(64), estimatedTokens: 10, artifacts: [],
+  }
+  const h = harness({
+    states: {
+      'root-1': { ...freshSession('root-1'), chapters: [rootChapter] },
+      'call-1': { ...freshSession('call-1'), parentSession: 'root-1' },
+    },
+  })
+  const result = await runContinue(h.ports, {
+    callerSessionId: 'call-1', callerPreset: 'chapters', title: 'T',
+    handoffNote: 'carry on', chapters: RANGES, toolResultOverrides: [],
+  }, CONFIG)
+  assert.equal(result.ok, true, 'admitted despite the ancestor watermark of 5000')
+  const notice = h.notice()
+  assert.match(notice, /Second plan/, 'the caller\u2019s open-tail plan rides the notice as live (its seq 9 is above the CALLER\u2019S ceiling 8, not the ancestry max)')
+  assert.match(notice, /Carry the plan/, 'the archived plan is still cited')
+})
+
+// #396: archiveWatermark (an ancestry-wide max over MIXED per-session seq spaces) is retired; the one
+// predicate for a session's own boundary is nextUnarchivedSeq, and #396's rows above pin the notice split.
+test('the watermark predicate is the caller\u2019s own max, and 0 for an empty archive', () => {
+  assert.equal(nextUnarchivedSeq([]), 0)
   const r = (endSeq: number): ChapterRecord => ({
     number: 1, path: `p${endSeq}`, title: 't', summary: 's', startSeq: 0, endSeq, topics: [],
     sha256: 'q'.repeat(64), estimatedTokens: 1, artifacts: [],
   })
-  assert.equal(archiveWatermark([r(3), r(11), r(7)]), 11)
+  assert.equal(nextUnarchivedSeq([r(3), r(11), r(7)]) - 1, 11)
 })

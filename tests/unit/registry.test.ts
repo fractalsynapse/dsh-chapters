@@ -181,10 +181,13 @@ test('buildIndex omits removed stubs — the list a human removes from IS the in
   assert.deepEqual(entries.map((e) => e.number), [1, 3])
 })
 
-test('archiveWatermark counts removed stubs — deleting bytes never rewinds the watermark (#255 vs the #59 poison)', async () => {
-  const { archiveWatermark } = await import('../../src/continue-core.ts')
-  assert.equal(archiveWatermark([chapter(1), chapter(5, { status: 'removed', endSeq: 55 })]), 55)
-  assert.equal(archiveWatermark([chapter(1)]), 15)
+// #396: the ancestry-wide `archiveWatermark` helper is retired — the watermark a door validates against is
+// the ONE predicate `nextUnarchivedSeq` (src/render.ts). The #255 property stands and is re-pinned here:
+// a removed stub still counts, so deleting bytes never rewinds the watermark.
+test('nextUnarchivedSeq counts removed stubs — deleting bytes never rewinds the watermark (#255 vs the #59 poison)', async () => {
+  const { nextUnarchivedSeq } = await import('../../src/render.ts')
+  assert.equal(nextUnarchivedSeq([chapter(1), chapter(5, { status: 'removed', endSeq: 55 })]), 56)
+  assert.equal(nextUnarchivedSeq([chapter(1)]), 16)
 })
 
 test('a removed stub record round-trips through the registry schema (status and removedAt survive)', async () => {

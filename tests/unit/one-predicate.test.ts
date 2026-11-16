@@ -42,3 +42,39 @@ test('the tombstone-status filter comparison exists ONLY inside the one predicat
   const offenders = hits.filter((h) => !h.startsWith('registry.ts'))
   assert.deepEqual(offenders, [], `second status predicates found (${offenders.join(', ')}) — route the read through isActiveChapter (src/registry.ts), one predicate per decision (#59, #255)`)
 })
+
+/**
+ * #396: the watermark — "first seq not yet archived" — is ONE predicate
+ * (`nextUnarchivedSeq`, src/render.ts). Every hand-rolled `reduce(... endSeq ...)` is a second decision
+ * waiting to disagree: #336 fixed exactly this in save-core, and the deterministic doors and the forced
+ * child archive still carried the retired forms (a chapter covering seq 0 made the door refuse its own
+ * ranges). The two-clause `lastArchived > 0 ?` shape is the same defect spelled differently. Sanctioned
+ * sites are named; a new one must earn its place here, not in a door.
+ */
+const WATERMARK_REDUCE = /reduce\(.*endSeq/
+const TWO_CLAUSE = /lastArchived\s*>\s*0\s*\?/
+// render.ts owns the predicate; continue-core's display row is the one audited exception.
+const WATERMARK_ALLOWED = ['render.ts']
+
+test('the endSeq watermark exists ONLY as nextUnarchivedSeq in render.ts (#396)', () => {
+  const reduceHits: string[] = []
+  const clauseHits: string[] = []
+  const walk = (dir: string): void => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) { walk(p); continue }
+      if (!e.name.endsWith('.ts')) continue
+      const lines = fs.readFileSync(p, 'utf8').split('\n')
+      lines.forEach((line, i) => {
+        const rel = `${path.relative(SRC, p)}:${String(i + 1)}`
+        if (WATERMARK_REDUCE.test(line)) reduceHits.push(rel)
+        if (TWO_CLAUSE.test(line)) clauseHits.push(rel)
+      })
+    }
+  }
+  walk(SRC)
+  assert.ok(reduceHits.some((h) => h.startsWith('render.ts')), 'the predicate body must keep matching — update the scan and the predicate together')
+  const offenders = reduceHits.filter((h) => !WATERMARK_ALLOWED.some((a) => h.startsWith(a)))
+  assert.deepEqual(offenders, [], `second watermark derivations found (${offenders.join(', ')}) — route the read through nextUnarchivedSeq (src/render.ts), one predicate per decision (#396)`)
+  assert.deepEqual(clauseHits, [], `retired two-clause watermark form found (${clauseHits.join(', ')}) — #336 replaced it (#396)`)
+})
