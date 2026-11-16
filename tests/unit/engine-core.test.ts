@@ -242,33 +242,46 @@ test('deriveIdentity ignores harness-injected user messages when titling', async
 import { reconstructShadowedSeqs, buildFinalizedChapters } from '../../src/engine-core.ts'
 import type { ChapterRange } from '../../src/types.ts'
 
-/** A session that behaves like the real host class for the region mapping:
- * surface nodes + deriveEventMessage (events with string data.text derive;
- * others are invisible to the surface, like turn/end). */
+/** A session that behaves like the real host class for the region mapping.
+ * #399: the shape is the HOST's, not an invention — `SessionSurface.nodes` is a plain seq array of
+ * numbers (`dsh-session` lib/types/surface.d.ts:120) and `deriveEventMessage` is a class method that
+ * resolves projections through `this` (lib/index.js:1576). The previous stub fabricated `{seq}` objects
+ * and a standalone function, which is exactly how the composer died silently on real hosts while these
+ * rows stayed green (the r28 lesson, engine.ts:136-139). */
 const mapSession = (events: EngineSessionEvent[]): EngineSession => ({
   ...fakeSession(events),
-  surface: { nodes: events.map((e) => ({ seq: e.seq })) },
-  deriveEventMessage: (e) => typeof e.data?.text === 'string'
-    ? { role: String(e.data.role ?? 'user'), content: [{ type: 'text', text: String(e.data.text) }] }
-    : null, })
+  surface: { nodes: events.map((e) => e.seq) },
+  deriveEventMessage(this: unknown, e: EngineSessionEvent) {
+    if (this === undefined) throw new Error('deriveEventMessage called unbound — the host class method resolves projections through this (#399)')
+    const d = (e as { data?: { text?: string; role?: string } }).data
+    return typeof d?.text === 'string'
+      ? { role: String(d.role ?? 'user'), content: [{ type: 'text', text: String(d.text) }] }
+      : null
+  },
+})
 const dmsg = (seq: number, text: string, role = 'user'): EngineSessionEvent =>
   ev(seq, role === 'user' ? 'user/message' : 'assistant/message', { text, role })
 const derived = (s: EngineSession, seqs: number[]): EngineMessage[] =>
   seqs.map((q) => s.deriveEventMessage!(s.eventAt(q)!)).filter((m): m is EngineMessage => m !== null)
 
-test('reconstructShadowedSeqs: unique contiguous run maps back exactly; head system message tolerated', () => {
+test('reconstructShadowedSeqs: unique contiguous run maps back exactly; head system message tolerated (#399: over HOST-shaped number nodes + bound derive)', () => {
   const s = mapSession([dmsg(1, 'a'), dmsg(2, 'b'), dmsg(3, 'c'), dmsg(4, 'd'), ev(5, 'turn/end')])
-  assert.deepEqual(reconstructShadowedSeqs(s, { messages: derived(s, [2, 3]) }), [2, 3])
+  assert.deepEqual(reconstructShadowedSeqs(s, { messages: derived(s, [2, 3]) }), { ok: true, seqs: [2, 3] })
   // system head prepended (buildSummarizationInput): still matches the region
   const withHead = { messages: [{ role: 'system', content: [{ type: 'text', text: 'sys' }] }, ...derived(s, [1, 2])] }
-  assert.deepEqual(reconstructShadowedSeqs(s, withHead), [1, 2])
+  assert.deepEqual(reconstructShadowedSeqs(s, withHead), { ok: true, seqs: [1, 2] })
 })
 
-test('reconstructShadowedSeqs: ambiguous duplicate run ⇒ null (legacy is the honest fallback)', () => {
+test('reconstructShadowedSeqs: every fallback NAMES its reason — ambiguous and no-match are distinguishable (#399)', () => {
   const s = mapSession([dmsg(1, 'x'), dmsg(2, 'y'), dmsg(3, 'y'), dmsg(4, 'z')])
-  assert.equal(reconstructShadowedSeqs(s, { messages: derived(s, [2]) }), null)
+  assert.deepEqual(reconstructShadowedSeqs(s, { messages: derived(s, [2]) }), { ok: false, reason: 'ambiguous' })
   // and without the host class members, never guesses:
-  assert.equal(reconstructShadowedSeqs(fakeSession([]), { messages: [] }), null)
+  assert.deepEqual(reconstructShadowedSeqs(fakeSession([]), { messages: [] }), { ok: false, reason: 'no-surface-api' })
+  // The drift alarm: a region present, the API present, and NOTHING maps — what a future host
+  // bytes-change produces. It must read as `no-match`, not as a silent null.
+  assert.deepEqual(reconstructShadowedSeqs(s, { messages: [msg('user', 'text that exists nowhere on this surface')] }), { ok: false, reason: 'no-match' })
+  // empty region: honest abstention, its own name.
+  assert.deepEqual(reconstructShadowedSeqs(s, { messages: [] }), { ok: false, reason: 'empty-region' })
 })
 
 test('planSummarize with composition: reserves N, cites N bullets, manifest holds ranges; retry reuses', () => {
@@ -292,6 +305,25 @@ test('planSummarize with composition: reserves N, cites N bullets, manifest hold
     (st, aid, n) => reserve(st, aid, n), 'cid-l', null)
   assert.equal(leg.plan.numbers.length, 1)
   assert.equal(leg.plan.chapters, undefined)
+})
+
+// #399: the composed arm used to lead with [plan, rules] and DISCARD the plot — while engine.summarize()
+// had already PAID the bounded elicited-plot call for it. Both arms now carry the same sections in the
+// same order (plan, rules, plot); an activated composer cannot silently lose the thread.
+test('planSummarize composed arm carries the plot, same lead order as the legacy arm (#399)', () => {
+  const s0 = freshSession('root-p')
+  const composition: ChapterRange[] = [
+    { title: 'Render A', summary: 's1', startSeq: 0, endSeq: 2 },
+    { title: 'Sync B', summary: 's2', startSeq: 3, endSeq: 5 },
+  ]
+  const composed = planSummarize(fakeSession([]), s0, { messages: [] }, cfg,
+    (st, aid, n) => reserve(st, aid, n), 'cid-p', composition, 'shipping the composer, then re-anchoring tapes')
+  assert.match(composed.plan.tocText, /Working plot \(model-authored, carried across this checkpoint\):/, 'the composed checkpoint shows the plot section')
+  assert.match(composed.plan.tocText, /PLOT: shipping the composer/, 'and the plot text itself')
+  const legacy = planSummarize(fakeSession([]), freshSession('root-p'), { messages: [] }, cfg,
+    (st, aid, n) => reserve(st, aid, n), 'cid-q', null, 'same plot here too')
+  const at = (t: string): number => t.indexOf('Working plot')
+  assert.ok(at(composed.plan.tocText) > 0 && at(legacy.plan.tocText) > 0, 'both arms render it')
 })
 
 test('buildFinalizedChapters renders manifest ranges; coverage drift throws loudly', () => {
