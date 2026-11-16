@@ -362,6 +362,7 @@ test('a live-tail plan survives an ancestor whose chapters end far above it (#39
     startSeq: 0, endSeq: 5000, topics: [], sha256: 'a'.repeat(64), estimatedTokens: 10, artifacts: [],
   }
   const h = harness({
+    events: session({ liveTailPlan: true }),
     states: {
       'root-1': { ...freshSession('root-1'), chapters: [rootChapter] },
       'call-1': { ...freshSession('call-1'), parentSession: 'root-1' },

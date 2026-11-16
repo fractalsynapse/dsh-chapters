@@ -66,6 +66,10 @@ test('the endSeq watermark exists ONLY as nextUnarchivedSeq in render.ts (#396)'
       if (!e.name.endsWith('.ts')) continue
       const lines = fs.readFileSync(p, 'utf8').split('\n')
       lines.forEach((line, i) => {
+        // Comments DOCUMENT the retired forms (render.ts names the old save-core shape verbatim);
+        // the scan guards executable derivations, so comment-only lines are out of scope. A code line
+        // carrying one of these expressions before a trailing comment still matches.
+        if (/^\s*(\/\/|\*|\/\*)/.test(line)) return
         const rel = `${path.relative(SRC, p)}:${String(i + 1)}`
         if (WATERMARK_REDUCE.test(line)) reduceHits.push(rel)
         if (TWO_CLAUSE.test(line)) clauseHits.push(rel)
