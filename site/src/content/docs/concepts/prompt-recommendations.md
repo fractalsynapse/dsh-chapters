@@ -168,7 +168,10 @@ same bytes) carries, in order:
 
 - **the goal directive** when a goal is active — objective **whole**, because nothing the model
   reads is ever truncated,
-- **the active plan**, if one governs the session,
+- **the active plan**, if one governs the session — folded from the session's own durable log by the
+  SAME carry a compaction checkpoint seeds with (`detectPlans` → `carryActivePlan`, #398). It is not
+  read from a registry row: plan full-text lives in the log and the artifact store, and a row carries
+  only citations,
 - **the core rules** in force — the same block a rebuilt head renders from,
 - **the chapter history**: every chapter on the **ancestor path** (a continuation mid-goal inherits
   its lineage's history, not an empty list), each as **title + detailed summary + every plot line**
