@@ -146,3 +146,19 @@ test('no completed turn: a clean error result, nothing created', async () => {
   assert.match(result.kind === 'error' ? result.text : '', /no completed turn/)
   assert.equal(w.createRequests.length, 0)
 })
+
+// #396: the deterministic door derived its own watermark with the retired two-clause form
+// (`reduce(...,0)` + `lastArchived > 0 ? +1 : 0`), so a committed chapter ending at seq 0 made it compose
+// from 0 — below the floor runContinue validates against — and the door refused its own correct ranges
+// "below the watermark (#336)". One predicate now: nextUnarchivedSeq.
+test('a committed chapter covering seq 0 does not make the door refuse (one watermark predicate, #396)', async () => {
+  const w = makeWorld({
+    parentChapters: [{
+      number: 1, path: '.dsh-chapters/caller-1/chapters/001-seed.md',
+      title: 'seed', summary: 'covers seq 0 only', startSeq: 0, endSeq: 0,
+    }],
+  })
+  const result = await w.built.forkCommand.handler({ agent: w.caller as never, rawInput: 'From under a seq-0 watermark' })
+  assert.equal(result.kind, 'success', `door must compose from nextUnarchivedSeq (1), got: ${JSON.stringify(result)}`)
+  assert.match(result.kind === 'success' ? result.text : '', /seqs 1\.\.8/, 'the success line names the true boundary')
+})

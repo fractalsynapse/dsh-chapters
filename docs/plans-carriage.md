@@ -173,6 +173,12 @@ minus the text), `modeActive`, and `livePlans` — plans whose `seq > archiveCei
 precisely the mid-review case), explicitly labelled *not archived, parent log only*. Ranges stay the
 model's call and chapter text stays the plugin's (invariant 4); the model never guesses a verdict again.
 
+**The ceiling is a fact about the CALLER's own log, in the caller's own seq space** (#396). Continuation
+children restart their event numbering at 0, so a maximum taken across the ancestor path can exceed the
+caller's live tail and silently reclassify a still-open plan as archived. The continuation notice applies
+the same rule: its live/archived split is the caller's watermark (committed rows plus what this door is
+about to commit), never an ancestry max.
+
 ### 6. Composition and titles
 
 - Forced split points: an `exit_plan_mode` call seq is a topic boundary — feed them to
