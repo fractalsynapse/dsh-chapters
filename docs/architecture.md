@@ -489,6 +489,12 @@ note may blow through before any work happens, and the plugin would refuse every
 the small-context hardware it targets. The header is a fixed cost to subtract, not a competitor for the
 index. Measure it once per generation and cache it.
 
+The header bound is the last real request's **billed input**, not just its uncached part: the host reports
+`inputTokens`, `cacheReadTokens` and `cacheWriteTokens` as DISJOINT arms whose sum is the prompt
+(`@deepseek-ai/dsh-llm` `TokenUsage` contract), so admission subtracts all three (#395). Reading two of
+three under-counts the header on exactly the turns that extend the prompt cache — the bound would stop
+being conservative where conservatism matters most.
+
 The budget is enforced as a **preflight**: measure, then refuse with concrete numbers
 (`TOC 4,120 + note 2,800 = 6,920 > budget 5,750 (0.25 × (32,000 − 9,000))`) *before* creating any
 session. Never truncate to fit — a clipped handoff note is the lossy behaviour this plugin exists to
