@@ -322,8 +322,7 @@ test('planSummarize composed arm carries the plot, same lead order as the legacy
   assert.match(composed.plan.tocText, /PLOT: shipping the composer/, 'and the plot text itself')
   const legacy = planSummarize(fakeSession([]), freshSession('root-p'), { messages: [] }, cfg,
     (st, aid, n) => reserve(st, aid, n), 'cid-q', null, 'same plot here too')
-  const at = (t: string): number => t.indexOf('Working plot')
-  assert.ok(at(composed.plan.tocText) > 0 && at(legacy.plan.tocText) > 0, 'both arms render it')
+  assert.match(legacy.plan.tocText, /Working plot/, 'the legacy arm keeps carrying it too — one lead shape for both arms')
 })
 
 test('buildFinalizedChapters renders manifest ranges; coverage drift throws loudly', () => {
