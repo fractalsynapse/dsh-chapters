@@ -177,15 +177,19 @@ export function buildChaptersTools(
             windowTokens = info?.context?.contextWindow ?? null
           } catch { windowTokens = null }
         }
-        // Header bound: the last real request's full prompt (usage) — an
+        // Header bound: the last real request's billed input (usage) — an
         // UPPER bound on header+surface-at-that-time, so it over-counts the
         // header conservatively; refusals err toward the loud side.
+        // #395: the host reports the usage arms DISJOINT — inputTokens is uncached
+        // input only, and billed input = input + cacheRead + cacheWrite
+        // (@deepseek-ai/dsh-llm TokenUsage contract). Reading two of three
+        // under-counts on exactly the turns that extend the prompt cache.
         let headerBoundTokens: number | null = null
         const events = caller.session.snapshotEvents?.() ?? []
         for (let i = events.length - 1; i >= 0; i -= 1) {
-          const usage = (events[i]!.data as { usage?: { inputTokens?: number; cacheReadTokens?: number } } | undefined)?.usage
+          const usage = (events[i]!.data as { usage?: { inputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } } | undefined)?.usage
           if (usage !== undefined) {
-            headerBoundTokens = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0)
+            headerBoundTokens = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
             break
           }
         }
