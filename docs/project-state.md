@@ -1021,3 +1021,19 @@ that does not, loudly and before boot.
 `E2E_UPSTREAM` + `E2E_UPSTREAM_KEY` at the real qwen3.8-flash-next) · C3 live observation of a composed
 checkpoint (blocked here BY the guard until such an endpoint exists — the alias box cannot produce it)
 · #349 remainder · #397 contract decision · TreeDX live rows · host option-(d) todo row.
+
+## 2026-11-17 — correction to today's own entries: #340's re-record was never endpoint-blocked
+
+The 0.2.35 notes (and the #368 PR / #340 issue comments) stated the `prompt`-leg re-record was
+"blocked behind a truly-serving qwen3.8-flash-next endpoint". Wrong mechanism, found by RUNNING the
+rig's documented tool: per #56 the prompt/plans legs distill against the SCRIPTED STUB (:8081) — no
+live endpoint is ever legitimate for them. The true blocker was my own #406 guard, which demanded the
+pinned live id from every tape-writing mode and therefore refused the rig's own stub path
+(`refusing to record — the upstream does not list qwen3.8-flash-next; it lists [stub-plan-carriage]`,
+full log `var/distill/prompt-120705.log`). Three lessons held together: the guard overfit its incident
+(demos 1 and 2 passed; the missing third was stub-leg acceptance), I bypassed `distill-tapes.sh` for
+raw `e2e-one` and so walked into the live-alias the runner's policy forbids, and the shipped changelog
+stays as cut — corrections land forward, here and in `docs/backlog.md`. Fixed under #409: leg-kind
+marker from the stub-pinning script itself, stub-class witness (all-`stub-`-prefixed list; its own
+echo-arm noted honestly), both refusal directions kept, four-quadrant rows. No tape bytes from the
+failed attempt were ever committed (`tests/fixtures/model-tape/prompt/` restored to HEAD each time).
