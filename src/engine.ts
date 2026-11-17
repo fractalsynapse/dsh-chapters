@@ -769,10 +769,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // uncertainty (no Session mapping API, no collections, ambiguous match,
     // thrown anywhere) falls to the legacy single-chapter plan, which is the
     // behavior that has always been correct.
+    // #399: the fallback is now NAMED, not silent — and `no-match` (a region
+    // present and nothing mapped: host surface-shape drift) is a warn, the rest
+    // notes. The original bug hid behind an unnamed null for the whole life of
+    // the feature: real hosts archived one legacy chapter per compaction while
+    // every stub-shaped test stayed green.
     let composition: readonly ChapterRange[] | null = null
     try {
-      const seqs = reconstructShadowedSeqs(session, input)
-      if (seqs !== null && state.collections.length > 0) {
+      const found = reconstructShadowedSeqs(session, input)
+      if (!found.ok) {
+        const line = `dsh-chapters: compaction composition skipped (reason=${found.reason}) — legacy single-chapter fallback`
+        if (found.reason === 'no-match') this.ctx.logger?.warn?.(`${line} — the region was present and NOTHING mapped: host surface-shape drift? (#399)`)
+        else if (found.reason !== 'empty-region') diagnosticNote(this.ctx.logger, 'realm:engine:compose', line)
+      } else if (state.collections.length > 0) {
+        const seqs = found.seqs
         const spanStart = seqs[0]!
         const spanEnd = seqs[seqs.length - 1]!
         const spanEvents = seqs

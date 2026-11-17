@@ -38,7 +38,7 @@ import { registerHostCommands } from './commands.ts'
 import { wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
-import { carryActivePlan } from './plans.ts'
+import { carryActivePlan, detectPlans } from './plans.ts'
 import { buildRulesSection } from './rules.ts'
 import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } from './prompt.ts'
 import type { ModelsLlm } from './models-command.ts'
@@ -127,6 +127,10 @@ export interface Config {
   planInlineChars: number
   callArgArtifactTokens: number
   plansInNotice: boolean
+  /** #349: carry the parent session's goal into the child's continuation notice. */
+  goalInNotice: boolean
+  /** #349: budget in chars for the objective text inside that block. */
+  goalNoticeChars: number
   /** Teach the child its lookup verbs (read / chapters_artifact / chapters_search). */
   retrievalHints: boolean
   /** Seed plan mode into continuation children (plans-carriage § 10). */
@@ -269,6 +273,8 @@ export const Config = Schema.object({
   // Renders zero bytes when the path holds no plans, so the default-on cost for
   // sessions that never enter plan mode is exactly nothing.
   plansInNotice: Schema.boolean().default(true),
+  goalInNotice: Schema.boolean().default(true),
+  goalNoticeChars: Schema.number().step(1).min(120).default(600),
   retrievalHints: Schema.boolean().default(true),
   // Seeding is measured-safe (kernel accepts the two-event seed and the host's own
   // plan projection folds it to active) and it is what keeps the agent anchored to
@@ -583,11 +589,14 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       // #188: the operative plan via the SAME carry mechanism continuations seed with, budgeted at the
       // context cap — its own announced clip (which names the archive chapter citing the full text)
       // fires only if the plan alone would eat the entire budget.
+      // #398: this used to read `(await store.get(id)).planDocs` — a field that exists only on
+      // ChapterRecord rows (never on a SessionState), and even there as {seq,path,sha256}, not the
+      // full-text PlanDoc carryActivePlan folds. The read was provably always empty, so the director
+      // never saw a plan it claims to receive. Now: fold the durable log exactly as the engine's
+      // checkpoint carry does (engine.ts), over the events the suggest surface already holds.
       planOf: async (session) => {
         try {
-          const row = await store.get(session.id)
-          const docs = ((row as unknown as { planDocs?: unknown[] } | undefined)?.planDocs ?? []) as Parameters<typeof carryActivePlan>[0]
-          return carryActivePlan(docs, { maxChars: config.promptContextChars }) ?? ''
+          return carryActivePlan(detectPlans(session.events).plans, { maxChars: config.promptContextChars }) ?? ''
         } catch { return '' }
       },
       config: {
@@ -862,6 +871,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       planInlineChars: config.planInlineChars,
       callArgArtifactTokens: config.callArgArtifactTokens,
       plansInNotice: config.plansInNotice,
+      goalInNotice: config.goalInNotice,
+      goalNoticeChars: config.goalNoticeChars,
       retrievalHints: config.retrievalHints,
       planSeedMode: config.planSeedMode,
       searchMaxTokens: config.searchDefaultMaxTokens,

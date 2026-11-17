@@ -489,6 +489,12 @@ note may blow through before any work happens, and the plugin would refuse every
 the small-context hardware it targets. The header is a fixed cost to subtract, not a competitor for the
 index. Measure it once per generation and cache it.
 
+The header bound is the last real request's **billed input**, not just its uncached part: the host reports
+`inputTokens`, `cacheReadTokens` and `cacheWriteTokens` as DISJOINT arms whose sum is the prompt
+(`@deepseek-ai/dsh-llm` `TokenUsage` contract), so admission subtracts all three (#395). Reading two of
+three under-counts the header on exactly the turns that extend the prompt cache — the bound would stop
+being conservative where conservatism matters most.
+
 The budget is enforced as a **preflight**: measure, then refuse with concrete numbers
 (`TOC 4,120 + note 2,800 = 6,920 > budget 5,750 (0.25 × (32,000 − 9,000))`) *before* creating any
 session. Never truncate to fit — a clipped handoff note is the lossy behaviour this plugin exists to
@@ -539,6 +545,44 @@ Two structural consequences:
   ancestor get different, correct TOCs and cannot collide on numbering.
 - **Append-only has no exceptions.** Nothing derived is written back into the store; the registry is the
   only mutable state, and it is a domain table designed for it.
+
+## The Goal Across a Renewal (#349)
+
+An active goal is the one continuing intention a session has, and a child born at a renewal boundary does
+not inherit it: `create_goal` requires a direct-human turn, and the child's first turn is
+`plugin:dsh-chapters`. Before this, the objective stopped driving the work exactly where the plugin's own
+promise begins, and AGENTS' rule to "carry the authorized outcome" was left to the model's prose.
+
+**The rule now: carry the goal as text, and state aloud that it is not armed.** One selector
+(`foldGoalFromLog`) folds the parent's durable `goal/change` events — operations `create`, `edit`, `pause`,
+`resume`, `block`, `complete`, `clear`, with `{id, revision, objective, phase, maxGoalRounds, blockedReason}`
+— and one renderer (`renderGoalCarriage`) emits the child's `## Goal (carried from the parent session)`
+block: objective whole, revision, round cap, phase, the seq it came from, and the sentence that only a human
+can re-arm. It sits with the plans block, **above** the fold, because an objective is the fact a child must
+not reconstruct from recall.
+
+Invariants this respects:
+
+- **No goal, zero bytes.** Sessions that never used a goal get a byte-identical notice, which is also what
+  keeps recorded tapes unmoved. An empty section is treated as absent, not as an empty heading.
+- **`clear` ends it; `complete` is reported as finished** and receives no re-arm instruction. A child must
+  not pick up a purpose the human closed, and must not be told to resume one that succeeded.
+- **Unknown operations are ignored, not guessed.** If the host adds one, the fold keeps the last state it
+  understands rather than letting an unrecognized event rewrite the child's sense of its own objective.
+- **The budget bounds display, never the instruction.** `goalNoticeChars` (default 600, host-declared and
+  defaulted on the plugin config — the #354 discipline) truncates the objective with the length stated;
+  the "only the human can re-arm" lines are never cut, because a truncated permission notice is worse than
+  none.
+- **`phase` is foldable; `activation` is not.** The host keeps armed/disarmed process-local and the plugin
+  reads it from the live service for its own driver decisions, so the notice says who CAN change the driver
+  and never claims what the driver currently IS. Recovering armedness from history would be a guess in a
+  record's clothing.
+
+**Deliberately not done, pending a maintainer decision (#349):** the underlying goal *service* has no
+direct-human gate, so the plugin could arm a goal on the child unilaterally. Reaching a seam is not having
+authority to use it; silently routing around a gate because the tool wrapper is the only thing enforcing it
+is the kind of unexamined authority widening this whole release was a study in. If the answer is yes, it
+becomes an explicit, documented, configurable step — not a side effect of the birth path.
 
 ## Storage
 

@@ -1,5 +1,13 @@
-# Open items — 2026-10-23 (host 0.2.0-rc.2)
+# Open items — 2026-11-17 (host 0.2.0-rc.2)
 
+- **0.2.34 follow-waves (2026-11-17 audit):** the composed checkpoint has never been OBSERVED on a live
+  host — the heavy leg's first sight, tracked as `docs/verify.md` C3, in the same family as #143's
+  convergence bound. The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents` — the host says
+  "new calls are prohibited") are inventoried by `tests/unit/host-composer-shape.test.ts`; the migration
+  to `deriveMessages`/`requestHeader` (live) and `SessionQuery.readSession` (durable) is the first gate to
+  re-run before any host bump. #397 (`meta.parentSession` for continuation children) awaits a maintainer
+  decision on amending `docs/contract.md` § Lineage. #383 (#379) and #368 (#340) are held by maintainer
+  direction for **0.2.35**, together with the `prompt`-leg re-record.
 - **#355 — the 2026-11-14 correctness audit: 24 issues filed for this audit (25 counting #386), 22 fixed across 24 PRs, released in 0.2.33.**
   Every finding was reproduced against real bytes before it was changed, and the shape they share is the
   release's subject: **a check that cannot fail**. Concretely: the preset-row health witness compared a

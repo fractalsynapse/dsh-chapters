@@ -29,6 +29,7 @@ import { CHAPTERS_PRESET_ID } from './preset.ts'
 import { diagnosticWarn } from './diag.ts'
 import { formatWarnings } from './warnings.ts'
 import { isActiveChapter } from './registry.ts'
+import { nextUnarchivedSeq } from './render.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import { lineageOf, type SessionEventLike } from './types.ts'
 import type { RegistryStore } from './store.ts'
@@ -323,7 +324,9 @@ export function makeChildArchiveListener(deps: ChildArchiveDeps): (session: unkn
         // live turn boundary.
         const store = await deps.store()
         const state0 = await store.get(id)
-        const lastArchived = state0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
+        // #396: the ONE watermark predicate. (This line used to hand-roll the max, seeded -1 —
+        // equal in value, second in count, and exactly how #336's two derivations drifted.)
+        const lastArchived = nextUnarchivedSeq(state0.chapters) - 1
         const completed = events.filter((e) => e.type === 'turn/end' && e.seq > lastArchived && e.seq <= anchor).length
         const gate = shouldForceChildArchive({
           header,

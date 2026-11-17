@@ -11,6 +11,41 @@ history of a decision, not before every task.** The rules that lived inside it a
 ---
 
 ## Start Here
+## 2026-11-15 (later) — 0.2.33 is on npm: the release steps, and what they proved
+
+**Executed:** PR #385 merged to `main` (`42d66c7`) -> annotated tag `0.2.33` pushed -> tag-triggered release run
+`43753268463` green end to end -> `main` merged back into `staging` (`c7de7c0`).
+
+**What the release job proved, in its own words rather than mine:**
+- `version / tag consistency` passed — the tag string equals `package.json.version`.
+- The deterministic suite ran under the **85/85/85/85 coverage gate on pinned Node 24** — the DoD line this
+  audit could never evidence locally (Node 22.22.1) is satisfied by CI, at the shipping commit.
+- Publish carried a **sigstore provenance attestation** (logIndex 3909060018), so the documented 409
+  publish-without-attestation fallback was not needed this time. Worth stating because the fallback exists
+  precisely so that a transport collision cannot hold a release hostage — and a silent success would not
+  tell us whether it fired.
+- **The published tarball was re-downloaded and unpacked: its `package.json` and `package/lib/version.js`
+  both read `0.2.33`.** That is the 0.2.20 class caught at the only point it can be caught — after
+  publication, from the registry, not from the working tree.
+
+**Census after release, read back from GitHub rather than totalled by hand: 23 findings closed, 7 issues
+open** — #335 (maintainer decision), #340 and #379 (built and green except the tape chain, held for one
+`prompt`-leg re-record; the runbook is on #340), #349 (fallback merged post-cut, so 0.2.34; the rest needs a
+live host and an authority decision), #372 (browser rig), #389 (the deferred corpus gate), and the umbrella
+#355.
+
+**Landed after the cut, therefore shipping in 0.2.34:** #391 (goal carried into the child's notice as text,
+with the sentence that only a human can arm it), #392 (item Z's host-shape contract gate), #394 (#393's
+tag-protection mis-attribution). None of them changes what 0.2.33 does; #394 in particular only corrects
+comments in the release tooling plus adds a test that pins the real semver gate.
+
+**One thing this release did not do, and should not be mistaken for having done:** the audit's own headline
+finding — a check that cannot fail — was found **twice more in the release machinery itself** while cutting
+this version (#386: the manual trigger published by default; #393: a claimed tag-protection rule that does
+not exist on this repo). Both were fixed, one inside the release and one after it. The standing lesson is that
+verifying "did the release run green" is not the same as verifying "does the guard it relies on exist", which
+is the same distinction as testing a metric versus checking the mechanism behind it.
+
 ## 2026-11-15 — #355: the audit worked end to end, and shipped as 0.2.33
 
 **What was asked.** Deep-analyze the implementation, file the findings, fix them one at a time with tests
@@ -851,3 +886,62 @@ and that is stated wherever the claim is made. What the tape leg keeps is everyt
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.
+
+## 2026-11-16 — external context-handling audit: findings, two corrections, and what shipped
+
+A full read of the plugin against the pinned harness (`node_modules/@deepseek-ai/*` 0.2.0-rc.2) and
+`examples/cordis` produced five findings; four became issues and PRs, one died against a governing record:
+
+- **#399 (the headliner, PR pending)** — `reconstructShadowedSeqs` assumed a host shape that does not exist
+  (`surface.nodes` read as `{seq}[]`; `deriveEventMessage` called unbound), so pressure compaction archived
+  ONE legacy chapter on every real host while unit rows stayed green against a stub of the invented shape —
+  the r28 lesson re-run inside the composer. The composed arm also dropped the plot section.
+- **#395 (PR #400)** — the continuation budget's header bound read two of the three DISJOINT usage arms,
+  under-counting on cache-writing turns; now `input + cacheRead + cacheWrite`.
+- **#396 (PR #401)** — two watermark derivations still used forms #336 retired (`tools.ts` two-clause,
+  `auto-save.ts` hand-rolled max), and the notice's live-plan ceiling took an ancestry-wide max over mixed
+  per-session seq spaces, silently dropping a pending live-tail plan. One predicate everywhere; scan-gated.
+- **#398 (PR #402)** — the prompt bar's `planOf` read `row.planDocs`, a field that exists only on chapter
+  RECORDS (and without the full text `carryActivePlan` folds): the documented plan input was dead wiring.
+  Now folds `detectPlans(session.events)` exactly like the engine's checkpoint carry.
+- **#397 — closed, NOT implemented.** The proposal (pass `meta.parentSession` at `agents.create`) collided
+  with `docs/contract.md` § "Lineage: Kernel Fields We Must Not Lean On": the header field is seed lineage
+  and the registry is the sole ancestry authority by recorded decision. Amending that is a maintainer call;
+  the issue carries the one-line change if the decision flips.
+
+**Correction to the audit's own claims, measured after the fact:** it reported the e2e plane as "red — the
+harness that could catch these bugs cannot compile." Wrong gate model: `scripts/e2e-typecheck-ratchet.sh`
+baselines tests/e2e at 58 type errors by explicit decision (#83) and CI enforces NO-GROWTH; Playwright
+transpiles specs without type-checking, and the tape-replay acceptance job runs ten real-host legs in CI
+regardless. The debt is real and ratcheted; the claim that no real-host coverage exists was withdrawn.
+Node-24 note for rigs: this box's system node is 22; the repo-vendored `var/toolchain/node-v24.22.0` is
+what CI and the ratchet use, and the deterministic ledger (1,625+/1,631 with the five credential-gated
+`live:` TreeDX rows the only non-passes) was run on it.
+
+## 2026-11-17 — 0.2.34 cut prepared from staging `9bab463`
+
+The 2026-11-15/16 context-handling audit lands as **0.2.34**: #395, #396, #398, #399 (merged PRs #400–#403),
+plus the corpus re-stamp #404 and the post-0.2.33 tail of the previous wave (#390, #391→partial #349, #392,
+#394). Versions: `package.json` / `package-lock.json` root / `package-lock.json` `packages[""]` /
+`src/version.ts` — all four at **0.2.34**, the agreement row in `tests/unit/release-gate.test.ts` green.
+
+Verified at the integrated base `9bab463` before this branch: deterministic ledger 1,632/1,638 (5
+credential-gated `live:` TreeDX rows, 1 `#314 WISH` todo); **full 11-leg tape-replay chain green on the
+merged staging tree**, each leg under its own boot; `typecheck`/`typecheck:client` clean; ratchet 58=58;
+`corpus:stamp` re-stamped on that green replay with `promptAnchor` unchanged — no re-record required by
+anything in this range. The acceptance gate for the candidate itself remains this release PR's own
+`acceptance — ten tape-replay legs` run: `ci.yml` triggers on `pull_request` and `push: [main]` only.
+
+Open and named: `docs/verify.md` **C3** — no live-class run has yet OBSERVED a composed checkpoint (the
+heavy leg owns that first sight, same family as #143's bound). #349 remains open (goal-carriage partial
+landed via #391; the rig-dependent rest stands). The five `live:` TreeDX rows require credentials.
+**#397 was closed by decision, not code**: passing `meta.parentSession` at `agents.create` collides with
+`docs/contract.md` § Lineage ("seed lineage; the registry is the sole ancestry authority"); amendment is a
+maintainer call and the issue carries the one-line change if it flips.
+
+Maintainer direction recorded on 2026-11-17: **#383 (#379) and #368 (#340) are NOT in this cut** — they
+roll into **0.2.35** along with the `prompt`-leg re-record that gates them.
+
+The audit self-correction stays recorded above rather than edited away: the claim that "the e2e harness
+cannot compile so no real-host coverage exists" was wrong — the ratchet baselines 58 errors by design and
+the replay chain runs real boots regardless. Withdrawn where the findings are written.
