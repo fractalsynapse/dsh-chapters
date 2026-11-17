@@ -10,7 +10,7 @@ import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPi
 import { RIG_MODEL_ID } from './rig-pins.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 import { bootFailureMessage } from './boot-failure.ts'
-import { servedModelVerdict } from '../support/model-parity.ts'
+import { servedModelVerdict, stubEndpointVerdict, modelsListIds } from '../support/model-parity.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -481,6 +481,15 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     // harnessRoute legitimately answers null on the tracked profile until the provider row is patched
     // later, and an unknown-pinned-id refusal would gate a mode that always ran. E2E_UPSTREAM_MODEL
     // stays the deliberate remap: it must ALSO be listed and answer as itself.
+    // #409: the proof is LEG-KIND aware. STUB legs (plans/prompt/prompt-revival, #56 policy) distill
+    // against the scripted stub and are marked by the very script that pins it (E2E_STUB_LEG beside
+    // E2E_UPSTREAM in distill-tapes.sh — one coupled source). A stub-leg proof is stub-CLASS: every
+    // listed id `stub-`-prefixed, chat witnessed against the endpoint's OWN first listed id (the stub
+    // echoes request names; its `model` field is documented NOT-provenance). A live-leg proof is
+    // unchanged: pinned id listed AND answered as itself. Both mismatch directions refuse —
+    // marker-without-stub-class, and stub-class on an unmarked leg (the live witness fails, the stub
+    // list has no pinned id) — so the measured alias box stays refused everywhere.
+    const stubLeg = process.env.E2E_STUB_LEG === '1'
     const remap = process.env.E2E_UPSTREAM_MODEL
     const requested = remap !== undefined && remap !== '' ? remap : RIG_MODEL_ID
     const proofHeaders: Record<string, string> = { 'content-type': 'application/json' }
@@ -489,22 +498,33 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const proofAbort = AbortSignal.timeout(20_000)
     let listText = ''
     let chatText = ''
+    const chatProbe = (model: string): Promise<string> => fetch(new URL('/v1/chat/completions', upstreamBase).href, {
+      method: 'POST',
+      headers: proofHeaders,
+      signal: proofAbort,
+      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'identity probe — reply with one word' }], max_tokens: 4 }),
+    }).then((r) => r.text())
     try {
       listText = await (await fetch(new URL('/v1/models', upstreamBase).href, { signal: proofAbort })).text()
-      chatText = await (await fetch(new URL('/v1/chat/completions', upstreamBase).href, {
-        method: 'POST',
-        headers: proofHeaders,
-        signal: proofAbort,
-        body: JSON.stringify({ model: requested, messages: [{ role: 'user', content: 'identity probe — reply with one word' }], max_tokens: 4 }),
-      })).text()
+      const probeId = stubLeg ? (modelsListIds(listText)[0] ?? 'stub-probe-unlisted') : requested
+      chatText = await chatProbe(probeId)
     } catch (error) {
       throw new Error(`e2e: ${modelMode === 'record' ? 'record' : 'heal'} writes tape, and the model identity at `
         + `${upstreamBase} could not be PROVEN (${String((error as Error)?.message ?? error)}). `
-        + 'Start the endpoint the rig pins, or point E2E_UPSTREAM at one that answers. Replay writes nothing and stays allowed.')
+        + 'Start the endpoint the rig pins (or the scripted stub for STUB legs), or point E2E_UPSTREAM at one '
+        + 'that answers. Replay writes nothing and stays allowed.')
     }
-    const verdict = servedModelVerdict({ listText, chatText, requested })
-    if (verdict !== null) throw new Error(`e2e: refusing to ${modelMode === 'record' ? 'record' : 'heal'} — ${verdict}`)
-    console.log(`[e2e] model identity proven at ${upstreamBase}: ${requested} (listed, and answered as itself) (#406)`)
+    const verdict = stubLeg
+      ? stubEndpointVerdict({ listText, chatText })
+      : servedModelVerdict({ listText, chatText, requested })
+    if (verdict !== null) {
+      const listed = modelsListIds(listText)
+      const stubClassHint = !stubLeg && listed.length > 0 && listed.every((id: string) => id.startsWith('stub-'))
+        ? ' — NOTE: this endpoint IS stub-class; the scripted-stub legs (plans/prompt/prompt-revival) set E2E_STUB_LEG=1 via distill-tapes.sh, a live leg must not use the stub'
+        : ''
+      throw new Error(`e2e: refusing to ${modelMode === 'record' ? 'record' : 'heal'} (${stubLeg ? 'stub' : 'live'} leg) — ${verdict}${stubClassHint}`)
+    }
+    console.log(`[e2e] model identity proven at ${upstreamBase}: ${stubLeg ? 'STUB-class endpoint (all listed ids stub-*, self-answered)' : `${requested} (listed, and answered as itself)`} (#406/#409)`)
   }
   let proxy: ProxyHandle | null = null
   if (modelMode === 'record' || modelMode === 'replay') {

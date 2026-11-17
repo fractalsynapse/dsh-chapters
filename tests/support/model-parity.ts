@@ -56,3 +56,34 @@ export function servedModelVerdict(input: { listText: string, chatText: string, 
   }
   return null
 }
+
+/**
+ * #409 — the STUB-class witness, for the legs whose documented upstream IS the scripted stub
+ * (tests/e2e/stub-model.ts; #56 policy). An endpoint is stub-class iff its model list is non-empty
+ * and EVERY id carries the `stub-` prefix — one real id disqualifies the whole endpoint, which is
+ * what keeps the measured alias box refused here too. The chat arm is honest about what it can
+ * prove: the stub echoes the REQUEST name and its own provenance file says that field is
+ * NOT-provenance, so the witness requests the endpoint's OWN first listed id and requires the echo
+ * back unchanged — presence and self-consistency, nothing more. Leg-kind itself is carried by the
+ * marker E2E_STUB_LEG that distill-tapes.sh sets beside the stub it pins; boot enforces both
+ * directions (marker without stub-class → refuse, stub-class on a live leg → refuse via the
+ * live-path witness, which fails because the stub list has no pinned id).
+ */
+export function stubEndpointVerdict(input: { listText: string, chatText: string }): string | null {
+  const ids = modelsListIds(input.listText)
+  if (ids.length === 0) {
+    return `the upstream's /v1/models carried no parsable model list — a STUB-leg record requires `
+      + 'the scripted stub (all ids `stub-`-prefixed); nothing was recorded'
+  }
+  const real = ids.filter((id) => !id.startsWith('stub-'))
+  if (real.length > 0) {
+    return `a STUB-leg record was pointed at a NON-stub endpoint — its list carries real model ids `
+      + `[${real.join(', ')}] alongside anything else; the scripted stub lists only \`stub-\` names. Refusing before boot`
+  }
+  const served = chatServedId(input.chatText)
+  if (served === null || served !== ids[0]) {
+    return `the stub-class endpoint did not answer as its own first listed id `
+      + `(asked ${ids[0] ?? '?'}, answered ${served ?? 'unparsable'}) — refusing before boot`
+  }
+  return null
+}
