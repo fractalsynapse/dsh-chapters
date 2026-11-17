@@ -7,9 +7,19 @@
 # gets its own boot, port and pins (the same env the npm script uses), and its tape directory
 # is cleared first — a stale entry from another host is a prefix collision waiting to happen.
 #
-#   scripts/distill-tapes.sh                     # all eight, sequential
+#   scripts/distill-tapes.sh                     # all legs, sequential
 #   scripts/distill-tapes.sh fork rules          # just these
 #   KEEP_TAPES=1 scripts/distill-tapes.sh rules  # archive onto the existing tape, don't clear
+#
+# #411: every green RECORD is followed IN THIS SCRIPT by a strict REPLAY of the same leg — the
+# tape's own acceptance. (Race-prone legs note: the replayed call-SET can differ machine to machine —
+# a record that races away a call may pass its own replay and still MISS on a faster runner. The
+# committed corpus is therefore the healed SUPERSET: extra keyed entries cost a replay nothing when
+# the call never fires, a missing one fails the leg. If a fresh re-record would drop entries a prior
+# heal proved, KEEP the superset — the green verdict stands on the superset too.) A failing replay with new MISS lines earns exactly one bounded heal
+# (against the leg's own upstream) and a second replay must pass; a failing replay WITHOUT misses
+# is a leg failure, never healed. Verdicts read `record+replay green (N entries)`. Classification
+# lives in scripts/distill-replay-guard.mjs (pure, unit-tested).
 #
 # SEQUENTIAL ON PURPOSE: never two boots at once (measured 2026-09-23 — a live loop recording
 # mid-test can be OOM-killed; same-home sibling boots have corrupted captures).
@@ -133,14 +143,65 @@ for proj in "${want[@]}"; do
     rc=1
     failed+=("$proj:vacuous")
   fi
-  echo "--- $proj: exit=$rc tapeEntries=$n"
+  # ── #411: a green RECORD is only half a verdict. The tape is proven by the strict REPLAY that
+  # follows it: measured at #340's re-anchor, one call (the post-Run regeneration) won at replay's
+  # instant cache but lost the teardown race at record time — invisible to the recording itself.
+  # Now every green record is followed by an immediate strict replay; a failing replay WITH new
+  # MISS lines gets exactly one bounded heal against the leg's own upstream (deterministic by
+  # construction), then a second replay must pass. A failing replay WITHOUT new misses is a leg
+  # failure, not a corpus gap — healing it would paper a defect onto the tape. The classification
+  # table is pure and unit-tested (scripts/distill-replay-guard.mjs, tests/unit/…-guard.test.ts).
+  final_rc=$rc
+  verdict="exit=$rc tapeEntries=$n"
+  if [[ "$rc" -eq 0 && "$n" -gt 0 ]]; then
+    miss_before=$( { grep -c "MISS tape=${proj} " var/e2e-tape-misses.log 2>/dev/null || true; } | tr -d '[:space:]')
+    timeout "${DISTILL_TIMEOUT:-1800}" env E2E_MODEL=replay npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "var/distill/${proj}-replay-$(date +%H%M%S).log" 2>&1
+    rrc=$?
+    miss_after=$( { grep -c "MISS tape=${proj} " var/e2e-tape-misses.log 2>/dev/null || true; } | tr -d '[:space:]')
+    nmiss=$(( ${miss_after:-0} - ${miss_before:-0} )); [[ $nmiss -lt 0 ]] && nmiss=0
+    out=$(node --input-type=module -e "
+      import { classifyLeg } from './scripts/distill-replay-guard.mjs';
+      const v = classifyLeg({ recordRc: 0, entries: $n, replayRc: $rrc, newMisses: $nmiss });
+      process.stdout.write(v.action + '|' + v.verdict)")
+    action="${out%%|*}"; verdict="${out#*|}"
+    if [[ "$action" == "heal" ]]; then
+      echo "    $proj: $verdict"
+      # one bounded heal — the leg's OWN upstream: the stub restarts for stub legs, live legs reuse
+      # the exported E2E_UPSTREAM. KEEP-style: the heal appends; it never clears.
+      if [[ " ${STUB_PROJECTS} " == *" ${proj} "* ]]; then
+        if ! start_stub "${proj}-heal"; then failed+=("${proj}:stub-down"); final_rc=1; fi
+      fi
+      if [[ "$final_rc" -eq 0 ]]; then
+        timeout "${DISTILL_TIMEOUT:-1800}" env E2E_MODEL=replay E2E_TAPE_FALLBACK=1 ${leg_extra:-} \
+          npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "var/distill/${proj}-heal-$(date +%H%M%S).log" 2>&1
+        hrc=$?
+        [[ "$hrc" -ne 0 ]] && { verdict="heal pass exit=$hrc"; final_rc=1; }
+      fi
+      stop_stub
+      if [[ "$final_rc" -eq 0 ]]; then
+        n=$(find "tests/fixtures/model-tape/$proj" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+        miss_before=$( { grep -c "MISS tape=${proj} " var/e2e-tape-misses.log 2>/dev/null || true; } | tr -d '[:space:]')
+        timeout "${DISTILL_TIMEOUT:-1800}" env E2E_MODEL=replay npx playwright test -c tests/e2e/playwright.config.ts --project="$proj" > "var/distill/${proj}-replay2-$(date +%H%M%S).log" 2>&1
+        rrc2=$?
+        miss_after=$( { grep -c "MISS tape=${proj} " var/e2e-tape-misses.log 2>/dev/null || true; } | tr -d '[:space:]')
+        nmiss2=$(( ${miss_after:-0} - ${miss_before:-0} )); [[ $nmiss2 -lt 0 ]] && nmiss2=0
+        out=$(node --input-type=module -e "
+          import { classifyLeg } from './scripts/distill-replay-guard.mjs';
+          const v = classifyLeg({ recordRc: 0, entries: $n, replayRc: $rrc2, newMisses: $nmiss2, healed: true });
+          process.stdout.write(v.action + '|' + v.verdict)")
+        action="${out%%|*}"; verdict="${out#*|}"
+      fi
+    fi
+    if [[ "$action" == "pass" ]]; then final_rc=0; else final_rc=1; fi
+  fi
+  echo "--- $proj: ${verdict} (#411 record+replay gate)"
   # Provenance is GENERATED, not hand-authored: the `rm -rf` above destroys whatever was in the
   # project directory, and hand-written PROVENANCE.md files (plans, prompt — the records saying
   # those legs come from the scripted stub, not a live model) were deleted by exactly that on the
   # re-anchor (#56). One line per leg, with the verdict only the runner knows.
-  node --experimental-strip-types scripts/write-provenance.mjs --project "$proj" --verdict "exit=$rc tapeEntries=$n" \
+  node --experimental-strip-types scripts/write-provenance.mjs --project "$proj" --verdict "$verdict" \
     >/dev/null 2>&1 || echo "    distill: provenance regeneration FAILED for $proj" >&2
-  [[ "$rc" -ne 0 ]] && failed+=("$proj")
+  [[ "$final_rc" -ne 0 ]] && failed+=("$proj")
 done
 echo
 if [[ ${#failed[@]} -eq 0 ]]; then echo "distill: all requested projects recorded"; else echo "distill FAILED: ${failed[*]}"; exit 1; fi
