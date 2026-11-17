@@ -1,6 +1,6 @@
 # Open items — 2026-11-17 (host 0.2.0-rc.2)
 
-- **0.2.34 follow-waves (2026-11-17 audit):** the composed checkpoint has never been OBSERVED on a live
+- **0.2.34 SHIPPED (2026-11-17, main 2eee0b3, tag 0.2.34; tarball + provenance verified — see project-state). Follow-waves for 0.2.35 (2026-11-17 audit):** the composed checkpoint has never been OBSERVED on a live
   host — the heavy leg's first sight, tracked as `docs/verify.md` C3, in the same family as #143's
   convergence bound. The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents` — the host says
   "new calls are prohibited") are inventoried by `tests/unit/host-composer-shape.test.ts`; the migration
