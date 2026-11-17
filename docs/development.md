@@ -127,6 +127,19 @@ answers the question in exactly one place; two consumers use it:
 - `tests/e2e/boot.ts` **refuses replay by name** when `host` ≠ the pinned version, quoting the
   recorded `reason` and the tracking issue. `E2E_MODEL=record` is deliberately exempt — re-distilling
   is the way out, and a gate that blocked it would strand itself.
+- **Model identity is proven before any mode that WRITES tape** (#406). `MODE=record` and `MODE=heal`
+  now assert, before boot: the upstream's `/v1/models` lists the pinned rig model id, **and** a chat
+  probe requested by that name comes back with the same id in the RESPONSE's `model` field. (Live mode
+  is deliberately outside the proof: boot never resolves an upstream for it — the host routes it — so a
+  guard would probe an endpoint live does not use. Live-class runs on an aliasing endpoint still observe
+  the wrong model; the defense there is this rig's own honesty, not a fetch.) The measured
+  incident: this box's vLLM silently answers `qwen3.8-flash-next` with `qwen3-4b-instruct` — sessions
+  ran, specs ran, and the run wrote fifteen tape entries shaped by the wrong model (raw `think` traces
+  as content) before two prompt-bar assertions caught it. An aliasing endpoint makes every recorded run
+  NOT evidence for the pinned rig model, so the refusal names what IS served instead of recording over
+  the corpus. `MODE=replay` never probes — CI runners have no 8080, and replay writes nothing.
+  The predicate lives once in `tests/support/model-parity.ts`; `E2E_UPSTREAM_MODEL` remains the
+  deliberate remap, honored only when that id is itself listed and proven.
 - `.github/workflows/ci.yml`'s `host-capability` job sets `corpus-anchored`, the `e2e-replay` job
   requires it, and the run log gets a step summary plus a `::warning::` naming the issue. Skipped,
   visibly — the same discipline as the preset-row refusal it sits beside: never silently green,
