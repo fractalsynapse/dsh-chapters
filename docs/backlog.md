@@ -10,8 +10,8 @@
   re-record turned out to belong to the old base). #368 (#340) moved to **0.2.36** by maintainer decision of
   2026-11-17 with the `prompt`-leg re-record. Correction recorded 2026-11-17 the same day: that re-record is
   a STUB-path operation (#56), not an endpoint one — the block was #406's guard refusing the rig's own stub
-  distill, fixed and demoed by #409; then `scripts/distill-tapes.sh prompt` on the #340 branch completes its
-  one gated item.
+  distill, fixed by #409. DONE: PR #368 landed at 9905c4b after re-anchor + one deterministic heal
+  (record-time race class, follow-up gate #411). #340 closes at the 0.2.36 cut.
 - **#355 — the 2026-11-14 correctness audit: 24 issues filed for this audit (25 counting #386), 22 fixed across 24 PRs, released in 0.2.33.**
   Every finding was reproduced against real bytes before it was changed, and the shape they share is the
   release's subject: **a check that cannot fail**. Concretely: the preset-row health witness compared a

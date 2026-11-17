@@ -1037,3 +1037,17 @@ stays as cut — corrections land forward, here and in `docs/backlog.md`. Fixed 
 marker from the stub-pinning script itself, stub-class witness (all-`stub-`-prefixed list; its own
 echo-arm noted honestly), both refusal directions kept, four-quadrant rows. No tape bytes from the
 failed attempt were ever committed (`tests/fixtures/model-tape/prompt/` restored to HEAD each time).
+
+## 2026-11-17 — #340 (PR #368) LANDED to staging; 0.2.36 content is now decided-by-facts
+
+Sequence as measured, end to end: guard fix #409 (PR #410) merged → stub-path distill of the prompt
+leg (exit 0, 14 entries) → strict replay caught ONE unrecorded call — the post-Run regeneration this
+fix's own freshness semantics introduces, lost to streaming latency at record time (a record/replay
+cache-speed inversion, #331 family) → bounded heal against the same deterministic stub appended
+exactly one entry → strict replay green at the leg, full 11-leg chain green locally, CI acceptance
+green on endpoint-less runners → PR #368 merged (`9905c4b`). Follow-up gate filed as **#411**
+(distill should replay-after-record + bounded auto-heal as the default verdict).
+
+**0.2.36 standing content:** #340, #409. Candidates if wanted before the cut: #411 rig gate. Still
+open, unchanged: C3 (first live composed-checkpoint observation), #349 remainder, #397 contract
+decision, TreeDX live rows, host option-(d) todo. Release timing is the maintainer's call.
