@@ -144,3 +144,16 @@ test('#353: contract.md names a row module that default-exports', () => {
   assert.equal(/^\s*export default/m.test(toolsDist), false, 'control: lib/tools.js really has no default export')
   assert.equal(/^\s*export default/m.test(read('lib/tools-row.js')), true, 'control: lib/tools-row.js does')
 })
+
+// ───────────────────────────────────────── #398: the prompt bar's plan input is wired to a real field
+
+test('#398: planOf folds the operative plan from the session log, not from a row field that does not exist', () => {
+  const idx = read('src/index.ts')
+  const block = /planOf: async \(session\) => \{[\s\S]*?\n {6}\},/.exec(idx)
+  assert.ok(block !== null, 'planOf keeps this shape \u2014 update the scan and the wiring together')
+  assert.match(block[0], /detectPlans\(session\.events\)/,
+    'the fold must run over the session\u2019s durable events \u2014 exactly the mechanism engine.ts:815 carries into a checkpoint')
+  assert.match(block[0], /carryActivePlan\(/, 'and through the ONE operative-plan renderer')
+  assert.doesNotMatch(block[0], /planDocs/,
+    'planDocs is a ChapterRecord field; reading it off a SessionState ROW was the dead-code defect (\u2018?.planDocs ?? []\u2019 is always empty, and even record entries carry no .text carryActivePlan needs)')
+})
