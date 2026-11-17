@@ -88,3 +88,16 @@ test('#409: the stub witness is about the LIST — the chat arm only proves it a
   const list = JSON.stringify({ data: [{ id: 'stub-plan-carriage' }] })
   assert.ok(stubEndpointVerdict({ listText: list, chatText: JSON.stringify({ model: 'something-else' }) }) !== null)
 })
+
+// ───────────────────────── SSE frames: the OTHER chat wire shape (measured on the stub)
+
+test('#409: an SSE chat response carries its witness too — the stub streams unconditionally', () => {
+  const sse = 'data: {"model":"stub-plan-carriage","choices":[{"index":0,"delta":{"role":"assistant"}}]}\n'
+    + 'data: {"model":"stub-plan-carriage","choices":[{"index":0,"delta":{"content":"OK"}}]}\n'
+    + 'data: [DONE]\n\n'
+  assert.equal(chatServedId(sse), 'stub-plan-carriage')
+  const list = JSON.stringify({ data: [{ id: 'stub-plan-carriage' }] })
+  assert.equal(stubEndpointVerdict({ listText: list, chatText: sse }), null)
+  // and a garbage stream stays a refusal, not a crash
+  assert.equal(chatServedId('data: ???\ndata: [DONE]'), null)
+})
