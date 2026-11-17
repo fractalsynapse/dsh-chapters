@@ -7,6 +7,7 @@ import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:chil
 import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { RIG_MODEL_ID } from './rig-pins.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 import { bootFailureMessage } from './boot-failure.ts'
 import { servedModelVerdict } from '../support/model-parity.ts'
@@ -476,13 +477,12 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   // else, honored only when listed AND answered-as-itself.
   const writesTape = modelMode === 'record' || (modelMode === 'replay' && process.env.E2E_TAPE_FALLBACK === '1')
   if (writesTape) {
-    const routed = await harnessRoute
-    if (routed === null) {
-      throw new Error(`e2e: ${modelMode === 'record' ? 'record' : 'heal'} writes tape, but no harness route was `
-        + 'resolved — the pinned model id the tape would describe is unknown, and an unknown identity fails closed (#406).')
-    }
+    // #406: the pinned id comes from the rig's ONE source (RIG_MODEL_ID), not from a resolved route —
+    // harnessRoute legitimately answers null on the tracked profile until the provider row is patched
+    // later, and an unknown-pinned-id refusal would gate a mode that always ran. E2E_UPSTREAM_MODEL
+    // stays the deliberate remap: it must ALSO be listed and answer as itself.
     const remap = process.env.E2E_UPSTREAM_MODEL
-    const requested = remap !== undefined && remap !== '' ? remap : routed.route.model
+    const requested = remap !== undefined && remap !== '' ? remap : RIG_MODEL_ID
     const proofHeaders: Record<string, string> = { 'content-type': 'application/json' }
     const proofKey = process.env.E2E_UPSTREAM_KEY
     if (proofKey !== undefined && proofKey !== '') proofHeaders.authorization = `Bearer ${proofKey}`
@@ -569,7 +569,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
         // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
         p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
-        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: ${RIG_MODEL_ID}\n            name: ${RIG_MODEL_ID} (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
         // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
         // readiness outright (`LEG=fork MODE=replay E2E_HOST_RETRIES=1` died at 120s with the host's log holding
         // one plugin line and no URL, against ~21s for the same leg otherwise). The YAML parses either way, so
