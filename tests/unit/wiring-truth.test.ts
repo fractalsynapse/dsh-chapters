@@ -9,6 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { registerChaptersTools } from '../../src/tools.ts'
@@ -204,4 +205,21 @@ test('#409: the scripted-stub legs carry their marker from the ONE place that pi
   assert.match(boot, /const stubLeg = process\.env\.E2E_STUB_LEG === '1'/, 'boot reads the marker')
   assert.match(boot, /const verdict = stubLeg\n?\s*\? stubEndpointVerdict\(\{ listText, chatText \}\)\n?\s*: servedModelVerdict\(\{ listText, chatText, requested \}\)/,
     'the witness branches on leg kind: stub-class proof for stub legs, the pinned-id proof for live legs — unchanged for #406')
+})
+
+// ─────────────────────── #411: distill's per-leg loop must be record+replay, with one bounded heal
+
+test('#411: the distill loop classifies through the tested guard — twice, and heals at most once', () => {
+  const sh = read('scripts/distill-tapes.sh')
+  assert.equal((sh.match(/classifyLeg\(/g) ?? []).length, 2,
+    'exactly two classifyLeg call sites: after the first strict replay, and after the single bounded heal — a third would mean a second heal loop')
+  assert.equal((sh.match(/E2E_TAPE_FALLBACK=1/g) ?? []).length, 1,
+    'the fallback env — the heal — appears exactly once in the loop (#411: ONE bounded pass)')
+  assert.match(sh, /#411 record\+replay gate/, 'the verdict line names the gate the leg just passed')
+  assert.match(sh, /write-provenance\.mjs --project "\$proj" --verdict "\$verdict"/,
+    'PROVENANCE records the CLASSIFIED verdict, not the raw record exit code')
+  // The real syntax gate, executed rather than pattern-matched (#386's lesson: a gate you only
+  // read is a gate you have not tested).
+  const r = spawnSync('bash', ['-n', join(process.cwd(), 'scripts/distill-tapes.sh')], { encoding: 'utf8' })
+  assert.equal(r.status, 0, `bash -n scripts/distill-tapes.sh: ${r.stderr}`)
 })
