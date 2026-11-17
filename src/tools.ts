@@ -18,7 +18,7 @@ import { runRestoreHandler } from './restore.ts'
 import { makeRestoreCommand } from './restore-command.ts'
 import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
-import { candidateTotals, defersAtArchive, toolResultCandidates } from './render.ts'
+import { candidateTotals, defersAtArchive, nextUnarchivedSeq, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
@@ -658,9 +658,12 @@ export function buildChaptersTools(
         // append-only AND duplicate-free, and the child's TOC inherits every earlier
         // chapter through the ancestry walk. When nothing is newer, this degrades to a
         // pure citation fork: child created, archive cited, nothing written.
+        // #396: ONE predicate. The door used to keep the retired two-clause form here
+        // (reduce seeded at 0 + `lastArchived > 0 ? +1 : 0`), which disagreed with the
+        // floor runContinue validates against whenever a committed chapter covered seq 0.
         const parentState = await ports.getState(agent.session.id)
-        const lastArchived = parentState.chapters.reduce((m, c) => Math.max(m, c.endSeq), 0)
-        const fromSeq = lastArchived > 0 ? lastArchived + 1 : 0
+        const fromSeq = nextUnarchivedSeq(parentState.chapters)
+        const lastArchived = fromSeq - 1
         if (fromSeq > 0 && anchor <= lastArchived) {
           const forked = await runFork(ports, { ...callerArgs, handoffNote: `Archived through the Chapters ${door.noun}. Nothing had been said since the last archive, so this ${door.noun} cites the existing chapters unchanged. ${door.noDirective}` }, config)
           if (cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:fork-cite')
