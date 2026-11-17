@@ -917,3 +917,31 @@ regardless. The debt is real and ratcheted; the claim that no real-host coverage
 Node-24 note for rigs: this box's system node is 22; the repo-vendored `var/toolchain/node-v24.22.0` is
 what CI and the ratchet use, and the deterministic ledger (1,625+/1,631 with the five credential-gated
 `live:` TreeDX rows the only non-passes) was run on it.
+
+## 2026-11-17 — 0.2.34 cut prepared from staging `9bab463`
+
+The 2026-11-15/16 context-handling audit lands as **0.2.34**: #395, #396, #398, #399 (merged PRs #400–#403),
+plus the corpus re-stamp #404 and the post-0.2.33 tail of the previous wave (#390, #391→partial #349, #392,
+#394). Versions: `package.json` / `package-lock.json` root / `package-lock.json` `packages[""]` /
+`src/version.ts` — all four at **0.2.34**, the agreement row in `tests/unit/release-gate.test.ts` green.
+
+Verified at the integrated base `9bab463` before this branch: deterministic ledger 1,632/1,638 (5
+credential-gated `live:` TreeDX rows, 1 `#314 WISH` todo); **full 11-leg tape-replay chain green on the
+merged staging tree**, each leg under its own boot; `typecheck`/`typecheck:client` clean; ratchet 58=58;
+`corpus:stamp` re-stamped on that green replay with `promptAnchor` unchanged — no re-record required by
+anything in this range. The acceptance gate for the candidate itself remains this release PR's own
+`acceptance — ten tape-replay legs` run: `ci.yml` triggers on `pull_request` and `push: [main]` only.
+
+Open and named: `docs/verify.md` **C3** — no live-class run has yet OBSERVED a composed checkpoint (the
+heavy leg owns that first sight, same family as #143's bound). #349 remains open (goal-carriage partial
+landed via #391; the rig-dependent rest stands). The five `live:` TreeDX rows require credentials.
+**#397 was closed by decision, not code**: passing `meta.parentSession` at `agents.create` collides with
+`docs/contract.md` § Lineage ("seed lineage; the registry is the sole ancestry authority"); amendment is a
+maintainer call and the issue carries the one-line change if it flips.
+
+Maintainer direction recorded on 2026-11-17: **#383 (#379) and #368 (#340) are NOT in this cut** — they
+roll into **0.2.35** along with the `prompt`-leg re-record that gates them.
+
+The audit self-correction stays recorded above rather than edited away: the claim that "the e2e harness
+cannot compile so no real-host coverage exists" was wrong — the ratchet baselines 58 errors by design and
+the replay chain runs real boots regardless. Withdrawn where the findings are written.

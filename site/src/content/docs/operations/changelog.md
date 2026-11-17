@@ -8,6 +8,64 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.34 — 2026-11-17 · the features that existed only in the stubs (the 2026-11-15 context-handling audit)
+
+An external deep read of this plugin against the pinned harness and Cordis surfaces — `examples/dsh`,
+`examples/cordis`, and the *installed* `@deepseek-ai/*` 0.2.0-rc.2 bundles as the authority — produced four
+fixes whose shared shape is uglier than "a check that cannot fail": **a check that can never fail, because
+its stub believes a host shape the host never sends.** The durable-storage layer came out of the audit
+sound — append-only logs, reserve-before-write, read-back verification, lost-update sections all verified
+against the installed domain facility — which is why the findings concentrate exactly where the plugin
+touches the host's live objects:
+
+- **#399, the headliner** (`fix/399`, PR #403): compaction's topic-sequential composer had **never run on
+  a real host**. `reconstructShadowedSeqs` read `surface.nodes` as `{seq}[]` — the kernel publishes a plain
+  NUMBER array — and captured `deriveEventMessage` into a bare call — the host method resolves projections
+  through `this`. Nothing ever mapped, the function returned an unnamed `null`, and every pressure
+  compaction archived ONE legacy mega-chapter while the L0 suite stayed green against a stub of the
+  invented shape: the r28 lesson re-running inside the very file that documents r28. Now the mapping
+  speaks the real shape, the fallback is a discriminated `{reason}` the engine always names (`no-match` is
+  a WARN — the drift alarm that would have caught this in its first week), the composed checkpoint carries
+  the plot the legacy arm carries, and a new row hands the composer a session built by the **installed
+  kernel class** — the only stub that cannot lie. (The composed arm has never lived, so no committed tape
+  can depend on it; verified: all 25 replayed durable logs contain **zero** compaction events, and the
+  corpus `promptAnchor` is unchanged across the whole range. The first *live* observation of a composed
+  checkpoint is the heavy leg's to make — `docs/verify.md` C3, open, named.)
+- **#395** (PR #400): the continuation budget's header bound read two of the three DISJOINT usage arms —
+  `TokenUsage` documents billed input as `input + cacheRead + cacheWrite`, and the omitted arm is exactly
+  what a cache-extending turn pays. The bound claimed conservatism and was quietly over-generating
+  admissions on the turns that grew the prompt cache.
+- **#396** (PR #401): two watermark derivations still hand-rolled the form #336 retired, and the
+  continuation notice's live-plan ceiling took an ancestry-wide max over per-session seq spaces — sessions
+  restart event numbering at continuation, so a root's higher seqs could reclassify the caller's
+  *pending-review* plan as archived and drop it from the child's notice in silence. One predicate
+  everywhere now, and a source-scan gate (`one-predicate.test.ts`) fails CI on a fresh
+  `reduce(…endSeq)` derivation.
+- **#398** (PR #402): the prompt bar's `planOf` read `row.planDocs` — a field that exists only on chapter
+  RECORDS, and even there without the full text the folder needs. The "active plan rides every suggestion"
+  contract was dead wiring; it now folds `detectPlans(session.events)` exactly as the engine's checkpoint
+  carry does, pinned by a wiring-truth scan that refuses to re-read the phantom field.
+
+**Also in range from the 0.2.33 wave, landing after that tag:** #390 — a gate that checks every
+`dsh-chapters:` line quoted in current docs against what the code can actually emit, with a negative
+control after the first version of it lied; #391 — the parent goal now rides a child's notice as text, and
+the notice says aloud that only a human can arm it (partial #349, which stays open); #392 — item Z became a
+non-vacuous both-directions gate reading host shapes from the installed dist — the family #399 proves the
+world needs; #394 — `release.yml` credited the bare-semver tag rule to protection that is not configured.
+
+**Corrections made during the audit, recorded rather than edited away:** the audit initially claimed the
+e2e plane "cannot compile, so no real-host coverage exists." Wrong gate model — `scripts/e2e-typecheck-ratchet.sh`
+baselines 58 type errors by deliberate decision (#83) and CI enforces no-growth, while the replay chain
+runs ten real-host legs regardless. The claim is withdrawn in `docs/project-state.md` next to the findings
+it overstated, because this release's subject is precisely checks whose words outran their wiring.
+
+**Operator-visible effects:** zero default changes; zero bytes move in any archived chapter or checkpoint
+that existing tapes carry. Pressure compaction writes topic-split chapters from this version on (smaller,
+more precisely cited files), each fallback prints its named reason, and a pending plan reaches continuation
+children that previously lost one. **Not included:** #383 (#379 director-budget cap) and #368 (#340
+suggestion freshness) — both open, held by maintainer decision for 0.2.35 with the `prompt`-leg re-record
+that gates them.
+
 ### 0.2.33 — 2026-11-15 · the audit that kept finding green things that were not watching (#355)
 
 **Twenty-two audit findings closed by twenty-four merged PRs (one finding took two PRs, and a docs defect turned up during the release work itself), from a deep read of this plugin's own claims, and the pattern underneath all of them:
