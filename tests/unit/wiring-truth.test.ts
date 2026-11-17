@@ -157,3 +157,21 @@ test('#398: planOf folds the operative plan from the session log, not from a row
   assert.doesNotMatch(block[0], /planDocs/,
     'planDocs is a ChapterRecord field; reading it off a SessionState ROW was the dead-code defect (\u2018?.planDocs ?? []\u2019 is always empty, and even record entries carry no .text carryActivePlan needs)')
 })
+
+// ─────────────────────────────────── #406: the tape-writing modes must run the identity proof
+
+test('#406: boot.ts gates the model-identity proof to the modes that WRITE tape', () => {
+  const boot = read('tests/e2e/boot.ts')
+  assert.match(boot, /const writesTape = modelMode === 'record' \|\| \(modelMode === 'replay' && process\.env\.E2E_TAPE_FALLBACK === '1'\)/,
+    'the gate is exactly the two tape-writing modes — heal rides replay+fallback')
+  assert.match(boot, /if \(writesTape\) \{[\s\S]{0,2600}?servedModelVerdict\(\{ listText, chatText, requested \}\)/,
+    'the proof predicate runs behind the gate, on both fetched payloads')
+  assert.match(boot, /refusing to \$\{modelMode === 'record' \? 'record' : 'heal'\}/,
+    'a non-null verdict is a refusal that names the mode')
+  // The probe fetch must be DOWNSTREAM of the gate, and there must be exactly one: plain replay and
+  // live must never hit /v1/models — CI runners have no endpoint, and those modes write nothing.
+  const gateIdx = boot.indexOf('if (writesTape) {')
+  const probeIdx = boot.indexOf(`fetch(new URL('/v1/models'`)
+  assert.ok(gateIdx >= 0 && probeIdx > gateIdx, 'the identity probe sits inside the writesTape gate')
+  assert.equal(boot.split(`fetch(new URL('/v1/models'`).length - 1, 1, 'exactly one models probe in the whole boot path')
+})

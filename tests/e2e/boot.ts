@@ -9,6 +9,7 @@ import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 import { bootFailureMessage } from './boot-failure.ts'
+import { servedModelVerdict } from '../support/model-parity.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -463,6 +464,47 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
   if (modelMode === 'record' && !/^https?:\/\/(localhost|127\.|\[::1\])/.test(upstreamBase)
     && (process.env.E2E_UPSTREAM_KEY === undefined || process.env.E2E_UPSTREAM_KEY === '')) {
     throw new Error(`e2e: E2E_UPSTREAM=${upstreamBase} is remote but E2E_UPSTREAM_KEY is unset — the tape proxy would forward the profile's dummy credential and every distill request would 401. Set E2E_UPSTREAM_KEY (and E2E_UPSTREAM_MODEL if the endpoint serves a different id).`)
+  }
+  // #406: tape-WRITING modes prove the endpoint actually serves the pinned rig model BEFORE anything
+  // is recorded. Measured on this box: the local vLLM lists only `qwen3-4b-instruct` yet ANSWERS a
+  // chat request named `qwen3.8-flash-next` with it — the alias is silent, sessions run, specs pass or
+  // fail for the wrong reasons, and fifteen tape entries got written describing a model this rig does
+  // not pin. The witness is the RESPONSE's own `model` field; /v1/models alone does not catch the
+  // alias class. Replay never probes (CI runners have no 8080, and replay writes nothing). Live never
+  // resolves an upstream here BY DESIGN, so there is nothing honest to probe — the guard is scoped to
+  // the modes that can write. `E2E_UPSTREAM_MODEL` remains the deliberate remap: proven like anything
+  // else, honored only when listed AND answered-as-itself.
+  const writesTape = modelMode === 'record' || (modelMode === 'replay' && process.env.E2E_TAPE_FALLBACK === '1')
+  if (writesTape) {
+    const routed = await harnessRoute
+    if (routed === null) {
+      throw new Error(`e2e: ${modelMode === 'record' ? 'record' : 'heal'} writes tape, but no harness route was `
+        + 'resolved — the pinned model id the tape would describe is unknown, and an unknown identity fails closed (#406).')
+    }
+    const remap = process.env.E2E_UPSTREAM_MODEL
+    const requested = remap !== undefined && remap !== '' ? remap : routed.route.model
+    const proofHeaders: Record<string, string> = { 'content-type': 'application/json' }
+    const proofKey = process.env.E2E_UPSTREAM_KEY
+    if (proofKey !== undefined && proofKey !== '') proofHeaders.authorization = `Bearer ${proofKey}`
+    const proofAbort = AbortSignal.timeout(20_000)
+    let listText = ''
+    let chatText = ''
+    try {
+      listText = await (await fetch(new URL('/v1/models', upstreamBase).href, { signal: proofAbort })).text()
+      chatText = await (await fetch(new URL('/v1/chat/completions', upstreamBase).href, {
+        method: 'POST',
+        headers: proofHeaders,
+        signal: proofAbort,
+        body: JSON.stringify({ model: requested, messages: [{ role: 'user', content: 'identity probe — reply with one word' }], max_tokens: 4 }),
+      })).text()
+    } catch (error) {
+      throw new Error(`e2e: ${modelMode === 'record' ? 'record' : 'heal'} writes tape, and the model identity at `
+        + `${upstreamBase} could not be PROVEN (${String((error as Error)?.message ?? error)}). `
+        + 'Start the endpoint the rig pins, or point E2E_UPSTREAM at one that answers. Replay writes nothing and stays allowed.')
+    }
+    const verdict = servedModelVerdict({ listText, chatText, requested })
+    if (verdict !== null) throw new Error(`e2e: refusing to ${modelMode === 'record' ? 'record' : 'heal'} — ${verdict}`)
+    console.log(`[e2e] model identity proven at ${upstreamBase}: ${requested} (listed, and answered as itself) (#406)`)
   }
   let proxy: ProxyHandle | null = null
   if (modelMode === 'record' || modelMode === 'replay') {
