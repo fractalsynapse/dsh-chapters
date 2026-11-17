@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { servedModelVerdict, modelsListIds, chatServedId } from '../support/model-parity.ts'
+import { servedModelVerdict, stubEndpointVerdict, modelsListIds, chatServedId } from '../support/model-parity.ts'
 
 const RIG = 'qwen3.8-flash-next'
 
@@ -52,4 +52,39 @@ test('#406: the parse helpers stay total (they run on hostile payloads)', () => 
   assert.deepEqual(modelsListIds('{"data":"nope"}'), [])
   assert.equal(chatServedId('{}'), null)
   assert.equal(chatServedId('{"model":"x"}'), 'x')
+})
+
+// ────────────────────────────── #409: the stub-class witness (the leg kinds split)
+
+test('#409: a pure stub endpoint — everything listed is stub-prefixed — PASSES on the stub leg', () => {
+  const list = JSON.stringify({ data: [{ id: 'stub-plan-carriage' }] })
+  const chat = JSON.stringify({ model: 'stub-plan-carriage', choices: [] })
+  assert.equal(stubEndpointVerdict({ listText: list, chatText: chat }), null)
+})
+
+test('#409: a mixed list is NOT stub-class — one real id disqualifies the whole endpoint', () => {
+  const list = JSON.stringify({ data: [{ id: 'stub-plan-carriage' }, { id: 'qwen3-4b-instruct' }] })
+  const chat = JSON.stringify({ model: 'stub-plan-carriage', choices: [] })
+  const v = stubEndpointVerdict({ listText: list, chatText: chat })
+  assert.ok(v !== null)
+  assert.match(v, /qwen3-4b-instruct/, 'the refusal names the real id that broke the class')
+})
+
+test('#409: the measured alias box is refused on the STUB leg too — its only listed id is a real model', () => {
+  const list = JSON.stringify({ data: [{ id: 'qwen3-4b-instruct' }] })
+  const chat = JSON.stringify({ model: 'qwen3-4b-instruct', choices: [] })
+  assert.ok(stubEndpointVerdict({ listText: list, chatText: chat }) !== null)
+})
+
+test('#409: an unparseable or empty stub-list fails closed like everything else here', () => {
+  assert.ok(stubEndpointVerdict({ listText: 'nope', chatText: '{}' }) !== null)
+  assert.ok(stubEndpointVerdict({ listText: '{"data":[]}', chatText: '{}' }) !== null)
+})
+
+test('#409: the stub witness is about the LIST — the chat arm only proves it answers as its first listed id', () => {
+  // The stub's own provenance note: its `model` field ECHOES the request name and is documented
+  // NOT-provenance. So the witness uses the endpoint's OWN first listed id, and requires the echo
+  // to come back identical — an endpoint that lists stub ids but answers differently is broken.
+  const list = JSON.stringify({ data: [{ id: 'stub-plan-carriage' }] })
+  assert.ok(stubEndpointVerdict({ listText: list, chatText: JSON.stringify({ model: 'something-else' }) }) !== null)
 })
