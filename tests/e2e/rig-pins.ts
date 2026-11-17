@@ -13,6 +13,15 @@
  * `process.env` before booting. An explicit command-line value still wins, so a leg can be
  * re-tuned without editing the table.
  */
+/**
+ * The model id the rig pins, in ONE source (#406): the profile's provider row, the bar route's
+ * fixture spec, and the tape-WRITING identity proof all read this constant. An endpoint that
+ * silently aliases it (vLLM answers an unknown name with whatever is loaded) must fail the proof —
+ * the measured incident: qwen3.8-flash-next requested, qwen3-4b-instruct answered, think traces
+ * contaminated fifteen tape entries before two prompt-bar assertions caught it.
+ */
+export const RIG_MODEL_ID = 'qwen3.8-flash-next'
+
 export interface RigPin {
   port: number
   threshold: string
