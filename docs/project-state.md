@@ -945,3 +945,55 @@ roll into **0.2.35** along with the `prompt`-leg re-record that gates them.
 The audit self-correction stays recorded above rather than edited away: the claim that "the e2e harness
 cannot compile so no real-host coverage exists" was wrong — the ratchet baselines 58 errors by design and
 the replay chain runs real boots regardless. Withdrawn where the findings are written.
+
+## 2026-11-17 — 0.2.34 SHIPPED
+
+Released from `main` `2eee0b3` (merge of PR #405, verified head `e01282c`, tree-identical), tag **`0.2.34`**
+(annotated, immutable, matching the manifest at all four version sites).
+
+The release job's own gates (run `44051111647`, success): build → coverage-gated deterministic suite →
+publish with `NPM_TOKEN` (Production) and OIDC provenance — the log carries `publish Provenance statement
+published to transparency log` (sigstore logIndex 3944683270), the no-attestation fallback did not fire.
+CI on the `main` push (run `44051010483`) — including the ten-leg tape-replay acceptance chain — success,
+so the published content itself was replayed green.
+
+Registry tarball check (the 0.2.20 dead-version class): `npm view @fractalsynapse/dsh-chapters@0.2.34`
+resolves, `latest` points at it; unpacking the shipped tarball, `package.json` says **0.2.34** and
+`lib/version.js` carries `PLUGIN_VERSION = '0.2.34'` — manifest and bundled bytes agree. The registry
+attestation endpoint returns the publish bundle.
+
+Closed at this cut: **#395, #396, #398, #399** (the 2026-11-15/16 context-handling audit fixes).
+
+**Post-cut items heading for 0.2.35:**
+- **#383 (#379 director-budget cap)** and **#368 (#340 suggestion freshness)** — the two held PRs, together
+  with the **`prompt`-leg re-record** that gates them (maintainer direction of 2026-11-17).
+- **C3** (`docs/verify.md`) — the first live-host OBSERVATION of a composed checkpoint (heavy leg; same
+  family as #143's convergence bound). Deterministic + replayed evidence says the composer maps on the
+  real kernel class; the live sight is still owed.
+- **#349** remains open past its shipped half (#391).
+- **#397** awaits a maintainer decision on amending `docs/contract.md` § Lineage.
+- The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents`) — inventory pinned by
+  `tests/unit/host-composer-shape.test.ts` — are the first gate to re-run against any host bump;
+  `contract.md` is the measuring document.
+
+## 2026-11-17 — 0.2.35 cut prepared from staging `669d59d`; scope decided
+
+Maintainer direction of 2026-11-17: cut 0.2.35 **early** with the two landed items — #379 (director
+chapter-block cap, PR #383) and #406 (tape-writing model-identity guard, PR #407) — and move #340
+(PR #368) to **0.2.36**. Recorded as a decision: #368 passes everything except its one gated item, the
+`prompt`-leg re-record, which is blocked on an endpoint that truly serves the pinned rig model — the
+defect #406 now refuses loudly instead of recording over it.
+
+What the re-record attempt turned up is the release's real content: this box's endpoint was proven by
+direct probe to SILENTLY ALIAS the pinned model name (requests for `qwen3.8-flash-next` answered by
+`qwen3-4b-instruct`, raw `think` traces as content; fifteen tape entries contaminated and discarded,
+corpus untouched). The guard, the single-source `RIG_MODEL_ID`, the field demo (refuse before boot, zero
+bytes written), and the replay-inert proof (CI chain green with the guard present) all landed before
+the cut.
+
+Versions: all four sites at **0.2.35**; release-gate 6/6. Evidence at the pre-release base `669d59d`
+was carried by #407's own four green CI jobs (including the ten-leg replay); this candidate re-runs
+the full chain locally before its stamp commit. Named open, unchanged from 0.2.34: verify C3 (first
+live observation of a composed checkpoint), #349 remainder, #397 contract decision, five credential-
+gated TreeDX live rows, and #340 (its home is now 0.2.36, with this box's endpoint defect the thing to
+fix or route around).

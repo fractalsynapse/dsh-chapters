@@ -7,8 +7,10 @@ import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:chil
 import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
+import { RIG_MODEL_ID } from './rig-pins.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 import { bootFailureMessage } from './boot-failure.ts'
+import { servedModelVerdict } from '../support/model-parity.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -464,6 +466,46 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     && (process.env.E2E_UPSTREAM_KEY === undefined || process.env.E2E_UPSTREAM_KEY === '')) {
     throw new Error(`e2e: E2E_UPSTREAM=${upstreamBase} is remote but E2E_UPSTREAM_KEY is unset — the tape proxy would forward the profile's dummy credential and every distill request would 401. Set E2E_UPSTREAM_KEY (and E2E_UPSTREAM_MODEL if the endpoint serves a different id).`)
   }
+  // #406: tape-WRITING modes prove the endpoint actually serves the pinned rig model BEFORE anything
+  // is recorded. Measured on this box: the local vLLM lists only `qwen3-4b-instruct` yet ANSWERS a
+  // chat request named `qwen3.8-flash-next` with it — the alias is silent, sessions run, specs pass or
+  // fail for the wrong reasons, and fifteen tape entries got written describing a model this rig does
+  // not pin. The witness is the RESPONSE's own `model` field; /v1/models alone does not catch the
+  // alias class. Replay never probes (CI runners have no 8080, and replay writes nothing). Live never
+  // resolves an upstream here BY DESIGN, so there is nothing honest to probe — the guard is scoped to
+  // the modes that can write. `E2E_UPSTREAM_MODEL` remains the deliberate remap: proven like anything
+  // else, honored only when listed AND answered-as-itself.
+  const writesTape = modelMode === 'record' || (modelMode === 'replay' && process.env.E2E_TAPE_FALLBACK === '1')
+  if (writesTape) {
+    // #406: the pinned id comes from the rig's ONE source (RIG_MODEL_ID), not from a resolved route —
+    // harnessRoute legitimately answers null on the tracked profile until the provider row is patched
+    // later, and an unknown-pinned-id refusal would gate a mode that always ran. E2E_UPSTREAM_MODEL
+    // stays the deliberate remap: it must ALSO be listed and answer as itself.
+    const remap = process.env.E2E_UPSTREAM_MODEL
+    const requested = remap !== undefined && remap !== '' ? remap : RIG_MODEL_ID
+    const proofHeaders: Record<string, string> = { 'content-type': 'application/json' }
+    const proofKey = process.env.E2E_UPSTREAM_KEY
+    if (proofKey !== undefined && proofKey !== '') proofHeaders.authorization = `Bearer ${proofKey}`
+    const proofAbort = AbortSignal.timeout(20_000)
+    let listText = ''
+    let chatText = ''
+    try {
+      listText = await (await fetch(new URL('/v1/models', upstreamBase).href, { signal: proofAbort })).text()
+      chatText = await (await fetch(new URL('/v1/chat/completions', upstreamBase).href, {
+        method: 'POST',
+        headers: proofHeaders,
+        signal: proofAbort,
+        body: JSON.stringify({ model: requested, messages: [{ role: 'user', content: 'identity probe — reply with one word' }], max_tokens: 4 }),
+      })).text()
+    } catch (error) {
+      throw new Error(`e2e: ${modelMode === 'record' ? 'record' : 'heal'} writes tape, and the model identity at `
+        + `${upstreamBase} could not be PROVEN (${String((error as Error)?.message ?? error)}). `
+        + 'Start the endpoint the rig pins, or point E2E_UPSTREAM at one that answers. Replay writes nothing and stays allowed.')
+    }
+    const verdict = servedModelVerdict({ listText, chatText, requested })
+    if (verdict !== null) throw new Error(`e2e: refusing to ${modelMode === 'record' ? 'record' : 'heal'} — ${verdict}`)
+    console.log(`[e2e] model identity proven at ${upstreamBase}: ${requested} (listed, and answered as itself) (#406)`)
+  }
   let proxy: ProxyHandle | null = null
   if (modelMode === 'record' || modelMode === 'replay') {
     proxy = await startModelProxy({
@@ -527,7 +569,7 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
         // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
         p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
-        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: qwen3.8-flash-next\n            name: qwen3.8-flash-next (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
+        p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: ${RIG_MODEL_ID}\n            name: ${RIG_MODEL_ID} (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
         // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
         // readiness outright (`LEG=fork MODE=replay E2E_HOST_RETRIES=1` died at 120s with the host's log holding
         // one plugin line and no URL, against ~21s for the same leg otherwise). The YAML parses either way, so

@@ -1,5 +1,5 @@
 import { bootE2eServer, rigStoreRoot, ROOT, type Pins } from './boot.ts'
-import { applyRigEnv, projectFromArgv } from './rig-pins.ts'
+import { applyRigEnv, projectFromArgv, RIG_MODEL_ID } from './rig-pins.ts'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -41,9 +41,9 @@ function promptModelForBoot(): string {
     }
     console.warn('[e2e] live leg found no ambient provider route; falling back to the fixture route')
   }
-  console.log('[e2e] bar route = local/qwen3.8-flash-next — the tape proxy translates this to the ambient '
+  console.log(`[e2e] bar route = local/${RIG_MODEL_ID} — the tape proxy translates this to the ambient `
     + "provider's real model, because the host LLM service has no adapter for that provider directly")
-  return 'local/qwen3.8-flash-next'
+  return `local/${RIG_MODEL_ID}`
 }
 import { installRigFaultGuard, RIG_FAULT_PATTERN, REPLAY_MISS_PATTERN } from './rig-fault.ts'
 
