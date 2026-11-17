@@ -27,9 +27,12 @@ test('distill refuses a model-driven leg that recorded no tape entries', () => {
   assert.match(script, /if \[\[ "\$rc" -eq 0 && "\$n" -eq 0 \]\]; then/,
     'the refusal must be unconditional across projects — an exemption list is where a fake green re-hides')
   assert.match(script, /refusing to record/, 'the stub-upstream guard stays as its own separate check')
-  // the ordering matters: the refusal has to be able to override a 0 exit code
+  // the ordering matters: the refusal has to be able to override a 0 exit code.
+  // #411 reworded the verdict LINE (it now prints the classified record+replay gate verdict) — the
+  // anchor moves with it, the property does not: the vacuous check must run BEFORE any verdict
+  // print, and the gate's own classifyLeg table independently re-encodes VACUOUS for entries=0.
   const at = script.search(/VACUOUS|vacuous/)
-  const verdict = script.indexOf('echo "--- $proj: exit=$rc tapeEntries=$n"')
+  const verdict = script.indexOf('echo "--- $proj: ${verdict} (#411 record+replay gate)"')
   assert.ok(at > 0 && verdict > 0 && at < verdict, 'the check runs BEFORE the verdict line is printed')
 })
 
