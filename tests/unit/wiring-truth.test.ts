@@ -175,3 +175,19 @@ test('#406: boot.ts gates the model-identity proof to the modes that WRITE tape'
   assert.ok(gateIdx >= 0 && probeIdx > gateIdx, 'the identity probe sits inside the writesTape gate')
   assert.equal(boot.split(`fetch(new URL('/v1/models'`).length - 1, 1, 'exactly one models probe in the whole boot path')
 })
+
+// ─────────────────────────────── #406: the pinned rig model id has ONE source, and the guard reads it
+
+test('#406: RIG_MODEL_ID is the single literal for the pinned model id', () => {
+  const pins = read('tests/e2e/rig-pins.ts')
+  assert.match(pins, /export const RIG_MODEL_ID = 'qwen3\.8-flash-next'/, 'the constant is the definition site')
+  const boot = read('tests/e2e/boot.ts')
+  assert.match(boot, /- id: \$\{RIG_MODEL_ID\}/, 'the provider row interpolates the constant')
+  assert.doesNotMatch(boot, /- id: qwen3\.8-flash-next/, 'no raw literal survives in the YAML the boot writes')
+  assert.doesNotMatch(boot, /routed\.route\.model/, 'the guard does not depend on a resolved route — harnessRoute legitimately answers null on the tracked profile')
+  const gs = read('tests/e2e/globalSetup.ts')
+  assert.match(gs, /local\/\$\{RIG_MODEL_ID\}/, 'the bar fixture route uses the same source')
+  assert.doesNotMatch(gs, /'local\/qwen3\.8-flash-next'/, 'and carries no second literal')
+  assert.match(boot, /const requested = remap !== undefined && remap !== '' \? remap : RIG_MODEL_ID/,
+    'the proof requested name is the constant, unless E2E_UPSTREAM_MODEL deliberately remaps')
+})
