@@ -140,6 +140,16 @@ answers the question in exactly one place; two consumers use it:
   the corpus. `MODE=replay` never probes — CI runners have no 8080, and replay writes nothing.
   The predicate lives once in `tests/support/model-parity.ts`; `E2E_UPSTREAM_MODEL` remains the
   deliberate remap, honored only when that id is itself listed and proven.
+- **#409: the proof is leg-kind aware.** `plans`/`prompt`/`prompt-revival` legitimately distill against
+  the SCRIPTED STUB (#56 policy — the prompt leg's assertion compares a constant only the stub's
+  `suggest` arm mints), and the stub lists `stub-plan-carriage`, not the live model name. The guard's
+  first cut therefore refused the rig's own stub distill. `distill-tapes.sh` now exports
+  `E2E_STUB_LEG=1` beside the stub `E2E_UPSTREAM` it already pins — one coupled source — and boot
+  honors it only against a STUB-CLASS endpoint (every listed id `stub-`-prefixed, chat witnessed
+  against the endpoint's own first listed id; the stub's `model` field is an echo and its own
+  provenance file says so). Marker without stub-class → refuse; stub-class on a live leg → refuse;
+  the measured alias box fails BOTH leg kinds. Demos that bind the class: alias+record refused,
+  replay inert, AND stub-leg+stub-endpoint ACCEPTED — the third one was missing from #407.
 - `.github/workflows/ci.yml`'s `host-capability` job sets `corpus-anchored`, the `e2e-replay` job
   requires it, and the run log gets a step summary plus a `::warning::` naming the issue. Skipped,
   visibly — the same discipline as the preset-row refusal it sits beside: never silently green,
