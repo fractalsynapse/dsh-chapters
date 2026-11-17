@@ -223,3 +223,71 @@ the node's tokens, and the ceiling it failed.
 
 Rows: `tests/unit/last-resort.test.ts` (the ceiling math, `null` on incomplete inputs, and the anti-vacuity ordering row) plus the engine lifecycle suite; below the ceiling, untouched;
 switch off, untouched even after a decline; and the warning carries the numbers.
+
+## Engine ownership must be witnessed, not assumed (#360, measured 2026-11-15)
+
+Composing the `chapters` preset does not by itself prove the chapters engine served the session. Two
+real sessions on this machine — `agentPreset: "chapters"` in the durable header — were compacted
+entirely by the host's basic engine: 6 and 8 `compaction/summary` events carrying provider
+`qwen-token-plan`, **zero** with `dsh-chapters`, no TOC in any checkpoint, and no store directory in
+either workspace. They ran that way for a week. The LLM summariser was billed, and the archive that
+this whole plugin exists to write was never written.
+
+Nothing noticed, because the one place in the code that looks at summary provenance
+(`scanChaptersSummaries`) answers a *different* question — "which summaries can I reconstruct?" — and
+answers it by skipping anything that is not ours. A `continue` that was correct for reconstruction was
+the only signal about ownership, and it was silent by construction.
+
+The rule now: **ownership is counted and reported, separately from reconstruction.**
+
+- `summarizeProvenance(session)` counts ours vs foreign `compaction/summary` events, names the foreign
+  providers, and keeps the seqs so a human can go read the event that fired.
+- At each compaction entry the realm engine runs it, warns **once per session**, and records the count
+  under `engine.foreignCompaction:<sessionId>` in the shared settings table. That channel is deliberate:
+  the host plane and the preset realm are **separate module instances** under isolation, so a
+  process-local map would read permanently empty from `/chapters-status` — a green signal not connected
+  to the thing it certifies, which is the bug class, not a workaround for it.
+- `/chapters-status` prints the counts, and prints an explicit **"absence is NOT proof"** line when
+  there is nothing to report. A session that never needed compacting looks identical, in the absence of
+  this note, to a session whose engine silently never ran.
+
+**Deliberately not a refusal.** An operator may disable the `chapters-engine` row on purpose; a hard
+failure would break their sessions to report their own configuration. The posture is: say it loudly,
+once, in a file and in status, and let them decide.
+
+**Also corrected here:** the line above this section claimed *"the archive keeps every byte"* as the
+reason overriding an economy knob is defensible. For shadowed tool results that was **false** until
+#334 — the renderer archived arrival's ~500-byte stub and discarded the payload, hashing the stub so
+cleanly that every integrity check passed. The claim is now earned by that fix rather than by the
+mechanism's intent, and existing archives written before it still hold stubs for any session where
+arrival shadowing fired.
+
+Rows: `tests/unit/engine-provenance.test.ts` — fixtures built from the real `compaction/summary` key
+set read out of the affected production log (not an imagined shape), covering all-foreign, ours-including-
+`-degraded`, mixed, never-compacted, and no-provider-field; with an anti-vacuity control pinning that
+`scanChaptersSummaries` still sees only our own, so the two questions cannot be merged by someone
+"fixing" the silence in the wrong place.
+
+## The composer must speak the host's shape (#399, measured 2026-11-16)
+
+Pressure compaction topic-splits the shadowed span only when `reconstructShadowedSeqs` maps the prepared
+summarize region back onto durable seqs. Two host facts bind that mapping, both pinned against the installed
+bundle (`@deepseek-ai/dsh-session` 0.2.0-rc.2):
+
+- `SessionSurface.nodes` is a **plain seq array** (`readonly SessionSeq[]`, `lib/types/surface.d.ts:120`) —
+  numbers, not `{seq}` records. The `tokenMeter` measurement nodes have `.seq`; the surface nodes do not.
+- `Session#deriveEventMessage` is a **class method** that resolves projections through `this`
+  (`lib/index.js:1576`) — captured into a local and called bare, it throws. Reading it as a value and
+  invoking `derive(ev)` is the same r28 defect wearing a different hat.
+
+When either is violated the function returns "no match" and the engine falls to the legacy single-chapter
+path — silently at first, because nothing throws. The mapping result is therefore **discriminated**
+(`{ok:true,seqs} | {ok:false,reason}`) and the engine names the reason on every fallback:
+`no-surface-api` and `ambiguous` are honest degradations (note level); **`no-match` is a drift alarm** (warn:
+the region was present and nothing mapped). The composed checkpoint carries the same lead sections in the
+same order as the legacy one — plan, rules, plot — so activating the composed path cannot silently drop the
+plot the plugin just paid its bounded elicited call to produce.
+
+Corpus consequence: the composed arm has never run against a real host, so recording it changes composed
+checkpoint bytes for the first time when it activates. That is an activation, not a regression; the
+legacy-only legs stay byte-identical by construction.

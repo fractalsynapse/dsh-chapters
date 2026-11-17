@@ -177,3 +177,72 @@ test('equal titles in one batch do not overwrite each other', async () => {
   assert.equal(new Set(paths).size, 2, JSON.stringify(paths))
   assert.equal([...files.keys()].filter((p) => p.includes('/chapters/')).length, 2)
 })
+
+
+// ───────────────────────────────────────────── #337: two sessions must not share one chapter path
+
+/** A one-message span whose body carries a distinctive marker, so "whose bytes won" is checkable. */
+const marked = (title: string, startSeq: number, endSeq: number, marker: string): ReturnType<typeof chapter> =>
+  chapter(title, startSeq, endSeq, [
+    { type: 'user/message', seq: startSeq, time: 0, data: { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: marker }] } } as never,
+    { type: 'turn/end', seq: endSeq, data: { turn: 1, reason: { kind: 'completed' } } } as never,
+  ])
+
+test('#337: a child authoring the same number and title lands beside the parent, not on top of it', async () => {
+  // The live condition: `treeDir` is keyed by CHAIN ROOT while numbers restart at 1 for every
+  // freshSession, so parent and continuation child both mint 001-<same slug>.md. Measured before the
+  // fix: 40 paths claimed by two chapters with DIFFERENT sha256, and 393 (tree dir, number) pairs
+  // owned by more than one session — the write was an unconditional overwrite.
+  const { fs, files } = memoryFs()
+  const p1 = await writeArchive({
+    fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+    authorSessionId: 'session-parent-AAAA1111',
+    chapters: [marked('Shared title here', 0, 5, 'PARENT BODY MARKER 11111')], attemptId: 'p@5',
+  })
+  const p2 = await writeArchive({
+    fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+    authorSessionId: 'ch-child-BBBB2222',
+    chapters: [marked('Shared title here', 6, 11, 'CHILD BODY MARKER 22222')], attemptId: 'c@11',
+  })
+
+  const pp = p1.records[0]!.path
+  const cp = p2.records[0]!.path
+  assert.notEqual(cp, pp, `the child resolved onto the parent's path (${pp}) — the clobber this issue is about`)
+  const at = (rel: string): string => [...files.entries()].find(([k]) => k === rel || k.endsWith(rel))?.[1] ?? ''
+  assert.ok(at(pp).includes('PARENT BODY MARKER 11111'), 'the parent body survives intact')
+  assert.ok(at(cp).includes('CHILD BODY MARKER 22222'), 'the child body exists as its own file')
+  assert.ok(p2.warnings.some((w) => /path collision resolved/.test(w)), 'the resolution is REPORTED, never done quietly')
+  assert.ok(cp.endsWith('BBBB2222.md'), `the disambiguated name carries the authoring session, got ${cp}`)
+  // The record cites a file that actually holds its bytes — a lying citation is the whole failure.
+  assert.equal([...files.keys()].filter((k) => k.includes('/chapters/')).length, 2, 'two files, one per chapter')
+})
+
+test('#337: identical bytes from another session still reuse the path (collision logic must not break retry)', async () => {
+  const { fs } = memoryFs()
+  const first = await writeArchive({
+    fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+    authorSessionId: 'session-A', chapters: [marked('Same title', 0, 5, 'IDENTICAL BODY 3333')], attemptId: 'a@5',
+  })
+  const second = await writeArchive({
+    fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+    authorSessionId: 'session-B', chapters: [marked('Same title', 0, 5, 'IDENTICAL BODY 3333')], attemptId: 'b@5',
+  })
+  assert.equal(second.records[0]!.path, first.records[0]!.path,
+    'same bytes must not fork a new filename — that would break the attempt-key retry contract')
+  assert.ok(!second.warnings.some((w) => /path collision resolved/.test(w)), 'and it is not reported as a collision')
+})
+
+test('#337: when both candidate names are held it REFUSES rather than inventing a third', async () => {
+  // Silently appending -2, -3 until one is free would leave the caller's record citing a path nobody
+  // predicted, and would hide a real registry/tree collision behind a successful-looking write.
+  const { fs } = memoryFs()
+  await writeArchive({ fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+    authorSessionId: 'session-XXXX9999', chapters: [marked('Clash', 0, 5, 'BODY ONE')], attemptId: 'a' })
+  await writeArchive({ fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+    authorSessionId: 'session-YYYY8888', chapters: [marked('Clash', 6, 11, 'BODY TWO')], attemptId: 'b' })
+  await assert.rejects(
+    () => writeArchive({ fs, allocator: countingAllocator(), storeRoot: '.dsh-chapters', rootSessionId: 'ROOT',
+      authorSessionId: 'session-YYYY8888', chapters: [marked('Clash', 12, 15, 'BODY THREE')], attemptId: 'c' }),
+    /refusing to overwrite an immutable chapter \(#337\)/,
+    'a held primary and a held alternative must throw, naming /chapters-repair as the way out')
+})

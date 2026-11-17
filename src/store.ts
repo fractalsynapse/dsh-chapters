@@ -89,6 +89,9 @@ const sessionStateSchema = z.object({
   rev: z.number().int().nonnegative().default(0),
   parentSession: z.string().nullable(),
   rootSession: z.string().min(1),
+  // #348: optional so a stored row from before this field parses unchanged (same idiom as
+  // nextPlanNumber above). Rows written without it stay resolvable only via the durable log.
+  cwd: z.string().min(1).optional(),
   nextChapterNumber: z.number().int().positive(),
   // Plan-document numbering (plans-carriage § 11). Optional with a default so a
   // stored row from before the feature parses unchanged.
@@ -383,10 +386,12 @@ export async function commitChapters(
   store: RegistryStore,
   sessionId: string,
   records: readonly ChapterRecord[],
+  /** Owning workspace for these records' relative paths — stamped, never guessed (#348). */
+  cwd?: string,
 ): Promise<void> {
   // One section, fresh read inside it (#59): the old get→append→put held the snapshot across an
   // await, which is how another door's committed state got erased.
-  await store.mutate(sessionId, (state) => appendChapters(state, records))
+  await store.mutate(sessionId, (state) => appendChapters(state, records, cwd))
 }
 
 /**

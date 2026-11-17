@@ -38,7 +38,8 @@ import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
 import { applyArrivalStubs, type ArrivalSessionShim } from './arrival.ts'
 import { lastResortCeilingTokens } from './last-resort.ts'
-import { extractPlot } from './engine-core.ts'
+import { ARRIVAL_FLOOR_DEFAULT_TOKENS, extractPlot, summarizeProvenance } from './engine-core.ts'
+import { citationBaseOf } from './render.ts'
 import type { ChapterRange } from './types.ts'
 import { appendChapters, isFinalized, markFinalized, rememberPlan, reserve } from './registry.ts'
 import type { SessionState } from './registry.ts'
@@ -281,6 +282,35 @@ function isPressureConfigRejection(error: unknown): boolean {
   return (keyed && labelled) || (named && labelled)
 }
 
+/**
+ * #360 — the durable key under which the realm engine records foreign-engine compaction counts.
+ *
+ * Per session, in the shared settings table, because the host plane and the preset realm are SEPARATE
+ * module instances under isolation: a process-local map here would read permanently empty from
+ * `/chapters-status` — the exact "green signal that is not connected to the thing it certifies" this
+ * issue is about. Same channel idiom as `enrichment.route` (#330 notes the planes have no other
+ * cross-channel).
+ */
+export const foreignCompactionKey = (sessionId: string): string => `engine.foreignCompaction:${sessionId}`
+
+/**
+ * #351 — the durable key holding one session's arrival-deferral tally, and the process-side mirror of it.
+ * Same cross-plane idiom as `foreignCompactionKey`: the host plane's `/chapters-status` reads what the
+ * realm engine recorded, because the two planes are separate module instances.
+ */
+export const arrivalTallyKey = (sessionId: string): string => `engine.arrival:${sessionId}`
+
+const ARRIVAL_TALLY = new Map<string, { floorTokens: number, entered: number, stubbed: number, degraded: boolean, at: string }>()
+
+/** The shape stored under `foreignCompactionKey()`. */
+export interface ForeignCompactionFact {
+  foreign: number
+  ours: number
+  providers: string
+  total: number
+  at: string
+}
+
 export class ChaptersCompactionEngine extends BasicCompactionEngine {
   // Base inject is ['llm','tokenMeter','sessions']; subclassing INHERITS statics,
   // so re-declare with what the chapter flow adds (r12's crash, FINDINGS).
@@ -332,7 +362,19 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     mergeThreshold: z.number().default(0.3),
     chapterLimit: z.number().step(1).min(1).default(8000),
     syncDebounceMs: z.number().step(1).min(0).default(30000),
-    toolResultArtifactTokens: z.number().step(1).min(256).default(8000),
+    toolResultArtifactTokens: z.number().step(1).min(256).default(ARRIVAL_FLOOR_DEFAULT_TOKENS),
+    // #354: five keys the constructor destructures but this schema never declared, so they had no
+    // default, no validation and no visibility in the config editor — they arrived ONLY because
+    // installed schemastery 3.18.2 preserves unknown keys (`Schema.object({a}).validate({a:1,b:2})`
+    // -> `{a:1,b:2}`, measured), which is exactly the accident line ~330 below already records as a
+    // past bug ("destructured by the constructor, stripped by the schema"). Declared now, with the
+    // defaults the constructor was already applying via `??`, so behaviour is unchanged and the drift
+    // is what changes: `tests/unit/config-surface.test.ts` fails if a destructured key goes undeclared.
+    noticeIndexCap: z.number().step(1).min(0).default(6),
+    planInlineChars: z.number().step(1).min(0).default(900),
+    callArgArtifactTokens: z.number().step(1).min(0).default(0),
+    plansInCheckpoint: z.boolean().default(true),
+    planCheckpointChars: z.number().step(1).min(0).default(1600),
     // #61 Amendment A — the seventh archive moment. A `ch-*` continuation child has origin `user`, so
     // door 5 never sees it: the field case archived NOTHING across 2,363 events because no moment was
     // watching. Save-only, fires at turn/end, thresholds are config and never literals.
@@ -443,7 +485,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       toolResultDeferFloorTokens: toolResultDeferFloorTokens ?? 200,
       mergeThreshold: mergeThreshold ?? 0.3,
       chapterLimit: chapterLimit ?? 8000,
-      toolResultArtifactTokens: toolResultArtifactTokens ?? 8000,
+      toolResultArtifactTokens: toolResultArtifactTokens ?? ARRIVAL_FLOOR_DEFAULT_TOKENS,
       childAutoArchive: childAutoArchive ?? true,
       childAutoArchiveMinTurns: childAutoArchiveMinTurns ?? 4,
       planInlineChars: planInlineChars ?? 900,
@@ -727,10 +769,20 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // uncertainty (no Session mapping API, no collections, ambiguous match,
     // thrown anywhere) falls to the legacy single-chapter plan, which is the
     // behavior that has always been correct.
+    // #399: the fallback is now NAMED, not silent — and `no-match` (a region
+    // present and nothing mapped: host surface-shape drift) is a warn, the rest
+    // notes. The original bug hid behind an unnamed null for the whole life of
+    // the feature: real hosts archived one legacy chapter per compaction while
+    // every stub-shaped test stayed green.
     let composition: readonly ChapterRange[] | null = null
     try {
-      const seqs = reconstructShadowedSeqs(session, input)
-      if (seqs !== null && state.collections.length > 0) {
+      const found = reconstructShadowedSeqs(session, input)
+      if (!found.ok) {
+        const line = `dsh-chapters: compaction composition skipped (reason=${found.reason}) — legacy single-chapter fallback`
+        if (found.reason === 'no-match') this.ctx.logger?.warn?.(`${line} — the region was present and NOTHING mapped: host surface-shape drift? (#399)`)
+        else if (found.reason !== 'empty-region') diagnosticNote(this.ctx.logger, 'realm:engine:compose', line)
+      } else if (state.collections.length > 0) {
+        const seqs = found.seqs
         const spanStart = seqs[0]!
         const spanEnd = seqs[seqs.length - 1]!
         const spanEvents = seqs
@@ -911,13 +963,33 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       diagnosticNote(this.ctx.logger, 'realm:engine:arrive', 'arrival stubbing skipped: no tokenMeter on the realm context')
       return
     }
+    const floorTokens = this.chaptersConfig.toolResultArtifactTokens
     const r = await applyArrivalStubs(session, {
       cwd,
       storeRoot: this.chaptersConfig.artifactStoreRoot,
-      floorTokens: this.chaptersConfig.toolResultArtifactTokens,
+      floorTokens,
       estimate: (m: unknown) => meter.estimateMessage(m),
     })
     if (r.detail !== undefined) this.ctx.logger?.warn?.(`dsh-chapters: arrival stubbing degraded (${r.detail})`)
+    // #351: record the floor ACTUALLY in force and what it deferred, in the durable settings table.
+    // The realm cannot print into /chapters-status itself (host plane, separate module instance -- the
+    // #360 lesson), and the issue's naming trap is exactly a question an operator can only answer by
+    // reading source today: `toolResultDeferFloorTokens` (archive-time, 200) and
+    // `toolResultArtifactTokens` (arrival-time, now 1,600) look interchangeable and are not.
+    const sessionId = String((session as { id?: string }).id ?? '')
+    if (sessionId !== '') {
+      const prior = ARRIVAL_TALLY.get(sessionId)
+      const tally = {
+        floorTokens,
+        entered: (prior?.entered ?? 0) + 1,
+        stubbed: (prior?.stubbed ?? 0) + r.stubbed,
+        degraded: r.detail !== undefined,
+        at: new Date().toISOString(),
+      }
+      ARRIVAL_TALLY.set(sessionId, tally)
+      void this.store().then(({ store }) => store.putSetting(arrivalTallyKey(sessionId), JSON.stringify(tally)))
+        .catch((err: unknown) => { diagnosticWarn(this.ctx.logger, 'realm:engine:arrive', `arrival tally could not be persisted for ${sessionId}`, err) })
+    }
   }
 
   /**
@@ -1046,6 +1118,36 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     } catch { /* a report must never become the reason compaction failed */ }
   }
 
+  /** Sessions already warned about in this process — one line per session, never per compaction. */
+  static readonly #foreignWarned = new Set<string>()
+
+  /** #360 — count foreign-provider compaction summaries for this session and deliver the fact. */
+  #noteForeignEngines(agent: Agent): void {
+    try {
+      const session = (agent as unknown as { session?: EngineSession & { id?: string } }).session
+      if (session === undefined || typeof session.seq !== 'number') return
+      const prov = summarizeProvenance(session)
+      if (prov.foreign === 0) return
+      const id = String((session as { id?: string }).id ?? '?')
+      const fact: ForeignCompactionFact = {
+        foreign: prov.foreign, ours: prov.ours, total: prov.total,
+        providers: prov.foreignProviders.join(', '),
+        at: new Date().toISOString(),
+      }
+      // Fire-and-forget, but a delivered failure if it goes wrong (#61): a witness that cannot
+      // persist must say so rather than look like "no foreign compactions anywhere".
+      void this.store().then(({ store }) => store.putSetting(foreignCompactionKey(id), JSON.stringify(fact)))
+        .catch((err: unknown) => { diagnosticWarn(this.ctx.logger, 'realm:engine:provenance', `foreign-compaction fact could not be persisted for ${id}`, err) })
+      if (ChaptersCompactionEngine.#foreignWarned.has(id)) return
+      ChaptersCompactionEngine.#foreignWarned.add(id)
+      diagnosticWarn(this.ctx.logger, 'realm:engine:provenance',
+        `this chapters-preset session was compacted by ANOTHER engine: ${String(prov.foreign)} summary event(s) not provider=${CHAPTERS_PROVIDER} (seen: ${prov.foreignProviders.join(', ')}; seqs ${prov.foreignSeqs.slice(0, 6).join(',')}${prov.foreignSeqs.length > 6 ? ',…' : ''}). Our engine served ${String(prov.ours)}. The archive is not being written for these compactions — check that the chapters-engine row is enabled and ACTIVE in the composed preset. Full detail: /chapters-status.`)
+    } catch (error) {
+      // A witness must never be the reason compaction fails; but say that it degraded (#61).
+      diagnosticWarn(this.ctx.logger, 'realm:engine:provenance', 'provenance witness degraded — foreign-engine detection is OFF for this call', error)
+    }
+  }
+
   #noteDecision(where: string, trigger: unknown, result: CompactionResult | null, agent: Agent): void {
     // The INPUTS, not just the verdict: `decided: none` is one word covering two opposite bugs —
     // no routed target (the base returns null on line one) and under-threshold (a real decision).
@@ -1092,6 +1194,14 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // makes "is context relief wired at all?" answerable from a session log instead of inferred.
     diagnosticNote(this.ctx.logger, 'realm:engine:compact',
       `compactIfNeeded entered (trigger=${JSON.stringify(trigger)}, session=${String((agent as { session?: { id?: string } })?.session?.id ?? '?')})`)
+    // #360: a session composing the chapters preset may STILL be served by a foreign compaction
+    // engine (a disabled row, a mount that resolved but never activated, a preset the operator
+    // composed differently). The old behaviour was to skip those summaries in silence — the one
+    // place that looked at provenance did `continue`. Warn ONCE per session and record the count
+    // where /chapters-status can print it; deliberately NOT a refusal, because an operator may have
+    // disabled our engine row on purpose, and a loud truthful statement beats either silence or a
+    // hard failure that breaks their sessions.
+    this.#noteForeignEngines(agent)
     this.#observeRoute(agent)
     await this.#arrive(agent)
     // Finalization runs whether super resolves OR throws: the pressure retry
@@ -1301,7 +1411,11 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const cwd = (session as unknown as { header?: { cwd?: string } }).header?.cwd
     if (cwd === undefined) throw new Error('chapters: session has no cwd — nowhere reachable to write')
 
+    const finalizeCitationBase = citationBaseOf(this.chaptersConfig.artifactStoreRoot, state.rootSession, cwd)
     const renderedList = buildFinalizedChapters(session, shadowedSeqs, {
+      // #348: the compaction door cites artifacts the same way the save doors now do -- one
+      // convention across all seven archive moments, computed where rootSession and cwd are both known.
+      ...(finalizeCitationBase !== undefined ? { citationBase: finalizeCitationBase } : {}),
       tocText: '', numbers, chapter: plan, ...(plan.chapters !== undefined ? { chapters: plan.chapters } : {}),
     }, this.chaptersConfig)
 
@@ -1309,8 +1423,16 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     const wrote = await writeArchive({
       fs,
       allocator: makeAllocator(store, session.id),
-      storeRoot: resolveStoreRoot(cwd, this.chaptersConfig.artifactStoreRoot),
+      // #348 / #69: pass the RAW store root plus the cwd, exactly as the save door does
+      // (save-core.ts:299). This call used to hand writeArchive an ABSOLUTE resolveStoreRoot(...) and no
+      // cwd, so writeArchive minted absolute stored paths while the checkpoint TOC cited the
+      // workspace-relative form for the same file — two dialects for one chapter row, which is the
+      // split #69 already settled ("relative is the right winner"). Raw + cwd is also what makes
+      // ChapterRecord.artifacts[].path a third dialect stop diverging.
+      storeRoot: this.chaptersConfig.artifactStoreRoot,
+      cwd,
       rootSessionId: state.rootSession,
+      authorSessionId: session.id, // #337
       chapters: renderedList,
       attemptId: `compaction:${compactionId}`,
     })
@@ -1326,7 +1448,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     // #59: `state` was read BEFORE writeArchive (render + every artifact write). Committing from it
     // would erase anything another door committed meanwhile — which is how the SAIP compaction lost
     // its record while its 960 KB file stayed on disk. The commit re-reads inside one section.
-    await store.mutate(session.id, (fresh) => markFinalized(appendChapters(fresh, records), compactionId, numbers))
+    await store.mutate(session.id, (fresh) => markFinalized(appendChapters(fresh, records, cwd), compactionId, numbers))
     // §5.1: compaction finalization is a push point (debounced).
     const cwdNow = (session as unknown as { header?: { cwd?: string } }).header?.cwd
     if (cwdNow !== undefined) void this.#scheduler().then((s) => s.schedule(cwdNow, 'archive:compaction')).catch(() => undefined)

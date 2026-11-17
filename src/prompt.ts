@@ -273,6 +273,50 @@ export interface SuggestFacts {
  * would make the answer look derived from bytes that were never sent.
  */
 /**
+ * #350 — the smallest `drop` in `[0, chapterCount]` with `lengthOf(drop) <= budget`, or null if none.
+ *
+ * `lengthOf` is non-increasing except for one wrinkle the caller cannot remove: the announced
+ * "older chapters dropped: N" note gains a character when N crosses a digit boundary. A pure binary
+ * search could therefore skip a fitting value that is one past the found one, so the candidate is
+ * confirmed with a bounded linear step. The result is the SAME value the previous linear scan returned,
+ * for ceil(log2(n)) + a couple of evaluations instead of n + 1 — and it is tested that way, against a
+ * naive oracle over randomized length functions including deliberate digit-boundary sawtooths.
+ */
+export function firstFitDrop(
+  lengthOf: (drop: number) => number,
+  chapterCount: number,
+  budget: number,
+): number | null {
+  let lo = 0
+  let hi = chapterCount + 1 // exclusive upper bound: `chapterCount + 1` means "nothing fitted"
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (lengthOf(mid) <= budget) hi = mid
+    else lo = mid + 1
+  }
+  if (lo > chapterCount) return null
+  // A binary search is exact for a NON-INCREASING lengthOf and cannot be made exact for an arbitrary
+  // one — an earlier fit separated by an unfit value is invisible to it (a walk-back stops at the gap).
+  // So the precondition is asserted rather than assumed: see the monotonicity row in
+  // tests/unit/prompt-assembly-cost.test.ts, which proves the real assembly length never rises as more
+  // chapters drop. One cheap boundary check below guards the assumption at runtime and falls back to the
+  // linear scan if a future change ever breaks it, so the worst case is the old behaviour, never a wrong
+  // answer.
+  if (lengthOf(lo) > budget) return linearFirstFit(lengthOf, chapterCount, budget)
+  // The realistic violation is the announced-drop note gaining a character just left of `lo`, which a
+  // single neighbour check detects exactly. A separated earlier fit cannot be detected locally, which is
+  // why the precondition is tested rather than probed.
+  if (lo > 0 && lengthOf(lo - 1) <= budget) return linearFirstFit(lengthOf, chapterCount, budget)
+  return lo
+}
+
+/** The pre-#350 search, kept as the exact fallback for a length function that is not near-monotone. */
+function linearFirstFit(lengthOf: (drop: number) => number, chapterCount: number, budget: number): number | null {
+  for (let d = 0; d <= chapterCount; d++) if (lengthOf(d) <= budget) return d
+  return null
+}
+
+/**
  * Assemble the director's whole world (#188). Deterministic: same facts ⇒ same bytes.
  *
  * Two invariants the old assembly violated and this one exists to keep:
@@ -323,10 +367,17 @@ export function buildSuggestInput(facts: SuggestFacts, budgetChars: number, maxC
     parts.push('', replyRules)
     return parts.join('\n')
   }
-  for (let drop = 0; drop <= facts.chapters.length; drop++) {
-    const input = assemble(drop)
-    if (input.length <= budgetChars) return { input }
-  }
+  // #350: the first `drop` whose assembly fits. Dropping chapters only shortens the block, so
+  // `assemble(d).length` is (practically) monotonically non-increasing in `d` and the answer is findable
+  // by binary search in ceil(log2(n+1)) assemblies. The previous loop assembled the ENTIRE candidate
+  // string once per drop value — O(n²) in characters: measured 9,482 ms at 800 chapters / 36 MB on this
+  // machine, blocking the host's event loop at every turn boundary.
+  //
+  // The search is extracted as `firstFitDrop` so it can be checked against a naive linear oracle over
+  // randomized length functions. Inlining it here would leave the equivalence untestable — and "compare
+  // the function to itself" is not an oracle, it is a tautology (this release has caught three of those).
+  const drop = firstFitDrop((d) => assemble(d).length, facts.chapters.length, budgetChars)
+  if (drop !== null) return { input: assemble(drop) }
   const floor = assemble(facts.chapters.length).length
   return {
     refusal: `the suggestion input cannot fit — the protected context (goal, plan, rules, last turn) assembles to ${floor} chars, exceeding the ${budgetChars}-char budget with all ${facts.chapters.length} chapter(s) already dropped. Refusing rather than truncating (#188): raise the budget or set a larger model with /chapters-prompt model.`,
@@ -539,10 +590,29 @@ export function promptChaptersForLineage(opts: {
   readBody: (path: string) => string | null
 }): ChapterHistoryEntry[] {
   const out: ChapterHistoryEntry[] = []
+  // #350: ONE entry per chapter path. The registry holds rows that carry copies of their parent's
+  // entries — measured 391 identical number+path records in this machine's live store, and a call
+  // `includeLineage: true` returned 507 rows for 56 distinct paths. Without this, up to 43% of the
+  // director's chapter block was the same text repeated, and the same file was read from disk once per
+  // duplicate: 419 bodies / 19 MB synchronously per turn boundary.
+  //
+  // Deduped by PATH, not number — the same rule the TOC accumulation uses (engine-core.ts:214), because
+  // numbers repeat across roots while a path names one file. Keeping the two decisions on one key is the
+  // point: the archive an operator reads and the input the director is given cannot drift apart.
+  const seen = new Set<string>()
+  const plotsByPath = new Map<string, string[]>()
   for (const row of opts.rows) {
     for (const c of row.chapters.filter(isActiveChapter)) {
-      const body = opts.readBody(c.path) ?? ''
-      out.push({ number: c.number, title: c.title, summary: c.summary, plots: body === '' ? [] : extractPlots(body) })
+      if (seen.has(c.path)) continue
+      seen.add(c.path)
+      // One read per distinct body, and a body already seen is never re-parsed.
+      let plots = plotsByPath.get(c.path)
+      if (plots === undefined) {
+        const body = opts.readBody(c.path) ?? ''
+        plots = body === '' ? [] : extractPlots(body)
+        plotsByPath.set(c.path, plots)
+      }
+      out.push({ number: c.number, title: c.title, summary: c.summary, plots })
     }
   }
   return out

@@ -77,6 +77,68 @@ result only for a live `Session`, so pin such claims in the leg or on a pure fun
 (b) a field printed from a config key the realm does not carry reads `?` forever — measure the shape you *read*
 (#153's `window=?`).
 
+### A quoted sample is a contract (#389)
+
+When a page shows output and tells the reader to compare against it — `operations/install.md` does exactly
+this, and adds that anything else is a named problem — the quoted string stops being prose and becomes an
+interface. It then has two failure modes, and the second is worse: the code changes and the sample goes
+stale (a correct install looks broken, which happened for the roster line's trailing clause, fixed in #388),
+or **the check built to catch that cannot fail.**
+
+So the standing rule, and `tests/unit/doc-line-contract.test.ts` enforces all of it:
+
+- **Derive, or compare to the derived value.** The strongest form is what #388 did — export the function
+  that builds the line and have the test compose the documented sample from it. A general matcher is a
+  backstop, not a substitute.
+- **Whole-line anchored, always.** Prefix matching structurally cannot see truncation, which is the exact
+  defect class.
+- **Exclude vacuous patterns and say so out loud.** `dsh-chapters: ${m}` is a log wrapper, not a message;
+  as a matcher it accepts every line. The first version of this audit reported a clean zero-findings that
+  way, and the tell was a match attributed to the wrong file — a suspicious *attribution*, not a suspicious
+  count. The gate asserts the excluded set is non-empty and prints it on every run.
+- **Plant the failure.** The gate must reject a fabricated line AND accept the real one; without both, a
+  zero means nothing.
+- **Discover the corpus, do not list it.** A hand-written list of ten pages here contained two paths that
+  never existed, and its own completeness check caught that — walking the tree found 37 real pages instead.
+  A list narrows silently whenever anyone renames something.
+- **Exclude history on purpose.** Changelog, project-state and backlog quote what older builds printed.
+  "Fixing" them would erase the record, which is why they are filtered by an explicit pattern rather than
+  omitted by silence.
+
+Honest scope note: measured across those 37 current-state pages there are exactly **two** quoted
+`dsh-chapters:` lines today, both in `install.md`, both matching. The value of the gate is prospective —
+it is cheap insurance that the next quoted sample cannot drift the way this one did, and it is only trusted
+because it demonstrably rejects a line that was never emitted.
+
+### Host-shaped readers are checked against the installed dist (#355 item Z)
+
+AGENTS has the rule — *"Inspect actual host payload fields and use fixtures of the real shape"* — and this
+release proved the rule right and the enforcement missing: a fixture hand-written in the shape the code
+*expected* passes against a reader that cannot work on real bytes. Three separate findings were that bug
+(#339's `fiberState` stubs, #345's block-level `isError`, #355's item Z list), and every fix so far was
+case-by-case. The mechanical form of the rule is now `tests/unit/host-shape-contract.test.ts`, which parses
+the **installed** packages and asserts both directions:
+
+- **What the host declares.** `@deepseek-ai/dsh-llm`'s `ToolResultMessage` carries `isError?: boolean` at
+  **message** level, and the type surface contains **no block-level `isError` at all** — the fact that made
+  the old reader return false for 13 of 13 real failures. `cordis`'s `FiberState` is a **numeric
+  `const enum`** (`PENDING=0 … ACTIVE=2 … UNLOADING=5`), which is why comparing it to `'active'` is always
+  false — the #339 defect.
+- **What our code does with it.** `src/log-shape.ts` must read the message-level field; `src/preset.ts` must
+  not compare `fiberState` to a string literal. A reader that silently stops matching the declared shape
+  fails here rather than in production.
+
+Every assertion is **non-vacuous by construction**: the test requires the interface it searched for to have
+been found (`throw` if absent), so a renamed type or a moved declaration fails the run instead of quietly
+producing an empty match set — the failure mode that made this release's first version of the corpus gate
+report a false all-clear. Versions are printed on each run, so a dependency bump shows up as changed facts
+rather than a green suite.
+
+What this does **not** claim: that every fixture is dist-derived. It pins the two host shapes this audit
+actually got wrong, and the mechanism by which new ones can be added. The residual gap (a fixture for some
+other host field, unverified) stays open on #355 item Z rather than being ticked by the existence of this
+file.
+
 ### Correctness Checks
 
 | # | Check | Procedure | Passes when |
@@ -565,3 +627,11 @@ which 483 `test-litter` and 143 `empty-artifact`. Registry backups sit at
 | # | Claim | How it is verified | Result |
 |---|---|---|---|
 | B1 | A `persisted off` cannot strand the bar across a reload (#272/#276) | Browser leg `tests/e2e/prompt-off-revival.spec.ts`, its own boot (`prompt-revival`, port 41743 — measured reason in rig-pins: as the fifth session on the prompt boot it destabilized new-session creation for every spec): carry a session to a ready offer, seed a stale `off` mirror via `addInitScript` so it pre-dates all app JS, reload, and require (a) the bar visible and (b) the dock's `__dshPromptReply` seam showing the wire answered `suggested next step: …` — a veto never pulls, so an empty seam or missing bar fails the leg | **PASS** — recorded on the scripted stub (3 entries, own boot 41743), `prompt`+`prompt-off`+`prompt-revival` replay green model-free each under its own boot; mutation-proof: restoring the pre-#272 `off`-veto reddens EXACTLY this leg (`expect(locator).toBeVisible` — the veto never pulls), the canonical runner restores green. Local record needs `CHOKIDAR_USEPOLLING=1` on this box: 128 inotify instances are machine-exhausted (real ENOSPC, unrelated to the leg; CI runners never hit it) |
+
+## The compaction composer on the real host's shape (#399, measured 2026-11-16)
+
+| # | Claim | Class | How it is verified | Result |
+|---|---|---|---|---|
+| C1 | `reconstructShadowedSeqs` maps the summarize region against the ACTUAL host surface shape (plain-seq nodes, bound `deriveEventMessage`) | deterministic + pinned-host replay | `tests/unit/host-composer-shape.test.ts` row 1 hands the composer a session built by the INSTALLED `dsh-session` class (`Session.create`, RUN/SKIP-guarded); row 2 pins the host `.d.ts` source text; `tests/unit/engine-core.test.ts` fakes now wear the host shape (unbound `derive` throws); `engine-lifecycle` drives the real `summarize()` over two stored topics and demands a ≥2-chapter manifest + carried plot | **PASS** — red before the fix (proven at the test commit), green after; full deterministic ledger 1,627/1,633 with only the five credential-gated `live:` TreeDX rows non-passing |
+| C2 | Activating the composed path churns NO committed tape | pinned-host tape replay | Full chain: `E2E_MODEL=replay bash scripts/ci-replay.sh` (11 legs, own boot each); durable-log sweep: all 25 session logs in the run's homes grepped for `compaction/summary` | **PASS** — chain green; **zero** compaction events exist in ANY replayed durable log (the compaction-heavy `heavy` project is the live class, never replayed), so no recorded bytes can depend on the composer; `npm run corpus:check`: corpus matches the build (promptAnchor unchanged); e2e typecheck ratchet 58=58 |
+| C3 | A real-host pressure compaction now COMPOSES (multi-chapter checkpoints converging on the 32K window) | live provider | The `heavy` live leg (its bound is #143's open row, and it was already failing its own bound BEFORE this change) | **OPEN** — deliberately unclaimed: this change makes the composed arm reachable and gives operators a named `reason=` line per fallback, but no live run has yet observed it. The claim stands unverified until the heavy leg is next run on a live model. |

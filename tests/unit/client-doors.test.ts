@@ -566,3 +566,23 @@ test('production wires the navigator — an optional port that stops being passe
     'uiWorkspace must be in the client inject list, or the door has no way to switch')
   assert.match(src, /navigator: uiWorkspace/, 'and it must actually be handed to the runner')
 })
+
+test('#358: no awaited pause in the door runner is unref\'d — 21 rows were silently not executing', () => {
+  // The retry wait used `setTimeout(...).unref?.()`. `.unref()` releases the handle from the event
+  // loop's refcount, so when the awaited timer was the only pending work Node exited with the promise
+  // unresolved: 21 of the 28 rows here were reported `cancelledByParent` with
+  // "Promise resolution is still pending but the event loop has already resolved" while the summary
+  // line still read `# fail 0`. On the pinned Node 24 CI the loop stays alive for other reasons, so
+  // the whole #77 adoption/roster/verification path was UNOBSERVED rather than failing.
+  // A structural row is the honest guard here: the behavior can only be seen by a runner whose loop
+  // would otherwise drain, which is not something a single process can assert about itself.
+  const src = readFileSync(new URL('../../src/client/doors.ts', import.meta.url), 'utf8')
+  const offenders = src.split('\n')
+    .map((l, i) => [i + 1, l] as const)
+    .filter(([, l]) => /await[^;]*setTimeout\([^)]*\)[^;]*\.unref/.test(l))
+  assert.deepEqual(offenders, [],
+    `an awaited setTimeout must keep the loop alive; .unref() on it strands the caller (#358): ${JSON.stringify(offenders)}`)
+  // And prove the grep is not vacuous: the file does contain awaited timers, so the filter has
+  // something to police.
+  assert.ok(/await new Promise\(.{0,40}setTimeout/.test(src), 'the awaited-timer sites exist for this row to guard')
+})

@@ -39,6 +39,24 @@ session header the host itself writes (`parentSession`, `origin: subagent`, `del
 it was. See [15. Commands](/reference/commands/) for when that archive is written — automatically, at each
 settlement of the child's run.
 
+### A chapter is valid Markdown whatever it archived
+
+Tool arguments and results are arbitrary text, and the hostile case is common rather than exotic: a
+`bash` call quoting shell backticks, an `edit` whose `old_string` contains a fenced code block, a
+`write` carrying a whole Markdown file. So the renderer treats "cannot break the surrounding markup" as
+a requirement, not a hope:
+
+- **Fenced blocks** get a fence strictly longer than any backtick run inside them (`longerFence`), so
+  embedded code cannot close the block early and silently truncate the rest of the chapter.
+- **Inline spans** get the same treatment (#345). The invocation head — a bounded view of one call's
+  arguments — used to be wrapped in a single backtick, so an argument containing a backtick opened a
+  span that never closed and swallowed the `(seq N)` citation after it into rendered code. The head is
+  now delimited by a run longer than anything inside, with CommonMark's padding for content that begins
+  or ends with a backtick, and embedded newlines fold so one invocation stays one line.
+- **Nothing is clipped in place.** Where bytes are too large for the chapter body they are
+  content-addressed artifacts and the line says so; the inline head is a bounded *view* with the full
+  text retrievable, never the only copy.
+
 ### What a chapter's Plans block looks like
 
 A session plan is one `tool/call` argument (`exit_plan_mode`'s `plan` field) answered by one `tool/result`

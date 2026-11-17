@@ -89,6 +89,13 @@ export interface NoticePlan {
 }
 
 export interface RenderConfig {
+  /**
+   * Workspace-relative directory that contains this session's `artifacts/` and `chapters/`, e.g.
+   * `.dsh-chapters/17f7c1d6-…` (#348). Set by every door from values it already passes to
+   * writeArchive. With it, a citation is a path the host's read tool can OPEN; without it the line says
+   * which tool retrieves the payload instead of pointing at a path that resolves from nowhere.
+   */
+  citationBase?: string | undefined
   /** Below this estimated token count a tool result stays inline without needing a model override. */
   toolResultDeferFloorTokens: number
   /** Chapter sizes past this are flagged for a split at the next boundary. Never truncated. */
