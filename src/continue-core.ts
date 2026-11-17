@@ -25,7 +25,10 @@ import { appendChapters, freshSession, isActiveChapter, linkChild, reserve, rese
 import type { SessionState } from './registry.ts'
 import { buildTocNotice , noticeAuthoredText } from './notice.ts'
 import { deriveIdentity } from './engine-core.ts'
-import { buildPlansSection, detectPlans, PLAN_MODE_EVENT, type PlanIntent } from './plans.ts'
+import { PLAN_MODE_EVENT, buildPlansSection, detectPlans, type PlanIntent } from './plans.ts'
+// #349: the goal fold and its notice block live in their own module (goal-carriage.ts), so the
+// one-selector-one-renderer rule is checkable in one file rather than spread across plans.ts.
+import { foldGoalFromLog, renderGoalCarriage } from './goal-carriage.ts'
 
 export interface ContinueArgs {
   callerSessionId: string
@@ -74,6 +77,10 @@ export interface ContinueConfig extends RenderConfig {
    * this existed — which is what keeps the model tapes matching.
    */
   plansInNotice?: boolean | undefined
+  /** #349: carry the parent's goal into the child's notice (default on). */
+  goalInNotice?: boolean | undefined
+  /** #349: budget for the objective text in the notice; the instruction lines are never cut. */
+  goalNoticeChars?: number | undefined
   /**
    * Teach a child HOW to look things up, not only what was archived (findability
    * audit, 2026-10-11). The index answers questions about every kind — chapters,
@@ -189,6 +196,17 @@ export function assembleNotice(input: {
    * approved or re-plans from recall. Absent/empty => zero injected bytes.
    */
   plansSection?: string
+  /**
+   * #349 (conservative slice): the parent session's GOAL, folded from its durable `goal/change` events
+   * by `foldGoalFromLog`, rendered by `renderGoalCarriage`. Placed with the plans block, above the fold,
+   * because an objective is the fact a continuation must not re-derive from recall.
+   *
+   * This STATES the goal; it does not create or arm one in the child. The host requires a direct human
+   * turn for `create_goal` (`requireDirectHuman`), and #349 reserves plugin-authored goal creation as a
+   * maintainer decision — so the block says plainly that only the human can re-arm. Absent/empty => zero
+   * injected bytes, which is what keeps ordinary sessions' notices and recorded tapes untouched.
+   */
+  goalSection?: string
   retrievalHints?: boolean | undefined
 }): string {
   const lines = [
@@ -196,6 +214,7 @@ export function assembleNotice(input: {
     ...(input.projectLine !== undefined && input.projectLine !== '' ? ['', input.projectLine] : []),
     ...(input.rulesSection !== undefined && input.rulesSection !== '' ? ['', input.rulesSection] : []),
     ...(input.plansSection !== undefined && input.plansSection !== '' ? ['', input.plansSection] : []),
+    ...(input.goalSection !== undefined && input.goalSection !== '' ? ['', input.goalSection] : []),
     '',
     'This session continues an archived conversation. Chapters are verbatim Markdown in the workspace;',
     'every byte remains retrievable — inline, or at artifact paths cited inside a chapter. Read a chapter',
@@ -514,16 +533,14 @@ export function archivedPlanRows(records: readonly ChapterRecord[], entries: rea
  * unfinished turn, and the archive ceiling is completed turns only, so it is in no
  * chapter and no artifact (docs/plans-carriage.md § 5). The child must still be
  * told it exists, and told plainly that it was never approved.
+ * #396: `callerCeiling` is the CALLER's own archive boundary in the caller's seq
+ * space — never a max taken across the ancestry path.
  */
-export function livePlanRows(events: readonly SessionEventLike[], watermark: number): NoticePlan[] {
-  return detectPlans(events, { ceiling: watermark }).plans
+export function livePlanRows(events: readonly SessionEventLike[], callerCeiling: number): NoticePlan[] {
+  return detectPlans(events, { ceiling: callerCeiling }).plans
     .filter((p) => !p.archived)
     .map((p) => ({ title: p.title, status: p.status, seq: p.seq }))
 }
-
-/** The highest seq any cited chapter covers — the boundary between stored and live. */
-export const archiveWatermark = (records: readonly ChapterRecord[]): number =>
-  records.reduce((m, r) => Math.max(m, r.endSeq), 0)
 
 /** Fields both continue and fork need to create the child. */
 export type FinishArgs = Pick<ContinueArgs, 'callerSessionId' | 'callerPreset' | 'title' | 'handoffNote' | 'projectLine' | 'rulesSection' | 'intent'>
@@ -541,8 +558,13 @@ async function finishChild(
   // ---- The plans block: stored facts + whatever the caller's live tail holds.
   // Empty list ⇒ '' ⇒ zero injected bytes (the tape-safety property, verify.md P8).
   const intent = args.intent ?? 'continue'
-  const watermark = archiveWatermark(bundle.records)
+  // #396: the live/archived split is a statement about the CALLER's log, in the CALLER's seq space.
+  // Continuation children restart event numbering, so an ancestry-wide max (the retired
+  // archiveWatermark) can sit above the caller's live tail and silently reclassify an open-tail plan
+  // as archived (plans-carriage § 5). The ceiling is the caller's own watermark — its committed rows
+  // plus the records this door is about to commit, all author-tagged in the caller's space.
   const callerEvents = await ports.readCallerEvents()
+  const ownCeiling = Math.max(nextUnarchivedSeq(callerState.chapters) - 1, ...commitRecords.map((r) => r.endSeq))
   // The parent's CURRENT mode, folded last-value-wins exactly like the host
   // projection does. Measured against the installed kernel (docs/plans-carriage.md
   // § 10): the host's plan projection folds a seeded `plan/mode` to `active: true`, so the
@@ -560,9 +582,16 @@ async function finishChild(
   let plansSection = ''
   if (config.plansInNotice !== false) {
     plansSection = buildPlansSection(
-      [...archivedPlanRows(bundle.records, bundle.entries), ...livePlanRows(callerEvents, watermark)],
+      [...archivedPlanRows(bundle.records, bundle.entries), ...livePlanRows(callerEvents, ownCeiling)],
       { modeActive, intent, seeded: seedMode },
     )
+  }
+
+  // #349: the goal is folded from the CALLER's durable events, not read from a goal service — the realm
+  // has no such service and, per #360's lesson, a module-level cache would not cross the plane anyway.
+  let goalSection = ''
+  if (config.goalInNotice !== false) {
+    goalSection = renderGoalCarriage(foldGoalFromLog(callerEvents), config.goalNoticeChars ?? 600)
   }
 
   // ---- Notice text, then the budget gate (measure the WHOLE notice).
@@ -576,6 +605,7 @@ async function finishChild(
     ...(args.projectLine !== undefined ? { projectLine: args.projectLine } : {}),
     ...(args.rulesSection !== undefined ? { rulesSection: args.rulesSection } : {}),
     ...(plansSection !== '' ? { plansSection } : {}),
+    ...(goalSection !== '' ? { goalSection } : {}),
     retrievalHints: config.retrievalHints !== false,
   })
   // Built-then-measured, as above: the budget gate sees the authored bytes, not a draft.
