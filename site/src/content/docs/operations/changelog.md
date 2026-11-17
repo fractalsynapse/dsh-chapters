@@ -8,6 +8,45 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.35 — 2026-11-17 · the rig stopped trusting its endpoint by name (two items, one found mid-release)
+
+A small cut with an unusually precise story. It was supposed to be the #340 freshness fix plus the #379
+director cap; attempting #340's gated tape re-record instead measured a defect class the rig did not
+know it had, and the release ships the guard for it. #368 itself moves to 0.2.36 by maintainer
+decision — a scoping choice recorded on 2026-11-17, not a slip.
+
+**#379 — the director's chapter block is now bounded** (PR #383, the third mechanism of #7). One
+suggestion input arrived carrying **2 MB of old summaries** for a one-line answer; the chapter block the
+director reads now takes a measured share of its input budget instead of everything the lineage holds.
+The resync against post-0.2.34 staging also corrected the release notes' own held-claim: the failure
+that made this PR a re-record candidate belonged to the pre-0.2.34 base — against current trunk its
+ten-leg replay went **green with zero tape movement**, so the cap ships without a re-anchor.
+
+**#406 — tape-writing modes prove the endpoint serves the pinned model before anything is recorded**
+(PR #407). Found while re-recording: this box's vLLM lists **only** `qwen3-4b-instruct` yet silently
+**answers any request named `qwen3.8-flash-next`** with it — an alias, not an error. Sessions ran, the
+director's suggestions came back as the 4B's raw `think` traces passed through as content, two
+prompt-bar specs failed, and fifteen contaminated tape entries were written before anything was caught
+and everything was discarded (corpus verified untouched, `git status` empty). `record` and `heal` now
+refuse **before boot** unless the endpoint lists the pinned id AND the chat response answers with the
+same id in its own `model` field — the response witness is the whole point; `/v1/models` alone cannot
+see the alias class. Live mode is out of scope by design (boot never resolves an upstream for it, so a
+probe would test an endpoint live does not use), plain replay never probes (proven on CI runners with
+no endpoint at all: the ten-leg chain passed with the guard present), `E2E_UPSTREAM_MODEL` remains a
+deliberate remap that must itself pass the proof, and `RIG_MODEL_ID` became the single literal the
+provider row and the bar route both interpolate.
+
+**The class is the lesson:** the rig trusted a name where it should have trusted a witness. That is the
+same shape this repo keeps finding — green checks whose claim is not connected to the thing they
+certify — this time in the recording path rather than the product.
+
+**Operator-visible effects:** nothing in the model-facing bytes changes; releases and tapes after this
+one are cut by an endpoint that has to show its `model` field. **Held by decision, not oversight:**
+#340 (#368) — its code passes 10 of 11 legs and every deterministic gate; its one remaining acceptance
+item, the `prompt`-leg re-record, is now blocked behind a truly-serving `qwen3.8-flash-next` endpoint
+(the distillation rig, or `E2E_UPSTREAM` at the real model), and the #406 guard is what makes that
+blockade honest instead of silent.
+
 ### 0.2.34 — 2026-11-17 · the features that existed only in the stubs (the 2026-11-15 context-handling audit)
 
 An external deep read of this plugin against the pinned harness and Cordis surfaces — `examples/dsh`,
