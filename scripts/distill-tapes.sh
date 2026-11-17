@@ -81,7 +81,10 @@ for proj in "${want[@]}"; do
   # plans/prompt own their upstream: the scripted stub, or nothing (see STUB_PROJECTS above).
   if [[ " ${STUB_PROJECTS} " == *" ${proj} "* ]]; then
     if ! start_stub "${proj}"; then failed+=("${proj}:stub-down"); continue; fi
-    leg_extra="${leg_extra} E2E_UPSTREAM=http://127.0.0.1:${STUB_PORT}"
+    # #409: the marker travels with the pin — one coupled source. boot.ts honors E2E_STUB_LEG only
+    # against a stub-CLASS endpoint (all listed ids `stub-`-prefixed), and a live leg pointed at the
+    # stub still refuses. Without this line, the #406 guard rejects the rig's OWN stub-path distill.
+    leg_extra="${leg_extra} E2E_UPSTREAM=http://127.0.0.1:${STUB_PORT} E2E_STUB_LEG=1"
   fi
   # the header prints the EFFECTIVE regime, read from the one table the boot uses, so a tape's
   # provenance is auditable from the runner log alone (the row in distill-upstream-pins insists).
