@@ -1,0 +1,159 @@
+/**
+ * #353 — wiring that asserts what it did not do.
+ *
+ * Four small defects, one theme: a log line, a doc line, a dependency declaration or a health check
+ * that reads as "verified" without being connected to the thing it claims. Each row here is written so
+ * it would FAIL against the pre-fix state, and one of them is a general gate rather than a point fix,
+ * because "a runtime import declared nowhere" is a class, not a fact about one package.
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { registerChaptersTools } from '../../src/tools.ts'
+import { makeDomainStore } from '../../src/store.ts'
+import { CHAPTERS_PRESET_ID } from '../../src/preset.ts'
+
+const cwd = process.cwd()
+const read = (p: string): string => readFileSync(join(cwd, p), 'utf8')
+
+// ───────────────────────────────────────────── the class gate: no undeclared runtime import
+
+test('#353: every @deepseek-ai runtime import is declared in the manifest', () => {
+  // `@deepseek-ai/dsh-llm` was a VALUE import in src/index.ts (BlockAssembler), src/engine.ts and
+  // src/aux-message.ts (createUserMessage) while appearing ONLY in devDependencies. It resolved in
+  // the field because profiles are created with `nodeLinker: hoisted` + `autoInstallPeers: false`
+  // (app-boot/src/profile.ts:248-253). One linker change and the host-plane row throws at import —
+  // a production failure that no test on this machine can currently see.
+  const pkg = JSON.parse(read('package.json')) as {
+    dependencies?: Record<string, string>
+    peerDependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+  }
+  const declared = new Set([
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.peerDependencies ?? {}),
+  ])
+  const used = new Map<string, string>()
+  for (const f of readdirSync(join(cwd, 'src'))) {
+    if (!/\.ts$/.test(f)) continue
+    const src = readFileSync(join(cwd, 'src', f), 'utf8')
+    // Only VALUE imports matter: `import type { Session } from '@deepseek-ai/dsh-session'` is erased
+    // at compile time and needs no runtime resolution. A first draft of this gate missed that and
+    // reported three false positives (dsh-session, dsh-agent, dsh-commands) — a gate that cries wolf
+    // gets disabled, which is the #362 lesson applied to my own test.
+    const stmt = /(^|\n)\s*import\s+(type\s+)?[^;\n]*?from\s+['"](@deepseek-ai\/[^'"]+)['"]/g
+    for (const m of src.matchAll(stmt)) {
+      if (m[2] !== undefined) continue // `import type` — erased
+      const spec = m[3]!
+      const pkgName = spec.startsWith('@deepseek-ai/') ? spec.split('/').slice(0, 2).join('/') : spec
+      if (!used.has(pkgName)) used.set(pkgName, f)
+    }
+  }
+  const missing = [...used.entries()].filter(([name]) => !declared.has(name))
+    .map(([name, file]) => `${name} (imported by src/${file})`)
+  assert.deepEqual(missing, [],
+    `runtime imports of packages declared nowhere but devDependencies — they resolve only by linker\n  ${missing.join('\n  ')}`)
+  // Keep the gate honest: it must be looking at real traffic.
+  assert.ok(used.size >= 3, `expected several @deepseek-ai imports, saw ${String(used.size)} — the scan is broken, not clean`)
+  assert.ok(used.has('@deepseek-ai/dsh-llm'), 'the scan must actually see the package #353 adds')
+})
+
+// ───────────────────────────────────────────── a mount that did not happen must not be logged as one
+
+test('#353: registerChaptersTools WARNS when the strict commands service is absent', () => {
+  // cordis `ctx.get(name)` returns undefined unless the providing fiber is ACTIVE
+  // (cordis 4.0.5 lib/index.js:763-769). `commands` is deliberately outside the realm row's `inject`,
+  // so any mount-ordering wrinkle yielded tools-without-doors — and the row logged
+  // "seven tools + three continuation doors" anyway.
+  const tmp = mkdtempSync(join(tmpdir(), 'wiring-'))
+  const tables = new Map<string, Map<string, unknown>>()
+  const table = (name: string) => {
+    let m = tables.get(name)
+    if (m === undefined) { m = new Map(); tables.set(name, m) }
+    return {
+      get: (k: string) => m!.get(k),
+      put: async (k: string, v: unknown) => { m!.set(k, v) },
+      delete: async (k: string) => { m!.delete(k) },
+      entries: () => m!.entries(),
+      get size() { return m!.size },
+    }
+  }
+  const domainLike = { table, close: async () => {} }
+  const warns: string[] = []
+  const tools: Array<{ name?: string }> = []
+  const ctx = {
+    tools: { register: (def: unknown) => { tools.push(def as { name?: string }); return () => undefined } },
+    // the whole point: no `commands` service in this context.
+    get: (name: string) => name === 'commands' ? undefined : undefined,
+    logger: { info: () => undefined, warn: (m: unknown) => { warns.push(String(m)) } },
+    agents: {}, llm: undefined, sessionProjections: { stateOf: () => CHAPTERS_PRESET_ID },
+  }
+  try {
+    const dispose = registerChaptersTools(ctx as never, makeDomainStore(domainLike as never) as never, {
+      artifactStoreRoot: tmp, chapterTokenTarget: 8000, toolResultDeferFloorTokens: 200,
+    } as never)
+    assert.ok(tools.length >= 7, `the seven tools should still mount (they did: ${String(tools.length)})`)
+    const flagged = warns.filter((w) => /realm:tools:doors/.test(w))
+    assert.equal(flagged.length, 1,
+      `a missing commands service must produce exactly one loud warning; got: ${JSON.stringify(warns)}`)
+    assert.match(flagged[0]!, /NOT mounted/, 'naming the fact, not hedging')
+    assert.match(flagged[0]!, /chapters-continue|door/, 'and naming what the user loses')
+    dispose()
+  } finally {
+    rmSync(tmp, { recursive: true, force: true })
+  }
+})
+
+// ───────────────────────────────────────────── the rest are wiring facts, asserted where they live
+
+test('#353: the row logs the mount it actually performed', () => {
+  const row = read('src/tools-row.ts')
+  // Not a bare assert on the old string: the line must be CONDITIONAL on the doors being there.
+  assert.match(row, /doorsMounted \? ' \+ three continuation doors'/,
+    'the mount line must branch on whether the door commands registered')
+  assert.match(row, /DOOR COMMANDS NOT MOUNTED/, 'and say so explicitly when they did not')
+  assert.doesNotMatch(row, /logger\?\.info\?\.\('dsh-chapters: chapters-tools row mounted — seven tools \+ three continuation doors, this realm only/,
+    'the unconditional "seven tools + three doors" claim is the defect')
+})
+
+test('#353: the roster check certifies the preset this plugin registers', () => {
+  const idx = read('src/index.ts')
+  assert.match(idx, /reportPresetRoster\(ctx, CHAPTERS_PRESET_ID\)/,
+    'the health line must key on the id we register')
+  assert.doesNotMatch(idx, /reportPresetRoster\(ctx, config\.fallbackPreset\)/,
+    'fallbackPreset is a CHILD-MOUNT knob; keying the roster on it let `fallbackPreset: standard` certify `standard` and print an UNHEALTHY verdict naming the wrong id')
+})
+
+test('#353: the durable chapters preset id has ONE definition site in the doors', () => {
+  // registry/stores key on it; a second literal is how a rename silently unmounts door 5.
+  const auto = read('src/auto-save.ts')
+  assert.match(auto, /input\.header\.agentPreset !== CHAPTERS_PRESET_ID/, 'auto-save compares against the constant')
+  assert.doesNotMatch(auto, /agentPreset !== 'chapters'/, 'not a hand-copied literal')
+  assert.match(auto, /import \{ CHAPTERS_PRESET_ID \} from '\.\/preset\.ts'/, 'and it is actually imported')
+})
+
+test('#353: contract.md names a row module that default-exports', () => {
+  // docs/contract.md:189 told the next re-anchor to mount `@fractalsynapse/dsh-chapters/tools`.
+  // `lib/tools.js` has NO default export (grep: 0) while `lib/tools-row.js` has one — so a row written
+  // from the governing record would abort the whole preset.
+  const doc = read('docs/contract.md')
+  assert.match(doc, /@fractalsynapse\/dsh-chapters\/tools-row/, 'the doc must name the module that exists')
+  const toolsDist = read('lib/tools.js')
+  assert.equal(/^\s*export default/m.test(toolsDist), false, 'control: lib/tools.js really has no default export')
+  assert.equal(/^\s*export default/m.test(read('lib/tools-row.js')), true, 'control: lib/tools-row.js does')
+})
+
+// ───────────────────────────────────────── #398: the prompt bar's plan input is wired to a real field
+
+test('#398: planOf folds the operative plan from the session log, not from a row field that does not exist', () => {
+  const idx = read('src/index.ts')
+  const block = /planOf: async \(session\) => \{[\s\S]*?\n {6}\},/.exec(idx)
+  assert.ok(block !== null, 'planOf keeps this shape \u2014 update the scan and the wiring together')
+  assert.match(block[0], /detectPlans\(session\.events\)/,
+    'the fold must run over the session\u2019s durable events \u2014 exactly the mechanism engine.ts:815 carries into a checkpoint')
+  assert.match(block[0], /carryActivePlan\(/, 'and through the ONE operative-plan renderer')
+  assert.doesNotMatch(block[0], /planDocs/,
+    'planDocs is a ChapterRecord field; reading it off a SessionState ROW was the dead-code defect (\u2018?.planDocs ?? []\u2019 is always empty, and even record entries carry no .text carryActivePlan needs)')
+})

@@ -85,7 +85,18 @@ test('small tool results stay inline and large ones are deferred with a readable
   const chapter = renderChapter(events, { title: 'Work', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
   assert.equal(chapter.stats.toolResultsInlined, 1)
   assert.equal(chapter.stats.toolResultsDeferred, 1)
-  assert.match(chapter.markdown, /→ `artifacts\/[0-9a-f]{2}\/[0-9a-f]{64}\.txt`/)
+  // #348 CHANGED THIS EXPECTATION (the second contract change in this line of work, named as such).
+  // The old assertion pinned the bare STORE-relative fragment -- exactly the string that is not openable
+  // from the workspace root, which is the defect. Two forms are now legitimate, and a third (a bare
+  // unopenable path with no hint) is not:
+  //   - with a citationBase from the door: `→ \`.dsh-chapters/<root>/artifacts/…\`` (read can open it)
+  //   - without one, as here (a pure renderer call): the fragment PLUS the tool that can fetch it.
+  // Row `#348: without a base the line names chapters_artifact` in artifact-citation.test.ts pins the
+  // fallback; `with a base, the citation is a path that actually resolves on disk` pins the prefixed form.
+  assert.match(chapter.markdown, /→ `artifacts\/[0-9a-f]{2}\/[0-9a-f]{64}\.txt \(via chapters_artifact\)`/,
+    'a store-relative path may only be printed when the line also names what retrieves it')
+  assert.ok(!/→ `artifacts\/[0-9a-f]{2}\/[0-9a-f]{64}\.txt`/.test(chapter.markdown),
+    'the old bare form is the defect, not a supported shape')
   assert.equal(chapter.artifacts.length, 2, 'artifacts are written EITHER WAY, so deferral never loses data')
 })
 
@@ -332,4 +343,46 @@ test('#336: the duplicate detector sees what a Set structurally cannot', () => {
   assert.equal(dupes.has(11), false, 'the non-overlapping tail is not flagged')
   // The control that keeps this from being vacuous: no overlap, no findings.
   assert.equal(duplicateCoveredSeqs([chapters[0]!, chapters[2]!]).size, 0)
+})
+
+// ───────────────────────────────────────────── #345: inline code cannot be closed by its own content
+
+test('#345: a tool-call argument containing backticks does not break its own line', () => {
+  // The real shape: a bash call whose arguments quote shell backticks. `longerFence` protects fenced
+  // blocks (hazard #1 in this file's header) but the invocation head was a bare single-backtick span.
+  const hostile = '{"command":"grep -n \\"`a`\\|\\`#\\`#\\|Table of contents\\" file.ts"}'
+  const events = [
+    msg(0, 'user', 'search for it'),
+    call(1, 'bash', hostile, 'c1'),
+    result(2, 'found nothing', 'c1'),
+  ]
+  const chapter = renderChapter(events, { title: 'T', summary: 's', startSeq: 0, endSeq: 9 }, CONFIG)
+  const line = chapter.markdown.split('\n').find((l) => l.includes('**bash**'))!
+  assert.ok(line !== undefined, 'the invocation line exists')
+  // Count backtick runs: an ODD number of delimiters means the span is unbalanced and the `(seq N)`
+  // citation after it renders as code/emphasis instead of text.
+  const runs = (line.match(/`+/g) ?? [])
+  assert.equal(runs.length % 2, 0, `unbalanced inline code in: ${line}`)
+  assert.match(line, /\(seq 1\)$/, 'and the seq citation is still plain text at the end of the line')
+})
+
+test('#345: inlineCode picks a delimiter longer than any run inside, and pads edge backticks', async () => {
+  const { inlineCode } = await import('../../src/render.ts')
+  assert.equal(inlineCode('plain'), '`plain`')
+  assert.equal(inlineCode('has `one` run'), '``has `one` run``')
+  assert.equal(inlineCode('a ``` triple ``` inside'), '````a ``` triple ``` inside````')
+  // CommonMark: content beginning or ending with a backtick needs padding spaces, else the run is
+  // read as the delimiter itself.
+  assert.equal(inlineCode('`tick'), '`` `tick ``')
+  assert.match(inlineCode('one\ntwo'), /^`one two`$/, 'newlines fold — the head stays one line')
+  // The property, for any input: the delimiters never appear inside the span unescaped.
+  for (const s of ['', '`', '``', 'a`b', '```x', 'x```', '`````']) {
+    const out = inlineCode(s)
+    const open = /^(`+)/.exec(out)![1]!
+    const close = /(`+)$/.exec(out)![1]!
+    assert.equal(open, close, `open/close match for ${JSON.stringify(s)}`)
+    assert.ok(!open.includes('`````') || true)
+    assert.equal(out.slice(open.length, out.length - close.length).includes(open), false,
+      `content of ${JSON.stringify(s)} cannot contain its own delimiter ${open}`)
+  }
 })

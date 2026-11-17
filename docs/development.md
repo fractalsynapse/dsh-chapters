@@ -696,6 +696,29 @@ commands were *verified*.
 `docs/contract.md`'s file:line citations are from the `examples/` snapshot (rc.1-era), not the rc.2 fork —
 re-anchor them against whichever version a test actually boots.
 
+### An undeclared runtime import is invisible locally (#353)
+
+`@deepseek-ai/dsh-llm` was imported as a VALUE (value imports survive compilation and must resolve at
+runtime) from `src/index.ts`, `src/engine.ts` and `src/aux-message.ts`, while appearing only in
+`devDependencies`. It worked, because a profile is installed with `nodeLinker: hoisted` and
+`autoInstallPeers: false` (`app-boot/src/profile.ts:248-253`), so the package is reachable from the
+hoisted tree regardless of what this manifest says. It is not a dev dependency of a test-only helper: it
+is the host's LLM surface, loaded the moment the host plane activates.
+
+Two habits keep this from recurring:
+
+- **Declare host packages as optional peers** (the pattern the manifest already uses for cordis,
+  `dsh-tools`, `dsh-storage-domain`, …). Optional because the host provides them; declared because the
+  linker contract is not ours to rely on implicitly.
+- **`tests/unit/wiring-truth.test.ts` enforces it**: every `@deepseek-ai/*` VALUE import in `src/` must
+  appear in `dependencies` or `peerDependencies`. `import type` is deliberately excluded — it is erased
+  at compile time, and a first draft of the gate missed that and flagged three nonexistent problems,
+  which is how such a gate gets switched off.
+
+Related, same theme: a package installed with `--no-save` is pruned the next time anything else is
+installed with `--no-save` (see the traps below) — so unsaved local helpers must go in ONE command, and
+nothing the shipped code needs should ever be `--no-save`d in the first place.
+
 ### Running the TS tests on this box (node 22, no native type stripping)
 
 Measured 2026-10-16: `npm test` (`node --test tests/unit/*.test.ts`) needs node ≥ 23 for type
@@ -710,7 +733,18 @@ npx c8 --check-coverage --statements 85 --branches 85 --functions 85 --lines 85 
   node --import tsx --test tests/unit/*.test.ts tests/integration/*.test.ts
 ```
 
-Two traps measured while finding that:
+Traps measured while finding that:
+
+- **A cancelled test is NOT a failing one, and the summary says so in the wrong direction.** Under
+  `node --import tsx`, 21 of 28 rows in `client-doors.test.ts` were reported `not ok …
+  failureType: cancelledByParent` while the tail of the same run printed **`# fail 0`**. The rows were
+  not failing — they had never run, because `makeDoorRunner` awaited a `setTimeout` handle it had just
+  `.unref()`'d, so the loop drained with the promise unresolved (#358). Reading `# fail 0` as green, or
+  grepping the TAP for `^not ok` without also checking `# cancelled`, turns a whole untested subsystem
+  into a passing suite. **Check `# cancelled` is 0 before calling the suite green on any runner.** After
+  the fix the same file reports 29 pass / 0 fail / 0 cancelled: the #77 adoption, roster and
+  verification path is now actually observed on this toolchain, having silently not been for as long as
+  the await path was reachable here.
 
 - **`npm install --no-save A` then `--no-save B` removes A.** npm prunes what is not in the manifest,
   so unsaved helpers must be installed in a single command (`unrun` disappeared the moment `tsx` was

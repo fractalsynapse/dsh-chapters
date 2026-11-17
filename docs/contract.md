@@ -186,7 +186,7 @@ const chaptersContinue = defineTool({
 
 Register **in-realm** (#330, 0.2.32): the seven chapters tools and the three continuation door commands
 (`/chapters-fork`, `/chapters-continue`, `/chapters-save`) mount through a `chapters-tools` row
-(`@fractalsynapse/dsh-chapters/tools`) inside the `preset-chapters` composition — the same seam the host's
+(`@fractalsynapse/dsh-chapters/tools-row`) inside the `preset-chapters` composition — the same seam the host's
 own `dsh-tool-fs` and `dsh-tool-subagent` rows use — and the host plane registers none of them.
 `/chapters-repair` and `/chapters-restore` stay on the host plane: they are operator surfaces that must
 reach a broken chapters archive from any session, and human command text is not model-visible. The measured
@@ -330,6 +330,42 @@ The subclass seam, with everything measured by rounds 12-17 (sources: the instal
   committed records (measured: 3 plans / 1 finalized / no errors).
 - `@deepseek-ai/dsh-home-paths` exports `dshHomePath(...segments)` — the sanctioned
   way to reach `$DSH_HOME` from plugin code (host rc.2 line).
+
+### Preset row health: what the boot line can and cannot say (#339, documented late — #361 shipped it without this)
+
+The plugin registers `preset-chapters` as a declaration row, then asks the **host's own roster** whether the
+preset actually exists, and asks the **preset registry's composition inventory** how its mounted rows are
+doing. Those are three different facts and the line states the third only when the first two allow it.
+
+| line (exact) | meaning |
+| --- | --- |
+| `preset "chapters" registered as a declaration row` | the row was accepted by this host |
+| `preset "chapters" is in the host roster — N mounted rows all active — chapter-form compaction and continuations will compose` | present, and every mounted row reports a usable state |
+| `preset "chapters" is DECLARED BUT BROKEN — …` | the row resolves but a child will not activate; sessions choosing it will not compose |
+| `UNHEALTHY — preset "chapters" is NOT in the host roster (roster: …)` | the composition is missing: existing sessions refuse to open with `agent-preset/not-found` while their logs stay intact |
+| `could not verify the preset roster (…)` | the check itself failed; **treat chapter-form compaction as unconfirmed** — this is not a pass |
+
+**`N mounted rows all active` is a claim, and until #361 it could not be false.** `unusableRows` compared
+cordis' `fiberState` — a **number** — against the string `'active'`, so every row looked healthy under every
+condition, including the week two `chapters` sessions were being compacted by a foreign engine. The number is
+read as a number now. Treat the sentence as evidence: it can say `K of N rows NOT active (…)` when it means
+it, and `rows not reported by this host` / `rows unreadable (…)` when the inventory is unavailable — which is
+**not** the same as "all active", and is printed as its own phrase so a reader cannot conflate them.
+
+Two consequences worth stating because they are the failure modes this line exists to prevent:
+
+- **Presence is not activation, and activation is not usefulness.** A preset can be in the roster with every
+  row active and still be served by another engine's compaction; the ownership witness (#360,
+  `realm:engine:provenance` plus the `/chapters-status` provenance lines) is the check for *that*, and no
+  boot line substitutes for it.
+- **A degraded check never prints the healthy wording.** Missing inventory, an exception, or a non-numeric
+  state each produce their own text. The reason is #339 exactly: a check that falls back to the success
+  string is worse than no check, because it is read and believed.
+
+This section was written twelve rounds after #361 changed the behaviour, which is a missed
+documentation-first step: the code change shipped with tests and no contract, and the only place the
+behaviour was described was the install page's sample output — a sample that, at the time, was itself the
+symptom. Recorded here so the omission is closed rather than inherited, and noted in #355's process findings.
 
 ## Lineage: Kernel Fields We Must Not Lean On
 
@@ -980,6 +1016,41 @@ The rule now: **arming prompt autorun displaces the goal's continuation, and the
   turn — so a missing seam degrades to the safe behaviour rather than double-firing.
 - Re-arming the goal (`/goal resume`, or the bar's next human Run of a `GOAL:` step) is a human act, matching
   the host's own rule that a model may not resume a paused goal (`GOAL_TOOL_RESUME_PAUSED`).
+
+### The director's input assembly is bounded work, and dedupes by path (#350)
+
+The suggestion director is assembled at a turn boundary **on the host's event loop**, so its cost is not a
+detail: measured at real project scale (800 chapters / 36 MB) the pre-#350 code took **9,482 ms** for one
+input. Three causes were identified; two are fixed, and the third is named here so it is not mistaken for
+gone.
+
+1. **Duplicate lineage rows.** `promptChaptersForLineage` concatenated every ancestor row with no
+   dedupe, while the registry holds rows carrying copies of their parent's entries — measured 391 identical
+   number+path records, and a lineage call returning 507 rows for **56 distinct paths**. Each duplicate also
+   re-read its file, so 419 bodies / ~19 MB were read synchronously per boundary, and up to 43% of the
+   director's chapter block was the same text twice. Now deduped by **path**, the same key the TOC
+   accumulation uses (`engine-core.ts:214`), with one body read per distinct file. Path and not number
+   because numbers legitimately repeat across roots — a `number`-keyed dedupe would drop real chapters.
+2. **A quadratic drop search.** Over budget, the oldest chapter is dropped until the input fits; the loop
+   re-assembled the *entire* candidate string for every drop value. Since dropping only shortens the input,
+   `assemble(d).length` is non-increasing and the first fit is findable in `O(log n)` probes — `firstFitDrop`.
+   Measured after the change: **136 ms** at the same scale, a 70× reduction.
+   Two things this must not paper over. (a) The binary search is exact **only** for a non-increasing length
+   function; that precondition is asserted by a row that measures the real assembly across 120 chapters, and
+   a runtime neighbour check falls back to the linear scan if it is ever violated — worst case is the old
+   behaviour, never a wrong answer. (b) The remaining 136 ms is dominated by constructing tens of megabytes
+   of string **once**, which the budget makes inevitable — see 3.
+3. **Still open: the budget itself.** `resolvePromptLimits` derives `contextChars = floor(window ×
+   promptContextRatio × 4)`, so a 1M-token route yields ~2,000,000 chars ≈ 500K tokens of auxiliary input
+   per turn, and the chapter block dominates so thoroughly that the newest turn is about one character in
+   two million — the third mechanism behind "suggestions are not about my last message" (#7). Bounding the
+   chapter block as a *share* of the budget (with a floor share guaranteed to the newest turn) is the fix
+   that removes the megabytes, not the milliseconds-squared, and it is a policy change to the director's
+   input, so it is tracked separately rather than folded into a performance PR.
+
+**Acceptance note, stated rather than quietly missed:** #350 asked for "< 50 ms at 800 chapters / 36 MB".
+These changes deliver 136 ms, not 50 — and the gap is cause 3, not the search. Quoting the target as met
+would make the number mean nothing.
 
 ## Seeded-continuation load deadlock — the fold rule vs the header recorder (measured 2026-11-05, #314)
 

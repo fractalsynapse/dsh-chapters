@@ -135,10 +135,27 @@ test('a range far over chapterTokenTarget is REFUSED with its number, before any
     events, sessionId: 'S', cwd: tmp, store,
     config: { artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, chapterOversizeFactor: 2, toolResultDeferFloorTokens: 200, mergeThreshold: 0.3, chapterLimit: 8000 } as never,
   })
-  assert.equal(out.skipped, 'oversize', `expected an oversize refusal, got ${JSON.stringify(out.skipped)}`)
-  assert.ok(out.warnings.some((w) => /larger than its target|chapter ceiling/.test(w)), 'the refusal names the artifact')
-  assert.equal((await store.get('S')).nextChapterNumber, 1, 'no number was spent on a refused archive')
-  assert.equal(fs.existsSync(`${tmp}/.dsh-chapters/S/chapters`), false, 'and no file was written')
+  // #344 CHANGED THIS EXPECTATION, deliberately and with reason. The old contract was "a range over the
+  // ceiling is refused wholesale" — which, with #344's size-aware subdivision, now only applies to a
+  // range that cannot be reduced by ANY boundary choice. This fixture is exactly that: one assistant
+  // event of ~120 KB. #117's escape valve (render.ts:235) already decided that case must be ARCHIVED
+  // with a loud warning rather than refused, because refusing a single atom makes a long session
+  // permanently un-compactable — measured there: `chapters_continue` was refused four times over one
+  // 77,903-token event. Before #344 the deterministic doors never reached that valve (the equal-count
+  // split kept the giant inside a multi-event chapter, so it errored); now they do, and correctly.
+  //
+  // So the assertions move from "refused, nothing written" to "archived, loudly warned, and the warning
+  // still names the size and both knobs". The safety property the old row protected — a chapter a reader
+  // cannot come back to must not pass silently — is preserved by the warning, not by the refusal.
+  assert.equal(out.skipped, null, `expected the atom archived under #117's valve, got ${JSON.stringify(out.skipped)}`)
+  assert.ok(out.records.length >= 1, 'the giant event is archived rather than losing the whole session')
+  const ceilingWarn = out.warnings.filter((w) => /indivisible event|exceeds the chapter ceiling/.test(w))
+  assert.ok(ceilingWarn.length > 0, `a loud warning must name the oversized atom; got: ${JSON.stringify(out.warnings)}`)
+  assert.match(ceilingWarn[0]!, /chapterTokenTarget 8000/, 'naming the knob, as #344 requires of any refusal or warning')
+  assert.match(ceilingWarn[0]!, /read offset\/limit|reload/i, 'and telling the reader how to come back to it')
+  assert.ok((await store.get('S')).nextChapterNumber > 1, 'numbers ARE spent now that bytes were written')
+  assert.ok(fs.existsSync(`${tmp}/.dsh-chapters/S/chapters`), 'the archive exists')
+  fs.rmSync(tmp, { recursive: true, force: true })
 })
 
 test('a modest overshoot still archives — the factor separates warn from refuse', async () => {

@@ -18,7 +18,7 @@ import { runRestoreHandler } from './restore.ts'
 import { makeRestoreCommand } from './restore-command.ts'
 import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
-import { candidateTotals, defersAtArchive, toolResultCandidates } from './render.ts'
+import { candidateTotals, defersAtArchive, nextUnarchivedSeq, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
 import { rulesCommand } from './rules-commands.ts'
@@ -177,15 +177,19 @@ export function buildChaptersTools(
             windowTokens = info?.context?.contextWindow ?? null
           } catch { windowTokens = null }
         }
-        // Header bound: the last real request's full prompt (usage) — an
+        // Header bound: the last real request's billed input (usage) — an
         // UPPER bound on header+surface-at-that-time, so it over-counts the
         // header conservatively; refusals err toward the loud side.
+        // #395: the host reports the usage arms DISJOINT — inputTokens is uncached
+        // input only, and billed input = input + cacheRead + cacheWrite
+        // (@deepseek-ai/dsh-llm TokenUsage contract). Reading two of three
+        // under-counts on exactly the turns that extend the prompt cache.
         let headerBoundTokens: number | null = null
         const events = caller.session.snapshotEvents?.() ?? []
         for (let i = events.length - 1; i >= 0; i -= 1) {
-          const usage = (events[i]!.data as { usage?: { inputTokens?: number; cacheReadTokens?: number } } | undefined)?.usage
+          const usage = (events[i]!.data as { usage?: { inputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } } | undefined)?.usage
           if (usage !== undefined) {
-            headerBoundTokens = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0)
+            headerBoundTokens = (usage.inputTokens ?? 0) + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
             break
           }
         }
@@ -654,9 +658,12 @@ export function buildChaptersTools(
         // append-only AND duplicate-free, and the child's TOC inherits every earlier
         // chapter through the ancestry walk. When nothing is newer, this degrades to a
         // pure citation fork: child created, archive cited, nothing written.
+        // #396: ONE predicate. The door used to keep the retired two-clause form here
+        // (reduce seeded at 0 + `lastArchived > 0 ? +1 : 0`), which disagreed with the
+        // floor runContinue validates against whenever a committed chapter covered seq 0.
         const parentState = await ports.getState(agent.session.id)
-        const lastArchived = parentState.chapters.reduce((m, c) => Math.max(m, c.endSeq), 0)
-        const fromSeq = lastArchived > 0 ? lastArchived + 1 : 0
+        const fromSeq = nextUnarchivedSeq(parentState.chapters)
+        const lastArchived = fromSeq - 1
         if (fromSeq > 0 && anchor <= lastArchived) {
           const forked = await runFork(ports, { ...callerArgs, handoffNote: `Archived through the Chapters ${door.noun}. Nothing had been said since the last archive, so this ${door.noun} cites the existing chapters unchanged. ${door.noDirective}` }, config)
           if (cwd0 !== '') config.scheduler?.schedule(cwd0, 'archive:fork-cite')
@@ -760,6 +767,30 @@ export function buildChaptersTools(
         }
         if (out.skipped === 'nothing-new') {
           return { kind: 'success' as const, text: `Nothing to save: all ${out.priorChapters} chapter(s) already archived through seq ${out.lastArchived}. Content is searchable via chapters_search.` }
+        }
+        // #344: an EXHAUSTIVE refusal arm, not one `if` per known reason. `oversize` and `payloadless`
+        // both fell through to the success line below, so the real run on eadc — `skipped='oversize'`,
+        // `records=0` — printed "Saved: 0 chapter(s) archived … Enrichment queued." A refusal read as a
+        // success, on the door whose whole job is to say what was archived. Handling the reason
+        // generically means a NEW skip reason cannot silently inherit the success wording; that is how
+        // this happened twice over, and a per-case list is how it happens a third time.
+        if (out.skipped !== null && out.records.length === 0) {
+          const why: Record<string, string> = {
+            oversize: 'a chapter is too large to archive whole even after subdividing at every event boundary',
+            payloadless: 'the event read carried shapes but no payloads, so nothing could be archived',
+            'no-completed-turn': 'the conversation has no completed turn yet',
+          }
+          const detail = out.warnings.length > 0
+            ? `\n  ${out.warnings.join('\n  ').slice(0, 900)}`
+            : ''
+          return {
+            kind: 'error' as const,
+            text: `chapters-save: NOTHING archived — refused (${why[out.skipped] ?? `reason: ${out.skipped}`}) for seqs ${out.fromSeq}..${out.anchor}.`
+              + `\n  Ceiling: chapterTokenTarget ${String(config.chapterTokenTarget)} × chapterOversizeFactor ${String(config.chapterOversizeFactor ?? 2)}.`
+              + ' Raise either knob, or archive the range with chapters_continue (model-chosen boundaries), which may cut inside a turn.'
+              + detail
+              + '\n  Nothing was reserved, so no chapter number was spent.',
+          }
         }
 
         // Schedule enrichment asynchronously — do NOT await. Enrichment calls
@@ -1254,7 +1285,16 @@ export function registerChaptersTools(
   const disposeRulePropose = ctx.tools.register(built.chaptersRulePropose)
   const disposeRules = ctx.tools.register(built.chaptersRules)
   let disposeCommand: (() => void) | null = null
+  // #353: `commands` is deliberately NOT in the realm row's `inject`, and cordis `ctx.get(name)` is
+  // STRICT — it returns undefined unless the providing fiber is ACTIVE (cordis lib/index.js:763-769).
+  // The branch below silently skipped door registration when that happened, while the row went on to
+  // log "seven tools + three continuation doors, this realm only". A mount that did not happen must
+  // not be reported as one that did (AGENTS: deliver detected failures).
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register === undefined) {
+    const why = commands === undefined ? 'commands service absent from this context' : 'commands service has no register()'
+    diagnosticWarn(ctx.logger, 'realm:tools:doors', `the three continuation door commands are NOT mounted — ${why}. The seven chapters_* tools work; nothing offers /chapters-continue, /chapters-fork or /chapters-save as a command.`)
+  }
   if (commands?.register !== undefined) {
     try {
       // Keep EVERY disposer: a loop that overwrote `disposeCommand` would leak the
@@ -1291,6 +1331,11 @@ export function registerChaptersRepairRestore(
   const built = buildChaptersTools(ctx, store, config)
   const disposers: Array<() => void> = []
   const commands = ctx.get?.('commands') as { register?: (def: unknown) => (() => void) | unknown } | undefined
+  if (commands?.register === undefined) {
+    // #353: same silent-skip on the OPERATOR doors. These are the way into a broken child, so their
+    // absence is the one thing the host plane must never claim it registered.
+    diagnosticWarn(ctx.logger, 'host:tools:repair-restore', '/chapters-repair and /chapters-restore are NOT mounted — commands service unavailable on the host plane. A child that cannot compose its realm now has no documented way in.')
+  }
   if (commands?.register !== undefined) {
     try {
       for (const def of [built.repairCommand, built.restoreCommand]) {

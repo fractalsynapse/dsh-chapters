@@ -25,9 +25,11 @@
  * non-archive is either a quiet, expected skip (wrong preset, no completed turn)
  * or a LOUD warn (unreadable, save failed).
  */
+import { CHAPTERS_PRESET_ID } from './preset.ts'
 import { diagnosticWarn } from './diag.ts'
 import { formatWarnings } from './warnings.ts'
 import { isActiveChapter } from './registry.ts'
+import { nextUnarchivedSeq } from './render.ts'
 import { saveSession, type SaveSessionConfig } from './save-core.ts'
 import { lineageOf, type SessionEventLike } from './types.ts'
 import type { RegistryStore } from './store.ts'
@@ -255,7 +257,7 @@ export function shouldForceChildArchive(input: {
   enabled: boolean
 }): { fire: boolean; reason: string } {
   if (!input.enabled) return { fire: false, reason: 'childAutoArchive is off in config' }
-  if (input.header.agentPreset !== 'chapters') return { fire: false, reason: 'not a chapters-preset session' }
+  if (input.header.agentPreset !== CHAPTERS_PRESET_ID) return { fire: false, reason: 'not a chapters-preset session' } // #353: the durable preset id had a second literal copy outside its single predicate
   // door 5 owns delegation; two doors on one child would double-write the same span
   if (input.header.origin === 'subagent') return { fire: false, reason: 'owned by subagent settlement (door 5)' }
   // Only a ROOTED child: a session with no parent anywhere is the user's own session, whose doors are
@@ -322,7 +324,9 @@ export function makeChildArchiveListener(deps: ChildArchiveDeps): (session: unkn
         // live turn boundary.
         const store = await deps.store()
         const state0 = await store.get(id)
-        const lastArchived = state0.chapters.reduce((m, c) => Math.max(m, c.endSeq), -1)
+        // #396: the ONE watermark predicate. (This line used to hand-roll the max, seeded -1 —
+        // equal in value, second in count, and exactly how #336's two derivations drifted.)
+        const lastArchived = nextUnarchivedSeq(state0.chapters) - 1
         const completed = events.filter((e) => e.type === 'turn/end' && e.seq > lastArchived && e.seq <= anchor).length
         const gate = shouldForceChildArchive({
           header,
