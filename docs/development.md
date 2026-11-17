@@ -140,6 +140,16 @@ answers the question in exactly one place; two consumers use it:
   the corpus. `MODE=replay` never probes — CI runners have no 8080, and replay writes nothing.
   The predicate lives once in `tests/support/model-parity.ts`; `E2E_UPSTREAM_MODEL` remains the
   deliberate remap, honored only when that id is itself listed and proven.
+- **#409: the proof is leg-kind aware.** `plans`/`prompt`/`prompt-revival` legitimately distill against
+  the SCRIPTED STUB (#56 policy — the prompt leg's assertion compares a constant only the stub's
+  `suggest` arm mints), and the stub lists `stub-plan-carriage`, not the live model name. The guard's
+  first cut therefore refused the rig's own stub distill. `distill-tapes.sh` now exports
+  `E2E_STUB_LEG=1` beside the stub `E2E_UPSTREAM` it already pins — one coupled source — and boot
+  honors it only against a STUB-CLASS endpoint (every listed id `stub-`-prefixed, chat witnessed
+  against the endpoint's own first listed id; the stub's `model` field is an echo and its own
+  provenance file says so). Marker without stub-class → refuse; stub-class on a live leg → refuse;
+  the measured alias box fails BOTH leg kinds. Demos that bind the class: alias+record refused,
+  replay inert, AND stub-leg+stub-endpoint ACCEPTED — the third one was missing from #407.
 - `.github/workflows/ci.yml`'s `host-capability` job sets `corpus-anchored`, the `e2e-replay` job
   requires it, and the run log gets a step summary plus a `::warning::` naming the issue. Skipped,
   visibly — the same discipline as the preset-row refusal it sits beside: never silently green,
@@ -179,7 +189,7 @@ So the question "is this turn slow, or is the connection dead?" is a lookup:
 | unit | `npm test` (`tests/unit`) | node --test, no build, no network | pure core: registry, render, archive, notice, engine-core, tools, commands |
 | integration | (today: probe rounds — see spikes/probe/README pattern) | boots real hosts in scratch homes | host wiring, realm mounts, provider economics |
 | e2e (tape — the default loop) | `npm run test:e2e:replay` | same boots with `E2E_MODEL=replay`; model turns answered from `tests/fixtures/model-tape/<project>` via the record/replay proxy (`tests/e2e/model-proxy.ts`) — seconds, deterministic |
-| e2e (distillation — occasional) | `npm run test:e2e:record` | `E2E_MODEL=record`: forwards every exchange to the real Local model and appends the tape. Run once per scenario; wipe `var/model-tape` first for a clean corpus; tapes are isolated per project (eight: suite/heavy/arrival/fanout/enrich/rules/fork/plans); re-record when scenarios, prompts, or thresholds change. The GPU model is the DISTILLER, never the test oracle (user directive 2026-09-19) |
+| e2e (distillation — occasional) | `scripts/distill-tapes.sh [legs]` | `E2E_MODEL=record` per leg, and since #411 **every green record is followed in the same loop by a strict replay of that leg** — the tape's own acceptance. New misses earn exactly one bounded heal (the leg's own upstream) and a second replay must pass; a failing replay with no misses is a leg failure, never healed. Verdicts read `record+replay green (N entries)` and flow into generated PROVENANCE. (`npm run test:e2e:record` remains the chained variant — its first failure hides the rest, which is why the script exists.) Run once per scenario; wipe `var/model-tape` first for a clean corpus; tapes are isolated per project (eight: suite/heavy/arrival/fanout/enrich/rules/fork/plans); re-record when scenarios, prompts, or thresholds change. The GPU model is the DISTILLER, never the test oracle (user directive 2026-09-19) |
 | e2e | `npm run test:e2e` (`tests/e2e`, EIGHT projects: suite/heavy/arrival/fanout/enrich/rules/fork/plans) | Playwright + workspace-cached chromium vs a throwaway `var/e2e-home-<port>` rebuilt per boot (port-keyed so no boot can stomp another's state) (isolated from live agents — see FINDINGS 2026-09-19) | the browser: identity, fork button + switch, knowledge loop end-to-end, the oversized turn (mid-turn compactions), the subagent fan-out, arrival-time artifacting (low-floor project) |
 
 The e2e layer exists because client-plane facts were being GUESSED (services, methods, tooltips,

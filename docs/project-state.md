@@ -997,3 +997,67 @@ the full chain locally before its stamp commit. Named open, unchanged from 0.2.3
 live observation of a composed checkpoint), #349 remainder, #397 contract decision, five credential-
 gated TreeDX live rows, and #340 (its home is now 0.2.36, with this box's endpoint defect the thing to
 fix or route around).
+
+## 2026-11-17 — 0.2.35 SHIPPED
+
+Released from `main` `c53de2e` (merge of PR #408, verified head `33c55bf`, tree-identical), tag
+**`0.2.35`** (annotated, bare semver, matching the manifest at all four version sites).
+
+Release job (run `44083889900`) success: build → coverage-gated suite → publish with Production token;
+`publish Signed provenance statement` + transparency log logIndex 3945911543 — the no-attestation
+fallback did not fire. Registry: `latest` = 0.2.35; unpacked tarball: `package.json` 0.2.35 AND
+`lib/version.js` `PLUGIN_VERSION = '0.2.35'` (the 0.2.20 stale-tree class, excluded by measurement).
+Candidate evidence: all four CI jobs green at the head, including the ten-leg replay; the full 11-leg
+chain additionally run green LOCALLY at the release head before the stamp commit; `promptAnchor`
+`b40304ee3e35a94f` unchanged across 0.2.34→0.2.35 — zero model-facing byte changes in the whole range,
+machine-checked.
+
+Closed at this cut: **#379** (auto-referenced when the release reached `main`; ship comment added),
+**#406**. Scope decision honored and recorded: **#340 (PR #368) moves to 0.2.36** — its one gated item,
+the `prompt`-leg re-record, awaits an endpoint that truly serves the pinned model; #406 now refuses any
+that does not, loudly and before boot.
+
+**Heading for 0.2.35→0.2.36:** land #368 post-re-record (needs the distillation rig's model server or
+`E2E_UPSTREAM` + `E2E_UPSTREAM_KEY` at the real qwen3.8-flash-next) · C3 live observation of a composed
+checkpoint (blocked here BY the guard until such an endpoint exists — the alias box cannot produce it)
+· #349 remainder · #397 contract decision · TreeDX live rows · host option-(d) todo row.
+
+## 2026-11-17 — correction to today's own entries: #340's re-record was never endpoint-blocked
+
+The 0.2.35 notes (and the #368 PR / #340 issue comments) stated the `prompt`-leg re-record was
+"blocked behind a truly-serving qwen3.8-flash-next endpoint". Wrong mechanism, found by RUNNING the
+rig's documented tool: per #56 the prompt/plans legs distill against the SCRIPTED STUB (:8081) — no
+live endpoint is ever legitimate for them. The true blocker was my own #406 guard, which demanded the
+pinned live id from every tape-writing mode and therefore refused the rig's own stub path
+(`refusing to record — the upstream does not list qwen3.8-flash-next; it lists [stub-plan-carriage]`,
+full log `var/distill/prompt-120705.log`). Three lessons held together: the guard overfit its incident
+(demos 1 and 2 passed; the missing third was stub-leg acceptance), I bypassed `distill-tapes.sh` for
+raw `e2e-one` and so walked into the live-alias the runner's policy forbids, and the shipped changelog
+stays as cut — corrections land forward, here and in `docs/backlog.md`. Fixed under #409: leg-kind
+marker from the stub-pinning script itself, stub-class witness (all-`stub-`-prefixed list; its own
+echo-arm noted honestly), both refusal directions kept, four-quadrant rows. No tape bytes from the
+failed attempt were ever committed (`tests/fixtures/model-tape/prompt/` restored to HEAD each time).
+
+## 2026-11-17 — #340 (PR #368) LANDED to staging; 0.2.36 content is now decided-by-facts
+
+Sequence as measured, end to end: guard fix #409 (PR #410) merged → stub-path distill of the prompt
+leg (exit 0, 14 entries) → strict replay caught ONE unrecorded call — the post-Run regeneration this
+fix's own freshness semantics introduces, lost to streaming latency at record time (a record/replay
+cache-speed inversion, #331 family) → bounded heal against the same deterministic stub appended
+exactly one entry → strict replay green at the leg, full 11-leg chain green locally, CI acceptance
+green on endpoint-less runners → PR #368 merged (`9905c4b`). Follow-up gate filed as **#411**
+(distill should replay-after-record + bounded auto-heal as the default verdict).
+
+**0.2.36 standing content:** #340, #409. Candidates if wanted before the cut: #411 rig gate. Still
+open, unchanged: C3 (first live composed-checkpoint observation), #349 remainder, #397 contract
+decision, TreeDX live rows, host option-(d) todo. Release timing is the maintainer's call.
+
+## 2026-11-17 — 0.2.36 cut prepared from staging `f8971cb`
+
+Range 0.2.35..f8971cb: 18 commits, three merged PRs — #368 (#340 suggestion freshness, user-visible),
+#410 (#409 leg-kind identity guard), #412 (#411 distill record+replay gate with bounded heal). The
+honest arc is in the notes: 0.2.35 shipped a guard that broke the rig's own stub-path distill;
+0.2.36 ships its correction AND the fix that correction unblocked. Versions: four sites at 0.2.36.
+Open after this cut stands at: C3 (live composed-checkpoint observation — first sight belongs to the
+heavy leg whenever a true pinned-model endpoint runs it), #349 remainder, #397 contract decision,
+TreeDX live rows, host option-(d) todo row, #372 (browser-rig work, unbuilt).
