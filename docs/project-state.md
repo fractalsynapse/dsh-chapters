@@ -1061,3 +1061,24 @@ honest arc is in the notes: 0.2.35 shipped a guard that broke the rig's own stub
 Open after this cut stands at: C3 (live composed-checkpoint observation — first sight belongs to the
 heavy leg whenever a true pinned-model endpoint runs it), #349 remainder, #397 contract decision,
 TreeDX live rows, host option-(d) todo row, #372 (browser-rig work, unbuilt).
+
+## 2026-11-17 — 0.2.36 SHIPPED
+
+Released from `main` `798aab3` (merge of PR #413, verified head `ac0f20d`, tree-identical), tag
+**`0.2.36`** (annotated, bare semver, matching all four version sites).
+
+Release job (run `44195438482`) success; publish provenanced (registry attestation endpoint returns
+the bundle); `latest` = 0.2.36; tarball unpack: manifest `0.2.36` AND bundled `PLUGIN_VERSION =
+'0.2.36'`. Candidate evidence: all four CI jobs green at the head; full 11-leg replay chain run green
+LOCALLY at the release head before the stamp commit; `promptAnchor b40304ee3e35a94f` unchanged since
+0.2.34 — three releases, zero agent-facing prompt-byte moves, machine-checked at every stamp.
+
+Closed at this cut: **#340, #409, #411**. The arc they trace — last week's report, the guard that
+broke the rig's own stub path, the re-anchor that exposed a record-time race — is told in the 0.2.36
+notes and stands as the working example of the repo's release discipline: every claim names its
+class (deterministic / replayed / installed / live) and the missing class is declared, not implied.
+
+**Open after 0.2.36:** C3 — first LIVE observation of a composed checkpoint (heavy leg; needs the
+distillation rig's true pinned-model endpoint — this box is now refused by name, by design, #406/#409)
+· #349 remainder (browser rig) · #372 (unbuilt) · #397 (contract.md § Lineage decision, parked with
+its one-line change) · host option-(d) todo row · five credential-gated TreeDX live rows.
