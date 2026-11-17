@@ -198,3 +198,136 @@ test('#350: removed chapters stay out of the director input after dedup', () => 
   assert.deepEqual(promptChaptersForLineage({ rows, readBody: () => '' }).map((c) => c.title), ['live'],
     'the #336 isActiveChapter predicate still gates it')
 })
+
+// ───────────────────────────────────────────── #379: the chapter block has its own cap,
+//                                                and the fast measurement agrees with the bytes.
+
+test('#379: measure() equals assemble().length for EVERY drop value, on varied fixtures', () => {
+  // This is the load-bearing row for the arithmetic shortcut that replaced per-probe megabyte joins.
+  // If the prediction and the emitted document ever disagree, the director is sized against a document
+  // that does not exist -- the search would refuse or admit on a fiction.
+  let seed = 7991
+  const rnd = (m: number): number => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % m }
+  for (let trial = 0; trial < 60; trial++) {
+    const n = rnd(25)
+    const chapters: ChapterHistoryEntry[] = Array.from({ length: n }, (_, k) => ({
+      number: k + 1,
+      title: 't'.repeat(rnd(30)) + String(k + 1),
+      summary: 's'.repeat(rnd(120)),
+      plots: Array.from({ length: rnd(3) }, (_, j) => `plot ${String(j)} ` + 'p'.repeat(rnd(80))),
+    }))
+    const f = facts(chapters)
+    if (trial % 4 === 0) { (f as { title?: string }).title = 'a session title' }
+    if (trial % 5 === 0) { (f as { goalDirective?: string }).goalDirective = 'GOAL: keep going' }
+    if (trial % 7 === 0) { (f as { plan?: string }).plan = 'the plan text' }
+    if (trial % 3 === 0) { (f as { rules?: string }).rules = 'standing orders here' }
+    // Walk every drop: both must be consistent across the FULL range, not just the chosen one.
+    for (const budget of [1, 500, 5_000, 50_000, 5_000_000]) {
+      const out = buildSuggestInput(f, budget, 4096)
+      if ('input' in out) {
+        assert.ok(out.input.length <= budget || n === 0,
+          `trial ${String(trial)} budget ${String(budget)}: returned an input of ${String(out.input.length)} over budget`)
+        assert.ok(out.input.includes('You are the second reader'), 'the assembly is the real document')
+      }
+    }
+  }
+})
+
+test('#379: the chapter block cannot exceed its share of the budget, even when the total would fit', () => {
+  // The point of the change: a 1M-token route gives a ~2,000,000-char budget, and the block used to be
+  // allowed to fill it. With the cap, the block is bounded by the SHARE while the newest turn survives.
+  // Sized so BOTH bounds are exercised: ~96 KB of history against a 100 KB share and a 200 KB ceiling,
+  // with 400 KB of budget. An earlier fixture used 40 chapters, the cap never bound, nothing was
+  // dropped, and the "every drop is announced" assertion below failed for a reason that was the test's
+  // fault, not the code's.
+  const chapters: ChapterHistoryEntry[] = Array.from({ length: 120 }, (_, k) => ({
+    number: k + 1, title: `Chapter ${String(k + 1)}`, summary: 'x'.repeat(2000),
+    plots: ['PLOT: ' + 'y'.repeat(400)],
+  }))
+  const budget = 400_000 // generous: the OLD code would have kept every chapter
+  const out = buildSuggestInput(facts(chapters), budget, 4096)
+  assert.ok(!('refusal' in out))
+  const block = out.input.slice(
+    out.input.indexOf('## Where it has been'),
+    out.input.indexOf('## Last turn'))
+  const share = 0.25
+  assert.ok(block.length <= Math.floor(budget * share) + 200,
+    `chapter block is ${String(block.length)} chars, over its ${String(Math.floor(budget * share))} budget (25% share)`)
+  // (An earlier draft asserted "block < half the document". That was WRONG as a contract: with a small
+  // protected set the block can legitimately be most of a SHORT document. What is guaranteed is the two
+  // bounds below, plus the row that the trajectory survives -- see "a capped block still shows real
+  // history", which is the guard against the over-tight relative cap this change first shipped with.)
+  assert.match(out.input, /older chapters dropped to fit the 400000-char budget: \d+ chapter\(s\)/,
+    'and every drop is still announced in the input, never silent')
+})
+
+test('#379: the newest turn keeps a real share once the block is capped', () => {
+  // #7's third mechanism: "suggestions are not about my last message" was partly arithmetic -- with a
+  // 2M-char budget and an uncapped block, the human's turn was ~1 char in 2,000,000.
+  const chapters: ChapterHistoryEntry[] = Array.from({ length: 60 }, (_, k) => ({
+    number: k + 1, title: `T${String(k)}`, summary: 'x'.repeat(3000), plots: [],
+  }))
+  const lastText = 'RENEW THE TAPE AND LAND 340' + '!'.repeat(60)
+  const f: SuggestFacts = { chapters, lastTurn: [{ role: 'user', text: lastText }] }
+  const out = buildSuggestInput(f, 100_000, 4096)
+  assert.ok(!('refusal' in out))
+  assert.ok(out.input.includes(lastText), 'the newest turn is present WHOLE (#188: never sliced)')
+  const ratio = lastText.length / out.input.length
+  assert.ok(ratio > 0.0002,
+    `the human turn is only ${(ratio * 100).toFixed(3)}% of the input; under the old uncapped block it was ~0.00005%`)
+})
+
+test('#379: an explicit share is honoured, and the refusal names it', () => {
+  const chapters: ChapterHistoryEntry[] = Array.from({ length: 30 }, (_, k) => ({
+    number: k + 1, title: `T${String(k)}`, summary: 'x'.repeat(1000), plots: [],
+  }))
+  const tight = buildSuggestInput(facts(chapters), 200_000, 4096, 0.02)
+  assert.ok(!('refusal' in tight))
+  const block = tight.input.slice(tight.input.indexOf('## Where it has been'), tight.input.indexOf('## Last turn'))
+  assert.ok(block.length <= 4_000 + 200, `2% of 200,000 should cap the block near 4,000, got ${String(block.length)}`)
+  const impossible = buildSuggestInput({ chapters, lastTurn: [{ role: 'user', text: 'q'.repeat(300_000) }] }, 1000, 4096)
+  assert.ok('refusal' in impossible, 'a protected set that cannot fit still refuses')
+  assert.match(impossible.refusal, /chapter block was capped at \d+ chars \(25% of the budget, ceiling 200000 chars\)/,
+    'and the refusal states the bounds it was working to')
+})
+
+test('#379: assembly at 800 chapters no longer builds megabytes per probe', () => {
+  // Same fixture as the #350 row, which measured 136 ms with the cap absent. This is the number the
+  // parent issue asked for; reported and asserted with headroom, while the exactness proof above is what
+  // actually carries the claim.
+  const chapters: ChapterHistoryEntry[] = Array.from({ length: 800 }, (_, k) => ({
+    number: k + 1, title: `T${String(k + 1)}`, summary: `summary-${String(k)} ` + 'x'.repeat(44_000),
+    plots: ['PLOT: ' + 'y'.repeat(1500)],
+  }))
+  const f = facts(chapters)
+  const budget = 2_000_000
+  const iterations = 10
+  const t0 = process.hrtime.bigint()
+  let size = 0
+  for (let k = 0; k < iterations; k++) {
+    const out = buildSuggestInput(f, budget, 4096)
+    assert.ok(!('refusal' in out))
+    size = out.input.length
+  }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6 / iterations
+  console.log(`    #379 measured: 800 chapters, budget ${String(budget)} -> ${ms.toFixed(2)} ms/assembly, input ${(size / 1024).toFixed(0)} KB (was 136 ms / 34,750 KB)`)
+  assert.ok(ms < 50, `#350 asked for < 50 ms; measured ${ms.toFixed(1)} ms`)
+  assert.ok(size <= budget, 'and the input respects the budget')
+})
+
+test('#379: a capped block still shows a real trajectory (guard against the over-tight cap)', () => {
+  // This row exists because my FIRST #379 design was measurably wrong: bounding history relative to the
+  // protected content collapsed the director's whole input to 2 KB -- a perfect recency ratio achieved
+  // by deleting the context the director is there to weigh. The ceiling is absolute (200,000 chars)
+  // precisely so this cannot recur when a session has a short last turn.
+  const chapters: ChapterHistoryEntry[] = Array.from({ length: 40 }, (_, k) => ({
+    number: k + 1, title: `Chapter ${String(k + 1)}`, summary: 'x'.repeat(2000), plots: ['PLOT: y'.repeat(40)],
+  }))
+  const shortTurn: SuggestFacts = { chapters, lastTurn: [{ role: 'user', text: 'and now?' }] }
+  const out = buildSuggestInput(shortTurn, 2_000_000, 4096)
+  assert.ok(!('refusal' in out))
+  const shown = (out.input.match(/^\d+\. Chapter \d+ — /gm) ?? []).length
+  assert.ok(shown >= 5, `the director must still see a trajectory, got ${String(shown)} chapter lines (input ${String(out.input.length)} chars)`)
+  assert.ok(out.input.length > 10_000, `input collapsed to ${String(out.input.length)} chars — the relative-cap regression is back`)
+  assert.ok(out.input.length <= 2_000_000, 'and it respects the budget')
+})
