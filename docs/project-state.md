@@ -886,3 +886,34 @@ and that is stated wherever the claim is made. What the tape leg keeps is everyt
 
 Full chronology, measurements and which round proved what: **`docs/project-state.md`**.
 Next things to pick up: **`docs/backlog.md`**. Verification checklist: **`docs/verify.md`**.
+
+## 2026-11-16 — external context-handling audit: findings, two corrections, and what shipped
+
+A full read of the plugin against the pinned harness (`node_modules/@deepseek-ai/*` 0.2.0-rc.2) and
+`examples/cordis` produced five findings; four became issues and PRs, one died against a governing record:
+
+- **#399 (the headliner, PR pending)** — `reconstructShadowedSeqs` assumed a host shape that does not exist
+  (`surface.nodes` read as `{seq}[]`; `deriveEventMessage` called unbound), so pressure compaction archived
+  ONE legacy chapter on every real host while unit rows stayed green against a stub of the invented shape —
+  the r28 lesson re-run inside the composer. The composed arm also dropped the plot section.
+- **#395 (PR #400)** — the continuation budget's header bound read two of the three DISJOINT usage arms,
+  under-counting on cache-writing turns; now `input + cacheRead + cacheWrite`.
+- **#396 (PR #401)** — two watermark derivations still used forms #336 retired (`tools.ts` two-clause,
+  `auto-save.ts` hand-rolled max), and the notice's live-plan ceiling took an ancestry-wide max over mixed
+  per-session seq spaces, silently dropping a pending live-tail plan. One predicate everywhere; scan-gated.
+- **#398 (PR #402)** — the prompt bar's `planOf` read `row.planDocs`, a field that exists only on chapter
+  RECORDS (and without the full text `carryActivePlan` folds): the documented plan input was dead wiring.
+  Now folds `detectPlans(session.events)` exactly like the engine's checkpoint carry.
+- **#397 — closed, NOT implemented.** The proposal (pass `meta.parentSession` at `agents.create`) collided
+  with `docs/contract.md` § "Lineage: Kernel Fields We Must Not Lean On": the header field is seed lineage
+  and the registry is the sole ancestry authority by recorded decision. Amending that is a maintainer call;
+  the issue carries the one-line change if the decision flips.
+
+**Correction to the audit's own claims, measured after the fact:** it reported the e2e plane as "red — the
+harness that could catch these bugs cannot compile." Wrong gate model: `scripts/e2e-typecheck-ratchet.sh`
+baselines tests/e2e at 58 type errors by explicit decision (#83) and CI enforces NO-GROWTH; Playwright
+transpiles specs without type-checking, and the tape-replay acceptance job runs ten real-host legs in CI
+regardless. The debt is real and ratcheted; the claim that no real-host coverage exists was withdrawn.
+Node-24 note for rigs: this box's system node is 22; the repo-vendored `var/toolchain/node-v24.22.0` is
+what CI and the ratchet use, and the deterministic ledger (1,625+/1,631 with the five credential-gated
+`live:` TreeDX rows the only non-passes) was run on it.

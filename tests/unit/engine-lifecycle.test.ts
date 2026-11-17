@@ -746,3 +746,48 @@ test('#143 the note reports the window the adapter measured, not a config key th
     process.env.DSH_CHAPTERS_ENGINE_ERRORS = prev
   }
 })
+
+// #399: the composer dead-path regression, at the lifecycle level. sessionOf already wears the REAL host
+// shape (surface.nodes is a plain number array, exactly what SessionSurface publishes) — pre-fix, the
+// engine's reconstruct read `.seq` off every node, matched nothing, and silently archived ONE legacy
+// chapter per pressure compaction on every real host. This row drives summarize() over three completed
+// turns with two distinct stored topics and demands the composed manifest.
+test('summarize COMPOSES topic chapters on the host-shaped surface, carrying plan/rules/plot (#399)', async () => {
+  const h = harness()
+  try {
+    const events = [
+      human(0, 'rebuild the sync loop copy-out in src/sync.ts'),
+      asst(1, 'edited src/sync.ts; ran npm test'),
+      ev(2, 'turn/end', {}),
+      human(3, 'document the rules tier at docs/rules.md'),
+      { seq: 4, type: 'assistant/message', data: { content: [{ type: 'text', text: 'wrote docs/rules.md\nPLOT: finish the composer, then re-anchor the heavy tapes' }], source: { kind: 'user' } } },
+      ev(5, 'turn/end', {}),
+      human(6, 'and now start the archive mirror work'),
+      ev(7, 'turn/end', {}),
+      ev(8, 'compaction/start', { compactionId: 'c-comp' }),
+    ]
+    const session = h.sessionOf('s-comp', events)
+    // Two disjoint-topic turn collections (the deterministic signature store's shape):
+    await h.store.put('s-comp', { ...(await h.store.get('s-comp')), collections: [
+      { seqs: [0, 1, 2], paths: ['src/sync.ts'], commands: ['npm test'], terms: ['sync', 'copy-out'], size: 400, by: 'deterministic' },
+      { seqs: [3, 4, 5], paths: ['docs/rules.md'], commands: [], terms: ['rules', 'tier'], size: 300, by: 'deterministic' },
+    ] })
+    // The shadowed region: turn 1, turn 2, and the first node of turn 3 — what a pressure
+    // selection actually covers (surface nodes only; turn/end events derive to null).
+    const input = { messages: [0, 1, 3, 4, 6]
+      .map((seq) => (session as unknown as { deriveEventMessage: (e: unknown) => unknown }).deriveEventMessage(session.eventAt(seq)))
+      .filter((m) => m !== null) }
+    const r = await (h.engine as unknown as { summarize: (i: unknown, a: unknown) => Promise<{ summary: { text: string }[]; provider: string }> })
+      .summarize(input, { session })
+    assert.equal(r.provider, 'dsh-chapters')
+    const text = r.summary[0]!.text
+    const st = await h.store.get('s-comp')
+    const plan = st.plans['c-comp']!
+    assert.ok(plan.chapters !== undefined && plan.chapters.length >= 2,
+      `the composed manifest must cite >= 2 topic chapters, got ${JSON.stringify(plan.chapters)} — the composer is dead again (toc: ${text.slice(0, 200)})`)
+    const bullets = (text.match(/^\d+\.\s+\[/gm) ?? []).length
+    assert.ok(bullets >= 2, `the checkpoint TOC lists every composed chapter (got ${String(bullets)})`)
+    assert.match(text, /Working plot \(model-authored, carried across this checkpoint\):/, '#399: the composed arm carries the plot the legacy arm carries')
+    assert.match(text, /PLOT: finish the composer/, 'and it is the model-authored bytes, not a re-derivation')
+  } finally { h.dispose() }
+})
