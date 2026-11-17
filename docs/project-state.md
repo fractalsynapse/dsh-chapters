@@ -975,3 +975,49 @@ Closed at this cut: **#395, #396, #398, #399** (the 2026-11-15/16 context-handli
 - The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents`) — inventory pinned by
   `tests/unit/host-composer-shape.test.ts` — are the first gate to re-run against any host bump;
   `contract.md` is the measuring document.
+
+## 2026-11-17 — 0.2.35 cut prepared from staging `669d59d`; scope decided
+
+Maintainer direction of 2026-11-17: cut 0.2.35 **early** with the two landed items — #379 (director
+chapter-block cap, PR #383) and #406 (tape-writing model-identity guard, PR #407) — and move #340
+(PR #368) to **0.2.36**. Recorded as a decision: #368 passes everything except its one gated item, the
+`prompt`-leg re-record, which is blocked on an endpoint that truly serves the pinned rig model — the
+defect #406 now refuses loudly instead of recording over it.
+
+What the re-record attempt turned up is the release's real content: this box's endpoint was proven by
+direct probe to SILENTLY ALIAS the pinned model name (requests for `qwen3.8-flash-next` answered by
+`qwen3-4b-instruct`, raw `think` traces as content; fifteen tape entries contaminated and discarded,
+corpus untouched). The guard, the single-source `RIG_MODEL_ID`, the field demo (refuse before boot, zero
+bytes written), and the replay-inert proof (CI chain green with the guard present) all landed before
+the cut.
+
+Versions: all four sites at **0.2.35**; release-gate 6/6. Evidence at the pre-release base `669d59d`
+was carried by #407's own four green CI jobs (including the ten-leg replay); this candidate re-runs
+the full chain locally before its stamp commit. Named open, unchanged from 0.2.34: verify C3 (first
+live observation of a composed checkpoint), #349 remainder, #397 contract decision, five credential-
+gated TreeDX live rows, and #340 (its home is now 0.2.36, with this box's endpoint defect the thing to
+fix or route around).
+
+## 2026-11-17 — 0.2.35 SHIPPED
+
+Released from `main` `c53de2e` (merge of PR #408, verified head `33c55bf`, tree-identical), tag
+**`0.2.35`** (annotated, bare semver, matching the manifest at all four version sites).
+
+Release job (run `44083889900`) success: build → coverage-gated suite → publish with Production token;
+`publish Signed provenance statement` + transparency log logIndex 3945911543 — the no-attestation
+fallback did not fire. Registry: `latest` = 0.2.35; unpacked tarball: `package.json` 0.2.35 AND
+`lib/version.js` `PLUGIN_VERSION = '0.2.35'` (the 0.2.20 stale-tree class, excluded by measurement).
+Candidate evidence: all four CI jobs green at the head, including the ten-leg replay; the full 11-leg
+chain additionally run green LOCALLY at the release head before the stamp commit; `promptAnchor`
+`b40304ee3e35a94f` unchanged across 0.2.34→0.2.35 — zero model-facing byte changes in the whole range,
+machine-checked.
+
+Closed at this cut: **#379** (auto-referenced when the release reached `main`; ship comment added),
+**#406**. Scope decision honored and recorded: **#340 (PR #368) moves to 0.2.36** — its one gated item,
+the `prompt`-leg re-record, awaits an endpoint that truly serves the pinned model; #406 now refuses any
+that does not, loudly and before boot.
+
+**Heading for 0.2.35→0.2.36:** land #368 post-re-record (needs the distillation rig's model server or
+`E2E_UPSTREAM` + `E2E_UPSTREAM_KEY` at the real qwen3.8-flash-next) · C3 live observation of a composed
+checkpoint (blocked here BY the guard until such an endpoint exists — the alias box cannot produce it)
+· #349 remainder · #397 contract decision · TreeDX live rows · host option-(d) todo row.
