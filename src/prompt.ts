@@ -328,13 +328,41 @@ function linearFirstFit(lengthOf: (drop: number) => number, chapterCount: number
  *    last turn — never slices; if it alone cannot fit, the suggestion REFUSES with the numbers.
  *    A refused suggestion costs one turn; a truncated one poisons the next.
  */
-export function buildSuggestInput(facts: SuggestFacts, budgetChars: number, maxChars: number): { input: string } | { refusal: string } {
+/** Fraction of the director's budget the chapter block may occupy when the caller does not say (#379). */
+export const DEFAULT_CHAPTERS_SHARE = 0.25
+
+/**
+ * #379: absolute ceiling on the director's chapter block, in characters, whatever the budget allows
+ * (~50K est tokens). A share of a window-derived budget is unbounded in absolute terms: on a 1M-token
+ * route 25% is half a megabyte of old summaries. Sized so a session with hundreds of chapters still
+ * shows a real trajectory — measured: 40 chapters of 2 KB summaries still fits, 800 do not.
+ */
+export const DEFAULT_CHAPTERS_CAP_CHARS = 200_000
+
+export function buildSuggestInput(
+  facts: SuggestFacts,
+  budgetChars: number,
+  maxChars: number,
+  /** #379: cap on the chapter block as a fraction of `budgetChars`, independent of whether the total
+   *  would fit. Letting the window set the budget alone is what made the block dominate it. */
+  chaptersShare: number = DEFAULT_CHAPTERS_SHARE,
+): { input: string } | { refusal: string } {
   const head = 'You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.'
   const replyRules = `Write the ONE next prompt the human should paste into the composer. It MUST be a message the WORKER MODEL in this session receives and can act on with its own tools, files, and commands. The test: if this exact text arrived as a user message in the worker's context, could the worker act on it directly? Sentences only the human could perform — typing a slash command the host intercepts, opening a UI, clicking this bar, choosing between options — are wrong; the live failure this forbids was "run /chapters-prompt suggest and report the output". Telling the model to run tests, execute commands, fix a file, or investigate is exactly right ('run the tests', 'fix the flake in X first'); advice to the user ('you should consider', 'I recommend') and echoing the conversation's last instruction are not. It must also be FORWARD: name a next step that has NOT YET BEGUN — never a restatement of the work this session is already doing. A live sample failed exactly this, proposing "Create the #273 echo-adjacency issue and run the pre-change sampler" while the issue was filed and the sampler running; describing the in-flight task is a mirror, not a director. If the session is mid-task, recommend what comes AFTER that task lands — its verification, its follow-up — or a different line of work the latest state plainly calls for. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and advance the session's actual work — propose nothing already done. Reply with ONLY that prompt. The GOAL: prefix is legal ONLY when the goal block above names an ACTIVE goal and this step re-cuts that objective (only the human can send those; autorun will not). With no active goal named, NEVER use the prefix — not for wording about closing out, completing, or ending a purpose; proposing to "close out this release cycle" stamped GOAL: in a session with no goal is the live mis-stamp this forbids. An ordinary next step takes no prefix even when a goal is active.`
+  // #379: the chapter block gets its OWN cap, as a share of the budget, independent of whether the
+  // whole assembly would fit. Until now the block could grow to consume everything the window allowed,
+  // and on a 1M-token route `contextChars` is ~2,000,000 chars — so the director was handed megabytes of
+  // old summaries to write one sentence, with the newest human turn at roughly one character in two
+  // million (#7's third mechanism). Recency should be structural, not a hope that the block is small.
+  const share = chaptersShare > 0 && chaptersShare <= 1 ? chaptersShare : DEFAULT_CHAPTERS_SHARE
+  const chaptersCap = Math.max(0, Math.floor(budgetChars * share))
+  const CHAPTERS_HEADER = '## Where it has been (chapters, oldest first — title, summary, and the plots that carry the trajectory)'
+  const NO_CHAPTERS_LINE = '## Where it has been (no chapters yet)'
+
   const chapterBlock = (dropOldest: number): string[] => {
     const cs = facts.chapters.slice(dropOldest)
-    if (cs.length === 0) return ['## Where it has been (no chapters yet)']
-    const out = ['## Where it has been (chapters, oldest first — title, summary, and the plots that carry the trajectory)']
+    if (cs.length === 0) return [NO_CHAPTERS_LINE]
+    const out = [CHAPTERS_HEADER]
     for (const c of cs) {
       out.push(`${c.number}. ${c.title} — ${c.summary}`)
       if (c.plots.length > 0) {
@@ -344,43 +372,85 @@ export function buildSuggestInput(facts: SuggestFacts, budgetChars: number, maxC
     }
     return out
   }
-  const assemble = (dropOldest: number): string => {
-    const parts: string[] = [
-      head,
-      '',
-      `## Session${facts.title !== undefined && facts.title !== '' ? `: ${facts.title}` : ''}`,
-      // #113: the goal is stated BEFORE the history — it decides whether a candidate next step counts
-      // as progress, so it is never a footnote. #188: the plan and the standing orders ride with it.
-      ...(facts.goalDirective !== undefined && facts.goalDirective !== '' ? ['', String(facts.goalDirective)] : []),
-      ...(facts.plan !== undefined && facts.plan !== '' ? ['', '## Active plan', String(facts.plan)] : []),
-      ...(facts.rules !== undefined && facts.rules !== '' ? ['', '## Standing orders', String(facts.rules)] : []),
-      '',
-      ...chapterBlock(dropOldest),
-      '',
-      ...(facts.lastTurn.length > 0
-        ? ['## Last turn (request through final response)', ...facts.lastTurn.map((m) => `${m.role === 'user' ? 'Human' : 'Assistant'}: ${m.text}`)]
-        : ['## Last turn (empty)']),
-    ]
-    if (dropOldest > 0) {
-      parts.push(`(older chapters dropped to fit the ${budgetChars}-char budget: ${dropOldest} chapter(s) — the recent trajectory leads)`)
-    }
-    parts.push('', replyRules)
-    return parts.join('\n')
+
+  // Everything outside the chapter block, held as the SAME arrays the final string is built from, so the
+  // measurement below cannot describe a different document than assemble() emits. Their size is bounded
+  // by the reply rules and the human's turn — never by archive volume — so materialising them is cheap.
+  const preItems: string[] = [
+    head,
+    '',
+    `## Session${facts.title !== undefined && facts.title !== '' ? `: ${facts.title}` : ''}`,
+    ...(facts.goalDirective !== undefined && facts.goalDirective !== '' ? ['', String(facts.goalDirective)] : []),
+    ...(facts.plan !== undefined && facts.plan !== '' ? ['', '## Active plan', String(facts.plan)] : []),
+    ...(facts.rules !== undefined && facts.rules !== '' ? ['', '## Standing orders', String(facts.rules)] : []),
+    '',
+  ]
+  const lastTurnItems: string[] = facts.lastTurn.length > 0
+    ? ['## Last turn (request through final response)',
+      ...facts.lastTurn.map((m) => m.role === 'user' ? 'Human: ' + m.text : 'Assistant: ' + m.text)]
+    : ['## Last turn (empty)']
+  const dropNote = (dropOldest: number): string =>
+    `(older chapters dropped to fit the ${budgetChars}-char budget: ${dropOldest} chapter(s) — the recent trajectory leads)`
+  const tailItems = (dropOldest: number): string[] => [
+    ...lastTurnItems,
+    ...(dropOldest > 0 ? [dropNote(dropOldest)] : []),
+    '',
+    replyRules,
+  ]
+  const joinedLen = (items: readonly string[]): number =>
+    items.length === 0 ? 0 : items.reduce((m, x) => m + x.length, 0) + items.length - 1
+  const preLen = joinedLen(preItems)
+  const tailLen = (d: number): number => joinedLen(tailItems(d))
+
+  // The chapter block is the only part large enough to be worth measuring WITHOUT building it (#350's
+  // residual 136 ms was constructing tens of megabytes once per probe). Chapter k renders as one line,
+  // plus a '   Plots:' line and one line per plot when it has plots; the separators between those items
+  // belong to the chapter's own length. This arithmetic is checked against assemble() for EVERY drop
+  // value in tests/unit/prompt-assembly-cost.test.ts — a shortcut that disagrees with the bytes is worse
+  // than the slow version it replaces.
+  const chapterLens = facts.chapters.map((c) => {
+    const headChars = String(c.number).length + 2 + c.title.length + 3 + c.summary.length
+    const plotChars = c.plots.length === 0 ? 0 : 9 + c.plots.reduce((m, pl) => m + 5 + pl.length, 0)
+    const items = 1 + (c.plots.length > 0 ? 1 + c.plots.length : 0)
+    return { joined: headChars + plotChars + Math.max(0, items - 1), items }
+  })
+  const nChapters = facts.chapters.length
+  const suffixJoined: number[] = new Array<number>(nChapters + 1).fill(0)
+  const suffixItems: number[] = new Array<number>(nChapters + 1).fill(0)
+  for (let k = nChapters - 1; k >= 0; k--) {
+    suffixJoined[k] = suffixJoined[k + 1]! + chapterLens[k]!.joined
+    suffixItems[k] = suffixItems[k + 1]! + chapterLens[k]!.items
   }
-  // #350: the first `drop` whose assembly fits. Dropping chapters only shortens the block, so
-  // `assemble(d).length` is (practically) monotonically non-increasing in `d` and the answer is findable
-  // by binary search in ceil(log2(n+1)) assemblies. The previous loop assembled the ENTIRE candidate
-  // string once per drop value — O(n²) in characters: measured 9,482 ms at 800 chapters / 36 MB on this
-  // machine, blocking the host's event loop at every turn boundary.
+  const blockLen = (d: number): number => d >= nChapters
+    ? NO_CHAPTERS_LINE.length
+    : CHAPTERS_HEADER.length + 1 + suffixJoined[d]! + (suffixItems[d]! - 1)
+  const measure = (d: number): number => preLen + 1 + blockLen(d) + 1 + tailLen(d)
+
+  const assemble = (dropOldest: number): string =>
+    [...preItems, ...chapterBlock(dropOldest), ...tailItems(dropOldest)].join('\n')
+
+  // #350/#379: the joint constraint — total within budget AND the chapter block within its own cap.
+  // Both terms are non-increasing in `drop`, so their maximum is, and firstFitDrop remains valid. The
+  // block term is `block <= cap` restated on the total's scale: `block + (budget - cap) <= budget`.
+  // #379, and a correction made from measurement rather than taste. Bounding history at a share of the
+  // BUDGET is not enough on its own (a 1M-token route's 2,000,000-char budget makes 25% still half a
+  // megabyte beside a few thousand characters of newest turn). My first attempt bounded it RELATIVE TO
+  // THE PROTECTED CONTENT instead — and measured the result: the director's whole input collapsed to
+  // 2 KB, because the protected set is mostly fixed reply rules, so "25% of everything else" allowed
+  // about one chapter line. That satisfies a recency ratio by destroying the context the director
+  // exists to weigh, which is the wrong fix arrived at by the right arithmetic.
   //
-  // The search is extracted as `firstFitDrop` so it can be checked against a naive linear oracle over
-  // randomized length functions. Inlining it here would leave the equivalence untestable — and "compare
-  // the function to itself" is not an oracle, it is a tautology (this release has caught three of those).
-  const drop = firstFitDrop((d) => assemble(d).length, facts.chapters.length, budgetChars)
+  // So: share of the budget, AND an absolute ceiling. The ceiling is what actually bounds the
+  // large-window case (a ~50K-token history block), it does not shrink when a session's last turn is
+  // short, and recency is protected by what genuinely protects it — the last turn enters WHOLE and is
+  // never sliced (#188), plus the block being unable to exceed either bound.
+  const effectiveCap = Math.min(chaptersCap, DEFAULT_CHAPTERS_CAP_CHARS)
+  const required = (d: number): number => Math.max(measure(d), blockLen(d) + (budgetChars - effectiveCap))
+  const drop = firstFitDrop(required, nChapters, budgetChars)
   if (drop !== null) return { input: assemble(drop) }
   const floor = assemble(facts.chapters.length).length
   return {
-    refusal: `the suggestion input cannot fit — the protected context (goal, plan, rules, last turn) assembles to ${floor} chars, exceeding the ${budgetChars}-char budget with all ${facts.chapters.length} chapter(s) already dropped. Refusing rather than truncating (#188): raise the budget or set a larger model with /chapters-prompt model.`,
+    refusal: `the suggestion input cannot fit — the protected context (goal, plan, rules, last turn) assembles to ${floor} chars, exceeding the ${budgetChars}-char budget with all ${nChapters} chapter(s) already dropped; the chapter block was capped at ${effectiveCap} chars (${Math.round(share * 100)}% of the budget, ceiling ${DEFAULT_CHAPTERS_CAP_CHARS} chars). Refusing rather than truncating (#188): raise the budget or set a larger model with /chapters-prompt model.`,
   }
 }
 
