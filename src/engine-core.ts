@@ -185,7 +185,11 @@ export interface SummarizeResultLike {
 
 // ---------------------------------------------------------------- minimal session surface
 
-/** The slice of `Session` the core reads. Kept small so fakes are honest. */
+/** The slice of `Session` the core reads. Kept small so fakes are honest — and #399 made the honesty
+ * checkable: `surface.nodes` is a PLAIN seq array (`SessionSurface.nodes: readonly SessionSeq[]`,
+ * dsh-session lib/types/surface.d.ts:120) and `deriveEventMessage` is a class method that resolves
+ * projections through `this` (lib/index.js:1576). The previous declared shape — `{seq}[]` nodes plus a
+ * standalone function — existed nowhere, which is how the composer died silently on every real host. */
 export interface EngineSession {
   readonly id: string
   readonly seq: number
@@ -195,7 +199,7 @@ export interface EngineSession {
    * needs them to map summarize-input messages back to log seqs. Absence of
    * either simply means: no reconstruction, legacy single-chapter compaction.
    */
-  readonly surface?: { readonly nodes?: readonly { readonly seq: number }[] }
+  readonly surface?: { readonly nodes?: readonly number[] }
   deriveEventMessage?(event: EngineSessionEvent): EngineMessage | null | undefined
 }
 
@@ -431,25 +435,38 @@ export const chapterPathFor = (config: EngineConfig, rootSession: string, number
   toStoredPath(config.workspaceCwd,
     `${config.artifactStoreRoot.replace(/\/+$/, '')}/${rootSession}/chapters/${String(number).padStart(3, '0')}-${slugify(title)}.md`)
 
+/** The mapping's verdict: seqs, or WHY the region did not map — #399 made a silent null impossible,
+ * because "ambiguous" (honest), "no-surface-api" (old host) and "no-match" (shape drift) are three
+ * different operator conversations, and one `null` was telling nobody. */
+export type RegionReconstruction =
+  | { ok: true; seqs: number[] }
+  | { ok: false; reason: 'no-surface-api' | 'empty-region' | 'no-match' | 'ambiguous' }
+
 /**
  * Map the prepared summarize input back to the log seqs it was built from
  * (the host builds region messages as `deriveEventMessage(eventAt(seq))` for
- * the shadowed selection). Returns null — meaning "use the legacy
- * single-chapter path" — whenever the Session lacks the mapping API, nothing
- * matches, or MORE THAN ONE contiguous run matches (duplicate small
- * messages are common; guessing a wrong span would cite chapters that never
- * cover their seqs, and an honest legacy chapter beats that).
+ * the shadowed selection). Any uncertainty means the caller falls to the legacy
+ * single-chapter plan, which is the behavior that has always been correct:
+ * no Session mapping API, an empty region, MORE THAN ONE contiguous run
+ * matching (duplicate small messages are common; guessing a wrong span would
+ * cite chapters that never cover their seqs), or NOTHING matching — the last
+ * one names drift, and the engine warns on it (#399).
+ *
+ * Host shape, enforced by tests/unit/host-composer-shape.test.ts: `surface.nodes` is a plain seq array
+ * and `deriveEventMessage` must be called as a METHOD (its host implementation reads `this`). The
+ * pre-#399 code did neither, and composed compaction never ran outside unit tests.
  */
 export function reconstructShadowedSeqs(
   session: EngineSession,
   input: SummarizeInputLike,
-): number[] | null {
+): RegionReconstruction {
   const nodes = session.surface?.nodes
-  const derive = session.deriveEventMessage
-  if (nodes === undefined || nodes.length === 0 || derive === undefined) return null
+  if (nodes === undefined || nodes.length === 0 || typeof session.deriveEventMessage !== 'function') {
+    return { ok: false, reason: 'no-surface-api' }
+  }
   let region: readonly EngineMessage[] = input.messages
   if (region[0]?.role === 'system') region = region.slice(1) // the prepended system head
-  if (region.length === 0) return null
+  if (region.length === 0) return { ok: false, reason: 'empty-region' }
   const encoded = region.map((m) => JSON.stringify(m))
   const matches: number[][] = []
   for (let start = 0; start < nodes.length && matches.length < 2; start += 1) {
@@ -457,9 +474,9 @@ export function reconstructShadowedSeqs(
     let mi = 0
     let ok = true
     for (let ni = start; ni < nodes.length && mi < encoded.length; ni += 1) {
-      const ev = session.eventAt(nodes[ni]!.seq)
+      const ev = session.eventAt(nodes[ni]!)
       if (ev === undefined) continue
-      const msg = derive(ev)
+      const msg = session.deriveEventMessage(ev) // bound method call — the host needs `this` (#399)
       if (msg === null || msg === undefined) continue
       if (JSON.stringify(msg) !== encoded[mi]) { ok = false; break }
       seqs.push(ev.seq)
@@ -467,7 +484,8 @@ export function reconstructShadowedSeqs(
     }
     if (ok && mi === encoded.length && seqs.length > 0) matches.push(seqs)
   }
-  return matches.length === 1 ? matches[0]! : null
+  if (matches.length === 1) return { ok: true, seqs: matches[0]! }
+  return { ok: false, reason: matches.length === 0 ? 'no-match' : 'ambiguous' }
 }
 
 /**
@@ -515,7 +533,13 @@ export function planSummarize(
     ? `Active plan — carried across this checkpoint (it is STILL the work directive):\n\n${planCarry.trim()}`
     : null
   const rulesSection = rulesCarry !== null && rulesCarry.trim() !== '' ? rulesCarry.trim() : null
-  const leadSections0 = [planSection, rulesSection].filter((x): x is string => x !== null && x !== '')
+  // #399: hoisted above BOTH arms. The composed arm used to lead with [plan, rules] and discard the
+  // plot — after summarize() had already paid the bounded elicited-plot call for it. One lead shape:
+  // plan, rules, plot, in that order, whichever path reserved the numbers.
+  const plotSection = plot !== null && plot.trim() !== ''
+    ? `Working plot (model-authored, carried across this checkpoint):\n\nPLOT: ${plot.trim()}\n\n(If it has gone stale, revise it in your next reply.)`
+    : null
+  const leadSections = [planSection, rulesSection, plotSection].filter((x): x is string => x !== null && x !== '')
   const blocks = extractCheckpointBlocks(input.messages)
   const { bullets, carriedProse } = parseTocState(blocks)
   const identity = deriveIdentity(input.messages, blocks.length > 0)
@@ -546,9 +570,9 @@ export function planSummarize(
     }
     return {
       plan: {
-        tocText: leadSections0.length === 0
+        tocText: leadSections.length === 0
           ? composedParts.join('\n\n')
-          : `${leadSections0.join('\n\n')}\n\n${composedParts.join('\n\n')}`,
+          : `${leadSections.join('\n\n')}\n\n${composedParts.join('\n\n')}`,
         numbers: reserved.numbers,
         chapter: { title: chapters[0]!.title, summary: chapters[0]!.summary, path: chapters[0]!.path },
         chapters,
@@ -571,10 +595,6 @@ export function planSummarize(
   if (carriedProse.length > 0) {
     parts.push('Earlier summary carried forward (not chapter-formatted):', ...carriedProse.map(quote))
   }
-  const plotSection = plot !== null && plot.trim() !== ''
-    ? `Working plot (model-authored, carried across this checkpoint):\n\nPLOT: ${plot.trim()}\n\n(If it has gone stale, revise it in your next reply.)`
-    : null
-  const leadSections = [planSection, rulesSection, plotSection].filter((x): x is string => x !== null && x !== '')
   const tocText = leadSections.length === 0 ? parts.join('\n\n') : `${leadSections.join('\n\n')}\n\n${parts.join('\n\n')}`
 
   return {
