@@ -975,3 +975,25 @@ Closed at this cut: **#395, #396, #398, #399** (the 2026-11-15/16 context-handli
 - The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents`) — inventory pinned by
   `tests/unit/host-composer-shape.test.ts` — are the first gate to re-run against any host bump;
   `contract.md` is the measuring document.
+
+## 2026-11-17 — 0.2.35 cut prepared from staging `669d59d`; scope decided
+
+Maintainer direction of 2026-11-17: cut 0.2.35 **early** with the two landed items — #379 (director
+chapter-block cap, PR #383) and #406 (tape-writing model-identity guard, PR #407) — and move #340
+(PR #368) to **0.2.36**. Recorded as a decision: #368 passes everything except its one gated item, the
+`prompt`-leg re-record, which is blocked on an endpoint that truly serves the pinned rig model — the
+defect #406 now refuses loudly instead of recording over it.
+
+What the re-record attempt turned up is the release's real content: this box's endpoint was proven by
+direct probe to SILENTLY ALIAS the pinned model name (requests for `qwen3.8-flash-next` answered by
+`qwen3-4b-instruct`, raw `think` traces as content; fifteen tape entries contaminated and discarded,
+corpus untouched). The guard, the single-source `RIG_MODEL_ID`, the field demo (refuse before boot, zero
+bytes written), and the replay-inert proof (CI chain green with the guard present) all landed before
+the cut.
+
+Versions: all four sites at **0.2.35**; release-gate 6/6. Evidence at the pre-release base `669d59d`
+was carried by #407's own four green CI jobs (including the ten-leg replay); this candidate re-runs
+the full chain locally before its stamp commit. Named open, unchanged from 0.2.34: verify C3 (first
+live observation of a composed checkpoint), #349 remainder, #397 contract decision, five credential-
+gated TreeDX live rows, and #340 (its home is now 0.2.36, with this box's endpoint defect the thing to
+fix or route around).
