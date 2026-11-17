@@ -23,7 +23,21 @@ export const chatServedId = (text: string | undefined): string | null => {
   try {
     const j = JSON.parse(text ?? '') as { model?: unknown }
     return typeof j.model === 'string' && j.model !== '' ? j.model : null
-  } catch { return null }
+  } catch {
+    // #409: an SSE chat response is the OTHER wire shape every real server speaks — the scripted
+    // stub streams `data: {…}` chunks unconditionally (measured: it stamps its OWN model field,
+    // harder witness than the echo, but my first-cut parser saw only "answered unparsable").
+    // Take the first data-frame that carries a model string; tolerate the [DONE] sentinel.
+    for (const line of (text ?? '').split('\n')) {
+      const frame = line.startsWith('data:') ? line.slice(5).trim() : line
+      if (frame === '' || frame === '[DONE]') continue
+      try {
+        const j = JSON.parse(frame) as { model?: unknown }
+        if (typeof j.model === 'string' && j.model !== '') return j.model
+      } catch { /* not a JSON frame — keep scanning */ }
+    }
+    return null
+  }
 }
 
 /**
