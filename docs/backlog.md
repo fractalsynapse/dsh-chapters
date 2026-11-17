@@ -1,4 +1,39 @@
-# Open items — 2026-10-23 (host 0.2.0-rc.2)
+# Open items — 2026-11-17 (host 0.2.0-rc.2)
+
+- **0.2.34 SHIPPED (2026-11-17, main 2eee0b3, tag 0.2.34; tarball + provenance verified — see project-state). Follow-waves for 0.2.35 (2026-11-17 audit):** the composed checkpoint has never been OBSERVED on a live
+  host — the heavy leg's first sight, tracked as `docs/verify.md` C3, in the same family as #143's
+  convergence bound. The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents` — the host says
+  "new calls are prohibited") are inventoried by `tests/unit/host-composer-shape.test.ts`; the migration
+  to `deriveMessages`/`requestHeader` (live) and `SessionQuery.readSession` (durable) is the first gate to
+  re-run before any host bump. #397 (`meta.parentSession` for continuation children) awaits a maintainer
+  decision on amending `docs/contract.md` § Lineage. #383 (#379) and #368 (#340) are held by maintainer
+  direction for **0.2.35**, together with the `prompt`-leg re-record.
+- **#355 — the 2026-11-14 correctness audit: 24 issues filed for this audit (25 counting #386), 22 fixed across 24 PRs, released in 0.2.33.**
+  Every finding was reproduced against real bytes before it was changed, and the shape they share is the
+  release's subject: **a check that cannot fail**. Concretely: the preset-row health witness compared a
+  *number* (`fiberState`) to a *string* (`'active'`) and so read "all active" under every condition, while
+  two `chapters`-preset sessions were being compacted entirely by a foreign engine — 6 and 8 summaries with
+  provider `qwen-token-plan`, no TOC, no store, for a week (#339/#360). Chapter integrity agreed with a
+  truncated archive because the hash covered arrival's stub (#334, 932,462 chars; now 0). `# fail 0` printed
+  over **22 cancelled** tests because a door awaited a `setTimeout` handle it had just `.unref()`'d (#358).
+  A log line asserted "seven tools + three continuation doors" while the strict `commands` lookup returned
+  undefined and no door mounted (#353). The deterministic doors refused real sessions' **opening turns**
+  (2/3, 55/153, 32/308) and printed "Saved: 0 chapter(s) archived" (#344). A human message quoting
+  `<system-reminder>` lost 2,518 characters of its own instruction, labelled as host state (#347). 39% of
+  registry paths were unresolvable from registry bytes (#348), and artifact citations pointed where `read`
+  cannot go (#348c). Coverage of all 35 real event types became a table with reasons (#346) — including the
+  finding that the largest apparent gap, `agent/inbox/spliced` at ~2 MB, is **658/659 already-rendered
+  duplicate** and must never be rendered. The director took 9,482 ms per turn boundary (#350) and its
+  chapter block was uncapped (#379, held). The prompt plane wrote nothing durable, which is why two
+  user-reported symptoms needed a full audit to diagnose (#352). The config surface drifted in both
+  directions with no comparison between them (#354), and the anchor hashed comment prose, so a docs edit
+  demanded a re-anchor while a real prompt change could slip past (#362).
+  **Still open after this release:** #340 (suggestion freshness — built, held for the `prompt`-leg
+  re-record) · #379 (block cap — same wave) · #335 (arguments artifact-backed by default, or drop the docs
+  promise; maintainer's call) · #349 and #372 (both need a browser rig; left unbuilt rather than shipped
+  as unobserved wiring) · #331 (`enrich` annotate-title nondeterminism) · #336/#337 damage stays
+  **report-only** pending an operator decision under the deletion exception · the method note for the next
+  audit: `docs/project-state.md` § 2026-11-15.
 
 - **#330 — chapters tools in-realm + the model never measures its own context (2026-11-14, LANDED — released in 0.2.32).**
   Two shipped changes: the seven `chapters_*` tools and the three continuation doors mount through a

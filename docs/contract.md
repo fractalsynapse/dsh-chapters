@@ -331,6 +331,42 @@ The subclass seam, with everything measured by rounds 12-17 (sources: the instal
 - `@deepseek-ai/dsh-home-paths` exports `dshHomePath(...segments)` — the sanctioned
   way to reach `$DSH_HOME` from plugin code (host rc.2 line).
 
+### Preset row health: what the boot line can and cannot say (#339, documented late — #361 shipped it without this)
+
+The plugin registers `preset-chapters` as a declaration row, then asks the **host's own roster** whether the
+preset actually exists, and asks the **preset registry's composition inventory** how its mounted rows are
+doing. Those are three different facts and the line states the third only when the first two allow it.
+
+| line (exact) | meaning |
+| --- | --- |
+| `preset "chapters" registered as a declaration row` | the row was accepted by this host |
+| `preset "chapters" is in the host roster — N mounted rows all active — chapter-form compaction and continuations will compose` | present, and every mounted row reports a usable state |
+| `preset "chapters" is DECLARED BUT BROKEN — …` | the row resolves but a child will not activate; sessions choosing it will not compose |
+| `UNHEALTHY — preset "chapters" is NOT in the host roster (roster: …)` | the composition is missing: existing sessions refuse to open with `agent-preset/not-found` while their logs stay intact |
+| `could not verify the preset roster (…)` | the check itself failed; **treat chapter-form compaction as unconfirmed** — this is not a pass |
+
+**`N mounted rows all active` is a claim, and until #361 it could not be false.** `unusableRows` compared
+cordis' `fiberState` — a **number** — against the string `'active'`, so every row looked healthy under every
+condition, including the week two `chapters` sessions were being compacted by a foreign engine. The number is
+read as a number now. Treat the sentence as evidence: it can say `K of N rows NOT active (…)` when it means
+it, and `rows not reported by this host` / `rows unreadable (…)` when the inventory is unavailable — which is
+**not** the same as "all active", and is printed as its own phrase so a reader cannot conflate them.
+
+Two consequences worth stating because they are the failure modes this line exists to prevent:
+
+- **Presence is not activation, and activation is not usefulness.** A preset can be in the roster with every
+  row active and still be served by another engine's compaction; the ownership witness (#360,
+  `realm:engine:provenance` plus the `/chapters-status` provenance lines) is the check for *that*, and no
+  boot line substitutes for it.
+- **A degraded check never prints the healthy wording.** Missing inventory, an exception, or a non-numeric
+  state each produce their own text. The reason is #339 exactly: a check that falls back to the success
+  string is worse than no check, because it is read and believed.
+
+This section was written twelve rounds after #361 changed the behaviour, which is a missed
+documentation-first step: the code change shipped with tests and no contract, and the only place the
+behaviour was described was the install page's sample output — a sample that, at the time, was itself the
+symptom. Recorded here so the omission is closed rather than inherited, and noted in #355's process findings.
+
 ## Lineage: Kernel Fields We Must Not Lean On
 
 `SessionHeader` (`packages/core/session/src/types.ts:93-122`) carries `version`, `id`, `createdAt`,

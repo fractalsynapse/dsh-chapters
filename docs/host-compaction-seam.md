@@ -267,3 +267,27 @@ set read out of the affected production log (not an imagined shape), covering al
 `-degraded`, mixed, never-compacted, and no-provider-field; with an anti-vacuity control pinning that
 `scanChaptersSummaries` still sees only our own, so the two questions cannot be merged by someone
 "fixing" the silence in the wrong place.
+
+## The composer must speak the host's shape (#399, measured 2026-11-16)
+
+Pressure compaction topic-splits the shadowed span only when `reconstructShadowedSeqs` maps the prepared
+summarize region back onto durable seqs. Two host facts bind that mapping, both pinned against the installed
+bundle (`@deepseek-ai/dsh-session` 0.2.0-rc.2):
+
+- `SessionSurface.nodes` is a **plain seq array** (`readonly SessionSeq[]`, `lib/types/surface.d.ts:120`) —
+  numbers, not `{seq}` records. The `tokenMeter` measurement nodes have `.seq`; the surface nodes do not.
+- `Session#deriveEventMessage` is a **class method** that resolves projections through `this`
+  (`lib/index.js:1576`) — captured into a local and called bare, it throws. Reading it as a value and
+  invoking `derive(ev)` is the same r28 defect wearing a different hat.
+
+When either is violated the function returns "no match" and the engine falls to the legacy single-chapter
+path — silently at first, because nothing throws. The mapping result is therefore **discriminated**
+(`{ok:true,seqs} | {ok:false,reason}`) and the engine names the reason on every fallback:
+`no-surface-api` and `ambiguous` are honest degradations (note level); **`no-match` is a drift alarm** (warn:
+the region was present and nothing mapped). The composed checkpoint carries the same lead sections in the
+same order as the legacy one — plan, rules, plot — so activating the composed path cannot silently drop the
+plot the plugin just paid its bounded elicited call to produce.
+
+Corpus consequence: the composed arm has never run against a real host, so recording it changes composed
+checkpoint bytes for the first time when it activates. That is an activation, not a regression; the
+legacy-only legs stay byte-identical by construction.

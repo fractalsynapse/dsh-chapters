@@ -191,6 +191,24 @@ test('continue: an over-budget handoff refuses WITH the numbers', async () => {
   } finally { w.dispose() }
 })
 
+// #395: the host reports usage as THREE disjoint arms — inputTokens is uncached input only, and billed
+// input = input + cacheRead + cacheWrite (@deepseek-ai/dsh-llm TokenUsage contract). The header bound is
+// the billed input; dropping cacheWriteTokens under-counts on exactly the turns that extend the cache.
+test('continue: the header bound counts cacheWriteTokens — the third disjoint usage arm (#395)', async () => {
+  const w = world()
+  try {
+    w.events[1]!.data.usage = { inputTokens: 9000, cacheReadTokens: 300, cacheWriteTokens: 5000 }
+    const r = await w.built.chaptersContinue.execute({
+      title: 'Bound check', handoffNote: 'short note',
+      chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, w.exec as never) as { ok: boolean; budget?: { allowanceTokens: number } }
+    assert.equal(r.ok, true)
+    // window 32,000; bound 9,000 + 300 + 5,000 = 14,300 remaining; allowance 0.25 × 17,700 = 4,425.
+    // Pre-fix the bound was 9,300 and this line reads 5,675 — an over-generous admission.
+    assert.equal(r.budget?.allowanceTokens, 4425, 'allowance = ratio × (window − billed input, all three arms)')
+  } finally { w.dispose() }
+})
+
 // ------------------------------------------------------------------ fork
 
 test('fork: cites the existing archive when the watermark covers the anchor', async () => {

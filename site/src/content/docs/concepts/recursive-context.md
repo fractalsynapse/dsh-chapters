@@ -5,6 +5,54 @@ lastUpdated: true
 ---
 
 The naive frame: a model has a context window; when content exceeds it, compress. dsh-chapters takes the opposite frame, and it is worth being precise about because it is where most memory systems diverge.
+## The goal is carried into the child as text, and said aloud as unarmed (#349)
+
+A session running under a goal (`/goal`, or `create_goal`) has an objective the host is driving toward.
+A continuation child reads its parent's archive and notice — but **not its parent's goal state**, so unless
+something carries it, the objective stops steering the work exactly at the boundary the plugin exists to
+cross.
+
+What happens now, conservatively:
+
+- The child's continuation notice gains a **`## Goal (carried from the parent session)`** block, folded from
+  the parent's durable `goal/change` events by one selector (`foldGoalFromLog`) and rendered by one function
+  (`renderGoalCarriage`). It states the **objective whole**, the revision, the round cap, the phase, and the
+  seq it came from.
+- It then says, in the notice the child is guaranteed to read at birth: **the goal is NOT armed in the
+  child, and only the human can send `/goal resume`.** That sentence is the design, not a caveat.
+- A **cleared** goal carries nothing. A **completed** goal is stated as finished and gets no re-arm
+  instruction, so a child cannot pick a closed purpose back up.
+- A session that never used a goal pays **zero bytes**: the block is absent, the notice is byte-identical
+  to before, and no recorded tape shifts.
+- The budget (`goalNoticeChars`, default 600) bounds the **objective display only**. The instruction lines
+  are never truncated — a cut-off "only the human can re-arm" is worse than none.
+
+### Why the plugin does not simply re-create the goal
+
+The host's `create_goal` tool is gated behind `requireDirectHuman`: an open-turn message with
+`source.kind === 'user'`. A continuation child's first turn is authored `plugin:dsh-chapters`, so the child
+cannot call the tool. The **service** underneath (`ctx.get('goals').create(agent, …)`) has no such gate, so
+the plugin *could* arm a goal on the child's behalf.
+
+**It does not, and that is a deliberate non-choice pending the maintainer** (#349 asks the question
+explicitly). Silently routing around a direct-human gate because the seam is reachable is an authority
+widening, not a fix — the same category as a health check that was never asked whether its condition can
+be false. If the answer is "no, the plugin must not author goals," this fallback is the final shape. If it
+is "yes, deliberately," it becomes an explicit, documented, configurable step — not a side effect of the
+birth path.
+
+### One state the log can give, and one it cannot
+
+`phase` (active / paused / blocked / complete) is carried inside `goal/change`, so the block can state it
+truthfully. **`activation` — armed or disarmed — is not in the log at all**: the host keeps it process-local,
+and the plugin reads it from the live service for its own driver decisions. So the notice says who *can*
+change the driver, never what the driver currently is. A claim about armedness recovered by folding history
+would be a guess dressed as a record.
+
+Rows: `tests/unit/goal-carriage.test.ts` (fold semantics for every operation the host emits, including
+unknown ones ignored; clear vs complete; budget and instruction survival; zero bytes with no goal; notice
+placement above the fold).
+
 
 ## The claim
 
