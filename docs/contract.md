@@ -1048,9 +1048,38 @@ gone.
    that removes the megabytes, not the milliseconds-squared, and it is a policy change to the director's
    input, so it is tracked separately rather than folded into a performance PR.
 
-**Acceptance note, stated rather than quietly missed:** #350 asked for "< 50 ms at 800 chapters / 36 MB".
-These changes deliver 136 ms, not 50 — and the gap is cause 3, not the search. Quoting the target as met
-would make the number mean nothing.
+**Acceptance note, updated after #379 landed the cap:** #350 asked for "< 50 ms at 800 chapters / 36 MB".
+#350 alone delivered 136 ms; the same fixture measured **0.29 ms** once the chapter block was bounded
+(#379), because the remaining cost was constructing a document the cap now prevents. Both numbers are kept
+here rather than overwritten — the second only means anything against the first.
+
+### The chapter block is bounded, and the bound is not a recency ratio (#379)
+
+The director's budget was `contextChars = floor(window × promptContextRatio × 4)`, so a 1M-token route
+allowed ~2,000,000 characters of auxiliary input to produce one sentence, with the newest human turn at
+roughly one character in two million — #7's third mechanism, the other two being #340 and #343.
+
+`buildSuggestInput` now caps the chapter block at **both** a share of the budget
+(`DEFAULT_CHAPTERS_SHARE`, 25%) and an absolute ceiling (`DEFAULT_CHAPTERS_CAP_CHARS`, 200,000 chars
+≈ 50K tokens). The joint constraint stays monotone in `drop`, so the #350 search still applies unchanged.
+
+**Why an absolute ceiling and not a share of the document.** My first attempt bounded history *relative to
+the protected content*, which is the only frame in which "not crowded out" looks structural — and it
+measured the result: **the director's entire input collapsed to 2 KB.** The protected set is mostly fixed
+reply rules, so "25% of everything else" allowed about one chapter line: a perfect recency ratio obtained
+by deleting the context the director exists to weigh. The regression is now pinned by a row asserting the
+input still shows a real trajectory, so a future tightening that trades content for a ratio fails loudly.
+
+Recency is instead protected by what genuinely protects it: the last turn enters **whole and is never
+sliced** (#188), every drop is **announced in the input**, and the block cannot exceed either bound.
+
+**What is NOT done:** the share and ceiling are documented constants threaded as a parameter, not yet
+profile config keys. Surfacing them needs the #354 discipline (declare on the row, validate, print in
+`/chapters-status` which values are in force) — a knob nobody can see is how #354 drifted for months.
+Tracked on #379; the cap itself is enforced today.
+
+Tape status: this changes the director's **request bytes** by design — one of the two items (with #340)
+that genuinely need the `prompt`-leg re-anchor before merging.
 
 ## Seeded-continuation load deadlock — the fold rule vs the header recorder (measured 2026-11-05, #314)
 
