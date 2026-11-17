@@ -9,6 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { registerChaptersTools } from '../../src/tools.ts'
@@ -164,7 +165,7 @@ test('#406: boot.ts gates the model-identity proof to the modes that WRITE tape'
   const boot = read('tests/e2e/boot.ts')
   assert.match(boot, /const writesTape = modelMode === 'record' \|\| \(modelMode === 'replay' && process\.env\.E2E_TAPE_FALLBACK === '1'\)/,
     'the gate is exactly the two tape-writing modes — heal rides replay+fallback')
-  assert.match(boot, /if \(writesTape\) \{[\s\S]{0,2600}?servedModelVerdict\(\{ listText, chatText, requested \}\)/,
+  assert.match(boot, /if \(writesTape\) \{[\s\S]{0,4200}?servedModelVerdict\(\{ listText, chatText, requested \}\)/,
     'the proof predicate runs behind the gate, on both fetched payloads')
   assert.match(boot, /refusing to \$\{modelMode === 'record' \? 'record' : 'heal'\}/,
     'a non-null verdict is a refusal that names the mode')
@@ -190,4 +191,35 @@ test('#406: RIG_MODEL_ID is the single literal for the pinned model id', () => {
   assert.doesNotMatch(gs, /'local\/qwen3\.8-flash-next'/, 'and carries no second literal')
   assert.match(boot, /const requested = remap !== undefined && remap !== '' \? remap : RIG_MODEL_ID/,
     'the proof requested name is the constant, unless E2E_UPSTREAM_MODEL deliberately remaps')
+})
+
+// ─────────────────────── #409: the stub-leg marker is set where the stub is pinned, and boot branches
+
+test('#409: the scripted-stub legs carry their marker from the ONE place that pins the stub', () => {
+  const distill = read('scripts/distill-tapes.sh')
+  // the marker must ride the same leg_extra assignment as the stub E2E_UPSTREAM pin — a second
+  // site elsewhere is exactly the drift the #56 table-deletion learned about.
+  assert.match(distill, /leg_extra="\$\{leg_extra\} E2E_UPSTREAM=http:\/\/127\.0\.0\.1:\$\{STUB_PORT\} E2E_STUB_LEG=1"/,
+    'stub upstream pin and stub-leg marker are one line, inside the STUB_PROJECTS branch')
+  const boot = read('tests/e2e/boot.ts')
+  assert.match(boot, /const stubLeg = process\.env\.E2E_STUB_LEG === '1'/, 'boot reads the marker')
+  assert.match(boot, /const verdict = stubLeg\n?\s*\? stubEndpointVerdict\(\{ listText, chatText \}\)\n?\s*: servedModelVerdict\(\{ listText, chatText, requested \}\)/,
+    'the witness branches on leg kind: stub-class proof for stub legs, the pinned-id proof for live legs — unchanged for #406')
+})
+
+// ─────────────────────── #411: distill's per-leg loop must be record+replay, with one bounded heal
+
+test('#411: the distill loop classifies through the tested guard — twice, and heals at most once', () => {
+  const sh = read('scripts/distill-tapes.sh')
+  assert.equal((sh.match(/classifyLeg\(/g) ?? []).length, 2,
+    'exactly two classifyLeg call sites: after the first strict replay, and after the single bounded heal — a third would mean a second heal loop')
+  assert.equal((sh.match(/E2E_TAPE_FALLBACK=1/g) ?? []).length, 1,
+    'the fallback env — the heal — appears exactly once in the loop (#411: ONE bounded pass)')
+  assert.match(sh, /#411 record\+replay gate/, 'the verdict line names the gate the leg just passed')
+  assert.match(sh, /write-provenance\.mjs --project "\$proj" --verdict "\$verdict"/,
+    'PROVENANCE records the CLASSIFIED verdict, not the raw record exit code')
+  // The real syntax gate, executed rather than pattern-matched (#386's lesson: a gate you only
+  // read is a gate you have not tested).
+  const r = spawnSync('bash', ['-n', join(process.cwd(), 'scripts/distill-tapes.sh')], { encoding: 'utf8' })
+  assert.equal(r.status, 0, `bash -n scripts/distill-tapes.sh: ${r.stderr}`)
 })
