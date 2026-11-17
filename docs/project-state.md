@@ -1051,3 +1051,13 @@ green on endpoint-less runners → PR #368 merged (`9905c4b`). Follow-up gate fi
 **0.2.36 standing content:** #340, #409. Candidates if wanted before the cut: #411 rig gate. Still
 open, unchanged: C3 (first live composed-checkpoint observation), #349 remainder, #397 contract
 decision, TreeDX live rows, host option-(d) todo. Release timing is the maintainer's call.
+
+## 2026-11-17 — 0.2.36 cut prepared from staging `f8971cb`
+
+Range 0.2.35..f8971cb: 18 commits, three merged PRs — #368 (#340 suggestion freshness, user-visible),
+#410 (#409 leg-kind identity guard), #412 (#411 distill record+replay gate with bounded heal). The
+honest arc is in the notes: 0.2.35 shipped a guard that broke the rig's own stub-path distill;
+0.2.36 ships its correction AND the fix that correction unblocked. Versions: four sites at 0.2.36.
+Open after this cut stands at: C3 (live composed-checkpoint observation — first sight belongs to the
+heavy leg whenever a true pinned-model endpoint runs it), #349 remainder, #397 contract decision,
+TreeDX live rows, host option-(d) todo row, #372 (browser-rig work, unbuilt).
