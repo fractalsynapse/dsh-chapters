@@ -585,19 +585,13 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // all compose the same bytes. `E2E_HARNESS_PROFILE=1` restores the rewrite for the live-model `live`
       // mode, where there is no tape to stay byte-identical with.
       if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
-        // #414: not just the provider row — the WHOLE profile must carry exactly ONE route answer.
-        // The old single-block swap left the seed's `agent-default-model: provider: local` row
-        // standing, so the session composed a provider whose block no longer existed and the live
-        // leg died at `no credential for provider route "local"` — after minutes, inside a marker
-        // wait, for a fact boot could have refused in milliseconds. applyHarnessRoute collapses
-        // the default rows onto the route, verifies the block exists, and boot REFUSES on any
-        // other answer, naming the mismatch. (boot.ts's own comment demanded this: "which model
-        // powered this leg must have exactly one answer.")
-        const aligned = applyHarnessRoute(p, harnessRoute.route, PINNED_CONTEXT_WINDOW)
-        if (aligned.error !== null) {
-          throw new Error(`e2e: live/harness boot refused — ${aligned.error} (route ${harnessRoute.route.id}/${harnessRoute.route.model}; #414)`)
-        }
-        p = aligned.text
+        // #414: the harness branch does NOTHING here, deliberately. The full route alignment
+        // (provider block replace-or-append + default-row collapse + verification) runs at the
+        // LAST point before the write, below — measured 2026-11-17: cleaning the text here was
+        // overwritten by ensurePresetRegistryPin/applyRigPresetPin merging the dev profile's
+        // `provider: local` default row back in, and the booted host still composed the orphaned
+        // route. An alignment that does not see the final bytes asserts nothing. This branch
+        // exists only so the tracked-append below cannot fire alongside a harness route.
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
         p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: ${RIG_MODEL_ID}\n            name: ${RIG_MODEL_ID} (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
         // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
@@ -627,6 +621,16 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // #132: the workspace-instruction injection is development context whose presence/position varies
       // by machine; with the legs now bounded, removing the row is the principled determinism fix.
       p = dropInstructionRow(p)
+      // #414: the alignment is the LAST transform before the write, because the invariant it guards is
+      // about the bytes the host reads. Boot refuses on any other answer, naming the mismatch —
+      // milliseconds and a sentence, not 15 minutes and a marker wait.
+      if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
+        const aligned = applyHarnessRoute(p, harnessRoute.route, PINNED_CONTEXT_WINDOW)
+        if (aligned.error !== null) {
+          throw new Error(`e2e: live/harness boot refused — ${aligned.error} (route ${harnessRoute.route.id}/${harnessRoute.route.model}; #414)`)
+        }
+        p = aligned.text
+      }
       fs.writeFileSync(patchPath, p)
     }
   }
