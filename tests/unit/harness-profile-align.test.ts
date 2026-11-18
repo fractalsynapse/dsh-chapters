@@ -93,3 +93,26 @@ test('#414: a seed whose default row was deleted is restored by the route-carrie
   assert.equal(out.error, null, 'the harness route carries its own default row — a lost seed row is restored')
   assert.equal(defaultsOf(out.text), 1)
 })
+
+// ─────────────── the measured clobber: a merge step re-adds the stale row AFTER a clean alignment
+
+test('#414 regression (measured 2026-11-17): alignment as the LAST transform converges even when a merge re-injected the local row', () => {
+  const clean = applyHarnessRoute(SEED, route(), 32000)
+  assert.equal(clean.error, null)
+  // exactly what boot's own profile pipeline did: ensurePresetRegistryPin/applyRigPresetPin merged
+  // the dev profile's rich local row back in AFTER an earlier alignment pass:
+  const clobbered = clean.text + '\n' + [
+    '- id: agent-default-model',
+    '  name: "@deepseek-ai/dsh-agent-default-model"',
+    '  config:',
+    '    provider: local',
+    '    model: qwen3.8-flash-next',
+    '    reasoningEffort: medium',
+    '',
+  ].join('\n')
+  assert.equal(defaultsOf(clobbered), 2, 'control: the clobber really does restore the duplicate')
+  const final = applyHarnessRoute(clobbered, route(), 32000)
+  assert.equal(final.error, null, `the final alignment must converge: ${final.error ?? ''}`)
+  assert.equal(defaultsOf(final.text), 1, 'exactly one default row in the text the host will read')
+  assert.doesNotMatch(final.text, /provider: local\b/)
+})
