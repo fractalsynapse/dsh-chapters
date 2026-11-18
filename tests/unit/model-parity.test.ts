@@ -101,3 +101,19 @@ test('#409: an SSE chat response carries its witness too — the stub streams un
   // and a garbage stream stays a refusal, not a crash
   assert.equal(chatServedId('data: ???\ndata: [DONE]'), null)
 })
+
+// ─────────────── the probe URL builder: the guard must hit the SAME path the proxy hits
+
+test('#414: upstreamProbeUrl follows the proxy-side /v1-collision convention', async () => {
+  const { upstreamProbeUrl } = await import('../support/model-parity.ts')
+  // host-only base (the tracked local box):
+  assert.equal(upstreamProbeUrl('http://localhost:8080', '/v1/models'), 'http://localhost:8080/v1/models')
+  // PATH-PREFIXED base (the hosted token-plan): the measured boot bug was new URL('/v1/models', base)
+  // dropping /compatible-mode to the origin — a 404 that reads as "no parsable model list":
+  assert.equal(upstreamProbeUrl('https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1', '/v1/models'),
+    'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1/models')
+  assert.equal(upstreamProbeUrl('https://x.test/compatible-mode/v1/', '/v1/chat/completions'),
+    'https://x.test/compatible-mode/v1/chat/completions')
+  // base WITHOUT /v1 keeps the standard suffix:
+  assert.equal(upstreamProbeUrl('https://api.example.com', '/v1/models'), 'https://api.example.com/v1/models')
+})
