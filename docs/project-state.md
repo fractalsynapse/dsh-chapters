@@ -1082,3 +1082,18 @@ class (deterministic / replayed / installed / live) and the missing class is dec
 distillation rig's true pinned-model endpoint — this box is now refused by name, by design, #406/#409)
 · #349 remainder (browser rig) · #372 (unbuilt) · #397 (contract.md § Lineage decision, parked with
 its one-line change) · host option-(d) todo row · five credential-gated TreeDX live rows.
+
+## 2026-11-17 — C3 live attempt: voided before the provider, and the void is the finding
+
+The first post-0.2.36 move — observing a composed checkpoint on live traffic — was attempted twice
+from this box and both runs are RECORDED AS VOID: the sessions never reached any provider
+(`turn/end: no credential for provider route "local"`, zero tool calls, zero compaction events, zero
+hosted tokens spent). The cause is a rig seam, filed as **#414** with the bytes: live+harness mode has
+no route translator — the component `globalSetup.ts:44` names as the translator IS the tape proxy, and
+live mode deliberately runs without one — while the session route stays pinned to
+`local/qwen3.8-flash-next` for tape portability. The sharper half: this box's :8080 answers the
+live-leg server-presence check with the ALIASING 4B model, so a tracked-mode live run here would not
+fail — it would SILENTLY observe the wrong model under the pinned name. The #406 lesson, live edition:
+an endpoint that lies about its model must be refused, not believed. C3's requirement is now machine-
+named (the distillation box, exact command on the verify row); nothing here can honestly discharge it,
+and the leg's compliance-wait proved itself by failing loudly both times.
