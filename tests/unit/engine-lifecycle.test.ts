@@ -791,3 +791,29 @@ test('summarize COMPOSES topic chapters on the host-shaped surface, carrying pla
     assert.match(text, /PLOT: finish the composer/, 'and it is the model-authored bytes, not a re-derivation')
   } finally { h.dispose() }
 })
+
+// #414 (measured on the first heavy LIVE run: 58 legacy manifests, zero log lines): the arm where
+// the region maps but no turn signature exists yet was the last unnamed fallback. #399 promised
+// every fallback names itself — this row is that promise kept.
+test('summarize: a mapped region with ZERO collections logs reason=no-collections (no silent legacy arms)', async () => {
+  const sink = path.join(os.tmpdir(), `eng-nosig-${Math.random().toString(36).slice(2)}.log`)
+  process.env.DSH_CHAPTERS_ENGINE_ERRORS = sink
+  const h = harness()
+  try {
+    const events = [
+      human(0, 'start the single giant turn'),
+      asst(1, 'streaming and streaming'),
+      ev(2, 'compaction/start', { compactionId: 'c-nosig' }),
+    ]
+    const session = h.sessionOf('s-nosig', events)
+    const input = { messages: [0, 1].map((seq) => (session as unknown as { deriveEventMessage: (e: unknown) => unknown }).deriveEventMessage(session.eventAt(seq))).filter((m) => m !== null) }
+    // no collections stored — the store row is fresh (a single-turn journey mid-flight, the heavy
+    // journey's measured shape: 58 compactions, 58 legacy manifests, and NOT ONE line said why)
+    const r = await (h.engine as unknown as { summarize: (i: unknown, a: unknown) => Promise<{ provider: string }> }).summarize(input, { session })
+    assert.equal(r.provider, 'dsh-chapters', 'the summary itself proceeds on the legacy arm')
+    const text = fs.readFileSync(sink, 'utf8')
+    assert.match(text, /compaction composition skipped \(reason=no-collections\)/,
+      `the last silent fallback must name itself in the sink, got: ${text.slice(0, 300)}`)
+    assert.match(text, /realm:engine:compose/, 'attributed by plane and site like every other note')
+  } finally { h.dispose(); delete process.env.DSH_CHAPTERS_ENGINE_ERRORS }
+})

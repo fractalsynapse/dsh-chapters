@@ -781,7 +781,13 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
         const line = `dsh-chapters: compaction composition skipped (reason=${found.reason}) — legacy single-chapter fallback`
         if (found.reason === 'no-match') this.ctx.logger?.warn?.(`${line} — the region was present and NOTHING mapped: host surface-shape drift? (#399)`)
         else if (found.reason !== 'empty-region') diagnosticNote(this.ctx.logger, 'realm:engine:compose', line)
-      } else if (state.collections.length > 0) {
+      } else if (state.collections.length === 0) {
+        // #414 (heavy-live, measured): the region mapped FINE and there was nothing to compose —
+        // a single-turn journey compacts before any turn/end has stored a signature, which is the
+        // design, not a drift. It must still say so: #399 promised every fallback names itself,
+        // and this was the one silent arm left (58 legacy manifests with zero log lines proved it).
+        diagnosticNote(this.ctx.logger, 'realm:engine:compose', `dsh-chapters: compaction composition skipped (reason=no-collections) — legacy single-chapter fallback (${String(session.seq)} events, no turn signature stored yet)`)
+      } else {
         const seqs = found.seqs
         const spanStart = seqs[0]!
         const spanEnd = seqs[seqs.length - 1]!
