@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
+import { applyHarnessRoute, describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { RIG_MODEL_ID } from './rig-pins.ts'
@@ -585,9 +585,19 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // all compose the same bytes. `E2E_HARNESS_PROFILE=1` restores the rewrite for the live-model `live`
       // mode, where there is no tape to stay byte-identical with.
       if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
-        // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host
-        // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
-        p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
+        // #414: not just the provider row — the WHOLE profile must carry exactly ONE route answer.
+        // The old single-block swap left the seed's `agent-default-model: provider: local` row
+        // standing, so the session composed a provider whose block no longer existed and the live
+        // leg died at `no credential for provider route "local"` — after minutes, inside a marker
+        // wait, for a fact boot could have refused in milliseconds. applyHarnessRoute collapses
+        // the default rows onto the route, verifies the block exists, and boot REFUSES on any
+        // other answer, naming the mismatch. (boot.ts's own comment demanded this: "which model
+        // powered this leg must have exactly one answer.")
+        const aligned = applyHarnessRoute(p, harnessRoute.route, PINNED_CONTEXT_WINDOW)
+        if (aligned.error !== null) {
+          throw new Error(`e2e: live/harness boot refused — ${aligned.error} (route ${harnessRoute.route.id}/${harnessRoute.route.model}; #414)`)
+        }
+        p = aligned.text
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
         p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: ${RIG_MODEL_ID}\n            name: ${RIG_MODEL_ID} (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
         // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
