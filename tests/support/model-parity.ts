@@ -101,3 +101,15 @@ export function stubEndpointVerdict(input: { listText: string, chatText: string 
   }
   return null
 }
+
+/**
+ * #414 — the guard's URL builder, mirroring the tape proxy's OWN convention (model-proxy.ts:906-911):
+ * when the base already ends at /v1 and the request path starts with /v1/, do not double it — and NEVER
+ * let a URL constructor's leading slash drop a path-prefixed base (the hosted token-plan
+ * `https://…/compatible-mode/v1` case: `new URL('/v1/models', base)` hits the ORIGIN's /v1/models,
+ * a 404 that reads as "no parsable model list" and refused a remote that answers fine).
+ */
+export function upstreamProbeUrl(base: string, reqPath: string): string {
+  const b = base.replace(/\/+$/, '')
+  return /\/v1$/.test(b) && reqPath.startsWith('/v1/') ? b + reqPath.slice(3) : b + reqPath
+}

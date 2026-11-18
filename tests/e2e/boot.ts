@@ -10,7 +10,7 @@ import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPi
 import { RIG_MODEL_ID } from './rig-pins.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 import { bootFailureMessage } from './boot-failure.ts'
-import { servedModelVerdict, stubEndpointVerdict, modelsListIds } from '../support/model-parity.ts'
+import { servedModelVerdict, stubEndpointVerdict, modelsListIds, upstreamProbeUrl } from '../support/model-parity.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -498,14 +498,14 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const proofAbort = AbortSignal.timeout(20_000)
     let listText = ''
     let chatText = ''
-    const chatProbe = (model: string): Promise<string> => fetch(new URL('/v1/chat/completions', upstreamBase).href, {
+    const chatProbe = (model: string): Promise<string> => fetch(upstreamProbeUrl(upstreamBase, '/v1/chat/completions'), {
       method: 'POST',
       headers: proofHeaders,
       signal: proofAbort,
       body: JSON.stringify({ model, messages: [{ role: 'user', content: 'identity probe — reply with one word' }], max_tokens: 4 }),
     }).then((r) => r.text())
     try {
-      listText = await (await fetch(new URL('/v1/models', upstreamBase).href, { signal: proofAbort })).text()
+      listText = await (await fetch(upstreamProbeUrl(upstreamBase, '/v1/models'), { signal: proofAbort, headers: proofHeaders })).text()
       const probeId = stubLeg ? (modelsListIds(listText)[0] ?? 'stub-probe-unlisted') : requested
       chatText = await chatProbe(probeId)
     } catch (error) {
