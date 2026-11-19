@@ -58,6 +58,7 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // #420: the compose leg's regime, derived from the table exactly like heavy's — forced crossing at
   // 0.6 of the pinned 32K AFTER two stored turn boundaries; floor off, retries on (heavy's reasons).
   'compose': { E2E_PORT: '41745', E2E_THRESHOLD: '0.7', E2E_FLOOR: '1000000', E2E_MAX_RETRIES: '3' },
+  'preset-visibility-live': { E2E_PORT: '41746', E2E_THRESHOLD: '0.9', E2E_NO_AUX_MODEL: '1' },
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {
@@ -208,7 +209,7 @@ test('the e2e chain covers every leg that has a tape', () => {
   // #420/#421: `compose` NAMED itself out of this class on 2026-11-19 — the fixed-composer record
   // replayed model-free green (1 passed, 48.3s, zero MISSes), so the tape is tracked corpus and the
   // leg is a chain member. The byproduct rule (#175) still covers the two live-only legs.
-  const excluded = ['default', 'prompt-goal-live', 'model-activities-live']
+  const excluded = ['default', 'prompt-goal-live', 'model-activities-live', 'preset-visibility-live']
   // Whole tokens, not substrings: `--project=prompt-off` CONTAINS `--project=prompt`, so `includes` would
   // report the bar's own leg as covered by its negative twin. Caught by mutation-testing the gate below.
   const named = new Set(chain.split(/\s+/).filter((t) => t.startsWith('--project=')).map((t) => t.slice('--project='.length)))

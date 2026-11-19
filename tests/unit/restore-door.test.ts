@@ -123,9 +123,9 @@ const mkPorts = (over: { budget?: { windowTokens: number | null; headerBoundToke
     fs: () => ({}) as never,
     budgetProbe: async () => ({ windowTokens: over.budget?.windowTokens ?? 131072, headerBoundTokens: over.budget?.headerBoundTokens ?? 13000 }),
     newId: (() => { let n = 9000; return () => String(n += 1) })(),
-    createChild: async (i: { sessionId: string; noticeEvent: { data: { content: { text: string }[] } } }) => {
+    createChild: async (i: { sessionId: string; noticeEvent: { data: { content: { text: string }[] } }; parentSessionId?: string }) => {
       if (over.createFails === true) throw new Error('kernel refusal')
-      created.push({ id: i.sessionId, notice: i.noticeEvent.data.content[0]!.text })
+      created.push({ id: i.sessionId, notice: i.noticeEvent.data.content[0]!.text, parentSessionId: i.parentSessionId })
       return { warnings: [] }
     },
     now: () => 5,
@@ -143,6 +143,7 @@ test('#319: continueFromRestored births a child through the SAME pieces and link
   const childRow = live.get(out.childId)
   assert.ok(childRow !== undefined, 'the child row is committed')
   assert.equal(childRow.parentSession, 'ch-target', 'linkChild routes to the restored session, not the caller')
+  assert.equal(created[0]!.parentSessionId, 'ch-target', '#397: the PORT input carries the TARGET as parent — restore lineage is explicit, not a closure over the caller')
   assert.equal(childRow.rootSession, 'ch-target')
 })
 

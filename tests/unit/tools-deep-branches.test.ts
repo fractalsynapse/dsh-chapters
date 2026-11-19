@@ -29,6 +29,11 @@ function w(opts: {
   usageAt?: number | undefined
   // #319: birth seams need per-row control over the agents registry (cold get, resume shape).
   agentsPatch?: (agents: Record<string, unknown>) => void
+  extraEvents?: Ev[]
+  /** #349: inject a goals service on the ctx; capture is provided by the row. */
+  goals?: Record<string, unknown>
+  /** #349: flips the plugin config key goalRearmOnCarry. */
+  rearmOff?: boolean
 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'toolsdeep-'))
   const tables = new Map<string, Map<string, unknown>>()
@@ -36,7 +41,9 @@ function w(opts: {
   const store = makeDomainStore({ table, close: async () => {} } as never)
   const events: Ev[] = [human(0, 'deep branch coverage of the wrappers'), asst(1, 'done: verified')]
   if (opts.usageAt !== undefined) events[1].data.usage = { inputTokens: 5000, cacheReadTokens: 100 }
-  events.push(ev(2, 'turn/end', {}))
+  // #349: caller events can be extended with goal/todo facts BEFORE the closing turn/end.
+  for (const extra of opts.extraEvents ?? []) events.push(extra as never)
+  events.push(ev(events.length, 'turn/end', {}))
   const ctxBuilt: [Record<string, unknown>] = [undefined as never]
   const ctx: Record<string, unknown> = {
     llm: opts.noResolve ? {} : { resolveModelInfo: async () => ({ context: { contextWindow: 32_000 } }) },
@@ -48,17 +55,43 @@ function w(opts: {
     logger: { info: () => undefined, warn: () => undefined },
   }
   if (opts.agentsPatch !== undefined) opts.agentsPatch(ctx.agents as Record<string, unknown>)
+  if (opts.goals !== undefined) {
+    const baseGet = ctx.get as (n: string) => unknown
+    ctx.get = ((n: string) => n === 'goals' ? opts.goals : baseGet(n)) as never
+    ;(ctx as Record<string, unknown>).goals = opts.goals
+  }
   void ctxBuilt
 
   const config = {
     artifactStoreRoot: '.dsh-chapters', chapterTokenTarget: 8000, toolResultDeferFloorTokens: 200,
     continuationBudgetRatio: 0.25, fallbackPreset: 'chapters', harnessId: 'hD', coreRulesBudgetTokens: 1200,
+    ...(opts.rearmOff === true ? { goalRearmOnCarry: false } : {}),
     ...(opts.noScheduler ? {} : { scheduler: { schedule: () => undefined, pullFor: async () => ({ ok: true, detail: '' }), run: async () => ({}), hasPending: () => false, drain: async () => {} } }),
   }
   const caller = { id: 'sd', options: { provider: 'local', model: 'm' }, session: { id: 'sd', header: { cwd: tmp }, snapshotEvents: () => events } }
   const built = buildChaptersTools(ctx as never, store as never, config as never)
   return { tmp, store, built, caller, events, table, exec: { agent: caller }, dispose: () => fs.rmSync(tmp, { recursive: true, force: true }) }
 }
+
+test('#397: every birth through the seam names the TRUE parent in the child meta (agents.create)', async () => {
+  // The durable fact #397 filed for: the kernel header's parentSession must be settable honestly at
+  // birth (the host's validator accepts a string parentSession — evidence on the issue), because the
+  // seventh archive moment already reads header-first (auto-save shouldForceChildArchive). Before
+  // this, tools.ts passed only cwd/isSeeded/agentPreset and children showed `parentSession: NONE`.
+  let createInput: Record<string, unknown> | undefined
+  const h = w({ agentsPatch: (agents) => {
+    agents.create = async (o: Record<string, unknown>) => { createInput = o; await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: (_m?: unknown) => {} } }
+  } })
+  try {
+    const r = await h.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, h.exec as never) as { ok: boolean }
+    assert.equal(r.ok, true)
+    const meta = (createInput as { meta?: Record<string, unknown> } | undefined)?.meta ?? {}
+    assert.equal(meta.parentSession, 'sd', '#397: meta.parentSession is the CALLER session id — the child header names its parent')
+    assert.equal(meta.isSeeded, false, 'unchanged: a continuation child is not a seeded fork')
+  } finally { h.dispose() }
+})
 
 test('continue without a resolved model window still budgets against header bound', async () => {
   const h = w({ usageAt: 0 })
@@ -245,4 +278,82 @@ test('when neither get nor resume answers, the door REFUSES and says why (#319 l
     assert.equal(r.ok, false, 'a child that could never see its TOC must not be handed over silently')
     assert.match(String(r.reason ?? ''), /no live agent and no agents\.resume seam|no followup seam/, 'the refusal names both registries it tried')
   } finally { h.dispose() }
+})
+
+
+// ─────────────── #349: the birth step re-arms through the goal SERVICE (maintainer decision) ───────────────
+
+const GOAL_CREATE = (): Ev => ({ seq: 0, type: 'goal/change', data: { operation: 'create', goal: { id: 'g-1', revision: 5, objective: 'Ship the widget and verify it in the browser', phase: 'active', maxGoalRounds: 9 } } }) as unknown as Ev
+
+test('#349: with an active carried goal, the birth re-arms via goals.create(handle, objective, cap)', async () => {
+  const calls: Array<{ agent: unknown; request: Record<string, unknown> }> = []
+  let noticeText = ''
+  const h = w({ extraEvents: [GOAL_CREATE()], goals: { create: (agent: unknown, request: Record<string, unknown>) => { calls.push({ agent, request }); return { id: 'g-child' } } }, agentsPatch: (agents) => {
+    agents.create = async (o: Record<string, unknown>) => { await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: () => {}, dispose: async () => {} } }
+    agents.get = () => ({ followup: (m: Record<string, unknown>) => { noticeText += JSON.stringify(m) }, dispose: async () => {} })
+  } })
+  try {
+    const r = await h.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, h.exec as never) as { ok: boolean }
+    assert.equal(r.ok, true)
+    assert.equal(calls.length, 1, 'exactly one re-arm per birth')
+    assert.equal(calls[0]!.request.objective, 'Ship the widget and verify it in the browser')
+    assert.equal(calls[0]!.request.maxGoalRounds, 9, 'the round cap rides; counts restart on the child')
+    assert.match(noticeText, /re-created this goal on the child/, 'the TOC the child reads states the re-arm in re-armed wording')
+  } finally { h.dispose() }
+})
+
+test('#349: service absent or refusing is LOUD — a warning naming /goal resume, never a silent birth', async () => {
+  const noSvc = w({ extraEvents: [GOAL_CREATE()] })
+  try {
+    const r = await noSvc.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, noSvc.exec as never) as { ok: boolean; warnings?: string[] }
+    assert.equal(r.ok, true, 'the birth stands — the carry failure is a warning, not a refusal')
+    assert.ok((r.warnings ?? []).some((x) => /goal re-arm skipped/.test(x) && /\/goal resume/.test(x)),
+      `the warning names the fallback: ${JSON.stringify(r.warnings)}`)
+  } finally { noSvc.dispose() }
+
+  const refusing = w({ extraEvents: [GOAL_CREATE()], goals: { create: () => { throw new Error('GOAL_LOCKED') } } })
+  try {
+    const r2 = await refusing.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, refusing.exec as never) as { ok: boolean; warnings?: string[] }
+    assert.equal(r2.ok, true)
+    assert.ok((r2.warnings ?? []).some((x) => /goal re-arm refused: GOAL_LOCKED/.test(x)),
+      `the host's own words come through: ${JSON.stringify(r2.warnings)}`)
+  } finally { refusing.dispose() }
+})
+
+test('#349 config off restores notice-only: goalRearmOnCarry=false means goals.create is never called, and the notice keeps the conservative wording', async () => {
+  // control first: default knob re-arms
+  let called = 0
+  const on = w({ extraEvents: [GOAL_CREATE()], goals: { create: () => { called += 1; return {} } } })
+  try {
+    const r = await on.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, on.exec as never) as { ok: boolean }
+    assert.equal(r.ok, true)
+    assert.equal(called, 1, 'control: default config DOES re-arm')
+  } finally { on.dispose() }
+  // the knob off: no create call AT ALL, and the child's notice bytes keep the human-only sentence
+  let calledOff = 0
+  let noticeText = ''
+  const captureAuthoring = (agents: Record<string, unknown>): void => {
+    // the TOC rides the child's followup seam (invariant 2: nothing seeded) — that msg IS the notice
+    agents.create = async (o: Record<string, unknown>) => {
+      await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: () => {}, dispose: async () => {} }
+    }
+    agents.get = () => ({ followup: (m: Record<string, unknown>) => { noticeText += JSON.stringify(m) }, dispose: async () => {} })
+  }
+  const off = w({ extraEvents: [GOAL_CREATE()], rearmOff: true, goals: { create: () => { calledOff += 1; return {} } }, agentsPatch: captureAuthoring })
+  try {
+    const r2 = await off.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, off.exec as never) as { ok: boolean }
+    assert.equal(r2.ok, true)
+    assert.equal(calledOff, 0, 'the host-side gate is back: zero service calls with the knob off')
+    assert.match(noticeText, /NOT armed in the child/, 'and the notice says the conservative truth again')
+  } finally { off.dispose() }
 })

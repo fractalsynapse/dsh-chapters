@@ -28,7 +28,7 @@ import { deriveIdentity } from './engine-core.ts'
 import { PLAN_MODE_EVENT, buildPlansSection, detectPlans, type PlanIntent } from './plans.ts'
 // #349: the goal fold and its notice block live in their own module (goal-carriage.ts), so the
 // one-selector-one-renderer rule is checkable in one file rather than spread across plans.ts.
-import { foldGoalFromLog, renderGoalCarriage } from './goal-carriage.ts'
+import { foldGoalFromLog, foldTaskListFromLog, goalRearmDecision, renderGoalCarriage, renderTaskCarriage } from './goal-carriage.ts'
 
 export interface ContinueArgs {
   callerSessionId: string
@@ -82,6 +82,13 @@ export interface ContinueConfig extends RenderConfig {
   /** #349: budget for the objective text in the notice; the instruction lines are never cut. */
   goalNoticeChars?: number | undefined
   /**
+   * #349 (maintainer decision 2026-11-19): re-create an ACTIVE carried goal on the child through the
+   * host's goal service after birth. Default (undefined/true) on; false restores the notice-only
+   * wording and never sends the payload. Deliberately checked as `!== false`: an absent field is the
+   * historical undefined-shape config several callers still build, and the decision is the default.
+   */
+  goalRearmOnCarry?: boolean | undefined
+  /**
    * Teach a child HOW to look things up, not only what was archived (findability
    * audit, 2026-10-11). The index answers questions about every kind — chapters,
    * `kind: plan` documents, curated rules — but the notice previously pointed at
@@ -126,6 +133,18 @@ export interface ContinuePorts {
     modeEvents: SessionEventLike[]
     presetId: string
     title: string
+    /**
+     * #349 (maintainer authority decision 2026-11-19): an ACTIVE goal carried from the parent, to be
+     * RE-CREATED on the child through the host's goal service after the birth succeeds. Present only
+     * when `goalRearmDecision` said yes and `goalRearmOnCarry` is not off — the plane executing the
+     * birth must not re-decide, only obey; refusals come back as warnings, never lost.
+     */
+    goal?: { objective: string, maxGoalRounds?: number | undefined }
+    /** #397 (maintainer amendment, docs/contract.md § Lineage): the TRUE birth parent, explicit in
+     * the port input rather than closed over — `chapters_continue`/`chapters_fork` pass the caller,
+     * `chapters-restore` passes the TARGET. The plane writes it into the kernel header meta so the
+     * child carries durable lineage with no registry dependency. */
+    parentSessionId: string
   }): Promise<void | { warnings?: readonly string[] }>
   now(): number
   /**
@@ -207,6 +226,12 @@ export function assembleNotice(input: {
    * injected bytes, which is what keeps ordinary sessions' notices and recorded tapes untouched.
    */
   goalSection?: string
+  /**
+   * #349: the parent's FINAL `todo/write` snapshot, rendered by renderTaskCarriage. Placed directly
+   * after the goal block — a task list without its objective is trivia, and an objective without its
+   * list is a wish. Absent/empty => zero injected bytes (the tape rule every optional section obeys).
+   */
+  taskSection?: string
   retrievalHints?: boolean | undefined
 }): string {
   const lines = [
@@ -215,6 +240,7 @@ export function assembleNotice(input: {
     ...(input.rulesSection !== undefined && input.rulesSection !== '' ? ['', input.rulesSection] : []),
     ...(input.plansSection !== undefined && input.plansSection !== '' ? ['', input.plansSection] : []),
     ...(input.goalSection !== undefined && input.goalSection !== '' ? ['', input.goalSection] : []),
+    ...(input.taskSection !== undefined && input.taskSection !== '' ? ['', input.taskSection] : []),
     '',
     'This session continues an archived conversation. Chapters are verbatim Markdown in the workspace;',
     'every byte remains retrievable — inline, or at artifact paths cited inside a chapter. Read a chapter',
@@ -447,7 +473,7 @@ export async function continueFromRestored(
   }
   const childId = `ch-${ports.newId()}`
   try {
-    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents: [], presetId: config.fallbackPreset, title })
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents: [], presetId: config.fallbackPreset, title, parentSessionId: targetSessionId })
     if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
     return { ok: false, reason: `restore child creation refused: ${String((error as Error).message)}`, warnings }
@@ -590,8 +616,20 @@ async function finishChild(
   // #349: the goal is folded from the CALLER's durable events, not read from a goal service — the realm
   // has no such service and, per #360's lesson, a module-level cache would not cross the plane anyway.
   let goalSection = ''
-  if (config.goalInNotice !== false) {
-    goalSection = renderGoalCarriage(foldGoalFromLog(callerEvents), config.goalNoticeChars ?? 600)
+  let taskSection = ''
+  let carriedGoal: { objective: string, maxGoalRounds?: number | undefined } | undefined
+  {
+    // #349: one fold, one decision, three consumers (wording mode, birth payload, e2e truth).
+    const goalFolded = foldGoalFromLog(callerEvents)
+    const decision = goalRearmDecision(goalFolded)
+    const rearm = decision.rearm && config.goalRearmOnCarry !== false
+    goalSection = renderGoalCarriage(goalFolded, config.goalNoticeChars ?? 600, rearm ? 're-armed' : 'notice-only')
+    taskSection = renderTaskCarriage(foldTaskListFromLog(callerEvents))
+    // The payload reaches the plane ONLY when the decision says yes — the plane executes, never
+    // re-decides (one predicate per semantic decision, #59's rule).
+    if (rearm && goalFolded !== null) {
+      carriedGoal = { objective: goalFolded.objective, ...(goalFolded.maxGoalRounds !== undefined ? { maxGoalRounds: goalFolded.maxGoalRounds } : {}) }
+    }
   }
 
   // ---- Notice text, then the budget gate (measure the WHOLE notice).
@@ -606,6 +644,7 @@ async function finishChild(
     ...(args.rulesSection !== undefined ? { rulesSection: args.rulesSection } : {}),
     ...(plansSection !== '' ? { plansSection } : {}),
     ...(goalSection !== '' ? { goalSection } : {}),
+    ...(taskSection !== '' ? { taskSection } : {}),
     retrievalHints: config.retrievalHints !== false,
   })
   // Built-then-measured, as above: the budget gate sees the authored bytes, not a draft.
@@ -638,7 +677,7 @@ async function finishChild(
     // a workspace service that no longer exposes attachSession. Those are facts about the
     // continuation the user is being handed, so they belong in the door's reply, not only
     // in a log the reply already summarizes.
-    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title, parentSessionId: args.callerSessionId, ...(carriedGoal !== undefined ? { goal: carriedGoal } : {}) })
     if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
     // Full detail to the sink, short detail to the composer. The UI string is sliced to fit

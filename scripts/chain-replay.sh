@@ -43,6 +43,36 @@ for leg in $LEGS; do
   PORT=$(node --experimental-strip-types -e "
     import('./tests/e2e/rig-pins.ts').then((m) => process.stdout.write(String(m.RIG_PINS['$leg']?.port ?? '')));
   " 2>/dev/null)
+  # The recorded pattern (plans 0.237, enrich 0.238, fanout 0.239 x2): a previous playwright exit does
+  # NOT mean the previous HOST child released its port — dsh web children have been observed to outlive
+  # their wrapper. Wait for the port to be actually FREE (connection REFUSED), up to 90s, and if it is
+  # still HELD, fail the leg BY NAME with the holder — never boot into a collision and call the 120s
+  # readiness timeout a mystery. The cheap probe mirrors the runner's own style (node -e, no deps).
+  if [ -n "$PORT" ]; then
+    for WAIT in $(seq 1 45); do
+      # BINDABILITY, not LISTENERS: /proc proved the true collision class — an ESTABLISHED outbound
+      # socket using the port as its EPHEMERAL SOURCE (this machine's range 32768-60999 swallows the
+      # whole rig band) refuses listen() while ss -tln shows nothing. Connect-refused does NOT mean
+      # bindable; only asking for the bind is honest.
+      # PROBE CONTRACT, once and readable: exit 0 == BIND FAILED == held; exit 1 == listened == free.
+      # The first cut wrote `if ! node …` and inverted it: free ports were waited on (CI's pristine runners
+      # reported twelve false 'STILL HELD' failures at this authorship, 2026-11-19 — the guard's own
+      # polarity bug caught by the one gate that never shares the author's machine state), held ports
+      # were booted into. Correct polarity: HELD (exit 0) -> wait; FREE (exit 1) -> break and boot.
+      if node -e "const n=require('net');const s=n.createServer();s.once('listening',()=>{s.close(()=>process.exit(1))});s.once('error',()=>process.exit(0));s.listen($PORT,'127.0.0.1')" ; then
+        HOLDER=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1)
+        echo "(port $PORT bound by SOMEONE — listener or ephemeral source… ${HOLDER:-})"
+        sleep 2
+      else
+        break
+      fi
+      if [ "$WAIT" = 45 ]; then
+        echo "[chain-replay] $leg: port $PORT STILL HELD after 90s by ${HOLDER:-unknown} — refusing to boot into a collision"
+        FAILED+=("$leg:port-held")
+        continue 2
+      fi
+    done
+  fi
   if LEG=$leg MODE=replay E2E_MODEL=replay timeout 1200 bash scripts/e2e-one.sh > "var/chain-replay-$leg.log" 2>&1; then
     echo "ok (boot port ${PORT:-?})"
   else

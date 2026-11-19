@@ -1100,3 +1100,26 @@ artifact never contained the booted home's session logs. `scripts/chain-replay.s
 `session.v4.jsonl.zstd` files and registry into `var/e2e-session-logs/<leg>-<port>` (six files, under 4 MB each) so
 the runner's own history sits next to the tape diffs and the misses. When a miss claims "the conversation had
 already taken a different shape", the answer is in that transcript — read it, don't theorize about it.
+
+### The rig-band ephemeral collision (CORRECTED same day — the teardown theory was WRONG)
+
+`plans` (0.2.37 cut), `enrich` (0.2.38 cut), `fanout` twice (0.2.39 cut): `listen EADDRINUSE` on the
+leg's own port, boot dying at the 120s readiness ceiling, different leg each time. The first theory
+here (and in two ship records) said "previous host child outlives its wrapper" — a bind test disproved
+it on the spot: **`bind(41736)` refused while `ss -tln` and `/proc/net/tcp` showed NO LISTENER** —
+`lsof` named the holder: an ESTABLISHED outbound socket of the developer's own tooling using the rig
+port as its EPHEMERAL SOURCE. The machine's `ip_local_port_range` (32768-60999) swallows the entire
+rig band (41731-41746), so ANY local connection can squat any leg port at any time — which is also why
+the rerun-gave-green pattern: ephemeral allocation is luck, not drift. Wrong-theory trail kept
+deliberately: the first guard shipped minutes ago polled CONNECT-REFUSED, the wrong predicate
+(free-to-connect ≠ free-to-bind); it now asks for a real `listen()` per leg port, holds up to 90s,
+and fails the leg by name rather than booting into a refusal the ceiling will call a mystery.
+
+**The real fix, for the maintainer's machine (needs root or a re-distill, so it is recorded not
+done here):** either reserve the band for the rig — `sysctl net.ipv4.ip_local_reserved_ports=41731-41746`
+(zero bytes moved, zero tapes touched) — or relocate the band entirely (needs a FULL corpus
+re-distill, because every tape's regime, homes and header paths are port-keyed; NOT free, not
+tonight). Until one lands, the honest release sentence stays: first-attempt collisions are named,
+the recorded rerun is green, and the guard now measures the right thing. The wrong-teardown theory
+in the 0.2.37/0.2.38 ship records stands corrected here rather than silently rewritten — immutable
+tags, mutable understanding, one line in the right place.
