@@ -27,6 +27,7 @@ import {
   deriveRunning,
   BAR_STATE_COMMAND,
   pollSpacingFor, mountPullDecision, rowTooltip, stateFromCache, parseModelAbsent, edgeKickDelayMs,
+  firstPullRetryDue, FIRST_PULL_RETRY_SPACING_MS, FIRST_PULL_RETRY_CEILING,
   pushEventsOf, pushIsFresher, PROMPT_PROJECTION_KEY, PUSH_CONFIRM_GRACE_MS, turnEndPulse, ACTIVE_POLL_MS, type PromptBarStatus,
   barLabel,
   barVisible,
@@ -492,8 +493,33 @@ export function PromptDock(props: DockProps): ReactElement | null {
       if (typeof document !== 'undefined' && !document.hidden && duePull()) kick.current?.()
     }
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
-    void tick({ mount: true })
+    // #429: THE FIRST-PULL BOUNDED RETRY, finally as code — both comments above promise it (:240's
+    // ceiling, :410's 'retry until SOMETHING answers'), and its absence was the measured revival-leg
+    // flake: the mount effect fires while a loaded boot is still hydrating the composer's exec verb,
+    // refresh() returns at `exec === undefined` BEFORE pulling (no wire node, no answer), and under
+    // the quiet cadence (#229) nothing ever asks the mount again. Samples: FAILED in two loaded
+    // chains (local + CI), PASSED 10/10 solo on the same head + CI re-run + #427's CI. The loop is
+    // due ONLY while owed and unanswered (firstPullRetryDue — any honest reply, `off` included, is an
+    // answer, #304), and at the ceiling it gives up LOUDLY: a silent give-up is the mystery this
+    // whole class of bug ships behind (#54, again).
+    let firstPullRetries = 0
+    let firstPullTimer: ReturnType<typeof setTimeout> | undefined = undefined
+    const retryFirstPull = (): void => {
+      if (!firstPullRetryDue({ answered: answered.current, featureAbsent, attempts: firstPullRetries })) {
+        if (!answered.current && !featureAbsent && firstPullRetries >= FIRST_PULL_RETRY_CEILING) {
+          console.warn(`[client:prompt] first-pull retry ceiling (${String(FIRST_PULL_RETRY_CEILING)} x ${String(FIRST_PULL_RETRY_SPACING_MS)}ms) reached with NO wire answer — the mount pull remains owed; edges are the recovery path (#429)`)
+        }
+        return
+      }
+      firstPullRetries += 1
+      firstPullTimer = setTimeout(() => {
+        firstPullTimer = undefined
+        void refresh().then(() => { retryFirstPull() })
+      }, FIRST_PULL_RETRY_SPACING_MS)
+    }
+    void tick({ mount: true }).then(() => { retryFirstPull() })
     return () => {
+      if (firstPullTimer !== undefined) clearTimeout(firstPullTimer)
       if (timer !== undefined) clearTimeout(timer)
       if (edgeTimer.current !== undefined) { clearTimeout(edgeTimer.current); edgeTimer.current = undefined }
       kick.current = undefined

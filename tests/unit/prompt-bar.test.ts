@@ -9,7 +9,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS, turnEndPulse, configureQuietHeartbeat, rowTooltip } from '../../src/client/prompt-bar.ts'
+import {ACTIVE_POLL_MS, QUIET_POLL_MS, barLabel, barVisible, initialBarState, mountPullDecision, parseBarAutorun, parseBarState, parseModelAbsent, pollSpacingFor, promptBarReducer, shouldAutoFire, stateFromCache, pushEventsOf, pushIsFresher, deriveRunning, edgeKickDelayMs, EDGE_DEBOUNCE_MS, EDGE_FLOOR_MS, turnEndPulse, configureQuietHeartbeat, rowTooltip, firstPullRetryDue, FIRST_PULL_RETRY_CEILING, FIRST_PULL_RETRY_SPACING_MS} from '../../src/client/prompt-bar.ts'
 
 test('labels and visibility: analyzing, ready, failed, and the silence cases', () => {
   let s = promptBarReducer(initialBarState(), { t: 'polled', status: 'analyzing' })
@@ -421,4 +421,37 @@ test('#309: rowTooltip states the click outcome AND the empty-composer precondit
   assert.equal(rowTooltip(false, true), 'Click to expand the full suggested prompt', 'collapsed: the composer state is invisible until it matters')
   assert.equal(rowTooltip(true, false), 'Click to send this prompt to the chat input for editing', 'expanded + empty: the gesture, unchanged')
   assert.equal(rowTooltip(true, true), 'Clear existing prompt to send this prompt to chat input', 'expanded + occupied: the precondition, named')
+})
+
+
+// ─────────────── #429: the FIRST-PULL bounded retry — the promise the comments made, as code ───────────────
+//
+// The flake, measured (2026-11-19): prompt-revival failed the mount-pull seam assertion twice — once
+// in a local CHAIN run, once in CI's chain (both loaded contexts) — while the SAME head passed 10/10
+// solo locally, passed on CI re-run, and #427's identical code passed CI. The mechanism hides in a
+// silent early return: refresh() exits at `exec === undefined` BEFORE any pull when the dock mounts
+// during composer-verb hydration; no wire node, no answer, and under the quiet cadence (#229)
+// NOTHING ever asks the mount again. Two comments describe the missing mechanism (:240 'Retry ceiling
+// for the FIRST pull only, in attempts and spacing', :410 'Retry until SOMETHING answers') — prose
+// with no code is how a starved bar becomes a mystery leg failure. These rows pin the ONE predicate;
+// the dock wiring row lives in wiring-truth, because 'a gate you only read is a gate you have not
+// tested'.
+
+test('#429: firstPullRetryDue retries ONLY while no reply has arrived, up to the ceiling', () => {
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: 0 }), true, 'owed pull, nothing answered, room left')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: FIRST_PULL_RETRY_CEILING - 1 }), true, 'the last allowed attempt is due')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: FIRST_PULL_RETRY_CEILING }), false, 'bounded — the ceiling comment stays a ceiling')
+})
+
+test('#429: ANY honest reply ends the loop — an `off` included (#304, the seam claims the wire ANSWERED, never that the feature is on)', () => {
+  assert.equal(firstPullRetryDue({ answered: true, featureAbsent: false, attempts: 0 }), false, 'answered is answered — including a real off')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: true, attempts: 0 }), false, 'the model-absent plane spends nothing, retries included')
+})
+
+test('#429: the shape of the bound is the measured need — spacing under the CI-boot window, total under the leg timeout', () => {
+  assert.ok(FIRST_PULL_RETRY_SPACING_MS > 0 && FIRST_PULL_RETRY_SPACING_MS <= 3_000,
+    `spacing must cover exec-hydration gaps without spamming: ${String(FIRST_PULL_RETRY_SPACING_MS)}`)
+  const totalMs = FIRST_PULL_RETRY_CEILING * FIRST_PULL_RETRY_SPACING_MS
+  assert.ok(totalMs >= 8_000 && totalMs <= 30_000,
+    `the retry window must outlast a loaded boot's composer hydration but stay small next to the leg's 480s ceiling: ${String(totalMs)}ms`)
 })
