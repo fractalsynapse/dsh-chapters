@@ -205,7 +205,10 @@ test('the e2e chain covers every leg that has a tape', () => {
   // The two LIVE legs are excluded because their tape directories are byproducts of riding the record
   // proxy against the real provider (#175, gitignored) — a live leg is never a chain leg, and a local
   // run of one must not trip this gate on the developer's machine.
-  const excluded = ['default', 'prompt-goal-live', 'model-activities-live']
+  // #420/#421: `compose` joins the class the moment its fixed-composer recording REPLAYS model-free
+  // green — then the tape is tracked and the leg named in the chain instead. Until that verdict its
+  // recording dir is a byproduct, and a byproduct must not gate a developer's machine (#175's rule).
+  const excluded = ['default', 'prompt-goal-live', 'model-activities-live', 'compose']
   // Whole tokens, not substrings: `--project=prompt-off` CONTAINS `--project=prompt`, so `includes` would
   // report the bar's own leg as covered by its negative twin. Caught by mutation-testing the gate below.
   const named = new Set(chain.split(/\s+/).filter((t) => t.startsWith('--project=')).map((t) => t.slice('--project='.length)))

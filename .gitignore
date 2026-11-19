@@ -47,3 +47,7 @@ var/recovery-lab/
 # byproduct, never corpus (#175 — the model-free acceptance chain must not grow a live leg).
 tests/fixtures/model-tape/model-activities-live/
 tests/fixtures/model-tape/prompt-goal-live/
+# #420/#421: the compose leg's recordings are byproducts of riding the record proxy until the fixed
+# composer re-records AND the tape replays model-free green (#411 gate); promotion then TRACKS this
+# directory and adds it to the chain — until then it must not trip the e2e-pins coverage gate.
+tests/fixtures/model-tape/compose/
