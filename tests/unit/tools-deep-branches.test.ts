@@ -60,6 +60,26 @@ function w(opts: {
   return { tmp, store, built, caller, events, table, exec: { agent: caller }, dispose: () => fs.rmSync(tmp, { recursive: true, force: true }) }
 }
 
+test('#397: every birth through the seam names the TRUE parent in the child meta (agents.create)', async () => {
+  // The durable fact #397 filed for: the kernel header's parentSession must be settable honestly at
+  // birth (the host's validator accepts a string parentSession — evidence on the issue), because the
+  // seventh archive moment already reads header-first (auto-save shouldForceChildArchive). Before
+  // this, tools.ts passed only cwd/isSeeded/agentPreset and children showed `parentSession: NONE`.
+  let createInput: Record<string, unknown> | undefined
+  const h = w({ agentsPatch: (agents) => {
+    agents.create = async (o: Record<string, unknown>) => { createInput = o; await (o.setup as (c: unknown) => Promise<void>)({}); return { followup: (_m?: unknown) => {} } }
+  } })
+  try {
+    const r = await h.built.chaptersContinue.execute({
+      title: 'T', handoffNote: 'note', chapters: [{ title: 'A', summary: 'aa', startSeq: 0, endSeq: 2 }],
+    } as never, h.exec as never) as { ok: boolean }
+    assert.equal(r.ok, true)
+    const meta = (createInput as { meta?: Record<string, unknown> } | undefined)?.meta ?? {}
+    assert.equal(meta.parentSession, 'sd', '#397: meta.parentSession is the CALLER session id — the child header names its parent')
+    assert.equal(meta.isSeeded, false, 'unchanged: a continuation child is not a seeded fork')
+  } finally { h.dispose() }
+})
+
 test('continue without a resolved model window still budgets against header bound', async () => {
   const h = w({ usageAt: 0 })
   try {
