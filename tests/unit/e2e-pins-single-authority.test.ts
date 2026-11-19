@@ -55,6 +55,9 @@ const EXPECTED: Record<string, Record<string, string>> = {
   // to run under E2E_MODEL=replay. Its tape directory is gitignored: a live leg's recordings are a
   // byproduct of riding the record proxy, never corpus.
   'model-activities-live': { E2E_TAPE: 'model-activities-live', E2E_PORT: '41742', E2E_THRESHOLD: '0.9', E2E_ENRICH: '1', E2E_NO_AUX_MODEL: '1' },
+  // #420: the compose leg's regime, derived from the table exactly like heavy's — forced crossing at
+  // 0.6 of the pinned 32K AFTER two stored turn boundaries; floor off, retries on (heavy's reasons).
+  'compose': { E2E_PORT: '41745', E2E_THRESHOLD: '0.6', E2E_FLOOR: '1000000', E2E_MAX_RETRIES: '3' },
 }
 
 test('the table carries each project regime, and rigEnv derives it without copying', () => {
