@@ -772,6 +772,14 @@ warned "N event(s) rendered no output", `planSummarize` counted the oversize cha
 catch built a full diagnostic — and then the value was discarded. So the rule is not "add checks", it is
 **deliver what the checks already say**:
 
+- **Client visibility follows the command plane (#372).** The two door buttons are realm-scoped
+  affordances, so the client renders them ONLY when the host's own per-session projection
+  (`SessionSummary.projectionValues.agentPreset` — the fact the host's preset label reads, measured
+  in `dsh-client-ui-agent-preset` client bytes) says the session composes `chapters`. An unreadable
+  projection keeps the buttons and the click answers with the preset-specific refusal — fail-open
+  visibly, never silently dead. One id source: `CHAPTERS_PRESET_ID` lives in `src/preset-id.ts`
+  (client-safe, cordis-free); `src/preset.ts` re-exports it, and the client predicate is
+  `doorActionsVisibleFor` — one predicate per decision, per the hard rules.
 - **The diagnostics sink defaults ON.** `DSH_CHAPTERS_ENGINE_ERRORS` unset now means
   `<store-root>/diagnostics.log`, not "nowhere". All three SAIP compaction finalization failures left
   zero trace on disk, and door 5 logged `saved` to a logger nobody reads for three days. The env var
