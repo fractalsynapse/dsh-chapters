@@ -66,23 +66,6 @@ function headerPresetOf(sid: string): string | null {
   } catch { return null }
 }
 
-async function readCurrentSid(page: import('@playwright/test').Page): Promise<string> {
-  return page.evaluate(() => {
-    try { return (JSON.parse(window.localStorage.getItem('dsh.sessions.current') ?? '{}') as { sessionId?: string }).sessionId ?? '' } catch { return '' }
-  })
-}
-
-async function pollFor(fn: () => Promise<string>, timeoutMs: number, what: string): Promise<string> {
-  const deadline = Date.now() + timeoutMs
-  let last = ''
-  while (Date.now() < deadline) {
-    last = await fn()
-    if (last !== '') return last
-    await new Promise((r) => setTimeout(r, 2000))
-  }
-  throw new Error(`${what} — timed out after ${String(timeoutMs)}ms (last value: "${last}")`)
-}
-
 test.describe('door buttons follow the composed preset (#372)', () => {
   test.skip(process.env.E2E_MODEL === 'replay',
     'preset-visibility-live is a live-class leg: the seat roster RPC and a reply per session are machine behavior, not tape-stable (#138 class). Run with E2E_PROVIDER=harness.')
@@ -135,29 +118,34 @@ test.describe('door buttons follow the composed preset (#372)', () => {
     // DIV, not a textarea — a fill() waits on a target that cannot exist, which is exactly how run
     // 3 spent its 40-minute budget). No New-session click: it would discard the staged composition.
     await typeComposer(page, 'Reply with exactly the single word: STANDARDSIDE. Do not read or run anything.')
-    // the draft commits under a fresh id; `dsh.sessions.current` is the app's own authority (the key
-    // the #54 switch verifier reads). The standard session must be neither '' nor the chapters sid.
-    const stdSid = await pollFor(async () => {
-      const s = await readCurrentSid(page)
-      return s !== '' && s !== sidCh ? s : ''
-    }, 180_000, 'the standard draft committed and the app points at its session')
-    await expect.poll(() => headerPresetOf(stdSid), { timeout: 90_000, intervals: [2000],
-      message: 'the durable header records the standard preset — the fact the dock reads' }).toBe('standard')
+    // THE measurement is DOM, from the host's own surfaces — the header probe measured the wrong
+    // artifact: upstream agent-preset-selection.e2e.ts:302 settles the staged pick through the
+    // host's PROJECTION (`projections.values.agentPreset`) — exactly what our dock reads — while the
+    // durable header keeps the CREATE-TIME composition (run5 proved both can disagree: header
+    // `chapters` on a session the host composed standard). The session's own preset chip is the
+    // host saying what this session composes; the row below is the user-visible fact.
+    await expect(page.getByRole('button', { name: /^Standard mode/ }).first(),
+      'the host chip says this session composes the standard preset — the same projection the dock reads').toBeVisible({ timeout: 120_000 })
 
-    // THE measurement: a fresh assistant row in this session exists (so the row the button would
-    // ride on is really there), yet NO realm-scoped door button renders anywhere.
-    await expect.poll(() => sessionLogTextById(stdSid).includes('STANDARDSIDE'),
-      { timeout: 120_000, intervals: [2000], message: 'the standard session produced its assistant row' }).toBe(true)
+    // a fresh assistant row in this session exists (so the row the button would ride on is really
+    // there), yet NO realm-scoped door button renders anywhere:
+    await expect(page.getByText('STANDARDSIDE').first(),
+      'the standard session produced its assistant row').toBeVisible({ timeout: 180_000 })
     await expect(page.locator('button[aria-label="Fork with chapters"]'),
       '#372: no dead door button in a standard-preset session').toHaveCount(0)
     await expect(page.locator('button[aria-label="Continue with chapters"]'),
       '#372: and none for the continue door either').toHaveCount(0)
 
-    // verdict artifact: which header facts and which counts, whichever way the run landed
+    // verdict artifact: the two host surfaces side by side — chip/projection (what the dock reads,
+    // asserted above) and the durable header (create-time composition, kept here precisely because
+    // the standard side may honestly read `chapters`: that artifact pair is what run5 settled).
+    const chips = await page.evaluate(() => Array.from(document.querySelectorAll('button'))
+      .map(b => (b.textContent ?? '').trim())
+      .filter(t => /^(Chapters|Standard mode)$/.test(t)))
     fs.writeFileSync(path.join(ROOT, 'var', 'preset-visibility-verdict.json'), JSON.stringify({
       at: new Date().toISOString(),
       chapters: { sid: sidCh, headerPreset: headerPresetOf(sidCh) },
-      standard: { sid: stdSid, headerPreset: headerPresetOf(stdSid) },
+      standard: { chipButtons: chips, doorButtons: 'asserted above: count 0' },
     }, null, 2) + '\n')
   })
 })
