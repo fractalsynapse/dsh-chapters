@@ -1061,3 +1061,70 @@ honest arc is in the notes: 0.2.35 shipped a guard that broke the rig's own stub
 Open after this cut stands at: C3 (live composed-checkpoint observation — first sight belongs to the
 heavy leg whenever a true pinned-model endpoint runs it), #349 remainder, #397 contract decision,
 TreeDX live rows, host option-(d) todo row, #372 (browser-rig work, unbuilt).
+
+## 2026-11-17 — 0.2.36 SHIPPED
+
+Released from `main` `798aab3` (merge of PR #413, verified head `ac0f20d`, tree-identical), tag
+**`0.2.36`** (annotated, bare semver, matching all four version sites).
+
+Release job (run `44195438482`) success; publish provenanced (registry attestation endpoint returns
+the bundle); `latest` = 0.2.36; tarball unpack: manifest `0.2.36` AND bundled `PLUGIN_VERSION =
+'0.2.36'`. Candidate evidence: all four CI jobs green at the head; full 11-leg replay chain run green
+LOCALLY at the release head before the stamp commit; `promptAnchor b40304ee3e35a94f` unchanged since
+0.2.34 — three releases, zero agent-facing prompt-byte moves, machine-checked at every stamp.
+
+Closed at this cut: **#340, #409, #411**. The arc they trace — last week's report, the guard that
+broke the rig's own stub path, the re-anchor that exposed a record-time race — is told in the 0.2.36
+notes and stands as the working example of the repo's release discipline: every claim names its
+class (deterministic / replayed / installed / live) and the missing class is declared, not implied.
+
+**Open after 0.2.36:** C3 — first LIVE observation of a composed checkpoint (heavy leg; needs the
+distillation rig's true pinned-model endpoint — this box is now refused by name, by design, #406/#409)
+· #349 remainder (browser rig) · #372 (unbuilt) · #397 (contract.md § Lineage decision, parked with
+its one-line change) · host option-(d) todo row · five credential-gated TreeDX live rows.
+
+## 2026-11-17 — C3 live attempt: voided before the provider, and the void is the finding
+
+The first post-0.2.36 move — observing a composed checkpoint on live traffic — was attempted twice
+from this box and both runs are RECORDED AS VOID: the sessions never reached any provider
+(`turn/end: no credential for provider route "local"`, zero tool calls, zero compaction events, zero
+hosted tokens spent). The cause is a rig seam, filed as **#414** with the bytes: live+harness mode has
+no route translator — the component `globalSetup.ts:44` names as the translator IS the tape proxy, and
+live mode deliberately runs without one — while the session route stays pinned to
+`local/qwen3.8-flash-next` for tape portability. The sharper half: this box's :8080 answers the
+live-leg server-presence check with the ALIASING 4B model, so a tracked-mode live run here would not
+fail — it would SILENTLY observe the wrong model under the pinned name. The #406 lesson, live edition:
+an endpoint that lies about its model must be refused, not believed. C3's requirement is now machine-
+named (the distillation box, exact command on the verify row); nothing here can honestly discharge it,
+and the leg's compliance-wait proved itself by failing loudly both times.
+
+## 2026-11-18 — 0.2.37: the live-route fix and the `undefined` sink, both from the same day's chase
+
+**Candidate = staging at `05935a7`.** The range `0.2.36..staging` is exactly two issues, and the second
+was found cleaning up after the first:
+
+- **#414** (PRs #415 docs, #416 fix, merged `a2a3642`): the live/harness boot collapsed onto exactly
+  ONE route answer (`applyHarnessRoute`, the LAST transform before the write — the early-pass version
+  was measured being clobbered by the preset-merge steps); the identity guard builds probe URLs with
+  the tape proxy's own `/v1` convention (it had been refusing the working hosted remote over a 404 its
+  own builder created); and the LAST silent composition fallback now logs `reason=no-collections` —
+  found by the first heavy LIVE run (58 legacy manifests, zero lines). The live outcomes are recorded
+  with class labels on the verify ledger: heavy PASSED live (58/58 chapters-engine-served, zero
+  foreign, #143's bound held), the composer's non-firing is STRUCTURAL (single-turn journey,
+  signatures land at `turn/end`), and C3 stays open with its complete precondition finally written
+  down: live AND multi-turn AND pressure-crossing.
+- **#417** (PR #418, merged `05935a7`): the seam refuses stringified-missing sink values — the stray
+  file literally named `undefined` (real diagnostics nobody looked at) came from `process.env.X =
+  undefined` stringification through two unguarded test restores; fixed at both layers (seam guard +
+  guarded restores), with the over-refusal row proving legitimate relative sinks still receive lines.
+
+**Ship gate (deterministic class, run at the candidate before the stamp):** coverage gate via
+`scripts/ci-gate.sh`, full unit+integration ledger (baseline shape: 5 credential-gated `live:` rows +
+1 documented todo), the 11-leg replay chain under `scripts/chain-replay.sh`, then
+`npm run corpus:stamp` on green. `promptAnchor` must come back unchanged — nothing in this range
+touches agent-facing prompt bytes (the #417 plugin-side change is sink plumbing only).
+
+**Open after this cut:** C3 (vehicle named, precondition complete) · #349 remainder (browser rig) ·
+#372 (unbuilt) · #397 (contract.md § Lineage decision, parked with its one-line change) · #411's
+residual (record-time regeneration pattern) · host option-(d) todo row · five credential-gated
+TreeDX live rows.

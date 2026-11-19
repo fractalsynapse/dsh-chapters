@@ -4,13 +4,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { spawnSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
+import { applyHarnessRoute, describeRoute, endpointFromProviderModule, harnessProviderPatch, resolveKey, routeFromProfile } from './harness-provider.ts'
 import { startModelProxy, type ProxyHandle } from './model-proxy.ts'
 import { applyRigPresetPin, dropInstructionRow, ensurePresetRegistryPin, realmPinsOf } from './rig-preset-pin.ts'
 import { RIG_MODEL_ID } from './rig-pins.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 import { bootFailureMessage } from './boot-failure.ts'
-import { servedModelVerdict, stubEndpointVerdict, modelsListIds } from '../support/model-parity.ts'
+import { servedModelVerdict, stubEndpointVerdict, modelsListIds, upstreamProbeUrl } from '../support/model-parity.ts'
 
 /**
  * The provenance reader lives in `scripts/corpus-anchor.mjs` so CI and the rig ask the SAME
@@ -498,14 +498,14 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
     const proofAbort = AbortSignal.timeout(20_000)
     let listText = ''
     let chatText = ''
-    const chatProbe = (model: string): Promise<string> => fetch(new URL('/v1/chat/completions', upstreamBase).href, {
+    const chatProbe = (model: string): Promise<string> => fetch(upstreamProbeUrl(upstreamBase, '/v1/chat/completions'), {
       method: 'POST',
       headers: proofHeaders,
       signal: proofAbort,
       body: JSON.stringify({ model, messages: [{ role: 'user', content: 'identity probe — reply with one word' }], max_tokens: 4 }),
     }).then((r) => r.text())
     try {
-      listText = await (await fetch(new URL('/v1/models', upstreamBase).href, { signal: proofAbort })).text()
+      listText = await (await fetch(upstreamProbeUrl(upstreamBase, '/v1/models'), { signal: proofAbort, headers: proofHeaders })).text()
       const probeId = stubLeg ? (modelsListIds(listText)[0] ?? 'stub-probe-unlisted') : requested
       chatText = await chatProbe(probeId)
     } catch (error) {
@@ -585,9 +585,13 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // all compose the same bytes. `E2E_HARNESS_PROFILE=1` restores the rewrite for the live-model `live`
       // mode, where there is no tape to stay byte-identical with.
       if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
-        // Replace the route wholesale: keeping the `local` block beside a harness route would leave the host
-        // free to resolve the wrong one, and "which model powered this leg" must have exactly one answer.
-        p = p.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, harnessProviderPatch(harnessRoute.route, PINNED_CONTEXT_WINDOW))
+        // #414: the harness branch does NOTHING here, deliberately. The full route alignment
+        // (provider block replace-or-append + default-row collapse + verification) runs at the
+        // LAST point before the write, below — measured 2026-11-17: cleaning the text here was
+        // overwritten by ensurePresetRegistryPin/applyRigPresetPin merging the dev profile's
+        // `provider: local` default row back in, and the booted host still composed the orphaned
+        // route. An alignment that does not see the final bytes asserts nothing. This branch
+        // exists only so the tracked-append below cannot fire alongside a harness route.
       } else if (!/^[-\s]*id: llm-pi-ai\s*$/m.test(p)) {
         p = `- id: llm-pi-ai\n  config:\n    providers:\n      local:\n        displayName: Local\n        api: openai-completions\n        baseURL: http://localhost:8080/v1\n        models:\n          - id: ${RIG_MODEL_ID}\n            name: ${RIG_MODEL_ID} (dev, 32K stress)\n            contextWindow: 32000\n            maxTokens: 15000\n        apiKeyEnv: LOCAL_API_KEY\n        streamIdleTimeoutMs: 3600000\n        timeoutMs: 3600000\n        reasoning: medium\n        retryPolicy:\n          mode: normal\n          maxRetries: ${String(Math.max(0, Number(process.env.E2E_MAX_RETRIES ?? '0')))}\n` + p
         // The block is ALWAYS emitted: measured today that dropping it to express a per-leg regime broke boot
@@ -617,6 +621,16 @@ export async function bootE2eServer(port: number, pins: Pins): Promise<BootHandl
       // #132: the workspace-instruction injection is development context whose presence/position varies
       // by machine; with the legs now bounded, removing the row is the principled determinism fix.
       p = dropInstructionRow(p)
+      // #414: the alignment is the LAST transform before the write, because the invariant it guards is
+      // about the bytes the host reads. Boot refuses on any other answer, naming the mismatch —
+      // milliseconds and a sentence, not 15 minutes and a marker wait.
+      if (harnessRoute !== null && (process.env.E2E_HARNESS_PROFILE === '1' || process.env.E2E_MODEL === 'live')) {
+        const aligned = applyHarnessRoute(p, harnessRoute.route, PINNED_CONTEXT_WINDOW)
+        if (aligned.error !== null) {
+          throw new Error(`e2e: live/harness boot refused — ${aligned.error} (route ${harnessRoute.route.id}/${harnessRoute.route.model}; #414)`)
+        }
+        p = aligned.text
+      }
       fs.writeFileSync(patchPath, p)
     }
   }

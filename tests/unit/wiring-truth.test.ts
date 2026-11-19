@@ -172,9 +172,11 @@ test('#406: boot.ts gates the model-identity proof to the modes that WRITE tape'
   // The probe fetch must be DOWNSTREAM of the gate, and there must be exactly one: plain replay and
   // live must never hit /v1/models — CI runners have no endpoint, and those modes write nothing.
   const gateIdx = boot.indexOf('if (writesTape) {')
-  const probeIdx = boot.indexOf(`fetch(new URL('/v1/models'`)
+  // #414 re-pinned: the builder is upstreamProbeUrl (the proxy-side /v1 convention); the old
+  // `new URL('/v1/models', base)` shape dropped path-prefixed bases to the origin.
+  const probeIdx = boot.indexOf(`fetch(upstreamProbeUrl(upstreamBase, '/v1/models')`)
   assert.ok(gateIdx >= 0 && probeIdx > gateIdx, 'the identity probe sits inside the writesTape gate')
-  assert.equal(boot.split(`fetch(new URL('/v1/models'`).length - 1, 1, 'exactly one models probe in the whole boot path')
+  assert.equal(boot.split(`fetch(upstreamProbeUrl(upstreamBase, '/v1/models')`).length - 1, 1, 'exactly one models probe in the whole boot path')
 })
 
 // ─────────────────────────────── #406: the pinned rig model id has ONE source, and the guard reads it
