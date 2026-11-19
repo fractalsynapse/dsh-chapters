@@ -334,23 +334,31 @@ export function buildChaptersTools(
         // never silence (the #54 law: a detected failure that isn't delivered is the same bug).
         const birthWarnings: string[] = [...(attach.warnings ?? [])]
         if (goal !== undefined) {
-          const goalsSvc = (ctx as unknown as { goals?: { create?: (agent: unknown, request: Record<string, unknown>) => unknown } }).goals
-            ?? (ctx.get?.('goals') as { create?: (agent: unknown, request: Record<string, unknown>) => unknown } | undefined)
-          if (goalsSvc?.create === undefined) {
-            birthWarnings.push(`goal re-arm skipped: no goals service on this plane — the notice still carries the objective; a human can /goal resume in the child`)
-            diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm skipped — goals service absent', undefined)
-          } else {
-            try {
-              // get-AFTER-release (the r3 law, same as the notice-authoring seam above): the create
-              // handle was disposed deliberately, and the host's live-agent registry is what the goal
-              // service asserts liveness against — fetched fresh here, typed as the plugin's narrow
-              // agents view declares only `create`.
-              const agent = (ctx.agents as unknown as { get: (id: string) => unknown }).get(sessionId)
-              goalsSvc.create(agent, { objective: goal.objective, ...(goal.maxGoalRounds !== undefined ? { maxGoalRounds: goal.maxGoalRounds } : {}) })
-            } catch (error) {
-              birthWarnings.push(`goal re-arm refused: ${String((error as Error)?.message ?? error)} — the notice carries the objective; a human can /goal resume in the child`)
-              diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm refused by the host service', error)
+          // THE SERVICE RAIL, measured twice: the pinned host's cordis THROWS ('cannot get property
+          // "goals" without inject') on a bare `ctx.goals` PROPERTY read — run4's sink proved it, and
+          // the throw escaping this block turned an authorized carry into a 'child creation refused'
+          // line for an already-born child. The repo's only proven accessor is ctx.get('goals')
+          // (index.ts:669, the prompt plane's disarm/read rails) — and NOTHING in this block may
+          // escape: the documented promise is warning-never-refusal, so resolution, the agent fetch
+          // (get-after-release, the r3 law), and the create call all sit inside one try.
+          try {
+            const goalsSvc = (typeof ctx.get === 'function' ? ctx.get('goals') : undefined) as
+              { create?: (agent: unknown, request: Record<string, unknown>) => unknown } | undefined
+            if (goalsSvc?.create === undefined) {
+              birthWarnings.push('goal re-arm skipped: no goals service reachable on this plane — the notice still carries the objective; a human can /goal resume in the child')
+              diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm skipped — goals service absent', undefined)
+            } else {
+              const agent = (ctx.agents as unknown as { get?: (id: string) => unknown }).get?.(sessionId)
+              if (agent === undefined) {
+                birthWarnings.push('goal re-arm skipped: the fresh child agent is not reachable for the service call yet — a human can /goal resume in the child')
+                diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm skipped — agent not live for the service yet', undefined)
+              } else {
+                goalsSvc.create(agent, { objective: goal.objective, ...(goal.maxGoalRounds !== undefined ? { maxGoalRounds: goal.maxGoalRounds } : {}) })
+              }
             }
+          } catch (error) {
+            birthWarnings.push(`goal re-arm refused: ${String((error as Error)?.message ?? error)} — the notice carries the objective; a human can /goal resume in the child`)
+            diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm refused by the host service', error)
           }
         }
         return { warnings: birthWarnings }
