@@ -22,7 +22,7 @@ New topic candidates accumulate as **shadow aliases** — they influence nothing
 
 ```
 /chapters-enrich run                     # drain the queue now
-/chapters-enrich model anthropic/x       # or: model clear  (back to conversation route)
+/chapters-enrich model <provider>/<model-id>   # or: model clear  (back to conversation route)
 /chapters-enrich report                  # what the ladder did, to which chapters, with provenance
 ```
 
