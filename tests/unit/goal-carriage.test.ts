@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { foldGoalFromLog, renderGoalCarriage, type GoalSnapshot } from '../../src/goal-carriage.ts'
+import { foldGoalFromLog, foldTaskListFromLog, goalRearmDecision, renderGoalCarriage, renderTaskCarriage, type GoalSnapshot } from '../../src/goal-carriage.ts'
 import type { SessionEventLike } from '../../src/types.ts'
 
 const goalEvent = (seq: number, operation: string, goal: Record<string, unknown>, roundsStarted = 0): SessionEventLike => ({
@@ -265,4 +265,66 @@ test('#349: completion carried in `phase` (not the operation) is still treated a
   assert.doesNotMatch(text, /NOT armed in the child/, 'a finished goal is not told how to resume it')
   // And `roundsStarted` survives the fold for anyone reading the numbers later.
   assert.equal(g.roundsStarted, 0)
+})
+
+
+// ─────────────── #349: the maintainer decision — re-arm at birth, scoped by ONE predicate ───────────────
+
+const gEv = (seq: number, operation: string, goal: Record<string, unknown>): SessionEventLike =>
+  ({ type: 'goal/change', seq, data: { operation, goal } } as unknown as SessionEventLike)
+const tEv = (seq: number, todos: Array<{ content: string, status: string }>): SessionEventLike =>
+  ({ type: 'todo/write', seq, data: { todos } } as unknown as SessionEventLike)
+
+test('#349: goalRearmDecision is the ONE predicate — armed carries, stopped stays human-owned', () => {
+  const evs = (ops: Array<[string, Record<string, unknown>]>) => ops.map(([op, g], i) => gEv(i, op, g))
+  const active = foldGoalFromLog(evs([['create', { id: 'g1', revision: 1, objective: 'Ship X', phase: 'active', maxGoalRounds: 8 }]]))
+  assert.ok(active !== null)
+  assert.deepEqual(goalRearmDecision(active), { rearm: true, why: 'active' })
+  for (const [phase, op, why] of [['paused', 'pause', 'paused'], ['blocked', 'block', 'blocked']] as const) {
+    const g = foldGoalFromLog(evs([['create', { id: 'g1', revision: 1, objective: 'Ship X', phase: 'active' }], [op, { id: 'g1', revision: 1, phase, blockedReason: 'round-limit' }]]))
+    assert.ok(g !== null)
+    assert.deepEqual(goalRearmDecision(g), { rearm: false, why }, `${phase} goals are human-owned`)
+  }
+  const done = foldGoalFromLog(evs([['create', { id: 'g1', revision: 1, objective: 'Ship X', phase: 'active' }], ['complete', { id: 'g1', revision: 2, objective: 'Ship X', phase: 'complete' }]]))
+  assert.ok(done !== null)
+  assert.deepEqual(goalRearmDecision(done), { rearm: false, why: 'finished' }, 'a completed goal never re-arms')
+})
+
+test('#349: foldTaskListFromLog keeps the FINAL snapshot; renderTaskCarriage states statuses', () => {
+  const events = [
+    tEv(0, [{ content: 'old step', status: 'completed' }]),
+    tEv(1, [{ content: 'wire the seam', status: 'in_progress' }, { content: 'measure the host', status: 'pending' }]),
+  ] as SessionEventLike[]
+  const list = foldTaskListFromLog(events)
+  assert.equal(list?.length, 2, 'the LAST todo/write is the list, not the first')
+  assert.equal(list?.[0]?.content, 'wire the seam')
+  const block = renderTaskCarriage(list)
+  assert.match(block, /^## Task list \(carried from the parent session\)/)
+  assert.match(block, /\[in_progress\] wire the seam/)
+  assert.match(block, /\[pending\] measure the host/)
+  assert.equal(renderTaskCarriage(foldTaskListFromLog([] as SessionEventLike[])), '', 'no list, zero bytes — the tape-safety rule')
+})
+
+test('#349: renderGoalCarriage in re-armed mode says the truth of the birth step; the default keeps the conservative wording byte-identical', () => {
+  const goal = foldGoalFromLog([gEv(0, 'create', { id: 'g1', revision: 3, objective: 'Ship X end to end', phase: 'active', maxGoalRounds: 8 })] as SessionEventLike[])
+  assert.ok(goal !== null)
+  const rearmed = renderGoalCarriage(goal, 600, 're-armed')
+  assert.match(rearmed, /re-created this goal on the child/)
+  assert.match(rearmed, /round cap 8/)
+  assert.match(rearmed, /\/goal resume/, 'the human fallback is stated even when the plugin carries')
+  assert.doesNotMatch(rearmed, /Only the human can send/, 'the notice-only sentence belongs to notice-only mode')
+  const noticeOnly = renderGoalCarriage(goal, 600)
+  assert.match(noticeOnly, /NOT armed in the child/, 'the default mode is byte-compatible with the conservative slice')
+  assert.match(noticeOnly, /Only the human can send/)
+})
+
+test('#349: assembleNotice places Goal then Task list, above the fold, zero bytes when absent', async () => {
+  const { assembleNotice } = await import('../../src/continue-core.ts')
+  const base = { title: 'T', handoffNote: 'note', entries: [], rootSession: 'R', parentSession: 'P', storeRoot: '.dsh-chapters' }
+  const withBoth = assembleNotice({ ...base, goalSection: '## Goal\nx', taskSection: '## Task list\ny' })
+  const gi = withBoth.indexOf('## Goal')
+  const ti = withBoth.indexOf('## Task list')
+  const fi = withBoth.indexOf('## In flight')
+  assert.ok(gi >= 0 && gi < ti && ti < fi, 'order: goal, tasks, then the fold')
+  assert.equal(assembleNotice({ ...base, goalSection: '## Goal\nx' }), withBoth.replace('\n\n## Task list\ny', ''), 'no taskSection => byte-identical to the pre-#349 notice')
 })
