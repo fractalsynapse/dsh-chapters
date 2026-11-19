@@ -97,6 +97,20 @@ Division of labour:
   results with `seq`, tool name, and size. The model never guesses at byte counts.
 - **Default is defer** for anything above `toolResultDeferFloorTokens`; trivial results stay inline without
   being itemized, so the narrative reads naturally and the exception list stays short.
+- **A span INTERSECTS a signature; it never has to contain it** (#421, measured on the first live
+  composed-discussion record 2026-11-19). `composeChapters` used to require a signature's WHOLE seq
+  range to sit inside the shadowed span (`inSpan`), but live relief is incremental: every earlier pass
+  clips older signatures, and one clipped seq disqualified a finished topic FOREVER — so real multi-pass
+  traffic could never leave two whole signatures in one span, and every pass composed exactly one
+  chapter while every deterministic row (two complete signatures in one span) stayed green. Now a
+  signature whose seqs intersect the span participates with its CLIPPED range
+  (`max(first, spanStart)..min(last, spanEnd)`); its already-archived head stays in the earlier
+  chapter it belongs to, its remaining bytes get their own title at their own boundary. Unfinished
+  content is still never archived — unchanged by construction, because signatures are only stored at
+  `turn/end`, so the in-flight turn has none (measured: sig3 appeared in the row only after turn 3
+  closed). The compose leg (#420) checks the per-pass truth by SET (rows whose own `shadowedSeqs`
+  union-cover the pass's shadowed set) — range containment across rows of DIFFERENT passes was a
+  false positive that passed six legacy passes.
 - **A zero-length tool result defers nothing** (#59). `arrival.ts` has always skipped the empty string;
   the renderer did not, so every hollow chapter wrote references to `sha256("")` and reported
   `artifacts: 102` while holding one 0-byte file. An empty result renders `result (seq N, empty)` with
