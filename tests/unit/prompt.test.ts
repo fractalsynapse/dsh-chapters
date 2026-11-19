@@ -108,6 +108,44 @@ test('the input is deterministic, carries both sections, and ends with the reply
   assert.ok(!input.includes('dropped'), 'a fitting input announces nothing')
 })
 
+/**
+ * #317 — archive-derived context must arrive LABELED as past. The generator at boundary 8316
+ * faithfully offered "Check whether bash-32 has completed the 0.2.26 release chain…" because the
+ * chapter trajectory it was shown quoted an OPEN REQUEST block verbatim — the bytes were true,
+ * the tense was not marked. The section-level fix is one explicit line inside the chapters block;
+ * the rule-level fix names the same trap in the FUTURE sentence of the reply rules.
+ */
+test('#317: the chapters section opens with a tense label — archive content is PAST, even when phrased open', () => {
+  const f = facts(
+    [{ number: 1, title: 'Setup', summary: 'dispatched bash-32', plots: ['OPEN REQUEST: complete the 0.2.26 chain'] }],
+    [{ role: 'user', text: 'hello' }],
+  )
+  const input = inputOf(buildSuggestInput(f, 8000, 240))
+  const hPos = input.indexOf('## Where it has been')
+  const tPos = input.indexOf('PAST')
+  const cPos = input.indexOf('1. Setup')
+  assert.ok(hPos >= 0 && tPos > hPos && tPos < cPos, 'the label sits INSIDE the section, before any chapter content')
+  assert.match(input.slice(hPos, cPos), /never offer work the archive describes as dispatched, merged, published, or awaiting a notification/,
+    'the named trap states the four archive-past shapes verbatim')
+  assert.match(input.slice(hPos, cPos), /next step must be beyond everything shown/, 'and where the next step must live')
+})
+
+test('#317: no chapters means no archive and no tense label — the line describes content that is not there', () => {
+  const input = inputOf(buildSuggestInput({ title: 'S', chapters: [], lastTurn: [{ role: 'user', text: 'go' }] }, 4000, 240))
+  assert.ok(!input.includes('This section is PAST'), 'the NO_CHAPTERS line stays alone')
+})
+
+test('#317: the reply-rules FUTURE sentence names the archive-echo shape with its live quote', () => {
+  const input = inputOf(buildSuggestInput(
+    facts([{ number: 1, title: 'x', summary: 'y', plots: [] }], [{ role: 'user', text: 'go' }]),
+    8000, 240,
+  ))
+  assert.match(input, /mirror, not a director/, 'the #279 anchor sentence is still there')
+  assert.match(input, /bash-32 has completed the 0\.2\.26 release chain/,
+    'and the FUTURE rule now carries this trap with its live-era quote, not just the in-flight one')
+  assert.match(input, /quoted past phrasing is not current state/)
+})
+
 // #188 superseded this row's old contract (drop chapters, then drop tail messages, then HALVE the
 // per-message slice): nothing the model reads is ever sliced now. The ladder drops whole chapters
 // (oldest first, announced) and the last turn is PROTECTED — the assertions that survive are the

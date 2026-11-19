@@ -348,7 +348,7 @@ export function buildSuggestInput(
   chaptersShare: number = DEFAULT_CHAPTERS_SHARE,
 ): { input: string } | { refusal: string } {
   const head = 'You are the second reader of a DSH session — a model that DEFINES the next step and never executes it.'
-  const replyRules = `Write the ONE next prompt the human should paste into the composer. It MUST be a message the WORKER MODEL in this session receives and can act on with its own tools, files, and commands. The test: if this exact text arrived as a user message in the worker's context, could the worker act on it directly? Sentences only the human could perform — typing a slash command the host intercepts, opening a UI, clicking this bar, choosing between options — are wrong; the live failure this forbids was "run /chapters-prompt suggest and report the output". Telling the model to run tests, execute commands, fix a file, or investigate is exactly right ('run the tests', 'fix the flake in X first'); advice to the user ('you should consider', 'I recommend') and echoing the conversation's last instruction are not. It must also be FORWARD: name a next step that has NOT YET BEGUN — never a restatement of the work this session is already doing. A live sample failed exactly this, proposing "Create the #273 echo-adjacency issue and run the pre-change sampler" while the issue was filed and the sampler running; describing the in-flight task is a mirror, not a director. If the session is mid-task, recommend what comes AFTER that task lands — its verification, its follow-up — or a different line of work the latest state plainly calls for. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and advance the session's actual work — propose nothing already done. Reply with ONLY that prompt. The GOAL: prefix is legal ONLY when the goal block above names an ACTIVE goal and this step re-cuts that objective (only the human can send those; autorun will not). With no active goal named, NEVER use the prefix — not for wording about closing out, completing, or ending a purpose; proposing to "close out this release cycle" stamped GOAL: in a session with no goal is the live mis-stamp this forbids. An ordinary next step takes no prefix even when a goal is active.`
+  const replyRules = `Write the ONE next prompt the human should paste into the composer. It MUST be a message the WORKER MODEL in this session receives and can act on with its own tools, files, and commands. The test: if this exact text arrived as a user message in the worker's context, could the worker act on it directly? Sentences only the human could perform — typing a slash command the host intercepts, opening a UI, clicking this bar, choosing between options — are wrong; the live failure this forbids was "run /chapters-prompt suggest and report the output". Telling the model to run tests, execute commands, fix a file, or investigate is exactly right ('run the tests', 'fix the flake in X first'); advice to the user ('you should consider', 'I recommend') and echoing the conversation's last instruction are not. It must also be FORWARD: name a next step that has NOT YET BEGUN — never a restatement of the work this session is already doing. A live sample failed exactly this, proposing "Create the #273 echo-adjacency issue and run the pre-change sampler" while the issue was filed and the sampler running; describing the in-flight task is a mirror, not a director. The same trap in the archive's clothing: a live generator offered "Check whether bash-32 has completed the 0.2.26 release chain" only because an archived chapter quoted that work as an OPEN REQUEST — quoted past phrasing is not current state; a step the chapter history describes as dispatched, merged, published, or awaited is PAST, not next. If the session is mid-task, recommend what comes AFTER that task lands — its verification, its follow-up — or a different line of work the latest state plainly calls for. A single imperative request; plain text; at most ${maxChars} characters; no preamble, no quotes, no markdown; it must follow from the latest state and advance the session's actual work — propose nothing already done. Reply with ONLY that prompt. The GOAL: prefix is legal ONLY when the goal block above names an ACTIVE goal and this step re-cuts that objective (only the human can send those; autorun will not). With no active goal named, NEVER use the prefix — not for wording about closing out, completing, or ending a purpose; proposing to "close out this release cycle" stamped GOAL: in a session with no goal is the live mis-stamp this forbids. An ordinary next step takes no prefix even when a goal is active.`
   // #379: the chapter block gets its OWN cap, as a share of the budget, independent of whether the
   // whole assembly would fit. Until now the block could grow to consume everything the window allowed,
   // and on a 1M-token route `contextChars` is ~2,000,000 chars — so the director was handed megabytes of
@@ -358,11 +358,18 @@ export function buildSuggestInput(
   const chaptersCap = Math.max(0, Math.floor(budgetChars * share))
   const CHAPTERS_HEADER = '## Where it has been (chapters, oldest first — title, summary, and the plots that carry the trajectory)'
   const NO_CHAPTERS_LINE = '## Where it has been (no chapters yet)'
+  // #317 — the tense label. The bytes in this section are archived renderings of PAST turns;
+  // several of those bytes are phrased as open work ("OPEN REQUEST", TODO, "awaiting X"), and at
+  // boundary 8316 the generator faithfully offered one of them as the next step ("Check whether
+  // bash-32 has completed the 0.2.26 release chain"). Truthful quoting, wrong tense, and the
+  // input itself was the only place the tense could have been marked. One line, inside the
+  // section, before any chapter content.
+  const TENSE_LINE = 'This section is PAST — an archive quoting what already happened. Blocks phrased as open work (OPEN REQUEST, TODO, "awaiting X") are history, not pending items: never offer work the archive describes as dispatched, merged, published, or awaiting a notification; the next step must be beyond everything shown here.'
 
   const chapterBlock = (dropOldest: number): string[] => {
     const cs = facts.chapters.slice(dropOldest)
     if (cs.length === 0) return [NO_CHAPTERS_LINE]
-    const out = [CHAPTERS_HEADER]
+    const out = [CHAPTERS_HEADER, TENSE_LINE]
     for (const c of cs) {
       out.push(`${c.number}. ${c.title} — ${c.summary}`)
       if (c.plots.length > 0) {
@@ -422,8 +429,10 @@ export function buildSuggestInput(
     suffixItems[k] = suffixItems[k + 1]! + chapterLens[k]!.items
   }
   const blockLen = (d: number): number => d >= nChapters
+    // #317: the assembled block is HEADER \n TENSE_LINE \n rows — the tense label is a block item
+    // on BOTH sides of the arithmetic, or the drop ladder budgets bytes that are not there.
     ? NO_CHAPTERS_LINE.length
-    : CHAPTERS_HEADER.length + 1 + suffixJoined[d]! + (suffixItems[d]! - 1)
+    : CHAPTERS_HEADER.length + TENSE_LINE.length + 2 + suffixJoined[d]! + (suffixItems[d]! - 1)
   const measure = (d: number): number => preLen + 1 + blockLen(d) + 1 + tailLen(d)
 
   const assemble = (dropOldest: number): string =>
