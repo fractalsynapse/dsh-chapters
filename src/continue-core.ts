@@ -126,6 +126,11 @@ export interface ContinuePorts {
     modeEvents: SessionEventLike[]
     presetId: string
     title: string
+    /** #397 (maintainer amendment, docs/contract.md § Lineage): the TRUE birth parent, explicit in
+     * the port input rather than closed over — `chapters_continue`/`chapters_fork` pass the caller,
+     * `chapters-restore` passes the TARGET. The plane writes it into the kernel header meta so the
+     * child carries durable lineage with no registry dependency. */
+    parentSessionId: string
   }): Promise<void | { warnings?: readonly string[] }>
   now(): number
   /**
@@ -447,7 +452,7 @@ export async function continueFromRestored(
   }
   const childId = `ch-${ports.newId()}`
   try {
-    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents: [], presetId: config.fallbackPreset, title })
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents: [], presetId: config.fallbackPreset, title, parentSessionId: targetSessionId })
     if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
     return { ok: false, reason: `restore child creation refused: ${String((error as Error).message)}`, warnings }
@@ -638,7 +643,7 @@ async function finishChild(
     // a workspace service that no longer exposes attachSession. Those are facts about the
     // continuation the user is being handed, so they belong in the door's reply, not only
     // in a log the reply already summarizes.
-    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title })
+    const created = await ports.createChild({ sessionId: childId, noticeEvent, modeEvents, presetId, title: args.title, parentSessionId: args.callerSessionId })
     if (created !== undefined && Array.isArray(created.warnings)) warnings.push(...created.warnings)
   } catch (error) {
     // Full detail to the sink, short detail to the composer. The UI string is sliced to fit
