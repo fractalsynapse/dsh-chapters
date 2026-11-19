@@ -460,6 +460,38 @@ kind that produces a wrong conclusion instead of an error:
   catch). The bootstrap now seeds `storages/workspace.json` (exact host
   schema: ISO dates, `updatedAt`, registered path = the checkout) when absent.
 
+### The `compose` leg — compaction recorded FROM live discussion, replayed with the corpus (#420, C3's vehicle)
+
+No committed leg exercised compaction or TOC verification from the conversation itself: C2's sweep
+found zero `compaction/summary` events in any replayed durable log, and `heavy` (the live-class
+single-turn journey) cannot fire the composer by design — signatures store at `turn/end` and heavy
+compacts mid-turn. The `compose` leg closes the shape gap with the geometry the two old legs each
+lacked: **multi-turn AND pressure-crossing.**
+
+The intended observable contract:
+
+- Small discussion turns on deliberately DIFFERENT topics, each ending a boundary (signature stored)
+  and each carrying a verbatim codeword, then one turn whose READ contract forces a crossing by
+  arithmetic (the 600-line tool page cap, same pigeonhole as heavy) — the trigger is 0.7 of the
+  pinned 32K window, so turns 1–2 (20-line doc reads) CANNOT cross and the first changelog page
+  MUST (0.6 was measured firing relief mid-topic-2, the eager pass clipping the signatures the
+  composer needs cold — twice-corrected arithmetic in `tests/e2e/rig-pins.ts`).
+- The verdict is read from DURABLE bytes, not the browser: a `compaction/summary` whose shadowed
+  region is covered by **≥2 chapters**, at least one chapter boundary ALIGNED to a topic-transition
+  `turn/end` seq, chapter bodies carrying exactly their turn's codewords (bodies are rendered
+  verbatim from the log by invariant 4, so mis-splitting is visible mechanically), the coverage
+  invariant holding, and the session healthy one small turn later.
+- **The tape is the point — and it is now corpus.** Recorded live on the fixed composer (2026-11-19,
+  `1 passed`, composed+aligned from durable bytes) and **replayed model-free green: `1 passed`,
+  48.3 s, zero MISSes** — #141's branch-walk did not bite; the byte-exact tape reproduces the same
+  local relief decisions. The leg is a chain member (`test:e2e` + `chain-replay.sh`), the tape is
+  tracked with its PROVENANCE, and a future code change that breaks composition turns this leg red in
+  seconds — the maintainer's directive, satisfied: code changes do not affect the tape; a code change
+  that breaks the composed path affects the verdict.
+- Regime: own boot, own port (rig-pins single authority), translating-proxy recording exactly like
+  the #416 recipe (`MODE=record E2E_PROVIDER=harness`), identity guard proving the remote
+  lists-and-answers-as-itself before a byte is recorded.
+
 ### Safe default guard
 
 Prefix every harness command with `DSH_HOME=$PWD/.dshdev` — or do not type it at all:

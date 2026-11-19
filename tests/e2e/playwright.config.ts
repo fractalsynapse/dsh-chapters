@@ -31,7 +31,7 @@ export default defineConfig({
     // tape was distilled under, the surface diverged (stubs appearing where none were
     // recorded), and the proxy MISSed. Playwright merges project `env` into every worker,
     // so record, replay, coverage and a manual run now boot the SAME world.
-    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts', '**/prompt-off-revival.spec.ts', '**/reload-after-restart.spec.ts',
+    { name: 'suite', env: rigEnv('suite'), testIgnore: ['**/artifact-arrival.spec.ts', '**/oversized-turn.spec.ts', '**/composed-discussion.spec.ts', '**/enrich.spec.ts', '**/rules.spec.ts', '**/subagent-fanout.spec.ts', '**/explore.spec.ts', '**/fork-button.spec.ts', '**/cache-trajectory.spec.ts', '**/plans.spec.ts', '**/prompt-bar.spec.ts', '**/prompt-off.spec.ts', '**/prompt-off-revival.spec.ts', '**/reload-after-restart.spec.ts',
       // #138: `prompt-goal-live.spec.ts` rides its OWN project (live provider, wall-clock bound). Left here it ran
       // inside the suite boot — `suite` is everything-not-ignored — and changed that session's human-message set,
       // which is what the title request at msg1 of the suite tape encodes. Measured: suite `4 passed` on staging's tree,
@@ -70,6 +70,11 @@ export default defineConfig({
     // 16K of 32K) so the crossing arrives in the FIRST chunks — capture on
     // the live model stays in minutes, and replay of the tape is identical.
     { name: 'heavy', env: rigEnv('heavy'), testMatch: ['**/oversized-turn.spec.ts'] },
+    // #420 compose: the C3 vehicle — discussion across real turn boundaries that crosses pressure
+    // mid-read-turn, so relief finds STORED signatures and must COMPOSE (>=2 chapters aligned at a
+    // topic seam, asserted from durable bytes; see composed-discussion.spec.ts). Chain member since
+    // 2026-11-19: its tape replays model-free green — 1 passed, 48.3s, zero misses (#411 gate).
+    { name: 'compose', env: rigEnv('compose'), testMatch: ['**/composed-discussion.spec.ts'] },
     { name: 'arrival', env: rigEnv('arrival'), testMatch: ['**/artifact-arrival.spec.ts'] },
     // fanout: the two-subagent research journey gets its OWN boot and tape
     // (2026-09-23, lesson of the suite-context chains): its child sessions

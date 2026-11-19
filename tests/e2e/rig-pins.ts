@@ -108,6 +108,21 @@ export const RIG_PINS: Record<string, RigPin> = {
   // ON (mining rides the annotation call), own port like every journey. NOT in chain-replay.sh's list;
   // the model-free acceptance job does not cover it, and the spec refuses to run under E2E_MODEL=replay.
   'model-activities-live': { port: 41742, threshold: '0.9', enrich: true, noAuxModel: true },
+  // #420 (C3's vehicle): the COMPOSED-CHECKPOINT journey — two small topic turns (signatures store at
+  // turn/end), then heavy's forced-read crossing (trigger 0.6 of the pinned 32K: header ~13.3K + the
+  // short turns stay under 19.2K, the first landed ~10K page cannot). floor OFF and maxRetries 3 ride
+  // heavy's measured reasons verbatim: arrival stubbing would shrink the very chunks that force the
+  // crossing, and post-relief reissue needs retries. The intent is promotion to a chain leg once the
+  // recorded tape replays model-free with the durable assertions (#411 gate) — docs/development.md.
+  // #420 geometry, twice-corrected by LIVE records (2026-11-19): 0.6 (19.2K) let relief fire
+  // MID-topic-2 — the host relieves the moment it can, and the eager first pass shadowed topic-1's
+  // head before topic-2's signature was ever stored, so no span held TWO whole signatures (measured:
+  // passes=2, regions=[12,5], still one chapter each — correctly!). Composition needs a COLD store at
+  // crossing time: 0.7 (22.4K trigger) + 20-line topic reads (~1.2K each) cannot cross before t3's
+  // first 600-line changelog page lands (~10K on top of ~15.7K). The journey's first recorded shape
+  // also shows the fix working — #421 clipped-participation is what the next pass needs, this pin is
+  // what makes a pass DESERVE it.
+  'compose': { port: 41745, threshold: '0.7', floor: '1000000', maxRetries: 3 },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
