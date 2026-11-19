@@ -34,52 +34,6 @@ test.beforeEach(async () => {
     'prompt-goal-live needs the live provider (E2E_MODEL!=replay): an armed goal\'s round count is machine latency, so no tape can match it (#138)')
 })
 
-test('arming the bar\'s Autorun takes the continuation away from an active goal', async ({ page }) => {
-  await openApp(page)
-  const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
-  const bar = page.locator(DOCK_BAR)
-  await expect(bar, 'the prompt dock row is present').toBeVisible({ timeout: 60_000 })
-  await waitForOffer(bar, page)
-
-  await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
-  const goalBar = page.locator('[data-goal-bar]')
-  await expect(goalBar, 'the host goal bar appears once a goal exists').toBeVisible({ timeout: 120_000 })
-
-  // Arm the worker loop. Whatever round the driver happens to be on, the OUTCOME is fixed by the product: the goal
-  // loses automatic activation, so the host stops offering `Pause` and starts offering `Resume`.
-  const autorun = bar.locator('button[aria-label="Autorun"], button:has-text("Autorun")').first()
-  await expect(autorun, 'Autorun is arm-able').toBeEnabled({ timeout: 120_000 })
-  await autorun.click()
-  await expect(bar.locator('button[aria-label="Autorun off"], button:has-text("Autorun off")').first(),
-    'the bar holds its armed state after the server round-trip').toBeVisible({ timeout: 60_000 })
-  await expect(page.locator('button[aria-label="Resume goal"], button:has-text("Resume goal")').first(),
-    'the host goal control flips: arming the loop displaced the goal driver').toBeVisible({ timeout: 180_000 })
-  await expect(page.locator('button[aria-label="Pause goal"], button:has-text("Pause goal")').first(),
-    'and Pause is gone, because nothing automatic is running for the goal').toHaveCount(0)
-  void sid
-})
-
-test('clearing the goal leaves the bar offering a suggestion on the next turn', async ({ page }) => {
-  await openApp(page)
-  const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
-  await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
-  const goalBar = page.locator('[data-goal-bar]')
-  await expect(goalBar, 'a goal exists before it can be cleared').toBeVisible({ timeout: 120_000 })
-
-  await typeComposer(page, '/goal clear', deliveredFor(sid, '/goal clear'))
-  await expect(goalBar, 'the goal control is gone, not merely rephased').toHaveCount(0, { timeout: 120_000 })
-
-  // One ordinary turn with no goal in the session at all: the bar must go on suggesting.
-  const nextTurn = 'Reply with exactly: DONE'
-  await typeComposer(page, nextTurn, deliveredFor(sid, nextTurn))
-  const bar = page.locator(DOCK_BAR)
-  await expect(bar, 'the bar is still mounted with no goal present').toBeVisible({ timeout: 60_000 })
-  await waitForOffer(bar, page)
-  const offered = await offerText(bar)
-  expect(offered.length, 'the bar produces a real suggestion after the goal is cleared (length)').toBeGreaterThan(0)
-  void sid
-})
-
 // ─────────────── #349: the goal crosses the renewal — re-armed at birth, live host ───────────────
 //
 // THE CLAIM MEASURED HERE (not available any cheaper): an ACTIVE goal in the parent produces, at
@@ -155,4 +109,50 @@ test('the continuation child of an ACTIVE-goal session is born with the goal re-
   // and the TOC the child was handed said the re-armed truth, not the notice-only sentence
   nodeAssert.ok(childLog.includes('re-created this goal on the child'),
     'the birth notice used the re-armed wording')
+})
+
+test('arming the bar\'s Autorun takes the continuation away from an active goal', async ({ page }) => {
+  await openApp(page)
+  const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
+  const bar = page.locator(DOCK_BAR)
+  await expect(bar, 'the prompt dock row is present').toBeVisible({ timeout: 60_000 })
+  await waitForOffer(bar, page)
+
+  await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
+  const goalBar = page.locator('[data-goal-bar]')
+  await expect(goalBar, 'the host goal bar appears once a goal exists').toBeVisible({ timeout: 120_000 })
+
+  // Arm the worker loop. Whatever round the driver happens to be on, the OUTCOME is fixed by the product: the goal
+  // loses automatic activation, so the host stops offering `Pause` and starts offering `Resume`.
+  const autorun = bar.locator('button[aria-label="Autorun"], button:has-text("Autorun")').first()
+  await expect(autorun, 'Autorun is arm-able').toBeEnabled({ timeout: 120_000 })
+  await autorun.click()
+  await expect(bar.locator('button[aria-label="Autorun off"], button:has-text("Autorun off")').first(),
+    'the bar holds its armed state after the server round-trip').toBeVisible({ timeout: 60_000 })
+  await expect(page.locator('button[aria-label="Resume goal"], button:has-text("Resume goal")').first(),
+    'the host goal control flips: arming the loop displaced the goal driver').toBeVisible({ timeout: 180_000 })
+  await expect(page.locator('button[aria-label="Pause goal"], button:has-text("Pause goal")').first(),
+    'and Pause is gone, because nothing automatic is running for the goal').toHaveCount(0)
+  void sid
+})
+
+test('clearing the goal leaves the bar offering a suggestion on the next turn', async ({ page }) => {
+  await openApp(page)
+  const sid = await newSessionWithTurn(page, 'Reply with exactly: OK')
+  await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
+  const goalBar = page.locator('[data-goal-bar]')
+  await expect(goalBar, 'a goal exists before it can be cleared').toBeVisible({ timeout: 120_000 })
+
+  await typeComposer(page, '/goal clear', deliveredFor(sid, '/goal clear'))
+  await expect(goalBar, 'the goal control is gone, not merely rephased').toHaveCount(0, { timeout: 120_000 })
+
+  // One ordinary turn with no goal in the session at all: the bar must go on suggesting.
+  const nextTurn = 'Reply with exactly: DONE'
+  await typeComposer(page, nextTurn, deliveredFor(sid, nextTurn))
+  const bar = page.locator(DOCK_BAR)
+  await expect(bar, 'the bar is still mounted with no goal present').toBeVisible({ timeout: 60_000 })
+  await waitForOffer(bar, page)
+  const offered = await offerText(bar)
+  expect(offered.length, 'the bar produces a real suggestion after the goal is cleared (length)').toBeGreaterThan(0)
+  void sid
 })
