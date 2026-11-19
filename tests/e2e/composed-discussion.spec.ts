@@ -169,34 +169,43 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
       return shadowedAll.length > 0 && shadowedAll.every((seq) => chapters.some((c) => seq >= c.startSeq && seq <= c.endSeq))
     }, { timeout: 480_000, intervals: [5000] }).toBe(true)
 
-    // (2) COMPOSED: some relief pass split ITS OWN shadowed region into >=2 chapters. (Counting
-    // chapters across the whole session would pass on two legacy single-chapter passes — the claim
-    // is per-pass, because that is where the composer acts.)
+    // (2) COMPOSED, honestly per pass (false positive retired 2026-11-19 by the first live record):
+    // counting registry rows whose RANGE fell inside a pass's bounding region passed six LEGACY
+    // single-chapter passes, because neighboring passes' rows overlap bounding boxes. The durable
+    // truth is the SET link: a pass's chapter rows are exactly those whose own shadowedSeqs are
+    // subsets of that pass's shadowed set, union-covering it. >=2 such rows = composed; 1 = legacy.
     const composedPass = summaries.some((s) => {
-      const region = shadowedOf(s)
-      if (region.length === 0) return false
-      const lo = Math.min(...region), hi = Math.max(...region)
-      return chapters.filter((c) => c.startSeq >= lo && c.endSeq <= hi).length >= 2
+      const region = new Set(shadowedOf(s))
+      if (region.size === 0) return false
+      const rows = chapters.filter((c) => {
+        const own = c.shadowedSeqs ?? []
+        return own.length > 0 && own.every((q) => region.has(q))
+      })
+      const union = new Set(rows.flatMap((r) => r.shadowedSeqs ?? []))
+      return rows.length >= 2 && [...region].every((q) => union.has(q))
     })
     expect(composedPass,
-      `C3 (#420): a pressure crossing with TWO stored signatures must COMPOSE — no pass split its shadowed region into >=2 chapters. passes=${String(summaries.length)}, regions=${JSON.stringify(summaries.map(shadowedOf).map((r) => r.length))}, chapters=${JSON.stringify(chapters.map((c) => [c.number, c.startSeq, c.endSeq]))}`).toBe(true)
+      `C3 (#420): a pressure crossing with stored signatures must COMPOSE — every pass archived its shadowed set as a SINGLE chapter row (src/compose.ts inSpan containment drops any signature clipped by an earlier pass — #421's finding, measured: six passes, six rows). passes=${String(summaries.length)}, regions=${JSON.stringify(summaries.map(shadowedOf).map((r) => r.length))}, chapters=${JSON.stringify(chapters.map((c) => [c.number, c.startSeq, c.endSeq, (c.shadowedSeqs ?? []).length]))}`).toBe(true)
 
-    // (3) ALIGNED at a topic transition: some chapter boundary separates the codewords — provable
-    // mechanically because codewords exist ONLY in their own user turns and bodies are verbatim.
+    // (3) ALIGNED at a topic transition: a chapter seam lands EXACTLY after a turn/end — the durable
+    // record of where one topic closed and the next opened — and the chapter that starts there
+    // carries the next topic's codeword (bodies are verbatim renderings, invariant 4, so "carries"
+    // is mechanical, not a claim about a title). Range-containment guesses were what the first live
+    // record disproved; this rule reads the two facts the archive actually holds.
     const u2 = userSeqWith(log, BREADCRUST)
     const u3 = userSeqWith(log, 'Bigger task on this repo')
     expect(u2, 'topic 2 landed as a durable user message').toBeGreaterThan(0)
     expect(u3, 'the crossing turn landed as a durable user message').toBeGreaterThan(u2)
     const sorted = [...chapters].sort((a, b) => a.startSeq - b.startSeq)
+    const turnEnds = eventTypes(log, 'turn/end').map((e) => e.seq)
     const aligned = sorted.some((c, i) => {
       const next = sorted[i + 1]
       if (next === undefined) return false
       if (next.startSeq !== c.endSeq + 1) return false
-      const left = chapterBytes(c), right = chapterBytes(next)
-      // the seam between two adjacent chapters falls exactly where the discussion changed subject:
-      // topic-1 bytes on one side, topic-2's codeword on the other — or the seam is the crossing
-      // turn itself (next chapter starts at u3) with topic-2's codeword on the left.
-      return (left.includes(SUNSTONE) && right.includes(BREADCRUST)) || (next.startSeq === u3 && left.includes(BREADCRUST))
+      // the seam between two adjacent chapters falls exactly where a turn closed:
+      const seamIsTurnBoundary = turnEnds.includes(c.endSeq)
+      const rightSignedByNextTopic = chapterBytes(next).includes(BREADCRUST) || chapterBytes(next).includes('Bigger task on this repo')
+      return seamIsTurnBoundary && rightSignedByNextTopic
     })
     expect(aligned, `C3 (#420): >=2 chapters exist but NO adjacent boundary separates the topics (u2=${String(u2)}, u3=${String(u3)}): ${JSON.stringify(sorted.map((c) => ({ n: c.number, r: [c.startSeq, c.endSeq], sun: chapterBytes(c).includes(SUNSTONE), bread: chapterBytes(c).includes(BREADCRUST) })))}`).toBe(true)
 
