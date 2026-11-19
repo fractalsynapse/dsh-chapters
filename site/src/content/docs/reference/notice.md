@@ -54,6 +54,26 @@ every byte remains retrievable — inline, or at artifact paths cited inside a c
 by its path with the read tool when the detail matters. The previous session stays intact.
                                                      ← the fixed preamble, identical every time
 
+## Goal
+
+If the parent session carried an **active goal** into the renewal, the notice gains a `## Goal` block
+above the fold: the objective whole (a display budget may state its cut, the archive holds every byte),
+the revision, the round cap, the phase, and the seq it was folded from. The plugin then **re-creates the
+goal on the child** through the host's goal service — the objective keeps driving work instead of
+becoming prose — and the block says so. A paused or blocked goal is stated but NOT re-armed (a human
+stopped it; only a human resumes it). A completed or cleared goal is reported as finished and never
+resumed. No goal, no bytes: ordinary sessions' notices are byte-identical. If the host refuses the
+re-creation, the door's reply says so plainly and `​/goal resume` by you remains the path.
+Control `goalRearmOnCarry` (default on) restores the notice-only wording if your deployment wants goal
+creation reserved for humans.
+
+## Task list
+
+A parent that used the todo list gets a `## Task list (carried from the parent session)` block — the
+final `todo/write` snapshot, statuses and all. Task lists stay surface-local in chapters (a decision
+recorded in the backlog); the notice carries them so the child knows what was in flight, not just what
+was said.
+
 ## In flight
 <State of play — the handoff note. Free text, the
 agent's framing of "here's what's happening now".>   ← budget-checked TOGETHER with the index below;
