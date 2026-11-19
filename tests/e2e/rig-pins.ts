@@ -108,6 +108,13 @@ export const RIG_PINS: Record<string, RigPin> = {
   // ON (mining rides the annotation call), own port like every journey. NOT in chain-replay.sh's list;
   // the model-free acceptance job does not cover it, and the spec refuses to run under E2E_MODEL=replay.
   'model-activities-live': { port: 41742, threshold: '0.9', enrich: true, noAuxModel: true },
+  // #420 (C3's vehicle): the COMPOSED-CHECKPOINT journey — two small topic turns (signatures store at
+  // turn/end), then heavy's forced-read crossing (trigger 0.6 of the pinned 32K: header ~13.3K + the
+  // short turns stay under 19.2K, the first landed ~10K page cannot). floor OFF and maxRetries 3 ride
+  // heavy's measured reasons verbatim: arrival stubbing would shrink the very chunks that force the
+  // crossing, and post-relief reissue needs retries. The intent is promotion to a chain leg once the
+  // recorded tape replays model-free with the durable assertions (#411 gate) — docs/development.md.
+  'compose': { port: 41745, threshold: '0.6', floor: '1000000', maxRetries: 3 },
 }
 
 /** The env Playwright hands the project's workers — derived, never hand-copied. */
