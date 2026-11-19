@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, sessionLogTextById, ROOT } from './session.ts'
+import { openApp, newSessionWithTurn, typeComposer, sessionLogTextById, ROOT } from './session.ts'
 
 /**
  * #372 — the door buttons follow the COMPOSED PRESET, measured in the browser on BOTH sides.
@@ -88,7 +88,7 @@ test.describe('door buttons follow the composed preset (#372)', () => {
     'preset-visibility-live is a live-class leg: the seat roster RPC and a reply per session are machine behavior, not tape-stable (#138 class). Run with E2E_PROVIDER=harness.')
 
   test('chapters session renders the door rows; a standard session does not', async ({ page }) => {
-    test.setTimeout(2_400_000) // 40 min: two live sessions, seat RPC, and the roster wait margins this box has measured
+    test.setTimeout(1_500_000) // 25 min: two live sessions, seat RPC, draft commit — sized to the measured flow, not to a doomed wait
 
     await openApp(page)
 
