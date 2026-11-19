@@ -92,18 +92,20 @@ test('clearing the goal leaves the bar offering a suggestion on the next turn', 
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { openSessionByRow, ROOT, sessionLogTextById } from './session.ts'
+import { openSessionByRow, ROOT, sessionLogTextById, sessionLogFileFor } from './session.ts'
 
 function findChildOf(parentSid: string): string {
   // #397 lineage does the discovery: the child's DURABLE HEADER names parentSession — no registry
-  // race, no id-shape guessing. Sessions roots are port-keyed like every rig home.
+  // race, no id-shape guessing. The log FILE comes from sessionLogFileFor, never a hand-built path:
+  // the e2e-log-shape tripwire exists because the host renames formats, and a by-hand path turns a
+  // rename into a false "missing archive" (its own message, earned).
   const home = `/tmp/dsh-e2e/e2e-home-${process.env.E2E_PORT ?? ''}`
   const root = path.join(home, 'sessions')
   let dirs: string[] = []
   try { dirs = fs.readdirSync(root).flatMap((ws) => fs.readdirSync(path.join(root, ws)).map((d) => path.join(root, ws, d))) } catch { return '' }
   for (const d of dirs) {
-    const f = path.join(d, 'session.v4.jsonl.zstd')
-    if (!fs.existsSync(f)) continue
+    const f = sessionLogFileFor(d)
+    if (f === null) continue
     const base = path.basename(d)
     if (base.includes(parentSid)) continue
     try {
