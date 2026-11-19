@@ -1128,3 +1128,13 @@ touches agent-facing prompt bytes (the #417 plugin-side change is sink plumbing 
 #372 (unbuilt) · #397 (contract.md § Lineage decision, parked with its one-line change) · #411's
 residual (record-time regeneration pattern) · host option-(d) todo row · five credential-gated
 TreeDX live rows.
+
+
+**05935a7..74e59fb SHIPPED — 0.2.37, published and registry-proven.** PR #419 merged to main at
+`74e59fb` with all four CI jobs green at the head (coverage gate, preset-rows probe, env parity,
+ten-leg acceptance); annotated tag `0.2.37` at the merge commit; release run `44444746764` success.
+Registry proof: `latest` = **0.2.37**; unpacked tarball answers manifest `0.2.37` AND bundled
+`PLUGIN_VERSION = '0.2.37'` (the stale-tree class of 0.2.20 stays gated); provenance attestation
+present (`slsa.dev/provenance/v1`). Candidate evidence unchanged from the record above: 11-leg replay
+chain green locally at the release head (the one `plans` boot that died on `EADDRINUSE` was a
+transient port collision, named and re-run green), `corpus:stamp` with `promptAnchor` unchanged.
