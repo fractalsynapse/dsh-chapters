@@ -79,3 +79,10 @@ test('topic signatures still IGNORE the report — the r28 rule survives (#61)',
   assert.equal(isHumanAuthored(report as never), false,
     'isHumanAuthored stays strict: a 2 KB report must not drag a signature toward the filenames it mentions')
 })
+
+// #397: the header arm is the PRIMARY lineage source for children born from this version; a child
+// with NO registry row and NO `ch-` prefix still resolves — measured acceptance on the issue.
+test('#397: header-only lineage fires the gate with no registry row and no id prefix', () => {
+  const fired = shouldForceChildArchive({ ...base, header: { origin: 'user', agentPreset: 'chapters', parentSession: 'session-real-parent' }, id: 'session-random-uuid-shape', lineageParent: undefined, chapterCount: 0, completedTurnsAboveWatermark: 2 })
+  assert.equal(fired.fire, true, 'a kernel header fact is enough; the registry row and id prefix stay fallbacks')
+})
