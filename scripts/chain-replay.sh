@@ -43,6 +43,27 @@ for leg in $LEGS; do
   PORT=$(node --experimental-strip-types -e "
     import('./tests/e2e/rig-pins.ts').then((m) => process.stdout.write(String(m.RIG_PINS['$leg']?.port ?? '')));
   " 2>/dev/null)
+  # The recorded pattern (plans 0.237, enrich 0.238, fanout 0.239 x2): a previous playwright exit does
+  # NOT mean the previous HOST child released its port — dsh web children have been observed to outlive
+  # their wrapper. Wait for the port to be actually FREE (connection REFUSED), up to 90s, and if it is
+  # still HELD, fail the leg BY NAME with the holder — never boot into a collision and call the 120s
+  # readiness timeout a mystery. The cheap probe mirrors the runner's own style (node -e, no deps).
+  if [ -n "$PORT" ]; then
+    for WAIT in $(seq 1 45); do
+      if node -e "const n=require('net');const s=n.connect($PORT,'127.0.0.1');s.setTimeout(500);s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1));s.on('timeout',()=>{s.destroy();process.exit(1)})" ; then
+        HOLDER=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1)
+        echo "(waiting for port $PORT to free… ${HOLDER:-})"
+        sleep 2
+      else
+        break
+      fi
+      if [ "$WAIT" = 45 ]; then
+        echo "[chain-replay] $leg: port $PORT STILL HELD after 90s by ${HOLDER:-unknown} — refusing to boot into a collision"
+        FAILED+=("$leg:port-held")
+        continue 2
+      fi
+    done
+  fi
   if LEG=$leg MODE=replay E2E_MODEL=replay timeout 1200 bash scripts/e2e-one.sh > "var/chain-replay-$leg.log" 2>&1; then
     echo "ok (boot port ${PORT:-?})"
   else
