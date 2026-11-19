@@ -124,7 +124,10 @@ test.describe('door buttons follow the composed preset (#372)', () => {
     // durable header keeps the CREATE-TIME composition (run5 proved both can disagree: header
     // `chapters` on a session the host composed standard). The session's own preset chip is the
     // host saying what this session composes; the row below is the user-visible fact.
-    await expect(page.getByRole('button', { name: /^Standard mode/ }).first(),
+    // (run6's aria snapshot settles both: `text: Standard mode` sits in the session header and the
+    // paragraph `STANDARDSIDE` proves the row arrived — the chip's ACCESSIBLE NAME is not its
+    // visible text in the session view, so assert substring text, not exact name regex.)
+    await expect(page.locator('text=Standard mode').first(),
       'the host chip says this session composes the standard preset — the same projection the dock reads').toBeVisible({ timeout: 120_000 })
 
     // a fresh assistant row in this session exists (so the row the button would ride on is really
