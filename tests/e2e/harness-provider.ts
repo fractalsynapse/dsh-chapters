@@ -182,3 +182,64 @@ export function describeRoute(route: ProviderRoute, resolved: KeyResolution, mod
 export function endpointFromProviderModule(providerModuleText: string): string | null {
   return /baseUrl:\s*"(https?:\/\/[^"]+)"/.exec(providerModuleText)?.[1] ?? null
 }
+
+/**
+ * #414 — collapse a booted rig profile onto EXACTLY ONE route answer, before the host starts.
+ *
+ * The measured void this closes: the live+harness branch replaced the `llm-pi-ai` provider block
+ * while the seeded `agent-default-model: provider: local` row survived — the session composed a
+ * provider whose block no longer existed, and the turn died at `no credential for provider route
+ * "local"` with zero requests sent. Boot's comment already demanded the invariant ("which model
+ * powered this leg must have exactly one answer"); this is the function that enforces it, and
+ * boot refuses at STARTUP on a non-null error — named in seconds, not via a 15-minute marker wait.
+ *
+ * Both seed shapes are real: the tracked seed carries NO llm-pi-ai block (boot's tracked branch
+ * appends one at boot), while an already-booted profile HAS one (replace in place — never
+ * duplicate). The emitted patch carries the route's own default row, so a profile whose default
+ * row was deleted is RESTORED rather than fatalized. Idempotence is asserted: re-applying the
+ * alignment to its own output changes no byte, so a collapse can never oscillate.
+ */
+export function applyHarnessRoute(
+  profileText: string,
+  route: ProviderRoute,
+  windowTokens: number,
+): { text: string, error: string | null } {
+  const patch = harnessProviderPatch(route, windowTokens)
+  const text = /^- id: llm-pi-ai\s*$/m.test(profileText)
+    ? profileText.replace(/- id: llm-pi-ai\n(?:.*\n)*?(?=- id: |\Z)/, patch)
+    : `${patch}\n${profileText}`
+  // Collapse agent-default-model rows to exactly one, and it must be the route's.
+  const lines = text.split('\n')
+  const isStart = (l: string): boolean => /^- id: agent-default-model\s*$/.test(l)
+  const blockEnd = (s: number): number => {
+    let e = s + 1
+    while (e < lines.length && !/^\S/.test(lines[e]!)) e += 1
+    return e
+  }
+  const providerOf = (s: number): string | null => {
+    for (let k = s; k < blockEnd(s); k += 1) {
+      const m = /^\s+provider:\s*(\S+)\s*$/.exec(lines[k]!)
+      if (m !== null) return m[1] ?? null
+    }
+    return null
+  }
+  const starts = lines.map((l, i) => isStart(l) ? i : -1).filter((i) => i >= 0)
+  const keepers = starts.filter((s) => providerOf(s) === route.id)
+  const droppable = starts.filter((s) => !keepers.includes(s))
+    .concat(keepers.slice(0, Math.max(0, keepers.length - 1))) // multiples of the route's: keep the LAST
+  for (const s of droppable.sort((a, b) => b - a)) lines.splice(s, blockEnd(s) - s)
+  const collapsed = lines.join('\n')
+  // Verify the invariant rather than trust the rewrite: exactly one row, naming the route, whose
+  // provider block is actually present. Any other answer is a startup refusal, by name.
+  const remaining = (collapsed.match(/^- id: agent-default-model\s*$/gm) ?? []).length
+  if (remaining !== 1) {
+    return { text: collapsed, error: `expected exactly one agent-default-model row after alignment, found ${String(remaining)}` }
+  }
+  if (!new RegExp(`^- id: agent-default-model\\n(?:[^\\n]*\\n)*?\\s+provider:\\s*${route.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm').test(collapsed)) {
+    return { text: collapsed, error: `the remaining agent-default-model row does not name the harness route "${route.id}"` }
+  }
+  if (!new RegExp(`^\\s{6}${route.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*$`, 'm').test(collapsed)) {
+    return { text: collapsed, error: `provider "${route.id}" has no block in the booted profile — the default row could never authenticate` }
+  }
+  return { text: collapsed, error: null }
+}
