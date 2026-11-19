@@ -604,7 +604,7 @@ Rows are renamed and dropped between host versions, so re-anchor `src/preset.ts`
 host's own `@deepseek-ai/dsh-web-app/presets/standard.patch.yml` after an upgrade. Measured drift across
 the five published versions (rc.1, rc.2, alpha.1, alpha.2, alpha.4): alpha.1 ADDS `dsh-time-context` +
 `dsh-tool-schedule` + `toolFilter.deny[schedule_*]`; alpha.2 DROPS the persona `suffix` (with its
-`{{cwd}}`), `backgroundMode`, and the codex/claude-code/ralph rows; alpha.4 rewrites the plan-mode
+`{{cwd}}`), `backgroundMode`, and the other subagent-provider rows (named in `cordis.patch.yml`, which stays the source of truth for what the host actually ships); alpha.4 rewrites the plan-mode
 sentence, drops `toolFilter`, adds `dsh-plugin-market`. rc.1 and rc.2 are byte-identical.
 `tests/unit/preset-declaration.test.ts` is what turns the next rename into a red row instead of a broken
 user session — and it pins that `dsh.bundle.patch` is still a string.
