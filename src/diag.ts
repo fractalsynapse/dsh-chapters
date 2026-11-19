@@ -37,6 +37,32 @@ let configured: string | undefined
 export function configureDiagnostics(path: string | undefined): void { configured = path }
 
 /**
+ * #417 — the stringified shape of MISSING. `process.env.X = undefined` stores the literal word,
+ * and an untyped host-side config merge can hand the seam `String(undefined)` the same way. Measured
+ * cost: a file literally named `undefined` in the process cwd holding real diagnostics nobody looked
+ * at — detection that loses the evidence, the exact class this seam exists to end. These words are
+ * refused as paths; `diagnosticSink` resolves them to NO SINK and the refusal is said once.
+ * Over-refusal guard: only these EXACT whole values — a legitimate relative sink named
+ * `diagnostics.log` (or a dir literally containing the word in a longer path) keeps working.
+ */
+const STRINGIFIED_MISSING = new Set(['undefined', 'null'])
+let rejectedSinkRaw: string | undefined
+let rejectionNoted = false
+
+/** The raw value the seam refused (for the status line); undefined when nothing was refused. */
+export function diagnosticSinkRejection(): string | undefined { return rejectedSinkRaw }
+
+function noteSinkRejection(raw: string): void {
+  if (rejectionNoted) return
+  rejectionNoted = true
+  // stderr, once — the same channel #61 kept because the profile logger is not retained. Saying it
+  // per call would turn a misconfiguration into the log spam this seam warns about elsewhere.
+  try {
+    process.stderr.write(`dsh-chapters: diagnostics sink refused — "${raw}" is a stringified missing value, not a path; nothing will be written to disk. Set DSH_CHAPTERS_ENGINE_ERRORS (or the diagnosticsLog profile config) to a real path, or the literal \`off\` for deliberate silence (#417)\n`)
+  } catch { /* the refusal must not become an unhandled error */ }
+}
+
+/**
  * First door wins: the sink lives in the project whose store we are already writing to, so a session
  * that never touches a door leaves no stray file, and a session that does gets its failures next to its
  * chapters. Idempotent — later projects do not relocate the log mid-process.
@@ -75,7 +101,12 @@ export const DIAGNOSTICS_OFF = 'off'
 
 export function diagnosticSink(): string | undefined {
   const p = process.env.DSH_CHAPTERS_ENGINE_ERRORS
-  if (p !== undefined && p !== '') return p === DIAGNOSTICS_OFF ? undefined : p
+  if (p !== undefined && p !== '') {
+    if (p === DIAGNOSTICS_OFF) return undefined
+    if (STRINGIFIED_MISSING.has(p)) { rejectedSinkRaw = p; return undefined }
+    return p
+  }
+  if (configured !== undefined && STRINGIFIED_MISSING.has(configured)) { rejectedSinkRaw = configured; return undefined }
   return configured
 }
 
@@ -88,10 +119,13 @@ export function diagnosticStatusLine(): string {
   const sink = diagnosticSink()
   const envSet = process.env.DSH_CHAPTERS_ENGINE_ERRORS
   if (sink === undefined) {
-    return envSet === DIAGNOSTICS_OFF
+    if (envSet === DIAGNOSTICS_OFF)
       // the operator chose silence — say THAT, not "you forgot to configure it"
-      ? 'Diagnostics: file sink explicitly disabled (DSH_CHAPTERS_ENGINE_ERRORS=off); door/child failures reach only the profile logger'
-      : 'Diagnostics: NO SINK AT ALL — no store root was resolved, so door/child failures reach only the profile logger (this is a bug, not a setting)'
+      return 'Diagnostics: file sink explicitly disabled (DSH_CHAPTERS_ENGINE_ERRORS=off); door/child failures reach only the profile logger'
+    const rejected = diagnosticSinkRejection()
+    if (rejected !== undefined)
+      return `Diagnostics: sink value "${rejected}" REFUSED as a stringified missing value (#417) — nothing is written to disk; set a real path or the literal \`off\``
+    return 'Diagnostics: NO SINK AT ALL — no store root was resolved, so door/child failures reach only the profile logger (this is a bug, not a setting)'
   }
   return `Diagnostics: sink → ${sink}${envSet !== undefined && envSet !== '' ? ' (env override)' : ''}`
 }
@@ -101,7 +135,7 @@ let everWritten = false
 export function diagnosticEverWritten(): boolean { return everWritten }
 
 /** Reset for tests only; production never calls it. */
-export function resetDiagnosticStateForTests(): void { everWritten = false }
+export function resetDiagnosticStateForTests(): void { everWritten = false; rejectedSinkRaw = undefined; rejectionNoted = false }
 
 /**
  * Append one diagnostic record. Returns the composed line even when the write fails, so a
@@ -118,7 +152,12 @@ export function diagnostic(where: string, message: string, error?: unknown): str
   const line = `[${new Date().toISOString()}] [${where}] ${message}` +
     (error === undefined ? '' : ` :: ${describe(error)}`)
   const sink = diagnosticSink()
-  if (sink === undefined) return line
+  if (sink === undefined) {
+    // #417: a REFUSED sink (a stringified missing value) is not silence-by-design — say so, once.
+    // Absence with no rejection keeps its existing contract: the status line already tells it.
+    if (rejectedSinkRaw !== undefined) noteSinkRejection(rejectedSinkRaw)
+    return line
+  }
   try {
     // appendFileSync, not async: a refused child creation is often followed by the process
     // tearing the session down, and a pending write can be lost exactly when it matters.

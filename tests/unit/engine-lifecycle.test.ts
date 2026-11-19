@@ -657,7 +657,12 @@ test('#140 a 32K-window target yields no throw: relief abstains with its numbers
     } finally { h2.dispose() }
   } finally {
     h.dispose()
-    process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
+    // #417: the guarded form — an unguarded `= prevSink` when the env was UNSET stores the literal
+    // string "undefined", and every later diagnostic in this process then appended to the file
+    // `undefined` in cwd. That is how the repo-root stray was born; the seam now refuses the value
+    // too, but the writers must not emit it.
+    if (prevSink === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prevSink
   }
 })
 
@@ -743,7 +748,9 @@ test('#143 the note reports the window the adapter measured, not a config key th
     assert.match(noteLine, /shadowedTok=\d+/, 'and the tokens field stays')
   } finally {
     h.dispose()
-    process.env.DSH_CHAPTERS_ENGINE_ERRORS = prev
+    // #417: guarded restore — same stray-`undefined` mechanism as above (see 660's note).
+    if (prev === undefined) delete process.env.DSH_CHAPTERS_ENGINE_ERRORS
+    else process.env.DSH_CHAPTERS_ENGINE_ERRORS = prev
   }
 })
 
