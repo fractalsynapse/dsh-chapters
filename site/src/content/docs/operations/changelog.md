@@ -8,6 +8,49 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.38 — 2026-11-19 · the release where compaction finally composed — and the corpus grew eyes
+
+One product fix and one test asset, and the story is how five live records spent themselves to make
+both claims honest. **PRs #423/#422 (#420, #421).**
+
+**#421 — a shadowed span INTERSECTS a signature; it never has to contain it** (PR #422). Since the
+composer shipped, real hosts had never once produced a multi-chapter checkpoint, and nothing said so:
+live relief is incremental, every earlier pass CLIPS older turn signatures, and `composeChapters`'
+`inSpan` demanded a signature's WHOLE seq range inside the shadowed span — one clipped seq
+disqualified a finished topic forever. Result measured on the first live composed-discussion record:
+six relief passes, all chapters-engine-served, every one a single chapter, **zero `reason=` lines** —
+the composer RAN and merged, while every deterministic row stayed green because they store two
+COMPLETE signatures in one span. The fix: intersect-and-clip participation (a clipped signature
+contributes its in-span range under its own title; its archived head stays in the earlier chapter),
+merge bounds clamped at `spanEnd`, the final bound as the union of completion witnesses with no
+inverted close, and the semantics written down where they belong: **unfinished means UNSIGNED** —
+signatures exist only at `turn/end`, so the in-flight turn has none to participate with. The
+long-standing completeness row was rewritten as the documented contract change it is, and the red
+rows were written from the live run's exact payload (committed as a fixture).
+
+**#420 — the compose leg, C3's vehicle, now the corpus's eleventh replay member** (PRs #423+#422).
+A live journey that discusses THIS project — topic turns read and summarize real docs, each storing a
+`turn/end` signature and carrying a verbatim codeword — then a forced changelog-page crossing the
+host cannot avoid, arithmetically, after both boundaries exist. The verdict is read from durable
+bytes: a pass's shadowed set covered by ≥2 chapter rows (the SET truth — the first draft's
+range-containment was a false positive that passed six legacy passes), a topic seam opening exactly
+at the next codeword's turn, codeword-clean bodies, coverage invariant, post-relief health. **Record
+five passed all of it live on the hosted remote** (`1 passed`, composed+aligned); the same tape then
+replayed MODEL-FREE green (`1 passed`, 48.3 s, zero MISSes — #141's branch-walk did not bite), and it
+is now tracked corpus (11 entries + PROVENANCE carrying the regime, the identity witness and the
+five-run lesson chain) and a chain leg. C3 — "a real-host pressure compaction now COMPOSES" — closed
+on both classes: **live observation and deterministic replay.** The geometry lesson is part of the
+asset: at trigger 0.6 the host relieved MID-topic-2, the eager pass clipping the cold store
+composition needs; 0.7 makes the first crossing arithmetically a two-whole-signature span.
+
+**Operator-visible:** pressure relief on real hosts can now archive as multiple topic-aligned
+chapters instead of one blob — same guarantees (nothing shadowed unarchived, contiguous coverage,
+nothing unfinished archived), better index. No config defaults change; **`promptAnchor`
+`b40304ee3e35a94f` still unchanged** — five releases of zero agent-facing prompt-byte moves,
+machine-checked at stamp. CI's acceptance chain is ELEVEN replay legs: a future change that breaks
+composition goes red in seconds, no LLM, no GPU — the maintainer's directive made mechanical: code
+changes do not affect the tape; a code change that breaks the composed path affects the verdict.
+
 ### 0.2.37 — 2026-11-18 · the release that fixed the rig's route, believed a remote by proof, and stopped writing files named `undefined`
 
 Two issues, both found by the same day's live chase, and each one's story is a check that needed its
