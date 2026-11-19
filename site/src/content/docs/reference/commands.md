@@ -18,6 +18,24 @@ before any restart. Nobody should ever again discover a refused session by resta
 
 Run in the composer **inside a session** (draft screens send text as a message — [FAQ](/start/faq/)). The operator commands are registered in `src/commands.ts` on the host plane — including `/chapters-repair` and `/chapters-restore`, which must stay reachable from any session to fix a broken chapters archive. The three continuation doors (`/chapters-fork`, `/chapters-continue`, `/chapters-save`) mount with the tools **inside the chapters preset realm** (0.2.32, [#330](https://github.com/fractalsynapse/dsh-chapters/issues/330)) — sessions on other presets do not carry them.
 
+## Command planes: what resolves where (#372)
+
+The commands do NOT all live on the same plane — and since 0.2.39 the UI says so as plainly as the
+server does:
+
+| Plane | Commands | Where they resolve |
+| --- | --- | --- |
+| **host plane** (registered for every session) | `/chapters-status`, `/chapters-link`, `/chapters-anchor`, `/chapters-models`, `/chapters-enrich`, `/chapters-prompt`, `/chapters-rule`, `/chapters-remove`, `/chapters-repair`, `/chapters-restore` | any session, any preset — repair/restore MUST stay reachable from everywhere: they are how you fix a broken chapters archive from a session that cannot run the doors |
+| **chapters preset realm** (mounted with the tools) | `/chapters-fork`, `/chapters-continue`, `/chapters-save` and the two conversation buttons *Fork with chapters* / *Continue with chapters* | only sessions composing the `chapters` preset (0.2.32, #330 — a realm-scoped command asked for from another preset resolves to nothing) |
+
+The dock now reads the composed preset from the host's own per-session projection
+(`projectionValues.agentPreset` on the session row — the same fact the host's preset label renders)
+and does **not render the two realm-scoped buttons in a session whose preset resolves to something
+else**. When the projection is not readable the buttons stay visible — presence of an unknown preset
+is UNKNOWN, not absence — and a click then answers with a refusal that names the preset requirement
+instead of a generic "the branch call failed". No inference, no hardcode: either the host says the
+preset or the door says it is needed.
+
 ## `/chapters-link` — the knowledge upstream
 
 | Form | Effect |
