@@ -31,7 +31,13 @@ import { openApp, newSessionWithTurn, sessionLogTextById, ROOT } from './session
  *     a reason the archive itself records.
  */
 
-const seat = (page: import('@playwright/test').Page) => page.locator('button[aria-haspopup="menu"]')
+// The seat is the popup button whose label text is EXACTLY the current preset display name
+// (measured live: BUTTON[] {Chapters} — empty aria-label). aria-haspopup ALONE hits the workspace
+// chooser and the model picker first (measured inventory), and a /chapters/i SUBSTRING would hit
+// '@treeseed/dsh-chapters'. Exact-text the label is the stable selector; after staging the label
+// may read 'Standard', so both spellings are allowed.
+const seat = (page: import('@playwright/test').Page) =>
+  page.locator('button[aria-haspopup="menu"]').filter({ hasText: /^(Chapters|Standard( mode)?)$/i }).first()
 
 async function dumpInteractive(page: import('@playwright/test').Page, phase: string): Promise<void> {
   const inv = await page.evaluate(() => {
