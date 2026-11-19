@@ -745,6 +745,33 @@ Two corollaries, both bought once:
   `tests/unit/client-doors.test.ts` has a row that fails if `src/client/index.ts` drops
   `uiWorkspace` from `inject` or stops passing it.
 
+## The two session LIST surfaces, measured (#180, host 0.2.0-rc.2)
+
+Two services list sessions, they return **different shapes**, and neither is a bare array:
+
+- **Gateway (what the browser renders and `open()`s against)** — `ctx.get('sessionController')`
+  resolves the host's `SessionController` (`@deepseek-ai/dsh-api-session-controller`, declared in
+  `lib/types/index.d.ts` as `list(_request: SessionListRequest, signal): Promise<SessionListValue>`).
+  `SessionListValue` is an **object envelope**: `{ items: readonly SessionSummary[] }`
+  (`lib/types/types.d.ts`), and each summary row carries **`sessionId`** (plus `updatedAt`,
+  `running`, `blank`, `parentSessionId?`, …) — not `header.id`.
+- **Client roster (what `doors.ts` reads)** — `ISessions.list` is **not callable at all**: it is an
+  `ObservableSnapshot<SessionListState>` property (`lib/types/client/contract/sessions.d.ts`) read
+  via `list.getSnapshot() → { ids: SessionId[], byId: Record<SessionId, SessionSummary>, phase, … }`
+  (`lib/types/client/sessions/service.d.ts`).
+
+The #180 defect: `src/attach.ts` called `sc.list()` and piped the result straight into `.map`.
+The call itself succeeds — `list` *is* a function on the gateway service — but it resolves to the
+`{items}` envelope, a truthy non-array, so `?? []` does not catch it and `.map` throws. The catch
+converted it to `gatewayListed: undefined`, which is why the browser-visibility verification —
+the exact fact the 0.2.x door hunt needed — has been unreadable on the real host since it shipped.
+The unit fixtures at the time pinned an *imagined* array shape, which is how the row the issue
+calls "the row that should have existed" never existed: a fixture is only evidence when it was
+measured. The normalizer in `attach.ts` now accepts, in order: a bare array of rows, the
+`{items: rows}` envelope, and an `ObservableSnapshot` (`list` or its call result exposing
+`getSnapshot` → `{ids}` or `{byId}`); anything else is `gatewayListed: undefined` **with the
+received shape named in the warning**, never a TypeError path and never silence.
+
 ## `ContinuePorts.mutateState` — the row write seam (#101)
 
 `ContinuePorts` exposes **both** `getState`/`putState` and `mutateState(sessionId, fn)`, and the split is
