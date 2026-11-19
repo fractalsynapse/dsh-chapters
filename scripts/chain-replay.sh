@@ -54,7 +54,12 @@ for leg in $LEGS; do
       # socket using the port as its EPHEMERAL SOURCE (this machine's range 32768-60999 swallows the
       # whole rig band) refuses listen() while ss -tln shows nothing. Connect-refused does NOT mean
       # bindable; only asking for the bind is honest.
-      if ! node -e "const n=require('net');const s=n.createServer();s.once('listening',()=>{s.close(()=>process.exit(1))});s.once('error',()=>process.exit(0));s.listen($PORT,'127.0.0.1')" ; then
+      # PROBE CONTRACT, once and readable: exit 0 == BIND FAILED == held; exit 1 == listened == free.
+      # The first cut wrote `if ! node …` and inverted it: free ports were waited on (CI's pristine runners
+      # reported twelve false 'STILL HELD' failures at this authorship, 2026-11-19 — the guard's own
+      # polarity bug caught by the one gate that never shares the author's machine state), held ports
+      # were booted into. Correct polarity: HELD (exit 0) -> wait; FREE (exit 1) -> break and boot.
+      if node -e "const n=require('net');const s=n.createServer();s.once('listening',()=>{s.close(()=>process.exit(1))});s.once('error',()=>process.exit(0));s.listen($PORT,'127.0.0.1')" ; then
         HOLDER=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1)
         echo "(port $PORT bound by SOMEONE — listener or ephemeral source… ${HOLDER:-})"
         sleep 2
