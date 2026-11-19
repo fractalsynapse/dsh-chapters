@@ -84,9 +84,19 @@ export function composeChapters(
   config: ComposeConfig,
 ): ComposeResult {
   const notes: string[] = []
-  const inSpan = (c: CollectionSignature): boolean =>
-    c.seqs.length > 0 && c.seqs[0]! >= spanStart && c.seqs[c.seqs.length - 1]! <= spanEnd
-  const usable = collections.filter(inSpan).sort((a, b) => a.seqs[0]! - b.seqs[0]!)
+  // #421 (measured on the FIRST LIVE composed-discussion record, 2026-11-19): the old rule demanded
+  // the WHOLE signature range sit inside the span. Live relief is incremental — earlier passes clip
+  // older signatures — so one clipped seq disqualified a finished topic FOREVER, and six real passes
+  // composed six single chapters while every deterministic row (two COMPLETE signatures in one span)
+  // stayed green. Intersection is the honest predicate; the signature then participates with its
+  // CLIPPED bounds, because its already-archived head lives in an earlier chapter. Unfinished turns
+  // stay unarchived by construction — signatures are only stored at `turn/end`, so the in-flight
+  // turn has no collection to participate with (measured in the same session's store row).
+  const intersects = (c: CollectionSignature): boolean =>
+    c.seqs.length > 0 && c.seqs[c.seqs.length - 1]! >= spanStart && c.seqs[0]! <= spanEnd
+  const clippedStart = (c: CollectionSignature): number => Math.max(c.seqs[0]!, spanStart)
+  const clippedEnd = (c: CollectionSignature): number => Math.min(c.seqs[c.seqs.length - 1]!, spanEnd)
+  const usable = collections.filter(intersects).sort((a, b) => clippedStart(a) - clippedStart(b))
   if (usable.length === 0) {
     const unarchived = events.filter((e) => e.seq >= spanStart && e.seq <= spanEnd).map((e) => e.seq)
     notes.push('no completed collections in span — legacy segmentation applies')
@@ -114,7 +124,8 @@ export function composeChapters(
   interface Running { first: CollectionSignature; last: CollectionSignature; paths: Set<string>; commands: Set<string>; terms: Set<string>; size: number; startSeq: number; endSeq: number }
   const runningOf = (c: CollectionSignature): Running => ({
     first: c, last: c, paths: new Set(c.paths), commands: new Set(c.commands), terms: new Set(c.terms),
-    size: c.size, startSeq: c.seqs[0]!, endSeq: c.seqs[c.seqs.length - 1]!,
+    // #421: the RUNNING RANGE is the intersection; the scoring identity (first/last) stays whole.
+    size: c.size, startSeq: clippedStart(c), endSeq: clippedEnd(c),
   })
   const scoreAgainst = (c: CollectionSignature, r: Running): number =>
     Math.max(signatureScore(c, r.first), signatureScore(c, r.last))
@@ -177,7 +188,9 @@ export function composeChapters(
       for (const t of c.terms) running.terms.add(t)
       running.size += c.size
       running.last = c
-      running.endSeq = c.seqs[c.seqs.length - 1]!
+      // #421: merge extends the RUNNING RANGE, and the range is span-clipped — a raw tail here could
+      // push a chapter past spanEnd, the one boundary §4.3 never crosses.
+      running.endSeq = Math.min(c.seqs[c.seqs.length - 1]!, spanEnd)
     } else {
       close()
       running = runningOf(c)
@@ -193,7 +206,15 @@ export function composeChapters(
     (m, e) => (e.type === 'turn/end' && e.seq <= spanEnd && e.seq > m ? e.seq : m),
     spanStart,
   )
-  if (!closedAtPlan) close(lastCompletedEnd)
+  // #421: the final bound is the UNION of the two completion witnesses — the running (clipped)
+  // signature's end, which proves its content finished by `turn/end` storage, and the last
+  // turn/end at or before spanEnd, which extends an unsigned-but-completed tail absorption. When the
+  // last signature already reached spanEnd clipped and no later turn closed, pendingLo sits past
+  // both and NOTHING closes: the old unconditional close(lastCompletedEnd) here could emit an
+  // inverted range (start 6, end 5, measured by the #421 rows) whenever a clipped signature opened
+  // after the last in-span turn/end.
+  const finalHi = Math.max(running.endSeq, lastCompletedEnd)
+  if (!closedAtPlan && pendingLo <= finalHi) close(finalHi)
 
   function close(hiOverride?: number): void {
     const lo = pendingLo

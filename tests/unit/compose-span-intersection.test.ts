@@ -45,10 +45,17 @@ test('#421 red-from-live bytes: a signature CLIPPED by earlier passes participat
     `a 28/29 seam (turn-1 close / turn-2 open) must appear: ${JSON.stringify(sorted.map((c) => [c.startSeq, c.endSeq]))}`)
   // contiguity invariants survive the clip: first range opens at the SPAN, ranges are adjacent.
   assert.equal(sorted[0]!.startSeq, FIX.span.lo, 'the first range still starts at spanStart (contiguity #59)')
-  assert.equal(sorted[sorted.length - 1]!.endSeq, FIX.span.hi, 'the last range still closes at spanEnd (absorption #59)')
   for (let i = 1; i < sorted.length; i++) {
     assert.equal(sorted[i]!.startSeq, sorted[i - 1]!.endSeq + 1, 'ascending non-overlapping coverage is never widened')
   }
+  // §4.3 stays sacred: the span's tail (55..66) belongs to the STILL-OPEN crossing turn — signatures
+  // exist only for turns that ended, so unfinished content must STAY LIVE, not be absorbed wholesale
+  // (the broken run did absorb it: the legacy ch5 range [25,66] carried mid-turn user messages 65/66).
+  assert.ok(sorted[sorted.length - 1]!.endSeq < FIX.span.hi,
+    'the composed ranges stop at completed material; the open tail stays live')
+  assert.ok(res.notes.some((n) => /stays live/.test(n)), `the §4.3 note names the unfinished tail: ${JSON.stringify(res.notes)}`)
+  assert.ok(res.unarchivedSeqs.every((q) => q >= 55) && res.unarchivedSeqs.length > 0,
+    `unarchivedSeqs is exactly the open tail: ${JSON.stringify(res.unarchivedSeqs)}`)
 })
 
 test('#421: whole containment is a SUBSET of intersection — the #399 two-complete-signature shape is unchanged', () => {

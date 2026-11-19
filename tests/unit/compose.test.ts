@@ -67,18 +67,20 @@ test('size limit forces a split even for identical signals', () => {
   assert.equal(r.chapters.length, 2) // 6000+6000 > 8000
 })
 
-test('completeness guard: span cutting a turn leaves it live and noted, never archived', () => {
-  // span ends at seq 7 — mid-turn (the turn ends at 8)
+test('#421 contract change: span cutting a FINISHED turn archives its in-span tail — "unfinished" means unsigned, not unspanned', () => {
+  // span ends at seq 7, cutting turn 3's stored range (its turn/end is 8). The retired reading kept
+  // 6..7 live because the SPAN was cut — but signatures exist only at turn/end (measured in the
+  // first live composed-discussion record, #420/#421: sig3 appeared in the store row only after
+  // turn 3 closed), so a signature crossing the span end is COMPLETED material. Its in-span part
+  // now archives, clipped, under its own chapter; its past-span part waits for the next door's
+  // watermark. Nothing past spanEnd is ever archived either way.
   const r = composeChapters(events, 0, 7, collections, CONFIG)
   const covered = r.chapters.flatMap((c) => Array.from({ length: c.endSeq - c.startSeq + 1 }, (_, i) => c.startSeq + i))
   assert.ok(covered.every((s) => s <= 7), 'no archived seq past the span end')
-  // the incomplete turn's IN-SPAN events (6,7) are unarchived; its turn-end (8) is outside the span entirely
-  assert.ok(r.unarchivedSeqs.includes(6) && r.unarchivedSeqs.includes(7), 'incomplete turn content stays live')
-  assert.ok(!r.unarchivedSeqs.includes(8), 'seqs outside the span are not the span\'s concern')
-  assert.ok(r.notes.some((n) => n.includes('stays live')))
-  // and the chapter that would have included turn 3 ends at the last COMPLETED turn inside the span
-  const mid = r.chapters.find((c) => c.startSeq === 0)
-  assert.equal(mid?.endSeq, 5)
+  assert.deepEqual(r.chapters.map((c) => [c.startSeq, c.endSeq]), [[0, 5], [6, 7]],
+    'the finished turn\u2019s in-span tail gets its own clipped chapter \u2014 not absorption, not silence')
+  assert.equal(r.unarchivedSeqs.length, 0, 'every in-span event is signed \u2014 nothing legitimately stays live here')
+  assert.ok(!r.notes.some((n) => n.includes('stays live')), 'the §4.3 note belongs to UNSIGNED content only')
 })
 
 test('no completed collections → no chapters (caller falls back to legacy segmentation)', () => {
