@@ -197,7 +197,7 @@ export function buildChaptersTools(
       },
       newId: () => randomUUID(),
       diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
-      createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title, parentSessionId }) => {
+      createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title, parentSessionId, goal }) => {
         const callerOptions = caller.options
         // The seed is contiguous from seq 0 and holds only STATE events this plugin authors
         // for the child (plan mode). Invariant 2 holds — nothing from the parent's log is
@@ -326,7 +326,34 @@ export function buildChaptersTools(
           // has chapters cited by its own TOC-less state; refuse loudly, name the repair.
           throw new Error(`birth TOC authoring failed for ${sessionId}: ${String((error as Error)?.message ?? error)}`)
         }
-        return { warnings: attach.warnings }
+        // #349 (maintainer decision 2026-11-19): the carried ACTIVE goal is re-created on the child
+        // through the host's goal SERVICE — the direct-human gate lives on the create_goal TOOL, and
+        // the decision authorized exactly this service-level step. Scope rules the plane obeys: the
+        // core decided (goal is absent for paused/complete/config-off), the service is called AFTER
+        // a settled birth, and every failure is a WARNING naming /goal resume — never a rollback,
+        // never silence (the #54 law: a detected failure that isn't delivered is the same bug).
+        const birthWarnings: string[] = [...(attach.warnings ?? [])]
+        if (goal !== undefined) {
+          const goalsSvc = (ctx as unknown as { goals?: { create?: (agent: unknown, request: Record<string, unknown>) => unknown } }).goals
+            ?? (ctx.get?.('goals') as { create?: (agent: unknown, request: Record<string, unknown>) => unknown } | undefined)
+          if (goalsSvc?.create === undefined) {
+            birthWarnings.push(`goal re-arm skipped: no goals service on this plane — the notice still carries the objective; a human can /goal resume in the child`)
+            diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm skipped — goals service absent', undefined)
+          } else {
+            try {
+              // get-AFTER-release (the r3 law, same as the notice-authoring seam above): the create
+              // handle was disposed deliberately, and the host's live-agent registry is what the goal
+              // service asserts liveness against — fetched fresh here, typed as the plugin's narrow
+              // agents view declares only `create`.
+              const agent = (ctx.agents as unknown as { get: (id: string) => unknown }).get(sessionId)
+              goalsSvc.create(agent, { objective: goal.objective, ...(goal.maxGoalRounds !== undefined ? { maxGoalRounds: goal.maxGoalRounds } : {}) })
+            } catch (error) {
+              birthWarnings.push(`goal re-arm refused: ${String((error as Error)?.message ?? error)} — the notice carries the objective; a human can /goal resume in the child`)
+              diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm refused by the host service', error)
+            }
+          }
+        }
+        return { warnings: birthWarnings }
       },
       now: () => Date.now(),
     }

@@ -1,14 +1,17 @@
 /**
- * #349 — carry the active goal across a renewal, conservatively.
+ * #349 — carry the active goal across a renewal: state it, and (per the maintainer's decision of
+ * 2026-11-19) RE-ARM it on the child through the goal SERVICE.
  *
- * THE SCOPE OF THIS MODULE, AND WHY IT IS NOT THE WHOLE ISSUE.
- * #349's fuller ask is to RE-ESTABLISH the goal on the child via `ctx.get('goals').create(agent, …)`, which
- * sidesteps the `requireDirectHuman` gate that guards the `create_goal` TOOL. The issue explicitly reserves
- * that as a maintainer decision ("Confirm with the maintainer whether plugin-authored goal creation is the
- * desired authority model before shipping — **if not, the notice must at least instruct the human to
- * re-arm, and say so loudly**"). This file implements THAT FALLBACK: the objective is stated in the child's
- * notice and the human is told, in the notice itself, that only they can re-arm. It creates nothing, calls
- * no goal service, and therefore needs no authority widening to ship.
+ * HISTORY OF THE AUTHORITY, kept because the reasoning is the point. This module first shipped the
+ * conservative slice — objective in the notice, "only a human can re-arm" stated aloud — because the
+ * issue reserved plugin-authored goal creation as a maintainer decision: the `requireDirectHuman` gate
+ * guards the create_goal TOOL, and reaching past a gate because the wrapper is the only thing
+ * enforcing it is an unexamined authority widening. The decision arrived (2026-11-19, in the #349
+ * thread): YES, scoped — `goalRearmDecision` here is the ONE predicate, only ACTIVE unfinished goals
+ * carry, the call happens post-birth on the tools plane, every refusal is a delivered warning naming
+ * `/goal resume`, and `goalRearmOnCarry` can restore the notice-only behavior byte-for-byte (the
+ * default-mode wording rows in goal-carriage.test.ts pin exactly that compatibility). What this file
+ * never does, in either mode: claim the parent's `activation` — that stays the service's to know.
  *
  * WHAT THE LOG CAN AND CANNOT SAY — measured, not assumed (three production logs):
  *   `goal/change` data keys : kind, version, operation, goal, roundsStarted, createdAt, updatedAt
@@ -101,6 +104,54 @@ export function foldGoalFromLog(events: readonly SessionEventLike[]): GoalSnapsh
 }
 
 /**
+ * The ONE re-arm predicate (#349, maintainer decision 2026-11-19): an ACTIVE, unfinished goal is the
+ * only state the plugin may carry into the child as a live goal. Paused/blocked stay human-owned (a
+ * human stopped them); complete/cleared never return. Everything else about the decision — the door's
+ * wording, the birth payload, the e2e assertion — reads THIS.
+ */
+export function goalRearmDecision(goal: GoalSnapshot | null): { rearm: boolean; why: string } {
+  if (goal === null) return { rearm: false, why: 'none' }
+  if (goal.finished) return { rearm: false, why: 'finished' }
+  if (goal.phase === 'paused') return { rearm: false, why: 'paused' }
+  if (goal.phase === 'blocked') return { rearm: false, why: 'blocked' }
+  if (goal.phase !== 'active') return { rearm: false, why: goal.phase }
+  return { rearm: true, why: 'active' }
+}
+
+export interface TaskItem { content: string; status: string }
+
+/**
+ * The FINAL `todo/write` snapshot folded from the log — measured host shape
+ * (`dsh-tool-todo`: every call appends the WHOLE list as { todos: [{ content, status }] }), so the
+ * last write is the list. null when the session never wrote one: no list, zero bytes, tapes unmoved.
+ */
+export function foldTaskListFromLog(events: readonly SessionEventLike[]): TaskItem[] | null {
+  let last: TaskItem[] | null = null
+  for (const ev of events) {
+    if (ev.type !== 'todo/write') continue
+    const todos = (ev.data ?? {}).todos
+    if (!Array.isArray(todos)) continue
+    const items: TaskItem[] = []
+    for (const t of todos) {
+      const o = t as { content?: unknown, status?: unknown }
+      if (typeof o?.content === 'string' && o.content.trim() !== '') {
+        items.push({ content: o.content.trim(), status: typeof o.status === 'string' ? o.status : 'pending' })
+      }
+    }
+    last = items
+  }
+  return last
+}
+
+/** The notice block for a carried task list. Empty when absent — the zero-bytes rule again. */
+export function renderTaskCarriage(list: TaskItem[] | null): string {
+  if (list === null || list.length === 0) return ''
+  const lines = ['## Task list (carried from the parent session)']
+  for (const t of list) lines.push(`- [${t.status}] ${t.content}`)
+  return lines.join('\n')
+}
+
+/**
  * The notice block for a carried goal. Empty string means "inject nothing" — the tape-safety rule every
  * optional notice section follows (`rulesSection`, `plansSection`): a session that never used a goal pays
  * zero bytes, so the archives and recorded requests of ordinary sessions are untouched by this feature.
@@ -111,6 +162,11 @@ export function foldGoalFromLog(events: readonly SessionEventLike[]): GoalSnapsh
 export function renderGoalCarriage(
   goal: GoalSnapshot | null,
   budgetChars: number,
+  /**
+   * #349: 're-armed' states the birth step the maintainer decision authorized; the default keeps the
+   * conservative wording BYTE-IDENTICAL (recorded tapes and pre-decision expectations untouched).
+   */
+  mode: 're-armed' | 'notice-only' = 'notice-only',
 ): string {
   if (goal === null || goal.objective === '') return ''
   const head = goal.finished ? '## Goal (completed — do not resume it)' : '## Goal (carried from the parent session)'
@@ -128,9 +184,16 @@ export function renderGoalCarriage(
   // The point of the conservative path: the child CANNOT arm its own goal, so say who can, loudly, in
   // the one place the child is guaranteed to read at birth.
   if (!goal.finished) {
-    lines.push(goal.phase === 'active'
-      ? 'This goal is NOT armed in the child: a continuation child cannot create or resume a goal (the host requires a direct human turn). Only the human can send /goal resume or re-cut the objective.'
-      : `Goal is ${goal.phase}. The child cannot change that — only the human can send /goal resume.`)
+    if (mode === 're-armed') {
+      // True under BOTH birth outcomes by construction: the step RUNS at birth, and the door's
+      // warning channel — never this block's silence — carries the exception. Wording verified by the
+      // #349 rows: re-created on the child, /goal resume as the human fallback, no human-only claim.
+      lines.push('The plugin re-created this goal on the child at birth (armed by the host\u0027s goal service; revision and round counts restart here, the round cap carries) \u2014 the maintainer-set authority model for continuations (#349, knob goalRearmOnCarry). Pause, edit, or clear it here with /goal; if the birth step was refused, the door\u0027s reply said so and /goal resume is the human fallback.')
+    } else {
+      lines.push(goal.phase === 'active'
+        ? 'This goal is NOT armed in the child: a continuation child cannot create or resume a goal (the host requires a direct human turn). Only the human can send /goal resume or re-cut the objective.'
+        : `Goal is ${goal.phase}. The child cannot change that — only the human can send /goal resume.`)
+    }
   }
   return lines.join('\n')
 }

@@ -131,6 +131,8 @@ export interface Config {
   goalInNotice: boolean
   /** #349: budget in chars for the objective text inside that block. */
   goalNoticeChars: number
+  /** #349 (maintainer decision): re-create an ACTIVE carried goal on the child via the goal service (the one authorized exception to the create_goal human gate — docs/architecture.md § The Goal Across a Renewal). */
+  goalRearmOnCarry: boolean
   /** Teach the child its lookup verbs (read / chapters_artifact / chapters_search). */
   retrievalHints: boolean
   /** Seed plan mode into continuation children (plans-carriage § 10). */
@@ -275,6 +277,7 @@ export const Config = Schema.object({
   plansInNotice: Schema.boolean().default(true),
   goalInNotice: Schema.boolean().default(true),
   goalNoticeChars: Schema.number().step(1).min(120).default(600),
+  goalRearmOnCarry: Schema.boolean().default(true),
   retrievalHints: Schema.boolean().default(true),
   // Seeding is measured-safe (kernel accepts the two-event seed and the host's own
   // plan projection folds it to active) and it is what keeps the agent anchored to
@@ -873,6 +876,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       plansInNotice: config.plansInNotice,
       goalInNotice: config.goalInNotice,
       goalNoticeChars: config.goalNoticeChars,
+      goalRearmOnCarry: config.goalRearmOnCarry,
       retrievalHints: config.retrievalHints,
       planSeedMode: config.planSeedMode,
       searchMaxTokens: config.searchDefaultMaxTokens,
