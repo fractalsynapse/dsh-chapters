@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { test, expect } from '@playwright/test'
-import { openApp, newSessionWithTurn, typeComposer, sessionLogTextById, ROOT } from './session.ts'
+import { execFileSync } from 'node:child_process'
+import { openApp, newSessionWithTurn, typeComposer, sessionLogTextById, sessionLogFileFor, ROOT } from './session.ts'
 
 /**
  * #372 — the door buttons follow the COMPOSED PRESET, measured in the browser on BOTH sides.
@@ -36,6 +37,36 @@ import { openApp, newSessionWithTurn, typeComposer, sessionLogTextById, ROOT } f
 // chooser and the model picker first (measured inventory), and a /chapters/i SUBSTRING would hit
 // '@treeseed/dsh-chapters'. Exact-text the label is the stable selector; after staging the label
 // may read 'Standard', so both spellings are allowed.
+/**
+ * #81's law applied to a sid-UNKNOWN send: the staged draft's id may change at commit, so the
+ * predicate counts the needle across EVERY session log in this boot's port-keyed home and demands
+ * the count strictly rise. That is delivery authority by observation — exactly what the guard test
+ * (e2e-delivery-authority) exists to enforce — not a placeholder third argument.
+ */
+function deliveredByLog(needle: string): () => boolean {
+  const scan = (): number => {
+    const root = path.join('/tmp', 'dsh-e2e', `e2e-home-${process.env.E2E_PORT ?? ''}`, 'sessions')
+    let total = 0
+    let wsDirs: string[] = []
+    try { wsDirs = fs.readdirSync(root) } catch { return 0 }
+    for (const ws of wsDirs) {
+      let ds: string[] = []
+      try { ds = fs.readdirSync(path.join(root, ws)) } catch { continue }
+      for (const d of ds) {
+        const f = sessionLogFileFor(path.join(root, ws, d))
+        if (f === null) continue
+        try {
+          const txt = execFileSync('zstd', ['-dc', f], { maxBuffer: 64 * 1024 * 1024 }).toString()
+          total += txt.split(needle).length - 1
+        } catch { /* a flushing log simply has nothing yet */ }
+      }
+    }
+    return total
+  }
+  const base = scan()
+  return () => scan() > base
+}
+
 const seat = (page: import('@playwright/test').Page) =>
   page.locator('button[aria-haspopup="menu"]').filter({ hasText: /^(Chapters|Standard( mode)?)$/i }).first()
 
@@ -117,7 +148,7 @@ test.describe('door buttons follow the composed preset (#372)', () => {
     // type into the CURRENT draft via the rig's own typeComposer (the composer is a contenteditable
     // DIV, not a textarea — a fill() waits on a target that cannot exist, which is exactly how run
     // 3 spent its 40-minute budget). No New-session click: it would discard the staged composition.
-    await typeComposer(page, 'Reply with exactly the single word: STANDARDSIDE. Do not read or run anything.')
+    await typeComposer(page, 'Reply with exactly the single word: STANDARDSIDE. Do not read or run anything.', deliveredByLog('STANDARDSIDE. Do not read or run anything.'), 90_000)
     // THE measurement is DOM, from the host's own surfaces — the header probe measured the wrong
     // artifact: upstream agent-preset-selection.e2e.ts:302 settles the staged pick through the
     // host's PROJECTION (`projections.values.agentPreset`) — exactly what our dock reads — while the
