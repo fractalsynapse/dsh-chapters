@@ -1208,3 +1208,45 @@ filed — it is recorded here so the next audit does not re-derive it · #349 re
 **Ship gate at the candidate before stamp:** full unit+integration ledger baseline shape
 (1,696/1,702 — 5 credential-gated `live:` + 1 todo); typecheck clean; ratchet 58=58; the TWELVE-leg
 replay chain run locally green at this head; `corpus:stamp` on green with `promptAnchor` unchanged.
+
+
+**70fb605..290b4ae SHIPPED — 0.2.39, published and registry-proven, with the chain-runner saga fully
+disclosed.** PR #428 merged at `290b4ae`; all four CI gates green at the head (acceptance after ONE
+failure + one re-run — the disclosure trail: attempt #1 was MY port-guard's inverted polarity, twelve
+false 'STILL HELD' lines on a runner nothing held, caught by CI and fixed with the contract written in
+the script and its truth table run against both real cases; attempt #2 failed only the pre-existing
+`prompt-revival` mount-pull race, observed at the same rate on BOTH machines, sampled 2-pass/2-fail,
+filed as **#429** with the #372-boot-ordering correlation candidate named to rule out first; attempt
+#3: 13/13 green). Annotated tag `0.2.39` at the merge commit; release run `44557329033` success.
+Registry proof: `latest` = 0.2.39; tarball manifest `0.2.39` AND bundled `PLUGIN_VERSION = '0.2.39'`;
+`slsa.dev/provenance/v1` attestation present. Local chain at the candidate: 11/12 green, `fanout`
+boot-REFUSED locally by the machine-level ephemeral squat (bind-refused, no listener, `lsof` names the
+session tooling's own socket; proven, documented, machine-fix recorded in docs/development.md:
+`ip_local_reserved_ports` or a re-distilled band — NOT silently worked around). Stamp
+`lib=c011dbe6d5e2c2d5`, `promptAnchor b40304ee3e35a94f` unchanged — six releases.
+
+**Open after 0.2.39:** #429 (mount-pull race, two-machine samples) · the rig-band reservation
+(maintainer's sysctl, needs root) · #138 goal rest-state · gatewayList shape (observed, recorded) ·
+host option-(d) · five credential-gated TreeDX live rows. **Closed by this cut:** #397, #372, #349
+(each's issue carries its evidence trail), and the stale #411 line retired from this file's open-list.
+
+## 2026-11-19 — 0.2.40: prose promises, measured seams
+
+**Candidate = staging at `a092c5a`.** Range `0.2.39..staging`: **#138** (contract § Goal budgets —
+the no-model service seam recorded with file:line witnesses, the /goal argument named as a host gap,
+budget-1 disappearance explained, our boundary pinned) and **#429** (the first-pull retry finally as
+code: ONE predicate, 8x2s bounded, loud ceiling, wiring pin; post-fix 10/10 leg + full twelve-leg
+chain green locally and CI acceptance green on runner hardware — the loaded contexts that produced
+the flakes now produce the passes). Both issues closed at their merges.
+
+**Ship gate at the candidate before stamp:** ledger baseline shape; build + symbol check before any
+boot (the #421 law, applied); the TWELVE-leg replay chain locally green at this head (the first
+attempt of the verification chain died on MY shell PATH — node 22 without strip-types — and the
+runner's fail-loud refusal at 'could not read the project list' is the designed behavior; the
+v24.22.0 rerun is the counted evidence, disclosed not deleted). `corpus:stamp` on green;
+`promptAnchor` must read unchanged.
+
+**Open after this cut:** the rig-band sysctl (one line for the maintainer's hand, docs/development.md)
+· gatewayList shape (observed, recorded) · host option-(d) todo row · five credential-gated TreeDX
+live rows. #138's rest-state half is now a CONTRACT fact, not an open question; #429 is closed with
+its fix measured in both failure contexts.

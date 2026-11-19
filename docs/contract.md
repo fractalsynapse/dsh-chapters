@@ -367,6 +367,28 @@ documentation-first step: the code change shipped with tests and no contract, an
 behaviour was described was the install page's sample output — a sample that, at the time, was itself the
 symptom. Recorded here so the omission is closed rather than inherited, and noted in #355's process findings.
 
+## Goal budgets without the model — the seam, and the two things it does NOT include (#138, measured against the pinned host bytes 2026-11-19)
+
+The question #138 asked is how a deterministic journey can bound goal rounds when a round is itself
+a turn and every turn ends (so the count at any click moment is machine latency). The measured answer:
+
+- **The seam exists, service-level**: `dsh-goal`'s `create(agent, { objective, maxGoalRounds })`
+  carries the budget directly — no model involved. Our plugin uses it at birth (`#349` re-arm:
+  `goalRearmDecision` → `ctx.get('goals').create(agent, { objective, maxGoalRounds })`; the live
+  witness is the continuation child whose durable `goal/change` row carries `cap 256`, and the
+  deterministic witness is the tools row pinning the cap on the captured call).
+- **The `/goal` COMMAND does not have it**: `dsh-command-goal` calls `ctx.goals.create(invocation.agent,
+  { objective })` — full stop (`lib/index.js:131,138`). A rounds argument on the slash command is a
+  host-side feature; recording it here is the whole of what our side can ship.
+- **`maxGoalRounds: 1` via a config pin is not a bound, it is a disappearance**: exhaustion puts the
+  phase at `blocked`, and the host GoalBar renders NOTHING for blocked/complete
+  (`GoalBar.tsx:85-86`) — the armed-but-resting state #138's title names does not exist host-side.
+  Budget 2 is the smallest count that can be *observed* at all (one round executes, the strip still
+  shows phase `active` between rounds), and "between" is where the race lives, so no tape may depend
+  on it — which is why every goal claim in this repo runs live-only under a wall-clock bound
+  (`prompt-goal-live`), never against a tape. The acceptance that "an armed goal has no rest state"
+  stands as a host-side gap, recorded, not ours to fix.
+
 ## Lineage: Kernel Fields We Must Not Lean On
 
 `SessionHeader` (`packages/core/session/src/types.ts:93-122`) carries `version`, `id`, `createdAt`,
@@ -582,7 +604,7 @@ Rows are renamed and dropped between host versions, so re-anchor `src/preset.ts`
 host's own `@deepseek-ai/dsh-web-app/presets/standard.patch.yml` after an upgrade. Measured drift across
 the five published versions (rc.1, rc.2, alpha.1, alpha.2, alpha.4): alpha.1 ADDS `dsh-time-context` +
 `dsh-tool-schedule` + `toolFilter.deny[schedule_*]`; alpha.2 DROPS the persona `suffix` (with its
-`{{cwd}}`), `backgroundMode`, and the codex/claude-code/ralph rows; alpha.4 rewrites the plan-mode
+`{{cwd}}`), `backgroundMode`, and the other subagent-provider rows (named in `cordis.patch.yml`, which stays the source of truth for what the host actually ships); alpha.4 rewrites the plan-mode
 sentence, drops `toolFilter`, adds `dsh-plugin-market`. rc.1 and rc.2 are byte-identical.
 `tests/unit/preset-declaration.test.ts` is what turns the next rename into a red row instead of a broken
 user session — and it pins that `dsh.bundle.patch` is still a string.

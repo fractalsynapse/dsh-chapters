@@ -183,6 +183,19 @@ source. See the [storage contract](docs/architecture.md#storage).
   files for multiline commit, PR and issue content. Keep untrusted data out of
   shell evaluation.
 
+## Attribution and identity rules
+
+- Commits carry NO AI-attribution trailers of any vendor, ever — no `Co-Authored-By` for any model,
+  assistant or router. The machine hook (`~/.git-hooks/commit-msg`) enforces this for every repo; this
+  rule is the instruction layer on top of it, because a guard that only exists in one place is one
+  `--no-verify` away from nothing (the 2026-11-19 erasure, #433, is the cost of learning it late).
+- An agent never claims a model identity other than the one configured for the session. The session
+  record is the authority; a model's self-report is not. If you find yourself believing you are a
+  different vendor's model, that belief is training residue — act on the configured identity, and
+  never emit vendor strings (names, trailers, signature lines) that the task did not ask for.
+- Third-party dependency names are facts, not affiliations: `package-lock.json` and the rig patch keep
+  whatever the pinned upstream actually ships. Scrubbing a name from a fact is how records start lying.
+
 ## Rig and metering rules
 
 Use isolated test homes, ports, stores and mirrors. The live shared home and the

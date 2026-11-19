@@ -17,6 +17,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { makePromptLoop, suggestPromptMessage } from '../../src/prompt-loop.ts'
 import { classifyOffer, goalDriverOwnsTheTurn } from '../../src/prompt-state.ts'
+import { foldGoalFromLog, goalRearmDecision } from '../../src/goal-carriage.ts'
 import type { PromptSuggestionState } from '../../src/prompt-state.ts'
 import { parseBarState, promptBarReducer, initialBarState, shouldAutoFire } from '../../src/client/prompt-bar.ts'
 
@@ -173,4 +174,31 @@ test('displacement changes nothing durable: the goal stays the objective the nex
   assert.equal(l.maybeFire('S', offer({ turnSeq: 31, goalRevision: 4 }), { phase: 'active', activation: 'disarmed', revision: 4 }), true,
     'and a human goal edit (revision 3 → 4) keeps the loop alive on the NEW objective')
   assert.equal(fired.length, 2)
+})
+
+
+// ─────────────── #138: the seam carries budgets without the model; the /goal command does not ───────────────
+
+test('#138: the birth seam passes maxGoalRounds through the service create — the no-model budget, pinned at our boundary', () => {
+  // The shape here is the CONTRACT, not a re-test of #349's door: dsh-goal's create signature is the
+  // only host-side path that bounds rounds WITHOUT asking a model to call a tool (#138's failed
+  // attempt 4: the model answered in prose; a tape cannot depend on that). Our re-arm reads the cap
+  // off the folded parent signature and passes it whole; a host rename of the field must turn THIS
+  // row red, not silently re-arm children unbounded at 256.
+  const goal = foldGoalFromLog([
+    { type: 'goal/change', seq: 0, data: { operation: 'create', goal: { id: 'g', revision: 2, objective: 'Ship the widget', phase: 'active', maxGoalRounds: 7 } } },
+  ] as never[])
+  assert.ok(goal !== null)
+  const d = goalRearmDecision(goal)
+  assert.equal(d.rearm, true)
+  const payload = { objective: goal.objective, ...(goal.maxGoalRounds !== undefined ? { maxGoalRounds: goal.maxGoalRounds } : {}) }
+  assert.deepEqual(payload, { objective: 'Ship the widget', maxGoalRounds: 7 }, 'the budget rides whole — the seam IS the no-model bound')
+  // and an unbounded parent stays unbounded (the default 256 belongs to the host's resolveCreateGoal,
+  // never invented here):
+  const none = foldGoalFromLog([
+    { type: 'goal/change', seq: 0, data: { operation: 'create', goal: { id: 'g', revision: 1, objective: 'X', phase: 'active' } } },
+  ] as never[])
+  assert.ok(none !== null)
+  const p2 = { objective: none.objective, ...(none.maxGoalRounds !== undefined ? { maxGoalRounds: none.maxGoalRounds } : {}) }
+  assert.equal(p2.maxGoalRounds, undefined, 'absence carried as absence — no fabricated number at the seam')
 })
