@@ -764,6 +764,13 @@ catch built a full diagnostic — and then the value was discarded. So the rule 
   still wins; the literal `off` is honoured, because an operator must be able to silence it — but
   silence is now a choice, never a default. `diagnosticsLog` in the profile config sets the path
   declaratively; resolution order is env → config → `<store-root>/diagnostics.log`.
+- **A sink value that is really a missing value resolves to NO SINK (#417).** Stringified absent
+  config/vars (`"undefined"`, `"null"` as whole values) are what `process.env.X = undefined` and a
+  stringified missing config leave behind; they are refused as paths — the plugin writes nothing to disk
+  for them, says so once on stderr, and the status line names the refusal. With no env and no resolvable
+  store root, `diagnostic()` writes nothing and `diagnosticStatusLine()` already says NO SINK AT ALL.
+  Measured cost of the hole: a file literally named `undefined` in the process cwd holding real
+  diagnostics nobody looked at — the exact "detection that loses the evidence" this section exists to end.
 - **Every plane writes to it, not just the engine (#352).** The prompt plane was the exception: one
   project's `diagnostics.log` held 21,138 `realm:*` lines, 4 `rules-section`, 4 `auto-save` and **zero**
   prompt lines, so the door's own verdicts — did it see the turn boundary at all, did the model spec

@@ -56,7 +56,7 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 
 | key | default | what it changes |
 |---|---|---|
-| `diagnosticsLog` | unset → `<store-root>/diagnostics.log` | where refusals, deferred finalizations and door failures are appended. `DSH_CHAPTERS_ENGINE_ERRORS` overrides it; the literal `off` disables file logging (the profile logger still gets them). Before this, an unset variable meant **no trace on disk** — and three real compaction failures left none. |
+| `diagnosticsLog` | unset → `<store-root>/diagnostics.log` | where refusals, deferred finalizations and door failures are appended. `DSH_CHAPTERS_ENGINE_ERRORS` overrides it; the literal `off` disables file logging (the profile logger still gets them). A value that is a stringified missing (`undefined`/`null` as the whole path) is refused as a sink and says so once — the plugin never writes a file named `undefined` into the working directory (#417). Before this, an unset variable meant **no trace on disk** — and three real compaction failures left none. |
 | `warningsDisplayCap` | 6 | how many warning TEXTS a door prints before switching to `…and M more`. Counts alone hid 86 warnings across six saves, including the one that named a hollow chapter. |
 | `segmentCandidateCapTokens` | 4000 | the ceiling on the oversized-result candidate list `chapters_segment` returns. Ranked by size, and the response always names what was withheld. The cap bounds the **total** and keeps every candidate that still fits — one oversized result never truncates the list (#343: the scan stopped at the first item that did not fit, and since results are ranked largest-first that was almost always item #2, so real sessions were offered exactly **1** candidate out of hundreds). |
 
