@@ -197,7 +197,7 @@ export function buildChaptersTools(
       },
       newId: () => randomUUID(),
       diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
-      createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
+      createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title, parentSessionId }) => {
         const callerOptions = caller.options
         // The seed is contiguous from seq 0 and holds only STATE events this plugin authors
         // for the child (plan mode). Invariant 2 holds — nothing from the parent's log is
@@ -216,7 +216,10 @@ export function buildChaptersTools(
           sessionId,
           seed: [...modeEvents],
           inheritedEventCount: 0,
-          meta: { cwd, isSeeded: false, ...(mountPreset !== undefined && mountPreset !== null ? { agentPreset: mountPreset } : {}) },
+          // #397: the kernel header names the TRUE birth parent (maintainer amendment to contract
+          // § Lineage: setting it for a child we actually birthed is durable lineage, not a fake
+          // relationship; the never-fake prohibition stands for writers the seam does not own).
+          meta: { cwd, isSeeded: false, parentSession: parentSessionId, ...(mountPreset !== undefined && mountPreset !== null ? { agentPreset: mountPreset } : {}) },
           ...(callerOptions.provider !== undefined ? { agentOptions: callerOptions } : {}),
           setup: async (agentCtx: unknown) => {
             const presets = ctx.get?.('agentPresets') as { mount?: (c: unknown, id: string) => Promise<unknown> } | undefined
