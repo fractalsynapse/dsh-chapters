@@ -19,7 +19,8 @@
  * rather than left to memory, and the guard fails loudly if anyone replays this spec against a tape.
  */
 import { test, expect } from '@playwright/test'
-import { deliveredFor, newSessionWithTurn, openApp, typeComposer } from './session.ts'
+import nodeAssert from 'node:assert/strict'
+import { assertChaptersPreset, deliveredFor, newSessionWithTurn, openApp, typeComposer } from './session.ts'
 import { DOCK_BAR, offerText, waitForOffer } from './prompt-bar-offer.ts'
 
 /** Wall-clock bound for a live journey: generous, but bounded — this is a smoke-class check, not a soak. */
@@ -77,4 +78,87 @@ test('clearing the goal leaves the bar offering a suggestion on the next turn', 
   const offered = await offerText(bar)
   expect(offered.length, 'the bar produces a real suggestion after the goal is cleared (length)').toBeGreaterThan(0)
   void sid
+})
+
+// ─────────────── #349: the goal crosses the renewal — re-armed at birth, live host ───────────────
+//
+// THE CLAIM MEASURED HERE (not available any cheaper): an ACTIVE goal in the parent produces, at
+// /chapters-continue birth, a goal the CHILD'S OWN session carries — armed via the host's goal
+// service (the maintainer authority decision 2026-11-19, docs/architecture.md § The Goal Across a
+// Renewal), visible in the child's goal strip, and durable in the child's log. Deterministic rows
+// cover the decision and the wording; ONLY a real host answers whether the service call lands on a
+// freshly-born, UI-attachable session — which is precisely the class of fact this leg exists for.
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { openSessionByRow, ROOT, sessionLogTextById, sessionLogFileFor } from './session.ts'
+
+function findChildOf(parentSid: string): string {
+  // #397 lineage does the discovery: the child's DURABLE HEADER names parentSession — no registry
+  // race, no id-shape guessing. The log FILE comes from sessionLogFileFor, never a hand-built path:
+  // the e2e-log-shape tripwire exists because the host renames formats, and a by-hand path turns a
+  // rename into a false "missing archive" (its own message, earned).
+  const home = `/tmp/dsh-e2e/e2e-home-${process.env.E2E_PORT ?? ''}`
+  const root = path.join(home, 'sessions')
+  let dirs: string[] = []
+  try { dirs = fs.readdirSync(root).flatMap((ws) => fs.readdirSync(path.join(root, ws)).map((d) => path.join(root, ws, d))) } catch { return '' }
+  for (const d of dirs) {
+    const f = sessionLogFileFor(d)
+    if (f === null) continue
+    const base = path.basename(d)
+    if (base.includes(parentSid)) continue
+    try {
+      const first = execFileSync('zstd', ['-dc', f], { maxBuffer: 64 * 1024 * 1024 }).toString().split('\n')[0] ?? ''
+      const e = JSON.parse(first) as { type?: string; parentSession?: string }
+      if (e.type === 'session' && e.parentSession === parentSid) return base.replace(/^session-/, '')
+    } catch { /* an empty/flushing log is simply not the child yet */ }
+  }
+  return ''
+}
+
+test('the continuation child of an ACTIVE-goal session is born with the goal re-armed (#349, live host)', async ({ page }) => {
+  test.setTimeout(1_800_000) // 30 min: goal RPC, a door birth, sidebar open, and this box's measured latency margins
+
+  // THE MISSING LINE both failed runs were really about: every test gets a FRESH page —
+  // openApp is per-test, never inherited, and without it the page sits blank, the New-session
+  // click is a silent no-op by design, and the helper's loud refusal (:882) is the guard working,
+  // not the thing broken. The earlier reorder chased a position premise this snapshot disproved.
+  await openApp(page)
+  const sid = await newSessionWithTurn(page,
+    'Reply with exactly the single word: PRE-GOAL. Do not read or run anything.', 900_000, false)
+  assertChaptersPreset(sid)
+
+  // The human arms the goal (the tool's direct-human gate is honored — a person types the command).
+  await typeComposer(page, '/goal Ship the widget and verify it in the browser', deliveredFor(sid, '/goal Ship the widget'))
+  await expect(page.locator('[data-goal-bar]').first(), 'the parent shows its goal strip').toBeVisible({ timeout: 120_000 })
+
+  // The deterministic door, from the composer.
+  await typeComposer(page, '/chapters-continue Goal-carry-live', deliveredFor(sid, '/chapters-continue Goal-carry-live'))
+
+  // The child exists when its HEADER names the parent (#397 lineage as the discovery mechanism).
+  await expect.poll(() => findChildOf(sid), {
+    timeout: 420_000, intervals: [5000],
+    message: 'a session was born whose durable header parentSession is the goal session',
+  }).not.toBe('')
+  const child = findChildOf(sid)
+
+  // Open it by the title the door gave it; then the two USER-VISIBLE facts:
+  await expect.poll(() => openSessionByRow(page, ['Goal-carry-live']),
+    { timeout: 120_000, intervals: [3000], message: 'the child row opens in the sidebar' }).toBe(true)
+
+  await expect(page.locator('[data-goal-bar]').first(),
+    '#349: the CHILD shows a goal strip — the objective kept driving').toBeVisible({ timeout: 120_000 })
+  await expect(page.locator('[data-goal-bar]').first(),
+    '#349: and it is the SAME objective, verbatim').toContainText('Ship the widget', { timeout: 30_000 })
+
+  // Durable truth under the UI: the child's own log holds the birth goal/change create, objective whole.
+  const childLog = sessionLogTextById(child)
+  nodeAssert.ok(childLog.includes('operation') && childLog.includes('"create"'),
+    `the child log records the re-armed goal durably (goal/change create): ${childLog.slice(0, 200)}`)
+  nodeAssert.ok(childLog.includes('Ship the widget and verify it in the browser'),
+    'the objective is whole in the child log')
+  // and the TOC the child was handed said the re-armed truth, not the notice-only sentence
+  nodeAssert.ok(childLog.includes('re-created this goal on the child'),
+    'the birth notice used the re-armed wording')
 })
