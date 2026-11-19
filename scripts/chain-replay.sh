@@ -50,9 +50,13 @@ for leg in $LEGS; do
   # readiness timeout a mystery. The cheap probe mirrors the runner's own style (node -e, no deps).
   if [ -n "$PORT" ]; then
     for WAIT in $(seq 1 45); do
-      if node -e "const n=require('net');const s=n.connect($PORT,'127.0.0.1');s.setTimeout(500);s.on('connect',()=>{s.destroy();process.exit(0)});s.on('error',()=>process.exit(1));s.on('timeout',()=>{s.destroy();process.exit(1)})" ; then
+      # BINDABILITY, not LISTENERS: /proc proved the true collision class — an ESTABLISHED outbound
+      # socket using the port as its EPHEMERAL SOURCE (this machine's range 32768-60999 swallows the
+      # whole rig band) refuses listen() while ss -tln shows nothing. Connect-refused does NOT mean
+      # bindable; only asking for the bind is honest.
+      if ! node -e "const n=require('net');const s=n.createServer();s.once('listening',()=>{s.close(()=>process.exit(1))});s.once('error',()=>process.exit(0));s.listen($PORT,'127.0.0.1')" ; then
         HOLDER=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oE 'pid=[0-9]+' | head -1)
-        echo "(waiting for port $PORT to free… ${HOLDER:-})"
+        echo "(port $PORT bound by SOMEONE — listener or ephemeral source… ${HOLDER:-})"
         sleep 2
       else
         break
