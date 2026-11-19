@@ -1169,3 +1169,19 @@ locally (every leg under its own boot, compose included), then `npm run corpus:s
 debt · #349 remainder (browser rig) · #372 (unbuilt) · #397 (contract.md § Lineage decision) ·
 #411 residual (record-time regeneration pattern) · host option-(d) todo row · five
 credential-gated TreeDX live rows.
+
+
+**fd7e7e6..69729f7 SHIPPED — 0.2.38, published and registry-proven.** PR #424 merged to main at
+`69729f7`, all four CI jobs green at the head (coverage gate, preset-rows probe, env parity, and the
+acceptance chain now replaying compose on the runner); annotated tag `0.2.38` at the merge commit;
+release run `44479863717` success. Registry proof: `latest` = **0.2.38**; unpacked tarball answers
+manifest `0.2.38` AND bundled `PLUGIN_VERSION = '0.2.38'`; provenance attestation present
+(`slsa.dev/provenance/v1`). Candidate evidence per the record above: twelve-leg replay chain green
+locally at the release head (the one `enrich` boot that died on `EADDRINUSE :41734` was the transient
+teardown race, port verified free, rerun fully green), stamp `lib=a2d63947fa0e8da7` moved only on the
+version literal with `promptAnchor` unchanged — and the stamp's own first commit message got amended
+before merge for saying "lib unchanged" when the honest reading is "lib changed ONLY by the version
+string": the amend is disclosed here because the bytes that moved are exactly what the release
+verifies.
+
+C3 is retired. The oldest open verification debt in this file's history became a replay leg.
