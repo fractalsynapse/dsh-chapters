@@ -92,7 +92,7 @@ test('#417: a stringified missing reaching the CONFIGURED sink (host config merg
     configureDiagnostics('undefined' as string)
     assert.equal(diagnosticSink(), undefined, 'the configured poison resolves to NO SINK')
     diagnostic('realm:engine', 'note')
-    assert.match(diagnosticStatusLine(), /refused/, 'the status line names the refusal, not just absence')
+    assert.match(diagnosticStatusLine(), /REFUSED/, 'the status line names the refusal, not just absence')
   })
   assert.deepEqual(listing, [], `no file may be written from a stringified configured value, got: ${JSON.stringify(listing)}`)
 })
