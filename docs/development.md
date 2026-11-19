@@ -1100,3 +1100,16 @@ artifact never contained the booted home's session logs. `scripts/chain-replay.s
 `session.v4.jsonl.zstd` files and registry into `var/e2e-session-logs/<leg>-<port>` (six files, under 4 MB each) so
 the runner's own history sits next to the tape diffs and the misses. When a miss claims "the conversation had
 already taken a different shape", the answer is in that transcript — read it, don't theorize about it.
+
+### The chain-runner port race (third observation 2026-11-19 — record the pattern, per AGENTS)
+
+`plans` (0.2.37 cut), `enrich` (0.2.38 cut), `fanout` (0.2.39 cut): the SAME failure on three release
+chains — `listen EADDRINUSE` on the leg's own port within ~2s of the previous leg's teardown, boot
+fails at the 120s readiness ceiling, the leg report is `FAILED (boot port …)` with the collision
+named in the child log tail. Each rerun passed every leg. So: (a) the release procedure's honest
+sentence is "the recorded rerun is green, the first-attempt collision is named", which is what the
+ship records have been saying — the pattern never healed anything; and (b) the cheapest useful fix,
+when someone takes it: the chain waits for the port to be FREE, not just for the previous playwright
+process to exit — a readiness-poll on the just-destroyed port before the next boot, in one place in
+`chain-replay.sh`. Not filed as an issue here because this release cycle is mid-ship; the observation
+lives where the next person running a chain will read it.
