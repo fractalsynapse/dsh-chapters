@@ -122,6 +122,11 @@ export const RIG_PINS: Record<string, RigPin> = {
   // first 600-line changelog page lands (~10K on top of ~15.7K). The journey's first recorded shape
   // also shows the fix working — #421 clipped-participation is what the next pass needs, this pin is
   // what makes a pass DESERVE it.
+  // #372: the door-button preset gate, measured in the browser on BOTH sides (chapters renders the
+  // rows, standard renders none, headers carry the fact). Live-class like prompt-goal-live: the
+  // hero seat's roster RPC and one reply per session are machine behavior, no tape can match —
+  // it skips LOUDLY under replay and its recording dir is a gitignored byproduct.
+  'preset-visibility-live': { port: 41746, threshold: '0.9', noAuxModel: true },
   'compose': { port: 41745, threshold: '0.7', floor: '1000000', maxRetries: 3 },
 }
 
