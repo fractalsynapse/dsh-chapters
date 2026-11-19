@@ -29,7 +29,7 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 // external like react. Every action in this row labels through it.
 import { withTooltip, nativeTitle } from './tooltip.ts'
 import { PromptDock } from './prompt-dock.ts'
-import { DOOR_ACTIONS, makeDoorRunner, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
+import { DOOR_ACTIONS, doorActionsVisibleFor, makeDoorRunner, presetOfSession, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -50,6 +50,8 @@ export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWork
 interface DoorActionProps {
   messageId: string
   run: () => Promise<DoorResult>
+  /** #372: the factory evaluates the host preset projection at render; false hides the row. */
+  visible?: () => boolean
 }
 
 /**
@@ -88,7 +90,12 @@ function injectStyles(): void {
 
 /** One component body for every door row; only the label and glyph differ. */
 function makeDoorAction(door: DoorAction) {
-  return function ChaptersDoorAction({ run }: DoorActionProps) {
+  return function ChaptersDoorAction({ run, visible }: DoorActionProps) {
+    // #372: a RESOLVED foreign preset renders nothing at all — the command cannot exist in this
+    // session's realm, and a button that resolves to nothing was the defect. UNKNOWN keeps the row
+    // (the runner answers with the named refusal): fail-open VISIBLY is the contract, never a
+    // silent disappearance on a host whose projection has not arrived yet.
+    if (visible !== undefined && !visible()) return null
     const [busy, setBusy] = useState(false)
     const [note, setNote] = useState<string | null>(null)
     const alive = useRef(true)
@@ -181,6 +188,9 @@ export function apply(ctx: Ctx): void {
       // the end of the session. Resolution failure falls back to no-anchor (old behavior) and says so
       // in the note — a door that silently ignores which row you clicked is the bug being fixed.
       inject: (sessionId: string, owner?: { messageId?: string }) => ({
+        // #372: the factory re-runs per session render, so visibility reads the host projection AT
+        // RENDER — resolved-foreign hides the row entirely, unknown keeps it for the named refusal.
+        visible: () => doorActionsVisibleFor(presetOfSession(sessions, sessionId)),
         run: async () => {
           let anchor: number | null = null
           const mid = typeof owner?.messageId === 'string' ? owner.messageId : ''

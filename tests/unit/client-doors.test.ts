@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import {
-  CHILD_ID, DOOR_ACTIONS, DOOR_BUILD, doorTitle, makeDoorRunner,
+  CHILD_ID, DOOR_ACTIONS, DOOR_BUILD, doorTitle, makeDoorRunner, presetOfSession, doorActionsVisibleFor,
   type ClientRemote, type ClientSessions,
 } from '../../src/client/doors.ts'
 
@@ -585,4 +585,65 @@ test('#358: no awaited pause in the door runner is unref\'d — 21 rows were sil
   // And prove the grep is not vacuous: the file does contain awaited timers, so the filter has
   // something to police.
   assert.ok(/await new Promise\(.{0,40}setTimeout/.test(src), 'the awaited-timer sites exist for this row to guard')
+})
+
+
+// ─────────────── #372 — host-fact visibility and the preset-named refusal ───────────────
+
+function sessionsWith(rowsById: Record<string, { projectionValues?: Record<string, unknown> }>) {
+  // the measured host store shape: list.getSnapshot() -> { ids, byId, phase } and the per-session
+  // projectionValues.agentPreset the host's own preset label reads (dsh-client-ui-agent-preset).
+  return {
+    list: { getSnapshot: () => ({ ids: Object.keys(rowsById), byId: rowsById, phase: 'ready' }) },
+    open: () => undefined,
+  } as unknown as ClientSessions
+}
+
+test('#372: presetOfSession reads the host projection; unreadable is UNKNOWN (null), never a guess', () => {
+  const s = sessionsWith({
+    'sess-std': { projectionValues: { agentPreset: 'standard' } },
+    'sess-ch': { projectionValues: { agentPreset: 'chapters' } },
+    'sess-bare': {},
+  })
+  assert.equal(presetOfSession(s, 'sess-std'), 'standard')
+  assert.equal(presetOfSession(s, 'sess-ch'), 'chapters')
+  assert.equal(presetOfSession(s, 'sess-bare'), null, 'a row without the projection is UNKNOWN — presence of an unreadable fact is not absence')
+  assert.equal(presetOfSession(s, 'sess-absent'), null, 'an unknown id answers UNKNOWN too')
+  assert.equal(presetOfSession(undefined, 'sess-1'), null, 'no service is UNKNOWN, not an error')
+})
+
+test('#372: doorActionsVisibleFor is the ONE predicate — unknown keeps, resolved-foreign hides', () => {
+  assert.equal(doorActionsVisibleFor(null), true, 'fail-open visibly: an unreadable projection keeps the rows for the named-refusal path')
+  assert.equal(doorActionsVisibleFor('chapters'), true)
+  assert.equal(doorActionsVisibleFor('standard'), false)
+  assert.equal(doorActionsVisibleFor('anything-else'), false)
+})
+
+test('#372: a resolved foreign preset refuses the CLICK by name and never touches the wire', async () => {
+  for (const door of DOOR_ACTIONS) {
+    const w = world(reply(door.noun, 'T', 'ch-x'))
+    const sessions = sessionsWith({ 'sess-1': { projectionValues: { agentPreset: 'standard' } } })
+    const result = await makeDoorRunner(w.remote, sessions, door)('sess-1')
+    assert.equal(result.ok, false, `${door.id} refuses`)
+    assert.match(result.message, /chapters preset/, `${door.id} names the requirement`)
+    assert.match(result.message, /standard/, 'and states what the session actually composes')
+    assert.deepEqual(w.executed, [], 'no mystery wire call against a command that cannot resolve')
+  }
+})
+
+test('#372: UNKNOWN projection keeps every existing path byte-identical (fail-open is not a behavior change)', async () => {
+  const w = world(reply('branch', 'T x', 'ch-a1'))
+  const result = await makeDoorRunner(w.remote, sessionsWith({ 'sess-1': {} }), DOOR_ACTIONS[0]!)('sess-1')
+  assert.deepEqual(w.executed, [{ sessionId: 'sess-1', line: '/chapters-fork' }])
+  assert.equal(result.ok, true)
+})
+
+test('#372: a wire failure now names the realm too — the generic \u201cthe branch call failed\u201d is retired', async () => {
+  const w = world('')
+  const dead = { commands: { execute: async () => ({ ok: false }) } } as unknown as ClientRemote
+  const r = await makeDoorRunner(dead, sessionsWith({}), DOOR_ACTIONS[0]!)('sess-1')
+  assert.equal(r.ok, false)
+  assert.match(r.message, /chapters preset/, 'an unresolvable realm-scoped command explains its plane')
+  assert.ok(r.message.length <= 90, 'the note budget stands')
+  void w
 })
