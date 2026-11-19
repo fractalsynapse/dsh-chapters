@@ -142,13 +142,11 @@ test.describe('door buttons follow the composed preset (#372)', () => {
     // verdict artifact: the two host surfaces side by side — chip/projection (what the dock reads,
     // asserted above) and the durable header (create-time composition, kept here precisely because
     // the standard side may honestly read `chapters`: that artifact pair is what run5 settled).
-    const chips = await page.evaluate(() => Array.from(document.querySelectorAll('button'))
-      .map(b => (b.textContent ?? '').trim())
-      .filter(t => /^(Chapters|Standard mode)$/.test(t)))
+    const chipVisible = await page.locator('text=Standard mode').first().isVisible().catch(() => false)
     fs.writeFileSync(path.join(ROOT, 'var', 'preset-visibility-verdict.json'), JSON.stringify({
       at: new Date().toISOString(),
       chapters: { sid: sidCh, headerPreset: headerPresetOf(sidCh) },
-      standard: { chipButtons: chips, doorButtons: 'asserted above: count 0' },
+      standard: { chipVisible, doorButtons: 'asserted above: count 0' },
     }, null, 2) + '\n')
   })
 })
