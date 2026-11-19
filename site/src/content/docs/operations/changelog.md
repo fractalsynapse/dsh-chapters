@@ -8,7 +8,23 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
-### 0.2.40 — 2026-11-19 · the release about keeping promises prose made — and the seam that was never missing
+### 0.2.40 — 2026-11-19 · promises prose made kept as code — and a history rewritten, said plainly
+
+**History-rewrite notice (this release's tags are new objects):** on 2026-11-19 the repository's
+commit history from Nov 14–15 was rewritten to strip 33 `Co-Authored-By: Claude Fable 5` trailers that
+agent sessions of that era wrote into commit messages — a vendor attribution that belongs to nobody's
+configured model and nobody's authorization (full accounting: #433). The rewrite touched MESSAGE bytes
+only; every branch tip was verified TREE-IDENTICAL before and after, so no file content changed
+anywhere in history. Tags 0.2.33–0.2.39 and all branches were re-pointed; the published npm packages
+are untouched, but their git provenance links now resolve through the moved tags, and GitHub may keep
+serving the old objects by SHA until its network garbage-collects them (support request tracked in
+#433). **Contributors: re-clone or `git fetch --prune --prune-tags` + reset — do NOT merge old local
+history forward.** Guards against recurrence shipped in this same range (#434): attribution rules in
+the project instructions, a machine-level commit-msg hook, and an explicit model pin in the tool
+config.
+
+Two closures, one theme: prose promises kept by measurement. **PRs #430 (#138), #431 (#429), #434 (#433 guards).**
+ — and the seam that was never missing
 
 Two closures, one theme: claims that read as done but were never wired, found by measurement. **PRs #430 (#138), #431 (#429).**
 
