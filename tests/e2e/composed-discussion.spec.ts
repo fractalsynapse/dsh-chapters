@@ -22,8 +22,10 @@ import { openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogText
  * against a conversation that means something. The crossing turn applies heavy's #132 arithmetic to
  * the changelog: the host read tool caps one call at 600 lines (measured on both machines), the
  * contract names EXACTLY three page calls, the first page lands ≈9–13K tokens, and the trigger sits
- * at 0.6 of the pinned 32K window — header (~13.3K) plus the two SMALL (40-line) topic turns stays
- * under it, the first changelog page cannot.
+ * at 0.7 of the pinned 32K window (22.4K — raised from 0.6 after a live record MEASURED relief firing
+ * mid-topic-2, the eager pass clipping the very signatures composition needs; see rig-pins.ts for
+ * the twice-corrected arithmetic) — header plus the two SMALL (20-line) topic turns cannot cross it,
+ * the first changelog page cannot miss it.
  *
  * The oracle is the archive itself, because invariant 4 makes it honest: the MODEL proposes ranges
  * and titles; the PLUGIN renders chapter bodies VERBATIM from the durable log. A codeword that
@@ -110,7 +112,7 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
     // bounded, signature-bearing; the codeword rides the USER message so it is durable regardless
     // of what the model recites (heavy's lesson: assistant TEXT is not a compliance signal).
     const sid = await newSessionWithTurn(page,
-      `Discussion about this workspace, no side tasks: read ${ARCH_DOC} with ONE read call, offset 1 limit 40. In two or three sentences, what does that opening say about the durable session log? Include the codeword ${SUNSTONE} verbatim in your reply, then stop.`,
+      `Discussion about this workspace, no side tasks: read ${ARCH_DOC} with ONE read call, offset 1 limit 20. In two or three sentences, what does that opening say about the durable session log? Include the codeword ${SUNSTONE} verbatim in your reply, then stop.`,
       900_000, false)
 
     // #56 sequencing, load-bearing HERE specifically: turn 1 must CLOSE (durable turn/end) before
@@ -121,7 +123,7 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
 
     // ── topic 2: a genuinely different subject — the development loop. Second boundary.
     await typeComposer(page,
-      `New topic about this repo, same rules — no side tasks: read ${DEV_DOC} with ONE read call, offset 1 limit 40. In two or three sentences, what does it say about why the tests isolate homes and ports? Include the codeword ${BREADCRUST} verbatim, then stop.`,
+      `New topic about this repo, same rules — no side tasks: read ${DEV_DOC} with ONE read call, offset 1 limit 20. In two or three sentences, what does it say about why the tests isolate homes and ports? Include the codeword ${BREADCRUST} verbatim, then stop.`,
       deliveredFor(sid, `New topic about this repo`))
     await expect.poll(() => eventTypes(sessionLogTextById(sid), 'turn/end').length >= 2,
       { timeout: 900_000, intervals: [5000] }).toBe(true)
