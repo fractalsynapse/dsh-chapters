@@ -472,8 +472,10 @@ The intended observable contract:
 
 - Small discussion turns on deliberately DIFFERENT topics, each ending a boundary (signature stored)
   and each carrying a verbatim codeword, then one turn whose READ contract forces a crossing by
-  arithmetic (the 600-line tool page cap, same pigeonhole as heavy) — the trigger is 0.6 of the
-  pinned 32K window, chosen so turns 1–2 stay under it and the first page read cannot.
+  arithmetic (the 600-line tool page cap, same pigeonhole as heavy) — the trigger is 0.7 of the
+  pinned 32K window, so turns 1–2 (20-line doc reads) CANNOT cross and the first changelog page
+  MUST (0.6 was measured firing relief mid-topic-2, the eager pass clipping the signatures the
+  composer needs cold — twice-corrected arithmetic in `tests/e2e/rig-pins.ts`).
 - The verdict is read from DURABLE bytes, not the browser: a `compaction/summary` whose shadowed
   region is covered by **≥2 chapters**, at least one chapter boundary ALIGNED to a topic-transition
   `turn/end` seq, chapter bodies carrying exactly their turn's codewords (bodies are rendered
