@@ -29,13 +29,17 @@ test('only the pressure journeys leave model-involving machinery enabled', () =>
   //   fanout  — the parent must consume its children's papers, and gating turned that synthesis away.
   // Pinning any of these does not make it deterministic; it deletes the behavior under test, which is the same
   // mistake as setting the arrival floor below the chunk size and calling the passing row a result.
-  const PRESSURE_LEGS = new Set(['heavy', 'suite', 'arrival', 'fanout'])
+  //   #420 compose — the C3 vehicle: the whole journey is a pressure crossing ACROSS STORED TURN
+  //   BOUNDARIES so the compaction composer fires with real collections; gating the machinery would
+  //   leave a leg that measures nothing. It joins the pressure class deliberately, and its replay
+  //   stability is exactly the open question the leg reports honestly (never healed silently).
+  const PRESSURE_LEGS = new Set(['heavy', 'suite', 'arrival', 'fanout', 'compose'])
   const open = Object.entries(RIG_PINS)
     .filter(([name]) => !PRESSURE_LEGS.has(name))
     .filter(([, pins]) => pins.noAuxModel !== true)
     .map(([name]) => name)
   assert.deepEqual(open, [], `these legs would let automatic compaction fire mid-journey, making the tape depend on machine timing: ${open.join(', ')}`)
-  for (const leg of ['heavy', 'suite', 'arrival', 'fanout']) {
+  for (const leg of PRESSURE_LEGS) {
     assert.equal(RIG_PINS[leg]?.noAuxModel, undefined,
       `${leg} exercises the machinery — pinning it would make the leg measure a boot where nothing happens`)
   }

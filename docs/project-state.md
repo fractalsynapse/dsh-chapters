@@ -1128,3 +1128,44 @@ touches agent-facing prompt bytes (the #417 plugin-side change is sink plumbing 
 #372 (unbuilt) · #397 (contract.md § Lineage decision, parked with its one-line change) · #411's
 residual (record-time regeneration pattern) · host option-(d) todo row · five credential-gated
 TreeDX live rows.
+
+
+**05935a7..74e59fb SHIPPED — 0.2.37, published and registry-proven.** PR #419 merged to main at
+`74e59fb` with all four CI jobs green at the head (coverage gate, preset-rows probe, env parity,
+ten-leg acceptance); annotated tag `0.2.37` at the merge commit; release run `44444746764` success.
+Registry proof: `latest` = **0.2.37**; unpacked tarball answers manifest `0.2.37` AND bundled
+`PLUGIN_VERSION = '0.2.37'` (the stale-tree class of 0.2.20 stays gated); provenance attestation
+present (`slsa.dev/provenance/v1`). Candidate evidence unchanged from the record above: 11-leg replay
+chain green locally at the release head (the one `plans` boot that died on `EADDRINUSE` was a
+transient port collision, named and re-run green), `corpus:stamp` with `promptAnchor` unchanged.
+
+## 2026-11-19 — 0.2.38: compaction composes on real hosts, and the corpus grew eyes (twelve legs)
+
+**Candidate = staging at `fd7e7e6`.** The range `0.2.37..staging` is exactly the C3 closure, two
+issues told as one story:
+
+- **#421** (PR #422): `composeChapters` span participation is INTERSECTION-and-CLIP — the old
+  `inSpan` wholesale-excluded signatures clipped by earlier relief passes, which made multi-chapter
+  composition structurally unreachable under live incremental traffic (measured: six passes, six
+  single chapters, zero reason lines). Semantics written: unfinished means UNSIGNED (signatures
+  exist only at turn/end). Red rows from the first live record's exact payload, committed as fixture;
+  the long-standing completeness row rewritten as a named contract change.
+- **#420** (PRs #423+#422): the compose leg — doc-grounded discussion, forced crossing after two
+  stored signatures, verdict from durable bytes (per-pass SET truth, topic-seam alignment,
+  coverage, health). Live record five passed it all on the hosted remote; the SAME tape replayed
+  model-free green (48.3s, zero misses — #141 did not bite); it is tracked corpus with PROVENANCE
+  and joins the replay chain. Honest count: `chain-replay.sh` runs TWELVE legs (suite…reload +
+  compose; heavy excluded by class), `test:e2e` names thirteen projects with heavy loud-skipping
+  under replay — the CI job title's \"ten\" predates this and is prose, not a gate. Geometry
+  lessons (0.6→0.7, 40→20 lines, stale-lib build verification) recorded in the leg's own
+  authorities.
+
+**Ship gate (deterministic class, at the candidate before stamp):** coverage gate + full
+unit+integration ledger (baseline shape: 5 credential-gated `live:` + 1 todo), the FULL replay chain
+locally (every leg under its own boot, compose included), then `npm run corpus:stamp` on green —
+`promptAnchor` must read unchanged (`b40304ee3e35a94f`).
+
+**Open after this cut:** C3 CLOSED (both classes) — the open list loses its oldest verification
+debt · #349 remainder (browser rig) · #372 (unbuilt) · #397 (contract.md § Lineage decision) ·
+#411 residual (record-time regeneration pattern) · host option-(d) todo row · five
+credential-gated TreeDX live rows.

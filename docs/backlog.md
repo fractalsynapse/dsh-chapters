@@ -1,8 +1,10 @@
 # Open items — 2026-11-17 (host 0.2.0-rc.2)
 
-- **0.2.34 SHIPPED (2026-11-17, main 2eee0b3, tag 0.2.34; tarball + provenance verified — see project-state). Follow-waves for 0.2.35 (2026-11-17 audit):** the composed checkpoint has never been OBSERVED on a live
-  host — the heavy leg's first sight, tracked as `docs/verify.md` C3, in the same family as #143's
-  convergence bound. The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents` — the host says
+- **0.2.34 SHIPPED (2026-11-17, main 2eee0b3, tag 0.2.34; tarball + provenance verified — see project-state). Follow-waves for 0.2.35 (2026-11-17 audit), C3 RETIRED 2026-11-19:** the composed checkpoint has now
+  been OBSERVED on a live host AND pinned as replay corpus — the compose leg (#420, `--project=compose`)
+  crosses pressure across two stored signatures and verifies >=2-chapter composition and topic-seam
+  alignment from durable bytes, model-free (#421 fixed `inSpan`; full account on the verify row and the
+  tape's PROVENANCE). #143's convergence-bound family remains covered by the heavy live row. The deprecated live reads (`eventAt`/`snapshotEvents`/`ownEvents` — the host says
   "new calls are prohibited") are inventoried by `tests/unit/host-composer-shape.test.ts`; the migration
   to `deriveMessages`/`requestHeader` (live) and `SessionQuery.readSession` (durable) is the first gate to
   re-run before any host bump. #397 (`meta.parentSession` for continuation children) awaits a maintainer
