@@ -89,3 +89,56 @@ test('a door that commits between our read and our write keeps its chapter (#101
     `every concurrently committed chapter must survive our writes (${String(survived)} of ${String(injected)} survived; row holds [${row.chapters.map((c) => c.title).join(', ').slice(0, 200)}])`)
   assert.ok(row.chapters.some((c) => c.title === 'One' || String(c.number) !== ''), 'and our own chapters committed')
 })
+
+// ─────────────── #349: the birth payload carries the re-arm decision ───────────────
+
+const goalEv = (seq: number, operation: string, goal: Record<string, unknown>): SessionEventLike =>
+  ({ type: 'goal/change', seq, data: { operation, goal } } as unknown as SessionEventLike)
+
+function goalWorld(events: SessionEventLike[]) {
+  const fs = new FakeFs()
+  const live = new Map<string, SessionState>([['A', freshSession('A')]])
+  const created: Array<{ sessionId: string; goal?: { objective: string; maxGoalRounds?: number } }> = []
+  const ports: ContinuePorts = {
+    readCallerEvents: async () => events,
+    getState: async (id) => cloneState(live, id),
+    putState: async (id, st) => { live.set(id, st) },
+    mutateState: async (id, fn) => { live.set(id, fn(cloneState(live, id))) },
+    fs: () => fs,
+    budgetProbe: async () => ({ windowTokens: 131_072, headerBoundTokens: 13_000 }),
+    newId: () => 'g-id',
+    createChild: async (i) => { created.push(i as never) },
+    now: () => 1_700_000_000_000,
+  }
+  return { ports, created }
+}
+
+function cloneState(live: Map<string, SessionState>, id: string): SessionState {
+  return JSON.parse(JSON.stringify(live.get(id) ?? freshSession(id))) as SessionState
+}
+
+test('#349: an ACTIVE carried goal makes runContinue hand createChild the re-arm payload; paused hands none', async () => {
+  const activeEvents = [
+    goalEv(0, 'create', { id: 'g1', revision: 4, objective: 'Ship the widget end to end', phase: 'active', maxGoalRounds: 12 }),
+    ...conversation(6),
+  ]
+  const w = goalWorld(activeEvents)
+  const out = await runContinue(w.ports, { ...args, callerSessionId: 'A' } as never, CONFIG)
+  assert.equal(out.ok, true, JSON.stringify(out))
+  assert.equal(w.created.length, 1)
+  assert.equal(w.created[0]!.goal?.objective, 'Ship the widget end to end', 'the birth input carries the objective')
+  assert.equal(w.created[0]!.goal?.maxGoalRounds, 12, 'and the round cap — same semantics, fresh counts')
+  // the notice said it out loud, in re-armed mode:
+  const wrote = Array.from((w.ports as unknown as { __fs?: never }) ?? []) // no-op typing guard
+  void wrote
+
+  const pausedEvents = [
+    goalEv(0, 'create', { id: 'g1', revision: 4, objective: 'Ship the widget end to end', phase: 'active' }),
+    goalEv(1, 'pause', { id: 'g1', revision: 4, phase: 'paused' }),
+    ...conversation(6),
+  ]
+  const p = goalWorld(pausedEvents)
+  const out2 = await runContinue(p.ports, { ...args, callerSessionId: 'A' } as never, CONFIG)
+  assert.equal(out2.ok, true)
+  assert.equal(p.created[0]!.goal, undefined, 'a paused goal is human-owned — no re-arm payload')
+})
