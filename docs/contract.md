@@ -374,9 +374,16 @@ symptom. Recorded here so the omission is closed rather than inherited, and note
 schemas**.
 
 - `isSeeded` means "contains a fork-inherited event prefix"; our one-event synthetic seed is not that.
-- `parentSession` is documented as *seed lineage*. Setting it to fake a relationship would be a misuse.
-- Therefore **our storage-domain registry is the sole authority on ancestry**, and the web UI's branch
-  graph will show our child as an unrelated root. A chain/manifest view is this plugin's job.
+- `parentSession` is documented upstream as *seed lineage*. **DSH amendment (maintainer decision
+  2026-11-19, #397): our birth seam sets it to the TRUE parent on every child it creates** —
+  `chapters_continue`/`chapters_fork` name the caller session; `chapters-restore` names the TARGET it
+  was born from. The relationship is real, so naming it in the kernel header is durable lineage the
+  child can read without our registry. The prohibition stands for every other writer: never claim a
+  parent that did not birth you.
+- The storage-domain registry REMAINS the ancestry authority for children born before the amendment
+  (they carry no header field), and the seventh archive moment reads header-first with registry
+  fallback (`shouldForceChildArchive`). A header-parented child may appear differently in the web
+  UI's branch graph (host-scope, unmeasured here); the chain/manifest view stays this plugin's job.
 - The header being composed per request from the preset plus plugin contributions is *why* invariant 3
   holds, and why cache validity is per-process-generation: a restart or config edit recomposes it for
   everyone.
