@@ -225,3 +225,20 @@ test('#411: the distill loop classifies through the tested guard — twice, and 
   const r = spawnSync('bash', ['-n', join(process.cwd(), 'scripts/distill-tapes.sh')], { encoding: 'utf8' })
   assert.equal(r.status, 0, `bash -n scripts/distill-tapes.sh: ${r.stderr}`)
 })
+
+// #429: the first-pull retry is a WIRING fact — the predicate alone does not fix a starved mount.
+// The two comments that promised this mechanism with no code behind it shipped a load-dependent
+// flake for weeks (chain-context failures, solo passes); this pin is what makes prose and product
+// the same claim, measured at every bump.
+test('#429: the dock wires the first-pull retry — one predicate, one call site, loud ceiling', () => {
+  const bar = readFileSync(new URL('../../src/client/prompt-bar.ts', import.meta.url), 'utf8')
+  const dock = readFileSync(new URL('../../src/client/prompt-dock.ts', import.meta.url), 'utf8')
+  assert.ok(bar.includes('export function firstPullRetryDue'), 'the ONE predicate lives in prompt-bar')
+  const dockCode = dock.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')  // CODE-shaped: comment mentions are not call sites (the #81 guard's own discipline)
+  assert.equal(dockCode.split('firstPullRetryDue(').length - 1, 1, 'called at exactly ONE site in the dock code')
+  assert.ok(/import \{[^}]*firstPullRetryDue[^}]*\} from '\.\/prompt-bar\.ts'/s.test(dock), 'imported from prompt-bar — the single decision source')
+  assert.ok(dock.includes('retryFirstPull'), 'the retry loop exists as code')
+  assert.ok(dock.includes('.then(() => { retryFirstPull() })'), 'the retry begins only after the mount tick has had its chance — the loop never races the discovery it is retrying')
+  assert.ok(dock.includes('retry ceiling'), 'giving up is LOUD (#54: a detected failure that is not delivered is the same bug)')
+  assert.ok(dock.includes('clearTimeout(firstPullTimer)'), 'the retry timer is reclaimed on unmount — a dock that navigates away must not keep pulling')
+})

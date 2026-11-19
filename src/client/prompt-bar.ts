@@ -178,6 +178,28 @@ function analyzingBeltMs(streak: number | undefined): number {
   return n === 0 ? ACTIVE_POLL_MS : n === 1 ? 20_000 : n === 2 ? 40_000 : 60_000
 }
 
+/** #429: attempts the mount may make before it gives up LOUDLY. Sized to the measured window:
+ * loaded boots hydrate the composer's exec verb AFTER the dock's first effect (the two chain-context
+ * failures vs 12 solo passes at the same head); 8x2s outlasts that without approaching any ceiling
+ * that matters, and each attempt is COST-FREE until exec exists (refresh() still early-returns with
+ * zero wire nodes) — the paid pulls begin only when the wire can answer. */
+export const FIRST_PULL_RETRY_CEILING = 8
+export const FIRST_PULL_RETRY_SPACING_MS = 2_000
+
+/**
+ * THE ONE first-pull retry predicate (#429). The dock's mount pull no-ops silently while the host
+ * has not yet handed `exec` — before #429 the retry lived only in two comments (the ceiling promise
+ * above execWithTimeout, and 'retry until SOMETHING answers' in the mount effect) with no code
+ * behind it, which is how the revival leg's mount pull could starve under boot load while solo
+ * boots passed 10/10. The loop is due ONLY while no reply has arrived — any parseable answer, an
+ * honest `off` included (#304's seam claim is THAT the wire answered, never that the feature is
+ * on), the feature plane is present, and the ceiling has room.
+ */
+export function firstPullRetryDue(c: { answered: boolean, featureAbsent: boolean, attempts: number }): boolean {
+  if (c.answered || c.featureAbsent) return false
+  return c.attempts < FIRST_PULL_RETRY_CEILING
+}
+
 export function pollSpacingFor(s: { status: PromptBarStatus; autorun: PromptBarAutorun; running: boolean; hidden: boolean; edges: boolean; turnEndPulse?: boolean; analyzingStreak?: number | undefined }): number | null {
   // #203: where the host publishes the running signal, the idle EDGE is the schedule — a turn ending
   // pulls, the bar's own actions pull, and a stable disarmed bar keeps NO clock at all, because a
