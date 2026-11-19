@@ -72,8 +72,8 @@ export default defineConfig({
     { name: 'heavy', env: rigEnv('heavy'), testMatch: ['**/oversized-turn.spec.ts'] },
     // #420 compose: the C3 vehicle — discussion across real turn boundaries that crosses pressure
     // mid-read-turn, so relief finds STORED signatures and must COMPOSE (>=2 chapters aligned at a
-    // topic seam, asserted from durable bytes; see composed-discussion.spec.ts). Promoted into the
-    // replay chain only when its tape replays model-free green (#411 gate).
+    // topic seam, asserted from durable bytes; see composed-discussion.spec.ts). Chain member since
+    // 2026-11-19: its tape replays model-free green — 1 passed, 48.3s, zero misses (#411 gate).
     { name: 'compose', env: rigEnv('compose'), testMatch: ['**/composed-discussion.spec.ts'] },
     { name: 'arrival', env: rigEnv('arrival'), testMatch: ['**/artifact-arrival.spec.ts'] },
     // fanout: the two-subagent research journey gets its OWN boot and tape
