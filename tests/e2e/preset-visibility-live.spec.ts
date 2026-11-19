@@ -131,9 +131,10 @@ test.describe('door buttons follow the composed preset (#372)', () => {
     await expect(page.getByRole('button', { name: 'Standard mode', exact: true }).first(),
       'the staged preset applied to the current draft').toBeVisible({ timeout: 20_000 })
 
-    // type into the CURRENT draft — no New-session click, which would discard the staged composition
-    await page.locator('textarea').first().fill('Reply with exactly the single word: STANDARDSIDE. Do not read or run anything.')
-    await page.keyboard.press('Enter')
+    // type into the CURRENT draft via the rig's own typeComposer (the composer is a contenteditable
+    // DIV, not a textarea — a fill() waits on a target that cannot exist, which is exactly how run
+    // 3 spent its 40-minute budget). No New-session click: it would discard the staged composition.
+    await typeComposer(page, 'Reply with exactly the single word: STANDARDSIDE. Do not read or run anything.')
     // the draft commits under a fresh id; `dsh.sessions.current` is the app's own authority (the key
     // the #54 switch verifier reads). The standard session must be neither '' nor the chapters sid.
     const stdSid = await pollFor(async () => {
