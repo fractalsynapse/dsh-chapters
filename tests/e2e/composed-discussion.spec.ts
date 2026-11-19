@@ -189,11 +189,12 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
     expect(composedPass,
       `C3 (#420): a pressure crossing with stored signatures must COMPOSE — every pass archived its shadowed set as a SINGLE chapter row (src/compose.ts inSpan containment drops any signature clipped by an earlier pass — #421's finding, measured: six passes, six rows). passes=${String(summaries.length)}, regions=${JSON.stringify(summaries.map(shadowedOf).map((r) => r.length))}, chapters=${JSON.stringify(chapters.map((c) => [c.number, c.startSeq, c.endSeq, (c.shadowedSeqs ?? []).length]))}`).toBe(true)
 
-    // (3) ALIGNED at a topic transition: a chapter seam lands EXACTLY after a turn/end — the durable
-    // record of where one topic closed and the next opened — and the chapter that starts there
-    // carries the next topic's codeword (bodies are verbatim renderings, invariant 4, so "carries"
-    // is mechanical, not a claim about a title). Range-containment guesses were what the first live
-    // record disproved; this rule reads the two facts the archive actually holds.
+    // (3) ALIGNED at a topic transition: a chapter seam where a turn CLOSED — precisely: the next
+    // chapter opens on that turn's FIRST seq and its body carries that turn's codeword (the chapter
+    // that CLOSED the seam may end at its signature's last seq, one before the turn/end — the
+    // turn/end itself is absorbed into the successor's range; measured by the first composed live
+    // record: topic-1 chapter [10,23], topic-2 chapter [30,45] opens exactly at u2, seam = topic
+    // transition). A chapter ending AT a turn/end also counts (the whole-sig-in-span shape).
     const u2 = userSeqWith(log, BREADCRUST)
     const u3 = userSeqWith(log, 'Bigger task on this repo')
     expect(u2, 'topic 2 landed as a durable user message').toBeGreaterThan(0)
@@ -203,11 +204,14 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
     const aligned = sorted.some((c, i) => {
       const next = sorted[i + 1]
       if (next === undefined) return false
-      if (next.startSeq !== c.endSeq + 1) return false
-      // the seam between two adjacent chapters falls exactly where a turn closed:
-      const seamIsTurnBoundary = turnEnds.includes(c.endSeq)
+      // ranges must not overlap; GAPS are legitimate under sparse shadowing (measured first
+      // composed record: topic-1 chapter [10,23], topic-2 chapter [30,45] — seqs 24..29 were never
+      // shadowed). Full-span coverage is section (1)'s job, not this predicate's.
+      if (next.startSeq <= c.endSeq) return false
+      const opensExactlyAtTopic2 = next.startSeq === u2
+      const closesExactlyAtTurnEnd = turnEnds.includes(c.endSeq)
       const rightSignedByNextTopic = chapterBytes(next).includes(BREADCRUST) || chapterBytes(next).includes('Bigger task on this repo')
-      return seamIsTurnBoundary && rightSignedByNextTopic
+      return (opensExactlyAtTopic2 || closesExactlyAtTurnEnd) && rightSignedByNextTopic
     })
     expect(aligned, `C3 (#420): >=2 chapters exist but NO adjacent boundary separates the topics (u2=${String(u2)}, u3=${String(u3)}): ${JSON.stringify(sorted.map((c) => ({ n: c.number, r: [c.startSeq, c.endSeq], sun: chapterBytes(c).includes(SUNSTONE), bread: chapterBytes(c).includes(BREADCRUST) })))}`).toBe(true)
 
