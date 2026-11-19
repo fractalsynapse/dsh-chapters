@@ -1,0 +1,288 @@
+{
+ "source": "live compose record 2026-11-19, port 41745, session session-8a5c3c6e-3605-4eeb-a3f6-13ec8d252ee1; pass 4 (summary@77)",
+ "span": {
+  "lo": 25,
+  "hi": 66
+ },
+ "shadowed": [
+  60,
+  25,
+  33,
+  34,
+  36,
+  38,
+  49,
+  51,
+  65,
+  66
+ ],
+ "collectionsAtDecisionTime": [
+  {
+   "seqs": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28
+   ],
+   "paths": [
+    "docs/architecture.md"
+   ],
+   "commands": [],
+   "terms": [
+    "architecture",
+    "docs",
+    "log",
+    "session",
+    "read",
+    "context",
+    "durable",
+    "opening"
+   ],
+   "size": 1129,
+   "by": "deterministic",
+   "codegraphSymbols": []
+  },
+  {
+   "seqs": [
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47,
+    48,
+    49,
+    50,
+    51,
+    52,
+    53,
+    54
+   ],
+   "paths": [
+    "docs/development.md"
+   ],
+   "commands": [],
+   "terms": [
+    "development",
+    "docs",
+    "host",
+    "read",
+    "breadcrust",
+    "dsh",
+    "offset",
+    "port"
+   ],
+   "size": 1721,
+   "by": "deterministic",
+   "codegraphSymbols": []
+  }
+ ],
+ "events": [
+  {
+   "seq": 25,
+   "type": "assistant/message"
+  },
+  {
+   "seq": 26,
+   "type": "step/end"
+  },
+  {
+   "seq": 27,
+   "type": "workspace/changes"
+  },
+  {
+   "seq": 28,
+   "type": "turn/end"
+  },
+  {
+   "seq": 29,
+   "type": "agent/inbox/spliced"
+  },
+  {
+   "seq": 30,
+   "type": "turn/start"
+  },
+  {
+   "seq": 31,
+   "type": "agent/inbox/spliced"
+  },
+  {
+   "seq": 32,
+   "type": "step/start"
+  },
+  {
+   "seq": 33,
+   "type": "user/message"
+  },
+  {
+   "seq": 34,
+   "type": "assistant/message"
+  },
+  {
+   "seq": 35,
+   "type": "tool/call"
+  },
+  {
+   "seq": 36,
+   "type": "tool/result"
+  },
+  {
+   "seq": 37,
+   "type": "tool/call"
+  },
+  {
+   "seq": 38,
+   "type": "tool/result"
+  },
+  {
+   "seq": 39,
+   "type": "step/end"
+  },
+  {
+   "seq": 40,
+   "type": "compaction/start"
+  },
+  {
+   "seq": 41,
+   "type": "compaction/summary"
+  },
+  {
+   "seq": 42,
+   "type": "user/message"
+  },
+  {
+   "seq": 43,
+   "type": "compaction/end"
+  },
+  {
+   "seq": 44,
+   "type": "compaction/start"
+  },
+  {
+   "seq": 45,
+   "type": "compaction/summary"
+  },
+  {
+   "seq": 46,
+   "type": "user/message"
+  },
+  {
+   "seq": 47,
+   "type": "compaction/end"
+  },
+  {
+   "seq": 48,
+   "type": "step/start"
+  },
+  {
+   "seq": 49,
+   "type": "user/message"
+  },
+  {
+   "seq": 50,
+   "type": "request/header"
+  },
+  {
+   "seq": 51,
+   "type": "assistant/message"
+  },
+  {
+   "seq": 52,
+   "type": "step/end"
+  },
+  {
+   "seq": 53,
+   "type": "workspace/changes"
+  },
+  {
+   "seq": 54,
+   "type": "turn/end"
+  },
+  {
+   "seq": 55,
+   "type": "agent/inbox/spliced"
+  },
+  {
+   "seq": 56,
+   "type": "turn/start"
+  },
+  {
+   "seq": 57,
+   "type": "agent/inbox/spliced"
+  },
+  {
+   "seq": 58,
+   "type": "compaction/start"
+  },
+  {
+   "seq": 59,
+   "type": "compaction/summary"
+  },
+  {
+   "seq": 60,
+   "type": "user/message"
+  },
+  {
+   "seq": 61,
+   "type": "compaction/end"
+  },
+  {
+   "seq": 62,
+   "type": "compaction/start"
+  },
+  {
+   "seq": 63,
+   "type": "compaction/end"
+  },
+  {
+   "seq": 64,
+   "type": "step/start"
+  },
+  {
+   "seq": 65,
+   "type": "user/message"
+  },
+  {
+   "seq": 66,
+   "type": "user/message"
+  }
+ ]
+}
