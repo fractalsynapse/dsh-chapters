@@ -481,13 +481,13 @@ The intended observable contract:
   `turn/end` seq, chapter bodies carrying exactly their turn's codewords (bodies are rendered
   verbatim from the log by invariant 4, so mis-splitting is visible mechanically), the coverage
   invariant holding, and the session healthy one small turn later.
-- **The tape is the point.** The recording run's tape must then replay model-free with the same
-  durable assertions — that replay is the first corpus asset that pins the composed path against
-  future code changes (the maintainer's directive 2026-11-19: code changes must not affect the tape;
-  a code change that breaks composition must now turn this leg red). If replay cannot be made stable
-  because of #141's auto-continuation branch-walk, the leg stays live-class with the named exclusion
-  in the e2e-pins coverage gate, and the tape survives as the one-shot witness — either outcome is
-  recorded, never healed into silence.
+- **The tape is the point — and it is now corpus.** Recorded live on the fixed composer (2026-11-19,
+  `1 passed`, composed+aligned from durable bytes) and **replayed model-free green: `1 passed`,
+  48.3 s, zero MISSes** — #141's branch-walk did not bite; the byte-exact tape reproduces the same
+  local relief decisions. The leg is a chain member (`test:e2e` + `chain-replay.sh`), the tape is
+  tracked with its PROVENANCE, and a future code change that breaks composition turns this leg red in
+  seconds — the maintainer's directive, satisfied: code changes do not affect the tape; a code change
+  that breaks the composed path affects the verdict.
 - Regime: own boot, own port (rig-pins single authority), translating-proxy recording exactly like
   the #416 recipe (`MODE=record E2E_PROVIDER=harness`), identity guard proving the remote
   lists-and-answers-as-itself before a byte is recorded.
