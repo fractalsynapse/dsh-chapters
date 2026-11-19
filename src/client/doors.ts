@@ -22,6 +22,8 @@
  * `remote.commands` must ALSO appear in inject — the federation gates each
  * sub-service individually (the live feedback package declares
  * remote.messageFeedback beside remote for exactly this reason). */
+import { CHAPTERS_PRESET_ID } from '../preset-id.ts'
+
 export interface ClientRemote {
   commands?: {
     execute(sessionId: string, line: string, attachments: readonly unknown[]): Promise<{
@@ -41,6 +43,33 @@ export interface ClientSessions {
 export interface DoorResult {
   ok: boolean
   message: string
+}
+
+/**
+ * #372 — the host's OWN per-session preset fact. The shape is measured, not invented:
+ * `dsh-client-ui-agent-preset/lib/client.js` resolves its label through
+ * `session?.projectionValues?.agentPreset`, and `dsh-api-session-controller` documents the field as
+ * "current host-computed projection values retained by the object layer". We read the SAME row the
+ * list store already gives us (rosterIds' shape) — no inference, no hardcoded preset name.
+ * null means the fact is NOT READABLE — which is UNKNOWN, never "standard" (#77's roster
+ * discipline applied to the preset: absence invented from unreadability is the same lie).
+ */
+export function presetOfSession(sessions: ClientSessions | undefined, sessionId: string): string | null {
+  try {
+    const snap = (sessions as unknown as { list?: { getSnapshot?: () => unknown } } | undefined)?.list?.getSnapshot?.()
+    const row = (snap as { byId?: Record<string, { projectionValues?: Record<string, unknown> }> } | undefined)?.byId?.[sessionId]
+    const value = row?.projectionValues?.agentPreset
+    return typeof value === 'string' && value !== '' ? value : null
+  } catch { return null }
+}
+
+/**
+ * The ONE visibility predicate for the realm-scoped door rows (#372). Unknown keeps the rows —
+ * the click path answers with the named refusal, so fail-open is never fail-silent; a RESOLVED
+ * foreign preset hides them, because those commands genuinely do not exist in that session.
+ */
+export function doorActionsVisibleFor(preset: string | null): boolean {
+  return preset === null || preset === CHAPTERS_PRESET_ID
 }
 
 /**
@@ -341,12 +370,22 @@ export function makeDoorRunner(
   return async function run(sessionId: string, anchorSeq?: number | null): Promise<DoorResult> {
     try {
       if (remote.commands?.execute === undefined) return { ok: false, message: 'commands remote unavailable' }
+      // #372: the gate runs BEFORE any wire call. A realm-scoped command asked of a session whose
+      // preset RESOLVES to something else cannot resolve — answering with the host fact the dock
+      // already reads is honest; firing into a guaranteed mystery is the dead button this issue was
+      // filed for. UNKNOWN preset falls through: the named failure below still covers the wire.
+      {
+        const preset = presetOfSession(sessions, sessionId)
+        if (preset !== null && !doorActionsVisibleFor(preset)) {
+          return { ok: false, message: `Chapters ${door.noun} needs the chapters preset realm — this session composes "${preset}". Switch this session's preset or run the door from a chapters session.`.slice(0, 140) }
+        }
+      }
       // #221: the clicked message's seq rides the command as its first token — the server anchors
       // the archive at the last completed turn AT OR BEFORE it. Absent ⇒ today's behavior (the end
       // of the session), byte-identical to the pre-#221 line.
       const line = typeof anchorSeq === 'number' && Number.isFinite(anchorSeq) ? `${door.command} ${String(Math.trunc(anchorSeq))}` : door.command
       const res = await remote.commands.execute(sessionId, line, [])
-      if (res.ok !== true) return { ok: false, message: (res.error?.message ?? `the ${door.noun} call failed`).slice(0, 90) }
+      if (res.ok !== true) return { ok: false, message: (res.error?.message ?? `the ${door.noun} failed — its command lives in the chapters preset realm`).slice(0, 90) }
       const result = res.value?.result
       const text = typeof result?.text === 'string' ? result.text : ''
       if (result?.kind !== 'success') return { ok: false, message: (text || `the ${door.noun} was refused — see the command result`).slice(0, 90) }

@@ -197,7 +197,7 @@ export function buildChaptersTools(
       },
       newId: () => randomUUID(),
       diagnostic: (where, message, error) => { diagnosticWarn(ctx.logger, where, message, error) },
-      createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title }) => {
+      createChild: async ({ sessionId, noticeEvent, modeEvents, presetId: mountPreset, title, parentSessionId, goal }) => {
         const callerOptions = caller.options
         // The seed is contiguous from seq 0 and holds only STATE events this plugin authors
         // for the child (plan mode). Invariant 2 holds — nothing from the parent's log is
@@ -216,7 +216,10 @@ export function buildChaptersTools(
           sessionId,
           seed: [...modeEvents],
           inheritedEventCount: 0,
-          meta: { cwd, isSeeded: false, ...(mountPreset !== undefined && mountPreset !== null ? { agentPreset: mountPreset } : {}) },
+          // #397: the kernel header names the TRUE birth parent (maintainer amendment to contract
+          // § Lineage: setting it for a child we actually birthed is durable lineage, not a fake
+          // relationship; the never-fake prohibition stands for writers the seam does not own).
+          meta: { cwd, isSeeded: false, parentSession: parentSessionId, ...(mountPreset !== undefined && mountPreset !== null ? { agentPreset: mountPreset } : {}) },
           ...(callerOptions.provider !== undefined ? { agentOptions: callerOptions } : {}),
           setup: async (agentCtx: unknown) => {
             const presets = ctx.get?.('agentPresets') as { mount?: (c: unknown, id: string) => Promise<unknown> } | undefined
@@ -323,7 +326,42 @@ export function buildChaptersTools(
           // has chapters cited by its own TOC-less state; refuse loudly, name the repair.
           throw new Error(`birth TOC authoring failed for ${sessionId}: ${String((error as Error)?.message ?? error)}`)
         }
-        return { warnings: attach.warnings }
+        // #349 (maintainer decision 2026-11-19): the carried ACTIVE goal is re-created on the child
+        // through the host's goal SERVICE — the direct-human gate lives on the create_goal TOOL, and
+        // the decision authorized exactly this service-level step. Scope rules the plane obeys: the
+        // core decided (goal is absent for paused/complete/config-off), the service is called AFTER
+        // a settled birth, and every failure is a WARNING naming /goal resume — never a rollback,
+        // never silence (the #54 law: a detected failure that isn't delivered is the same bug).
+        const birthWarnings: string[] = [...(attach.warnings ?? [])]
+        if (goal !== undefined) {
+          // THE SERVICE RAIL, measured twice: the pinned host's cordis THROWS ('cannot get property
+          // "goals" without inject') on a bare `ctx.goals` PROPERTY read — run4's sink proved it, and
+          // the throw escaping this block turned an authorized carry into a 'child creation refused'
+          // line for an already-born child. The repo's only proven accessor is ctx.get('goals')
+          // (index.ts:669, the prompt plane's disarm/read rails) — and NOTHING in this block may
+          // escape: the documented promise is warning-never-refusal, so resolution, the agent fetch
+          // (get-after-release, the r3 law), and the create call all sit inside one try.
+          try {
+            const goalsSvc = (typeof ctx.get === 'function' ? ctx.get('goals') : undefined) as
+              { create?: (agent: unknown, request: Record<string, unknown>) => unknown } | undefined
+            if (goalsSvc?.create === undefined) {
+              birthWarnings.push('goal re-arm skipped: no goals service reachable on this plane — the notice still carries the objective; a human can /goal resume in the child')
+              diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm skipped — goals service absent', undefined)
+            } else {
+              const agent = (ctx.agents as unknown as { get?: (id: string) => unknown }).get?.(sessionId)
+              if (agent === undefined) {
+                birthWarnings.push('goal re-arm skipped: the fresh child agent is not reachable for the service call yet — a human can /goal resume in the child')
+                diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm skipped — agent not live for the service yet', undefined)
+              } else {
+                goalsSvc.create(agent, { objective: goal.objective, ...(goal.maxGoalRounds !== undefined ? { maxGoalRounds: goal.maxGoalRounds } : {}) })
+              }
+            }
+          } catch (error) {
+            birthWarnings.push(`goal re-arm refused: ${String((error as Error)?.message ?? error)} — the notice carries the objective; a human can /goal resume in the child`)
+            diagnosticWarn(ctx.logger, 'door:continue', 'goal re-arm refused by the host service', error)
+          }
+        }
+        return { warnings: birthWarnings }
       },
       now: () => Date.now(),
     }

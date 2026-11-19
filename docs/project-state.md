@@ -1169,3 +1169,42 @@ locally (every leg under its own boot, compose included), then `npm run corpus:s
 debt · #349 remainder (browser rig) · #372 (unbuilt) · #397 (contract.md § Lineage decision) ·
 #411 residual (record-time regeneration pattern) · host option-(d) todo row · five
 credential-gated TreeDX live rows.
+
+
+**fd7e7e6..69729f7 SHIPPED — 0.2.38, published and registry-proven.** PR #424 merged to main at
+`69729f7`, all four CI jobs green at the head (coverage gate, preset-rows probe, env parity, and the
+acceptance chain now replaying compose on the runner); annotated tag `0.2.38` at the merge commit;
+release run `44479863717` success. Registry proof: `latest` = **0.2.38**; unpacked tarball answers
+manifest `0.2.38` AND bundled `PLUGIN_VERSION = '0.2.38'`; provenance attestation present
+(`slsa.dev/provenance/v1`). Candidate evidence per the record above: twelve-leg replay chain green
+locally at the release head (the one `enrich` boot that died on `EADDRINUSE :41734` was the transient
+teardown race, port verified free, rerun fully green), stamp `lib=a2d63947fa0e8da7` moved only on the
+version literal with `promptAnchor` unchanged — and the stamp's own first commit message got amended
+before merge for saying "lib unchanged" when the honest reading is "lib changed ONLY by the version
+string": the amend is disclosed here because the bytes that moved are exactly what the release
+verifies.
+
+C3 is retired. The oldest open verification debt in this file's history became a replay leg.
+
+## 2026-11-19 — 0.2.39: the release that carried the objective across
+
+**Candidate = staging at `70fb605`.** The range `0.2.38..staging` is one arc in three issues: **#397**
+(durable birth lineage in the kernel header, contract amended first — merged `PR #425`), **#372**
+(the dock reads the host's preset projection; resolved-foreign hides the realm-scoped buttons, unknown
+refuses by name — merged `PR #426` after a six-run browser-measurement chain, one wrong premise killed
+per run), **#349** (the maintainer authority decision implemented: ACTIVE carried goals re-arm at birth
+through the goal service, one predicate, warning-never-refusal, `goalRearmOnCarry`; five-run live chain
+including two stale-lib lessons and the cordis inject-gate discovery — merged `PR #427`). C3's
+successor facts are now regression corpus: the compose leg replays the composed path model-free (0.2.38)
+and the goal/lineage claims carry live-host witnesses in their legs.
+
+**Open-list corrections this cut makes:** #411 was already closed at 0.2.36 (its 'residual' line here
+was stale prose); #349, #372, #397, C3 all now closed/retired. Open after this cut: #349's sibling from
+#138 (an armed goal has no rest state — unchanged) · #372's host-side sibling: the gateway session-list
+shape warning (`attach:gatewayList`, pre-existing, non-fatal, observed while measuring) is NOT yet
+filed — it is recorded here so the next audit does not re-derive it · #349 remainder: none ·
+#397 remainder: none · host option-(d) todo row · five credential-gated TreeDX live rows.
+
+**Ship gate at the candidate before stamp:** full unit+integration ledger baseline shape
+(1,696/1,702 — 5 credential-gated `live:` + 1 todo); typecheck clean; ratchet 58=58; the TWELVE-leg
+replay chain run locally green at this head; `corpus:stamp` on green with `promptAnchor` unchanged.

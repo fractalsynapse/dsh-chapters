@@ -63,7 +63,8 @@ export interface PresetDefinition {
 
 /** The preset identity. `config.id` is DURABLE STATE: every continuation child's log
  *  records it as `agent-preset/selected`, so renaming it orphans those sessions. */
-export const CHAPTERS_PRESET_ID = 'chapters'
+import { CHAPTERS_PRESET_ID } from './preset-id.ts'
+export { CHAPTERS_PRESET_ID } // one id source, client-safe (#372/#353 discipline)
 
 /** Whether a row's module must be probed at all. `cordis:` rows are pseudo-modules the
  *  Loader always provides; our own package is by definition present — its realm row is the
