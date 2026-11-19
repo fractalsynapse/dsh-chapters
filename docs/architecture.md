@@ -567,7 +567,9 @@ not inherit it: `create_goal` requires a direct-human turn, and the child's firs
 `plugin:dsh-chapters`. Before this, the objective stopped driving the work exactly where the plugin's own
 promise begins, and AGENTS' rule to "carry the authorized outcome" was left to the model's prose.
 
-**The rule now: carry the goal as text, and state aloud that it is not armed.** One selector
+**The rule now (maintainer decision 2026-11-19 applied): carry the goal as text, AND re-arm a live goal
+at birth through the goal SERVICE — explicitly, documented, and configurable** (`goalRearmOnCarry`, default
+on; off restores the notice-only wording). One selector
 (`foldGoalFromLog`) folds the parent's durable `goal/change` events — operations `create`, `edit`, `pause`,
 `resume`, `block`, `complete`, `clear`, with `{id, revision, objective, phase, maxGoalRounds, blockedReason}`
 — and one renderer (`renderGoalCarriage`) emits the child's `## Goal (carried from the parent session)`
@@ -590,13 +592,18 @@ Invariants this respects:
 - **`phase` is foldable; `activation` is not.** The host keeps armed/disarmed process-local and the plugin
   reads it from the live service for its own driver decisions, so the notice says who CAN change the driver
   and never claims what the driver currently IS. Recovering armedness from history would be a guess in a
-  record's clothing.
+  record's clothing. THE RE-ARM RESPECTS THIS: the birth step creates a fresh goal (armed by the service's
+  own semantics, revision restarts, round counts start on the child) — it never CLAIMS the parent's
+  activation, and the notice wording is true whether the step succeeds or is refused.
 
-**Deliberately not done, pending a maintainer decision (#349):** the underlying goal *service* has no
-direct-human gate, so the plugin could arm a goal on the child unilaterally. Reaching a seam is not having
-authority to use it; silently routing around a gate because the tool wrapper is the only thing enforcing it
-is the kind of unexamined authority widening this whole release was a study in. If the answer is yes, it
-becomes an explicit, documented, configurable step — not a side effect of the birth path.
+**The decision, recorded (maintainer, 2026-11-19):** the earlier paragraph reserved plugin-authored goal
+creation as a maintainer call; the call is YES, scoped as this section now states — the ONE predicate
+(`goalRearmDecision`) arms exactly ACTIVE, unfinished goals (a paused/blocked goal stays notice-only:
+the human stopped it; a completed/cleared one stays closed), the service is called on the child's live
+handle AFTER a successful birth, and every failure mode is loud: no goals service or a refused create
+lands in the door's warning channel naming `/goal resume` as the human fallback — never a silence, never
+a rollback of the birth. Reaching a seam was not authority to use it; this paragraph is the authority,
+written before the code that cites it.
 
 ## Storage
 
