@@ -15,6 +15,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { attachCreatedChild, type AttachPorts } from '../../src/attach.ts'
 
 const harness = (opts: {
@@ -31,7 +32,11 @@ const harness = (opts: {
 } = {}): { ports: AttachPorts; diagnostics: string[] } => {
   const diagnostics: string[] = []
   const registry = opts.registry === undefined ? undefined : opts.registry
-  const gateway = opts.gateway === undefined ? { list: async () => [{ sessionId: 'ch-1' }] } : opts.gateway
+  // #180 — the DEFAULT gateway fixture is the MEASURED host shape, not an imagined array:
+  // SessionController.list(_request, signal) resolves `SessionListValue = { items: SessionSummary[] }`
+  // (docs/contract.md § The two session LIST surfaces). The old default was a bare array, which is
+  // exactly the fiction that let `attach.ts` ship reading a shape the host never returns.
+  const gateway = opts.gateway === undefined ? { list: async () => ({ items: [{ sessionId: 'ch-1' }] }) } : opts.gateway
   return {
     diagnostics,
     ports: {
@@ -56,7 +61,12 @@ test('happy path: attached AND listed, no warning, no diagnostic', async () => {
   assert.equal(r.attached, true)
   assert.equal(r.listed, true)
   assert.deepEqual(r.warnings, [], 'a success must not emit noise (the fork journey counts archive warnings)')
-  assert.deepEqual(h.diagnostics, [])
+  // #180 acceptance: the verdict itself goes to the SINK on the success path — the whole defect
+  // was that the gateway check could only ever say "could not be verified". A readable
+  // verification says what it verified, with the count.
+  assert.equal(h.diagnostics.length, 1, `expected only the gateway verdict line, got: ${JSON.stringify(h.diagnostics)}`)
+  assert.match(h.diagnostics[0]!, /^attach:gatewayList\|.*listed/)
+  assert.match(h.diagnostics[0]!, /1 sessions/, 'and the verdict carries the session count')
 })
 
 test('a workspaceRegistry service that is ABSENT is said out loud', async () => {
@@ -152,7 +162,7 @@ test('listed by persistence but absent from the gateway list is named as the gat
     registry: { createCanonical: async () => ({ attachSession: () => undefined }) },
     listSessions: async () => [{ header: { id: 'ch-1' } }],
   })
-  const ports = { ...h.ports, sessionController: { list: async () => [{ sessionId: 'parent' }] } } as never
+  const ports = { ...h.ports, sessionController: { list: async () => ({ items: [{ sessionId: 'parent' }] }) } } as never
   const r = await attachCreatedChild(ports)
   assert.equal(r.listed, true, 'persistence really does list it — that claim stays true')
   assert.equal(r.gatewayListed, false, 'and the surface the browser reads says otherwise')
@@ -166,7 +176,7 @@ test('both surfaces agreeing is silent, and no gateway port is an unverified cla
     registry: { createCanonical: async () => ({ attachSession: () => undefined }) },
     listSessions: async () => [{ header: { id: 'ch-1' } }],
   })
-  const both = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => [{ sessionId: 'ch-1' }] } } as never)
+  const both = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => ({ items: [{ sessionId: 'ch-1' }] }) } } as never)
   assert.equal(both.gatewayListed, true)
   assert.deepEqual(both.warnings, [], 'a child both surfaces show is a success, and success is quiet')
 
@@ -201,4 +211,84 @@ test('no sessionController to ask is said out loud — silence here reads as suc
   assert.equal(r.warnings.length, 1, `expected one unverified warning, got: ${JSON.stringify(r.warnings)}`)
   assert.match(r.warnings[0]!, /gateway/i, 'and it names the surface that could not be checked')
   assert.match(r.warnings[0]!, /could not be verified|unverified/i)
+})
+
+/**
+ * #180 — the browser-visibility check has been UNREADABLE on the real host since it shipped,
+ * because `attach.ts` piped `sessionController.list()` into `.map` and the measured gateway
+ * value is the `SessionListValue` **envelope** `{ items: SessionSummary[] }` — a truthy
+ * non-array that `?? []` cannot catch. TypeError into the catch meant every verdict degraded to
+ * "could not be verified". These rows pin the reader to BOTH measured surfaces (docs/contract.md
+ * § The two session LIST surfaces): the result is always a verdict, never an exception.
+ */
+const persistenceOk = () => ({
+  registry: { createCanonical: async () => ({ attachSession: () => undefined }) },
+  listSessions: async () => [{ header: { id: 'ch-1' } }],
+})
+
+test('#180: the measured {items} envelope decides true and false, never throws', async () => {
+  const h = harness(persistenceOk())
+  const yes = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => ({ items: [{ sessionId: 'parent' }, { sessionId: 'ch-1' }] }) } } as never)
+  assert.equal(yes.gatewayListed, true)
+  assert.deepEqual(yes.warnings, [])
+  const no = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => ({ items: [{ sessionId: 'parent' }] }) } } as never)
+  assert.equal(no.gatewayListed, false, 'envelope minus the child is a real NEGATIVE, not an unreadable surface')
+  assert.match(no.warnings.join(' '), /1 sessions/, 'and the count the browser would render is in the words')
+})
+
+test('#180: a bare array is still accepted (defensive — old fixtures, other hosts)', async () => {
+  const h = harness(persistenceOk())
+  const r = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => [{ sessionId: 'ch-1' }] } } as never)
+  assert.equal(r.gatewayListed, true)
+})
+
+test('#180: a non-callable ObservableSnapshot `list` reads through getSnapshot — the client face', async () => {
+  // ISessions.list is `ObservableSnapshot<SessionListState>`: a PROPERTY, not a method.
+  // If the port ever resolves that face, reading it as a callable would repeat the #180 failure
+  // in the other direction; rosterIds() in doors.ts already proves the shape is readable.
+  const h = harness(persistenceOk())
+  const ids = await attachCreatedChild({ ...h.ports, sessionController: { list: { getSnapshot: () => ({ ids: ['parent', 'ch-1'] }) } } } as never)
+  assert.equal(ids.gatewayListed, true, 'ids-list form')
+  const byId = await attachCreatedChild({ ...h.ports, sessionController: { list: { getSnapshot: () => ({ byId: { parent: {}, 'ch-1': {} } }) } } } as never)
+  assert.equal(byId.gatewayListed, true, 'byId-map form')
+  const miss = await attachCreatedChild({ ...h.ports, sessionController: { list: { getSnapshot: () => ({ ids: ['parent'] }) } } } as never)
+  assert.equal(miss.gatewayListed, false, 'and the negative still decides')
+})
+
+test('#180: list() RETURNING a snapshot object is read too (method and snapshot crossed)', async () => {
+  const h = harness(persistenceOk())
+  const r = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => ({ getSnapshot: () => ({ ids: ['ch-1'] }) }) } } as never)
+  assert.equal(r.gatewayListed, true)
+})
+
+test('#180: an unreadable result is UNVERIFIED with the received shape named — never a TypeError path', async () => {
+  const h = harness(persistenceOk())
+  const junk = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => ({ nonsense: 1 }) } } as never)
+  assert.equal(junk.gatewayListed, undefined, 'unknown shape = unknown verdict, not a false "not listed"')
+  assert.match(junk.warnings.join(' '), /shape|object/, 'and the warning names what WAS received, so the next drift is diagnosable')
+  const str = await attachCreatedChild({ ...h.ports, sessionController: { list: async () => 'not even an object' } } as never)
+  assert.equal(str.gatewayListed, undefined)
+  const noList = await attachCreatedChild({ ...h.ports, sessionController: { other: 1 } } as never)
+  assert.equal(noList.gatewayListed, undefined, 'a service with no list member at all is the loud UNVERIFIED row')
+  assert.match(noList.warnings.join(' '), /gateway/i)
+})
+
+test('#180 drift row: the shapes we read are pinned to the INSTALLED host types', async () => {
+  // The measure-the-shape rule's own remedy (AGENTS): this row fails the day the host package
+  // changes the list surface out from under attach.ts, instead of the sink silently losing the
+  // verdict again for another release. Reads the SAME .d.ts files the rig compiles against.
+  const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8')
+  const svcTypes = read('../../dev/dsh-host-lock/node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/types.d.ts')
+  assert.match(svcTypes, /export interface SessionListValue\s*\{\s*readonly items: readonly SessionSummary\[\]/,
+    'gateway SessionController.list resolves SessionListValue = { items: SessionSummary[] }')
+  assert.match(svcTypes, /export interface SessionSummary\s*\{[^}]*readonly sessionId: SessionId/,
+    'and the summary row keys the session by sessionId')
+  const clientContract = read('../../dev/dsh-host-lock/node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/client/contract/sessions.d.ts')
+  assert.match(clientContract, /readonly list: ObservableSnapshot<SessionListState>/,
+    'the client face exposes list as a NON-CALLABLE ObservableSnapshot property')
+  const clientSvc = read('../../dev/dsh-host-lock/node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/client/sessions/service.d.ts')
+  assert.match(clientSvc, /export interface SessionListState\s*\{[^}]*ids: SessionId\[\][^}]*byId: Record</,
+    'and SessionListState carries ids + byId')
+  const store = read('../../dev/dsh-host-lock/node_modules/@deepseek-ai/dsh-client-store/lib/types/contract.d.ts')
+  assert.match(store, /getSnapshot\(\): T/, 'ObservableSnapshot is read via getSnapshot()')
 })

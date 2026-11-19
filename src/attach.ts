@@ -21,8 +21,10 @@ export interface AttachPorts {
   workspaceRegistry: unknown
   /** the host's `sessionQuery` service; absent ⇒ listing cannot be verified, said out loud */
   sessionQuery: unknown
-  /** the host's `sessionController` service; its `list()` is the surface the BROWSER reads.
-   *  Absent ⇒ the gateway half of the verification is UNVERIFIED, said out loud. */
+  /** the host's `sessionController` service; its `list` is the surface the BROWSER reads.
+   *  Measured (#180, docs/contract.md): the gateway's `list(_request, signal)` resolves the
+   *  `{ items: SessionSummary[] }` envelope; the client face is a NON-callable ObservableSnapshot.
+   *  Absent or unreadable ⇒ the gateway half of the verification is UNVERIFIED, said out loud. */
   sessionController?: unknown
   /** the diagnostics seam (`src/diag.ts`): sink + logger, never throws */
   diagnostic(where: string, message: string, error?: unknown): void
@@ -52,6 +54,33 @@ const shape = (v: unknown): string => {
   if (typeof v !== 'object') return typeof v
   const keys = Object.keys(v as Record<string, unknown>).slice(0, 6)
   return `${Array.isArray(v) ? 'array' : 'object'}{${keys.join(',')}}`
+}
+
+/**
+ * #180 — the ONE reader for whatever a session-list surface hands back. Measured shapes
+ * (docs/contract.md § The two session LIST surfaces): the gateway `SessionController.list`
+ * resolves the `SessionListValue` envelope `{ items: [{ sessionId, … }] }`; the client
+ * `ISessions.list` is a non-callable `ObservableSnapshot` over `{ ids, byId }`. A bare array
+ * stays accepted defensively (old fixtures, other hosts). Anything else is `undefined` =
+ * UNREADABLE, which the caller must report as UNVERIFIED with the shape named — the old
+ * `(await sc.list() ?? []).map(...` threw TypeError on the envelope because `?? []` only
+ * catches null/undefined, and a truthy non-array sailed into `.map`. That silent degradation
+ * cost a whole release of blind browser-visibility verification.
+ */
+export const sessionIdsFromList = (value: unknown): string[] | undefined => {
+  if (Array.isArray(value)) {
+    return value.map((r) => {
+      const row = r as { sessionId?: string, header?: { id?: string }, id?: string } | null | undefined
+      return row?.sessionId ?? row?.header?.id ?? row?.id ?? ''
+    })
+  }
+  if (value === null || typeof value !== 'object') return undefined
+  const o = value as { items?: unknown, ids?: unknown, byId?: unknown, getSnapshot?: unknown }
+  if (Array.isArray(o.items)) return sessionIdsFromList(o.items)
+  if (Array.isArray(o.ids)) return o.ids.map((id) => String(id))
+  if (o.byId !== null && typeof o.byId === 'object') return Object.keys(o.byId as object)
+  if (typeof o.getSnapshot === 'function') return sessionIdsFromList((o.getSnapshot as () => unknown)())
+  return undefined
 }
 
 export async function attachCreatedChild(ports: AttachPorts): Promise<AttachOutcome> {
@@ -118,23 +147,46 @@ export async function attachCreatedChild(ports: AttachPorts): Promise<AttachOutc
       // and on 0.2.0-rc.2 a plugin-created child was present in one and absent from the other
       // (measured: the door's roster note said `MISSING, 1 sessions` while `listSessions`
       // listed it) — so a single boolean would have called that a success.
-      const sc = ports.sessionController as { list?: () => Promise<Array<{ sessionId?: string, header?: { id?: string } }>> } | undefined
-      if (typeof sc?.list !== 'function') {
-        // Silence here is what cost a round of the 0.2.x hunt: "no warning" got read as "the
+      const sc = ports.sessionController as { list?: unknown } | undefined
+      if (sc === null || sc === undefined) {
+        // This silence is what cost a round of the 0.2.x hunt: "no warning" got read as "the
         // gateway lists it". An unverified surface is a STATE and must be delivered as one.
         const reason = `child ${ports.childId} is listed in the durable session corpus, but its presence in the gateway (browser) session list could not be verified — no "sessionController" service to ask`
         ports.diagnostic('attach:gatewayList', reason, `resolved=${shape(ports.sessionController)}`)
         return { attached: true, listed: true, gatewayListed: undefined, warnings: [reason] }
       }
-      let gids: string[] = []
+      let gids: string[] | undefined
+      let unreadable: string | undefined
       try {
-        gids = (await sc.list() ?? []).map((r) => r?.sessionId ?? r?.header?.id ?? '')
+        // #180 — `list` is a METHOD on the gateway service and a non-callable ObservableSnapshot
+        // PROPERTY on the client face; both are measured shapes (docs/contract.md). Read either,
+        // then normalize the result through the ONE reader. Never pipe it into `.map` blind.
+        const member = sc.list
+        if (typeof member === 'function') {
+          const value = await (member as (this: unknown) => unknown).call(sc)
+          gids = sessionIdsFromList(value)
+          if (gids === undefined) unreadable = `unrecognized session-list shape ${shape(value)}`
+        } else if (member !== null && typeof member === 'object') {
+          gids = sessionIdsFromList(member)
+          if (gids === undefined) unreadable = `unrecognized session-list shape ${shape(member)}`
+        } else {
+          unreadable = `no readable "list" on the resolved service (got ${shape(sc)})`
+        }
       } catch (error) {
-        const reason = `child ${ports.childId} is listed, but the gateway session list could not be verified: ${String((error as Error)?.message ?? error)}`
-        ports.diagnostic('attach:gatewayList', reason, error)
+        unreadable = `sessionController.list failed: ${String((error as Error)?.message ?? error)}`
+      }
+      if (gids === undefined) {
+        const reason = `child ${ports.childId} is listed in the durable session corpus, but its presence in the gateway (browser) session list could not be verified — ${unreadable}`
+        ports.diagnostic('attach:gatewayList', reason, unreadable)
         return { attached: true, listed: true, gatewayListed: undefined, warnings: [reason] }
       }
-      if (gids.includes(ports.childId)) return { attached: true, listed: true, gatewayListed: true, warnings: [] }
+      if (gids.includes(ports.childId)) {
+        // The acceptance of #180: a check that works SAYS it works, with what it counted. The
+        // failure mode was never a crash the user saw — it was a verdict that degraded to
+        // "could not be verified" so quietly the whole surface went unread.
+        ports.diagnostic('attach:gatewayList', `child ${ports.childId} is gateway-listed (${String(gids.length)} sessions) — the browser can show and open it`)
+        return { attached: true, listed: true, gatewayListed: true, warnings: [] }
+      }
       const reason = `child ${ports.childId} is in the durable session list but NOT in the gateway's session list (sessionController.list returned ${String(gids.length)} sessions) — the browser cannot show or open it, so the door will not be able to switch`
       ports.diagnostic('attach:gatewayList', reason, `gateway=${gids.slice(0, 4).join(',')}`)
       return { attached: true, listed: true, gatewayListed: false, warnings: [reason] }
