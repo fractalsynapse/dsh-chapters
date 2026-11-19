@@ -8,6 +8,49 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.37 — 2026-11-18 · the release that fixed the rig's route, believed a remote by proof, and stopped writing files named `undefined`
+
+Two issues, both found by the same day's live chase, and each one's story is a check that needed its
+own witness. **PRs #415/#416 (#414), #418 (#417).**
+
+**#414 — the live/harness boot carries exactly ONE route answer** (PR #416). The seam that voided the
+first C3 attempts: boot's live+harness branch replaced the `llm-pi-ai` provider block but left the
+seed's `agent-default-model: provider: local` row standing — sessions composed a provider whose block
+no longer existed, and every live leg died at `no credential for provider route "local"` fifteen
+minutes into a marker wait, for a fact boot could have refused in milliseconds. `applyHarnessRoute`
+now replaces OR appends the provider block (the tracked seed carries none), collapses the default rows
+onto the harness route's own, and VERIFIES — one row, naming the route, whose block is present — with
+boot refusing at startup by name. The first fix ran too EARLY and the lesson is in the history: the
+preset-merge steps re-injected the stale row afterward, so the alignment is now the LAST transform
+before the write, with a convergence regression row proving it cleans any re-injection. A second defect
+surfaced while proving the fix: the #406 identity guard built probe URLs with
+`new URL('/v1/models', base)` — which drops a PATH-PREFIXED base (`…/compatible-mode/v1`) to the
+origin — so the guard had been REFUSING the working hosted remote over a 404 its own builder created.
+`upstreamProbeUrl` now follows the tape proxy's own documented `/v1`-collision convention, and the
+stale wiring pin fired exactly as designed when the shape moved. And the first heavy LIVE run —
+passed, 58 compactions, 58/58 chapters-engine-served, zero foreign, #143's bound held — exposed the
+ledger's last silent fallback: a mapped region with zero turn collections fell to legacy 58 times
+printing NOTHING; that arm now logs `reason=no-collections` (sink-verified). The composer's non-firing
+there is STRUCTURAL, not drift: signatures store at `turn/end` and heavy is deliberately single-turn —
+C3's complete precondition (live AND multi-turn AND pressure-crossing) is finally written down, and
+the claim stays open with its named vehicle.
+
+**#417 — the diagnostics seam refuses stringified-missing values** (PR #418). A file literally named
+`undefined` appeared in the repo root holding REAL composition-skip notes — detection losing the
+evidence, the class the sink exists to end. Mechanism: `process.env.X = undefined` stores the literal
+word, and two test finally-blocks restored the env with the unguarded `= prevSink` form while their
+siblings had always used the guarded `delete`. The fix is both layers: the seam now treats the exact
+whole values `undefined`/`null` (env OR configured path) as refusals — nothing written to disk, said
+ONCE on stderr, and the status line names the refusal — while a legitimate relative sink still
+receives lines (the over-refusal guard is a row, not a comment); the two poisoners got the guarded
+form. Docs recorded the contract first (configuration.md, architecture.md).
+
+**Operator-visible:** no user-facing defaults change; the plugin bytes move only inside `src/diag.ts`
+(a refused sink that previously wrote a stray file now writes nothing and says so once). The rig's
+live+harness mode refuses at startup instead of dying mid-marker-wait, and every compaction
+composition fallback now names itself in the sink. `promptAnchor` unchanged — the agent-facing prompt
+bytes are untouched, machine-checked at stamp.
+
 ### 0.2.36 — 2026-11-17 · the release that fixed yesterday's fix to reach the fix from last week
 
 Three merged PRs, and the sequence between them is the content. Last week's held item was **#340** —

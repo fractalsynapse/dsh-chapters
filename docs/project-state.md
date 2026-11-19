@@ -1097,3 +1097,34 @@ fail — it would SILENTLY observe the wrong model under the pinned name. The #4
 an endpoint that lies about its model must be refused, not believed. C3's requirement is now machine-
 named (the distillation box, exact command on the verify row); nothing here can honestly discharge it,
 and the leg's compliance-wait proved itself by failing loudly both times.
+
+## 2026-11-18 — 0.2.37: the live-route fix and the `undefined` sink, both from the same day's chase
+
+**Candidate = staging at `05935a7`.** The range `0.2.36..staging` is exactly two issues, and the second
+was found cleaning up after the first:
+
+- **#414** (PRs #415 docs, #416 fix, merged `a2a3642`): the live/harness boot collapsed onto exactly
+  ONE route answer (`applyHarnessRoute`, the LAST transform before the write — the early-pass version
+  was measured being clobbered by the preset-merge steps); the identity guard builds probe URLs with
+  the tape proxy's own `/v1` convention (it had been refusing the working hosted remote over a 404 its
+  own builder created); and the LAST silent composition fallback now logs `reason=no-collections` —
+  found by the first heavy LIVE run (58 legacy manifests, zero lines). The live outcomes are recorded
+  with class labels on the verify ledger: heavy PASSED live (58/58 chapters-engine-served, zero
+  foreign, #143's bound held), the composer's non-firing is STRUCTURAL (single-turn journey,
+  signatures land at `turn/end`), and C3 stays open with its complete precondition finally written
+  down: live AND multi-turn AND pressure-crossing.
+- **#417** (PR #418, merged `05935a7`): the seam refuses stringified-missing sink values — the stray
+  file literally named `undefined` (real diagnostics nobody looked at) came from `process.env.X =
+  undefined` stringification through two unguarded test restores; fixed at both layers (seam guard +
+  guarded restores), with the over-refusal row proving legitimate relative sinks still receive lines.
+
+**Ship gate (deterministic class, run at the candidate before the stamp):** coverage gate via
+`scripts/ci-gate.sh`, full unit+integration ledger (baseline shape: 5 credential-gated `live:` rows +
+1 documented todo), the 11-leg replay chain under `scripts/chain-replay.sh`, then
+`npm run corpus:stamp` on green. `promptAnchor` must come back unchanged — nothing in this range
+touches agent-facing prompt bytes (the #417 plugin-side change is sink plumbing only).
+
+**Open after this cut:** C3 (vehicle named, precondition complete) · #349 remainder (browser rig) ·
+#372 (unbuilt) · #397 (contract.md § Lineage decision, parked with its one-line change) · #411's
+residual (record-time regeneration pattern) · host option-(d) todo row · five credential-gated
+TreeDX live rows.
