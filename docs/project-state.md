@@ -1229,3 +1229,24 @@ session tooling's own socket; proven, documented, machine-fix recorded in docs/d
 (maintainer's sysctl, needs root) · #138 goal rest-state · gatewayList shape (observed, recorded) ·
 host option-(d) · five credential-gated TreeDX live rows. **Closed by this cut:** #397, #372, #349
 (each's issue carries its evidence trail), and the stale #411 line retired from this file's open-list.
+
+## 2026-11-19 — 0.2.40: prose promises, measured seams
+
+**Candidate = staging at `a092c5a`.** Range `0.2.39..staging`: **#138** (contract § Goal budgets —
+the no-model service seam recorded with file:line witnesses, the /goal argument named as a host gap,
+budget-1 disappearance explained, our boundary pinned) and **#429** (the first-pull retry finally as
+code: ONE predicate, 8x2s bounded, loud ceiling, wiring pin; post-fix 10/10 leg + full twelve-leg
+chain green locally and CI acceptance green on runner hardware — the loaded contexts that produced
+the flakes now produce the passes). Both issues closed at their merges.
+
+**Ship gate at the candidate before stamp:** ledger baseline shape; build + symbol check before any
+boot (the #421 law, applied); the TWELVE-leg replay chain locally green at this head (the first
+attempt of the verification chain died on MY shell PATH — node 22 without strip-types — and the
+runner's fail-loud refusal at 'could not read the project list' is the designed behavior; the
+v24.22.0 rerun is the counted evidence, disclosed not deleted). `corpus:stamp` on green;
+`promptAnchor` must read unchanged.
+
+**Open after this cut:** the rig-band sysctl (one line for the maintainer's hand, docs/development.md)
+· gatewayList shape (observed, recorded) · host option-(d) todo row · five credential-gated TreeDX
+live rows. #138's rest-state half is now a CONTRACT fact, not an open question; #429 is closed with
+its fix measured in both failure contexts.
