@@ -41,7 +41,7 @@ test('every host devDependency is pinned exactly to the version the e2e lock boo
   assert.deepEqual(floated, [], `caret/tilde ranges float the host under the corpus: ${floated.join(', ')}`)
 })
 
-test('the installed host types match the pin, not merely the manifest', () => {
+test('the installed host types match the pin, not merely the manifest', { skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: the ROOT install IS the version under test here — comparing it to the pin would assert the cell away` : false }, () => {
   const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'dev', 'dsh-host-lock', 'package.json'), 'utf8')) as
     { dependencies?: Record<string, string> }
   const pin = lock.dependencies?.['@deepseek-ai/dsh']
