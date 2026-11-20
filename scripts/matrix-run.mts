@@ -147,7 +147,13 @@ function familyMissing(): Map<string, string> {
 
 function swap(): { ok: boolean; detail: string } {
   const pkgPath = 'package.json'
-  const original = fs.readFileSync(pkgPath, 'utf8')
+  // The cell's base is the COMMITTED manifest, never the working file a previous cell may
+  // have left altered (measured: the first alignment-attempt cell left zod pinned and its
+  // family entries floated, and the retry 'passed' on that residue instead of its own
+  // resolution). `git show HEAD:package.json` is the one root every cell shares.
+  const fromGit = spawnSync('git', ['show', 'HEAD:package.json'], { encoding: 'utf8', timeout: 30_000 })
+  const original = fromGit.status === 0 && fromGit.stdout !== '' ? fromGit.stdout : fs.readFileSync(pkgPath, 'utf8')
+  fs.writeFileSync(pkgPath, original)
   const pkgj = JSON.parse(original) as Pkgj
   // The family SET differs between lines (measured: 0.2.0-rc.1 never published
   // dsh-experimental-client-ui-cot-translation; 0.2.1-rc.1 never published dsh-web-deepseek-api).
