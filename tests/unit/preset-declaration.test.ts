@@ -285,9 +285,10 @@ test('RUN — the composition references only prompt variables every supported h
 
 test(`${guard} — the installed host really does register what the composition references`, { skip: skip ?? false }, () => {
   // The drift half: read the kernel's OWN registrations rather than trusting the list above, so
-  // a host that drops `model` fails here instead of in someone's session.
-  const req = createRequire(import.meta.url)
-  const loop = (() => { try { return req.resolve('@deepseek-ai/dsh-agent-loop') } catch { return undefined } })()
+  // a host that drops `model` fails here instead of in someone's session. #437: the same probe the
+  // guard uses — the rig tree first; the test file's own lineage holds no @deepseek-ai packages on
+  // a CI runner, which is exactly why this row skipped for weeks while claiming to verify the host.
+  const loop = (() => { try { return hostRequireFor('@deepseek-ai/dsh-agent-loop') } catch { return undefined } })()
   assert.ok(loop !== undefined, 'the host loop package must resolve when this row runs')
   const registered = new Set([...readFileSync(loop, 'utf8').matchAll(/\.variable\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']/g)].map((m) => m[1]!))
   assert.ok(registered.size >= 2, `expected provider+model at minimum, saw: ${[...registered]}`)
