@@ -1144,8 +1144,11 @@ Design rules, each earned:
   a matrix cell whose lineage wobbles between versions is the point of the exercise.
 - **The rig pin is not touched.** The tape corpus stays anchored to its recorded world;
   the matrix tests PRODUCT-against-HOSTS (install → boot → compose probe), never re-interpret
-  tapes against other versions. The below-floor control exists precisely to prove the probe can
-  say NO: an 0.1.7-rc.2 cell classifies `fail-unsupported` from the plugin's own loud line.
+  tapes against other versions. **The supported block is 0.2.0 and up — 0.1.* is deprecated by
+  maintainer decision (#446), so the nightly enumerates no 0.1.x cells at all.** `--below=`
+  still accepts controls for one-off runs, and the pre-decision sweep cells (0.1.6 fail-boot /
+  fail-unsupported, 0.1.7 compose) stay recorded in `docs/verify.md` as the measurement that
+  located the capability edge before policy fixed the support edge.
 - **The verdict IS the attribution.** `fail-broken-preset` names the rows the host cannot
   activate; `pass` with `rows pruned as unshipped: …` is drift NAMED, not hidden (that is
   #437's drop-guard reporting through the sweep); `fail-compose` carries the probe's own text
