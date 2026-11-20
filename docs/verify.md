@@ -699,3 +699,22 @@ var` ordering, and a BEHAVIOUR row running the real report generator); `matrix-r
 now stamps the executing plane via `--source=`, defaulting to "local". Nightly goes live the day
 a release carries the workflow to `main` (maintainer release authority).
 
+**CORRECTED THE SAME NIGHT (#451, isolation re-sweep):** the paragraph above stands on the
+workflow-plane facts, but its opening verdict — "the 19/19 verdicts themselves are REAL" —
+needed the isolation test this section's own fix made possible, and the test says the truth is
+narrower: **the executions were real; the verdicts were protocol-bound.** The morning's 19/19
+and the first re-sweep's 11/19 were both produced by SEQUENTIAL cells in one reused workspace,
+where `swap()` reset the committed `package.json` but not the committed `package-lock.json` —
+a cell's resolution could inherit its neighbour's (proved live: 0.2.1-alpha.3 with an inherited
+lock died TS2379 with no nested zod detected; in a fresh workspace the #449 alignment fired,
+`aligned root zod 4.6.7 -> 4.4.3`, and it compiled). Fixed in `92ed63a` (cells restore the
+committed lock; the runner's reproducibility note now states it) and re-swept under a
+CI-faithful protocol: **one fresh workspace per version** (pristine manifests, root
+`node_modules` removed between cells, `dev/dsh-host-lock` installed as CI installs it).
+Result: **19/19 pass, both legs `pass 1731 / fail 0 / todo 1` per version**, artifacts
+`/tmp/sweep-results-451b/result-*.json` (21:25 UTC), README table regenerated from exactly
+those files with `--source` naming the protocol. Four cells initially redshelled a single row
+under four-stream parallel load — the fixed-120ms-quiesce flake, isolated to #452 and
+re-run green in a single stream; the failing row is listed there, not papered here.
+The registry enumeration was unchanged by the re-run (same 19 versions as the morning list).
+
