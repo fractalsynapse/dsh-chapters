@@ -772,6 +772,34 @@ measured. The normalizer in `attach.ts` now accepts, in order: a bare array of r
 `getSnapshot` → `{ids}` or `{byId}`); anything else is `gatewayListed: undefined` **with the
 received shape named in the warning**, never a TypeError path and never silence.
 
+## Which lineage resolves a plugin's rows — measured (#437)
+
+There are THREE resolution contexts, and only one decides whether a preset child row can
+activate. Measured on the rig machine the day a live DSH self-update published
+`@deepseek-ai/dsh-tool-schedule` (absent at the pinned host 0.2.0-rc.2) into `~/node_modules`:
+
+- **The plugin's own lineage** — `import.meta.resolve` from `lib/*.js`. The rig profile
+  SYMLINKS the plugin into the repo checkout, so this walk goes repo `node_modules` →
+  `~/node_modules`. It resolves packages the host has never shipped: the pre-#437 drop-guard
+  asked exactly this, kept the row, and the host then reported `DECLARED BUT BROKEN —
+  tool-schedule: never started` and every chapters session refused to compose.
+- **The host tree** — the first `node_modules` ancestor segment of `process.argv[1]` (the npm
+  `.bin/dsh` shim or `node_modules/dsh/bin/*`). Rows are imported by the HOST, so containment
+  (`<tree>/@scope/<package>`) is the only keep/drop predicate that cannot be polluted — every
+  filesystem walk-up from any path under `$HOME` reaches the pollution itself. This is
+  `makeHostAwareResolver` in `src/preset.ts`; when the entry has no probeable tree (compiled
+  single-file hosts) it falls back to the plugin lineage rather than mass-dropping rows.
+- **Dev checks against the pinned host** must require through `dev/dsh-host-lock/package.json`
+  first (`createRequire(new URL('../../dev/dsh-host-lock/package.json', …))`), or list the rig
+  tree ahead of the PATH probe — `preset-declaration` and `host-plan-card-shape` both did their
+  first-look the other way and turned red the moment HOME updated. `tape-proxy-window.test.ts`
+  was already pin-first; it is the pattern.
+
+The rig boot itself is NOT polluted the same way: `boot.ts` keeps the home under `os.tmpdir`
+because Node walks up from the PROFILE directory — but the symlinked plugin drags the host
+process's realpath back into the repo lineage regardless. Isolation of the HOME is not isolation
+of the resolution ancestry.
+
 ## `ContinuePorts.mutateState` — the row write seam (#101)
 
 `ContinuePorts` exposes **both** `getState`/`putState` and `mutateState(sessionId, fn)`, and the split is
