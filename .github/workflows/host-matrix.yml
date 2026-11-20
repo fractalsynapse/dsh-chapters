@@ -1,8 +1,13 @@
-name: host-matrix
-# #443: the supported-harness-versions sweep. Nightly and manual ONLY — a PR is gated by the
-# pinned-host chain (one corpus, one world); this job is the standing answer to "which harness
-# versions does this plugin actually work against", enumerated from the registry at run time so
-# the claim re-bases itself every night without a human editing a list.
+name: de-de
+# #443 + #447: the supported-harness-versions sweep — now running THE REAL TEST SUITES
+# against every published hat version ≥ 0.2.0, not just a compose probe. A PR is still
+# gated by the pinned-host chain (one corpus, one world); THIS job is the standing answer
+# to "does this plugin actually work against version X?", enumerated from the registry at
+# run time so the claim re-bases itself every night without a human editing a list.
+# Each version gets its own runner: swap the whole `@deepseek-ai/dsh-*` family to that
+# version (`scripts/de-de-de.mjs --version=X`) and run the real legs. The `report` job
+# assembles the README table from every leg's machine-readable verdict — so the README
+# always states what CI actually executed, latest run first.
 on:
   schedule:
     - cron: '17 4 * * *'   # daily, off the :00 scrum
@@ -16,14 +21,58 @@ on:
         description: 'comma-separated below-floor controls (empty: 0.1.* is deprecated by maintainer decision #446 — the supported block starts at 0.2.0)'
         required: false
         default: ''
+      legs:
+        description: 'legs to run per version, plus-separated (unit, integration, e2e, e2e-live)'
+        required: false
+        default: 'unit+integration'
+      refresh_readme:
+        description: 'open a PR refreshing the README table when the sweep finishes'
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: de-de
+  cancel-in-progress: false
+
 jobs:
-  sweep:
+  list:
+    name: enumerate the registry
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.l.outputs.matrix }}
+      count: ${{ steps.l.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: l
+        run: |
+          ARGS=(--list --json)
+          [ -n "${{ inputs.versions }}" ] && ARGS+=("--versions=${{ inputs.versions }}")
+          [ -n "${{ inputs.below }}" ] && ARGS+=("--below=${{ inputs.below }}")
+          node --experimental-strip-types --no-warnings scripts/de-de-de.mjs "${ARGS[@]}" > var/matrix.json
+          echo "matrix=$(node -p 'JSON.stringify(require("./var/matrix.json").include)')" >> "$GITHUB_OUTPUT"
+          echo "count=$(node -p 'require("./var/matrix.json").include.length')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: matrix, path: var/matrix.json }
+
+  test:
+    name: ${{ matrix.version }}
+    needs: list
+    if: needs.list.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false          # one red version must not cancel the rest of the truth
+      max-parallel: 10
+      matrix:
+        include: ${{ fromJSON(needs.list.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,31 +82,59 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       # The same runtime provisioning the acceptance job records as load-bearing: chromium's
-      # shared libs, zstd for the durable logs, and bubblewrap + the userns sysctl, without which
-      # a runner boots a 7-tool host against a local 34-tool one and every comparison is fiction.
+      # shared libs, zstd for the durable logs, and bubblewrap + the userns sysctl, without
+      # which a runner boots a 7-tool hat against a 34-tool one and every comparison is fiction.
       - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd bubblewrap
-      - name: allow unprivileged user namespaces (bubblewrap needs them)
+      - name: allow unprivileged user namespaces (bubblewrap needs it)
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>&1 || echo "sysctl: not available on this image"
-          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>&1 || echo "sysctl: setting not present on this image"
-          bwrap --ro-bind / / /bin/true && echo "bwrap probe: OK after sysctl" || echo "bwrap probe: still failing"
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>&1 || echo "sysctl: not present on this image"
+          bwrap --ro-bind / / /bin/true && echo "bwrap probe: OK" || echo "bwrap probe: failing"
       - name: install chromium (repo-local browsers path)
         run: PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
-      - name: sweep the supported versions
-        env:
-          MATRIX_VERSIONS: ${{ github.event.inputs.versions }}
-          MATRIX_BELOW: ${{ github.event.inputs.below }}
+      - name: run the real suites against ${{ matrix.version }}
         run: |
-          ARGS=()
-          [ -n "${MATRIX_VERSIONS:-}" ] && ARGS+=("--versions=${MATRIX_VERSIONS}")
-          [ -n "${MATRIX_BELOW:-}" ] && ARGS+=("--below=${MATRIX_BELOW}")
-          bash scripts/host-matrix.sh "${ARGS[@]}" 2>&1 | tee var/host-matrix-sweep-ci.log
-      - name: upload the verdicts
+          node --experimental-strip-types --no-warnings scripts/de-de-de.mjs \
+            --version=${{ matrix.version }} \
+            --legs=${{ inputs.legs || 'unit+integration' }} \
+            --out=var/de-de-de/result-${{ matrix.version }}.json
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: host-matrix-results
-          path: |
-            var/host-matrix-sweep-ci.log
-            var/host-matrix-results.jsonl
-          if-no-files-found: warn
+          name: result-${{ matrix.version }}
+          path: var/de-de-de/result-${{ matrix.version }}.json
+
+  report:
+    name: assemble the README table
+    needs: [list, test]
+    if: always() && needs.list.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'result-*', path: var/de-de-de/, merge-multiple: true }
+      - name: assemble
+        run: |
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts --report --readme --runs=var/de-de-de
+          echo '## What the sweep executed' >> $GITHUB_STEP_SUMMARY
+          node -p 'require("fs").readFileSync("README.md","utf8").split("<!-- versions:begin -->")[1].split("<!-- versions:end -->")[0]' >> $GITHUB_STEP_SUMMARY
+      - name: refresh the README on the nightly
+        if: github.event_name == 'schedule' || inputs.refresh_readme
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BR="de/refresh-$(date -u +%Y%m%d%H%M)"
+          git checkout -b "$BR"
+          git add README.md
+          if git diff --cached --quiet; then echo "table unchanged — no PR needed"; exit 0; fi
+          git commit -m "docs(de): the sweep ran — README table regenerated from this run's verdicts"
+          git push -u origin "$BR"
+          gh pr create --title "docs(de): refresh the version-support table ($(date -u +%F))" \
+            --body "Auto-generated by the \`de-de\` workflow: README table regenerated from the verdicts of the sweep that just ran. Review the verdicts, then merge."

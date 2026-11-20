@@ -9,6 +9,43 @@ source at [fractalsynapse/dsh-chapters](https://github.com/fractalsynapse/dsh-ch
 > **All documentation lives on the documentation site — this README is a doorway, not a duplicate.**
 > ### 📖 https://fractalsynapse.github.io/dsh-chapters/
 
+## Supported DSH host versions
+
+Every published Deepseek Session Harness version **from 0.2.0 up** is tested by CI
+(`.github/workflows/host-matrix.yml`, nightly + manual): each version gets its own runner,
+where the script `scripts/matrix-run.mts` swaps the whole `@deepseek-ai/dsh-*` family to
+that version and runs the real test legs, then the report job rewrites the table below
+from this run's verdicts. The table is therefore only ever as true as the last sweep.
+
+<!-- versions:begin -->
+
+> Bootstrap snapshot — compose-level verdicts from the first sweep (nightly CI replaces
+> this block with real-leg results from the first sweep run).
+
+| DSH host version | Verdict | Real-leg results | Last run (UTC) |
+|---|---|---|---|
+| 0.2.0-rc.1 | ✅ supported | — | 2026-11-20 |
+| 0.2.0-rc.2 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-alpha.1 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-alpha.2 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-alpha.3 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-alpha.4 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-alpha.5 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-rc.1 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-rc.2 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-rc.3 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-rc.4 | ✅ supported | — | 2026-11-20 |
+| 0.2.1-rc.5 | ✅ supported | — | 2026-11-20 |
+| 0.2.2-alpha.2 | ❌ broken-preset | — | 2026-11-20 |
+| 0.2.2-alpha.3 | ❌ broken-preset | — | 2026-11-20 |
+| 0.2.2-rc.1 | ❌ broken-preset | — | 2026-11-20 |
+| 0.2.2-rc.2 | ❌ broken-preset | — | 2026-11-20 |
+| 0.2.2-rc.3 | ❌ broken-preset | — | 2026-11-20 |
+| 0.2.2-rc.4 | ❌ broken-preset | — | 2026-11-20 |
+| 0.2.2-rc.5 | ❌ broken-preset | — | 2026-11-20 |
+
+<!-- versions:end -->
+
 ## Install (the whole setup)
 
 ```bash
