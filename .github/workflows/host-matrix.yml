@@ -13,9 +13,9 @@ on:
         required: false
         default: ''
       below:
-        description: 'comma-separated below-floor controls'
+        description: 'comma-separated below-floor controls (empty: 0.1.* is deprecated by maintainer decision #446 — the supported block starts at 0.2.0)'
         required: false
-        default: '0.1.6-alpha.1,0.1.6-alpha.2,0.1.7-rc.2'
+        default: ''
 
 permissions:
   contents: read

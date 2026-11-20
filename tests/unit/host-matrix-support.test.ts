@@ -16,9 +16,11 @@ import {
 test('#443: the target list is every registry version at/above the floor, sorted, prereleases included', () => {
   const json = JSON.stringify(['0.1.7-rc.2', '0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.4', '0.2.1-rc.4', '0.2.2-rc.5', 'garbage-not-a-version'.replace('garbage-not-a-version', '0.1.6-alpha.1')])
   assert.deepEqual(matrixTargets(json), ['0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.4', '0.2.1-rc.4', '0.2.2-rc.5'])
+  assert.ok(matrixTargets(json).every((v) => !v.startsWith('0.1.')),
+    '#446 maintainer decision: 0.1.* is deprecated — the DEFAULT list (no explicit controls) never includes one')
   assert.deepEqual(matrixTargets(json, { includeBelowFloor: ['0.1.7-rc.2'] }),
     ['0.2.0-rc.1', '0.2.0-rc.2', '0.2.1-alpha.4', '0.2.1-rc.4', '0.2.2-rc.5', '0.1.7-rc.2'],
-    'below-floor controls APPEND, never interleave into the supported block')
+    'below-floor controls APPEND when explicitly requested, never interleave into the supported block')
   assert.deepEqual(matrixTargets('not json'), [], 'a dead registry answers with an empty list, not a throw')
 })
 

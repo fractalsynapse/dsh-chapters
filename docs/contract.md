@@ -554,7 +554,11 @@ choice, now with data; every published 0.2.0-rc.1 → 0.2.1-rc.5 composes (12/12
 (`Cannot read properties of undefined (reading 'parent')`), alpha.3 onward
 `tool-subagent-list-agents (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started`.
 Both causes and the compose symptom (the #437 `new-session click never set dsh.sessions.current`)
-are attributed verbatim in the record at `docs/verify.md`; tracked in the follow-up issue.
+are attributed verbatim in the record at `docs/verify.md`; tracked in the follow-up issue (#445).
+**Maintainer decision 2026-11-20 (#446): the support floor stays 0.2.0 and 0.1.* is DEPRECATED**
+(the project started on it; the matrix evidence that 0.1.7-rc.2 technically composes is kept as
+history, not as a support claim). Cells below 0.2.0 are controls for one-off runs only — the
+nightly block is 0.2.0 and up, one source: `SUPPORT_FLOOR` in `tests/e2e/host-matrix-support.ts`.
 
 A user preset used to be a directory `$DSH_HOME/.agent-presets/<id>/` holding `preset.yml` +
 `agent.cordis.yml`. The host's own migration note is blunt: *"Nothing reads that directory any more."*
