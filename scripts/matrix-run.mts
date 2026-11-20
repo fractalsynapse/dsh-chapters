@@ -201,11 +201,57 @@ function swap(): { ok: boolean; detail: string } {
     }
     closed = 5
   }
+  // ZOD INSTANCE ALIGNMENT (issue #449): the compile dies TS2379 when the host's own packages
+  // pin zod EXACTLY (storage-domain/sdk-protocol/llm pin 4.4.3 from 0.2.1-alpha.3, 4.6.6 from
+  // 0.2.2-rc.5) while our root range floats to something newer — npm then nests a second zod
+  // under the host package and the two instances are structurally incompatible under
+  // exactOptionalPropertyTypes at the schema boundary in src/store.ts. Testing "against the
+  // version" means resolving the tree the way that version itself resolves it: when nested
+  // zod copies exist and every host exact pin agrees, re-pin the ROOT zod to the consensus
+  // and re-install. When host pins CONFLICT with each other, no root can satisfy them — the
+  // nesting is intrinsic to that version and is recorded as such, never hidden by an
+  // alignment that would lie about the tree.
+  let alignNote = ''
+  {
+    const nested: string[] = []
+    for (const fam of fs.readdirSync('node_modules/@deepseek-ai')) {
+      const nestedZod = `node_modules/@deepseek-ai/${fam}/node_modules/zod/package.json`
+      if (fs.existsSync(nestedZod)) {
+        try { nested.push(JSON.parse(fs.readFileSync(nestedZod, 'utf8')).version as string) } catch { /* unreadable copy */ }
+      }
+    }
+    if (nested.length > 0) {
+      const pins = new Map<string, number>()
+      for (const fam of fs.readdirSync('node_modules/@deepseek-ai')) {
+        let q: Pkgj & { dependencies?: Record<string, string> }
+        try { q = JSON.parse(fs.readFileSync(`node_modules/@deepseek-ai/${fam}/package.json`, 'utf8')) as typeof q } catch { continue }
+        const z = q.dependencies?.zod
+        if (typeof z === 'string' && /^\d+\.\d+\.\d+$/.test(z)) pins.set(z, (pins.get(z) ?? 0) + 1)
+      }
+      if (pins.size === 1) {
+        const target = [...pins.keys()][0]!
+        try {
+          const rootVer = JSON.parse(fs.readFileSync('node_modules/zod/package.json', 'utf8')).version as string
+          if (rootVer !== target) {
+            const fresh = JSON.parse(fs.readFileSync('package.json', 'utf8')) as Pkgj
+            ;(fresh.dependencies ??= {})['zod'] = target
+            fs.writeFileSync('package.json', JSON.stringify(fresh, null, 2) + '\n')
+            const ai = tryInstall([])
+            alignNote = ai.status === 0
+              ? `; aligned root zod ${rootVer} -> ${target} (every host exact pin agrees — one instance, the version's own resolution)`
+              : `; alignment install FAILED (exit ${String(ai.status)}): ${(ai.stderr ?? ai.stdout ?? '').replace(/\n/g, ' ').slice(0, 160)}`
+          } else alignNote = `; zod already ${target} at root (single instance)`
+        } catch { alignNote = '; nested zod found but root copy unreadable' }
+      } else {
+        alignNote = `; CONFLICTING host zod pins ${[...pins.keys()].join(' / ')} — no root version satisfies all, nesting is intrinsic to this version`
+      }
+    }
+  }
   let ok = false, detail = ''
   try {
     const got = JSON.parse(fs.readFileSync('node_modules/@deepseek-ai/dsh/package.json', 'utf8')) as { version?: string }
     ok = got.version === version
-    detail = ok ? `re-resolved ${String(changed)} direct entries to ${version} (${flagUsed}, closed in ${String(closed)} pass${closed === 1 ? '' : 'es'}${droppedNames.length > 0 ? `; ${String(droppedNames.length)} manifest names not published at this version left unpinned` : ''})`
+    detail = ok ? `re-resolved ${String(changed)} direct entries to ${version} (${flagUsed}, closed in ${String(closed)} pass${closed === 1 ? '' : 'es'}${droppedNames.length > 0 ? `; ${String(droppedNames.length)} manifest names not published at this version left unpinned` : ''}${alignNote})`
       : `asked ${version}, tree carries ${String(got.version)}`
   } catch { detail = `asked ${version}, no @deepseek-ai/dsh after install (${flagUsed})` }
   return { ok, detail }
