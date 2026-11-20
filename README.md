@@ -11,11 +11,15 @@ source at [fractalsynapse/dsh-chapters](https://github.com/fractalsynapse/dsh-ch
 
 ## Supported DSH host versions
 
-Every published Deepseek Session Harness version **from 0.2.0 up** is tested by CI
-(`.github/workflows/host-matrix.yml`, nightly + manual): each version gets its own runner,
-where the script `scripts/matrix-run.mts` swaps the whole `@deepseek-ai/dsh-*` family to
-that version and runs the real test legs, then the report job rewrites the table below
-from this run's verdicts. The table is therefore only ever as true as the last sweep.
+Every published Deepseek Session Harness version **from 0.2.0 up** gets the real test suites
+run against it, per version: the runner `scripts/matrix-run.mts` swaps the whole
+`@deepseek-ai/dsh-*` family to that version and runs the legs, and the
+`.github/workflows/host-matrix.yml` workflow (nightly + manual dispatch) assembles the table
+below from the executed verdicts. GitHub registers scheduled workflows only from the default
+branch, so the nightly fires once the next release carries `host-matrix.yml` to `main`; until
+then the table is refreshed by sweep runs of the committed code. Either way the line above the
+table names the plane that actually executed the sweep — a verdict is only ever as good as the
+run that produced it, and which run that was is part of the record.
 
 <!-- versions:begin -->
 

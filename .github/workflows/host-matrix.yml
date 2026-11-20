@@ -1,13 +1,23 @@
-name: de-de
-# #443 + #447: the supported-harness-versions sweep — now running THE REAL TEST SUITES
+name: Host version matrix
+# #443 + #447 + #451: the supported-harness-versions sweep — running THE REAL TEST SUITES
 # against every published hat version ≥ 0.2.0, not just a compose probe. A PR is still
 # gated by the pinned-host chain (one corpus, one world); THIS job is the standing answer
 # to "does this plugin actually work against version X?", enumerated from the registry at
 # run time so the claim re-bases itself every night without a human editing a list.
 # Each version gets its own runner: swap the whole `@deepseek-ai/dsh-*` family to that
-# version (`scripts/de-de-de.mjs --version=X`) and run the real legs. The `report` job
+# version (`scripts/matrix-run.mts --version=X`) and run the real legs. The `report` job
 # assembles the README table from every leg's machine-readable verdict — so the README
 # always states what CI actually executed, latest run first.
+#
+# #451, guarded by tests/unit/host-matrix-workflow.test.ts: this file shipped once with a
+# find/replace pass's casualties — the runner path, the name/concurrency strings and the
+# result directories had all been rewritten to placeholder tokens, and a README table ended
+# up attributed to a run of it that could not have happened. Two lessons wired in: every
+# referenced path must resolve (a repo-plane guard now fails the mangle — which is why THIS
+# comment names no casualties), and GitHub registers SCHEDULED workflows only from the
+# DEFAULT branch — this file starts firing its nightly the day a release carries it to
+# main; until then the README table is refreshed by sweep runs of committed code, and the
+# stamp says which plane produced it (--source, #451).
 on:
   schedule:
     - cron: '17 4 * * *'   # daily, off the :00 scrum
@@ -35,7 +45,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: de-de
+  group: host-matrix
   cancel-in-progress: false
 
 jobs:
@@ -53,10 +63,11 @@ jobs:
           node-version: 24
       - id: l
         run: |
+          mkdir -p var   # var/ is gitignored — a clean checkout has none until something makes it
           ARGS=(--list --json)
           [ -n "${{ inputs.versions }}" ] && ARGS+=("--versions=${{ inputs.versions }}")
           [ -n "${{ inputs.below }}" ] && ARGS+=("--below=${{ inputs.below }}")
-          node --experimental-strip-types --no-warnings scripts/de-de-de.mjs "${ARGS[@]}" > var/matrix.json
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts "${ARGS[@]}" > var/matrix.json
           echo "matrix=$(node -p 'JSON.stringify(require("./var/matrix.json").include)')" >> "$GITHUB_OUTPUT"
           echo "count=$(node -p 'require("./var/matrix.json").include.length')" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
@@ -94,15 +105,15 @@ jobs:
         run: PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
       - name: run the real suites against ${{ matrix.version }}
         run: |
-          node --experimental-strip-types --no-warnings scripts/de-de-de.mjs \
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts \
             --version=${{ matrix.version }} \
             --legs=${{ inputs.legs || 'unit+integration' }} \
-            --out=var/de-de-de/result-${{ matrix.version }}.json
+            --out=var/matrix-runs/result-${{ matrix.version }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: result-${{ matrix.version }}
-          path: var/de-de-de/result-${{ matrix.version }}.json
+          path: var/matrix-runs/result-${{ matrix.version }}.json
 
   report:
     name: assemble the README table
@@ -119,10 +130,14 @@ jobs:
         with:
           node-version: 24
       - uses: actions/download-artifact@v4
-        with: { pattern: 'result-*', path: var/de-de-de/, merge-multiple: true }
+        with: { pattern: 'result-*', path: var/matrix-runs/, merge-multiple: true }
       - name: assemble
         run: |
-          node --experimental-strip-types --no-warnings scripts/matrix-run.mts --report --readme --runs=var/de-de-de
+          # --source names the executing plane IN THE STAMP (#451): the README must never
+          # claim a workflow for a sweep a workflow did not run, so the claim is a parameter,
+          # never a literal.
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts --report --readme --runs=var/matrix-runs \
+            --source='the host-matrix GitHub Actions workflow'
           echo '## What the sweep executed' >> $GITHUB_STEP_SUMMARY
           node -p 'require("fs").readFileSync("README.md","utf8").split("<!-- versions:begin -->")[1].split("<!-- versions:end -->")[0]' >> $GITHUB_STEP_SUMMARY
       - name: refresh the README on the nightly
@@ -130,11 +145,11 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          BR="de/refresh-$(date -u +%Y%m%d%H%M)"
+          BR="chore/refresh-$(date -u +%Y%m%d%H%M)"
           git checkout -b "$BR"
           git add README.md
           if git diff --cached --quiet; then echo "table unchanged — no PR needed"; exit 0; fi
-          git commit -m "docs(de): the sweep ran — README table regenerated from this run's verdicts"
+          git commit -m "docs(#447): the sweep ran — README table regenerated from this run's verdicts"
           git push -u origin "$BR"
-          gh pr create --title "docs(de): refresh the version-support table ($(date -u +%F))" \
-            --body "Auto-generated by the \`de-de\` workflow: README table regenerated from the verdicts of the sweep that just ran. Review the verdicts, then merge."
+          gh pr create --title "docs(#447): refresh the version-support table ($(date -u +%F))" \
+            --body "Auto-generated by the \`host-matrix\` workflow: README table regenerated from the verdicts of the sweep that just ran (the stamp in the table names the plane that executed it). Review the verdicts, then merge."
