@@ -236,7 +236,11 @@ function swap(): { ok: boolean; detail: string } {
             const fresh = JSON.parse(fs.readFileSync('package.json', 'utf8')) as Pkgj
             ;(fresh.dependencies ??= {})['zod'] = target
             fs.writeFileSync('package.json', JSON.stringify(fresh, null, 2) + '\n')
-            const ai = tryInstall([])
+            // Same resolver mode the tree itself needed: if the main install fell back to
+            // legacy-peer-deps (measured: cordis-plugin-group's cordis peer trips the strict
+            // resolver on these lines), the alignment install must use it too — a stricter
+            // second pass than the first is just a second, different failure.
+            const ai = flagUsed === 'legacy-peer-deps fallback' ? tryInstall(['--legacy-peer-deps']) : tryInstall([])
             alignNote = ai.status === 0
               ? `; aligned root zod ${rootVer} -> ${target} (every host exact pin agrees — one instance, the version's own resolution)`
               : `; alignment install FAILED (exit ${String(ai.status)}): ${(ai.stderr ?? ai.stdout ?? '').replace(/\n/g, ' ').slice(0, 160)}`
