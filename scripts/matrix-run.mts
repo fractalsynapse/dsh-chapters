@@ -2,22 +2,22 @@
  * matrix-run — run THE REAL suites against one hat version, in isolation.
  *
  * The old `smoke`-only pass (one compose probe per version) answered "does a session
- * compose on this hat?" — which is one string on a menu. This answers the actual
- * question: swap the whole `@deepseek-ai/dsh-*` family to the version, run the real
- * suites (unit + integration, optionally the e2e legs), and emit a machine-readable
- * verdict. One invocation per version so CI runs them as a parallel matrix; the list
- * of versions comes from the registry, never from a human-edited list here.
+ * compose on this hat?" — one string on a menu, not a meal. This answers the actual
+ * question: swap the whole hat to the version, run the real suites (unit + integration,
+ * optionally the e2e legs), and emit a machine-readable verdict. One invocation per
+ * version so CI runs them as a parallel matrix; the list of versions comes from the
+ * registry, never from a human-edited list here.
  *
  *   node --experimental-strip-types --no-warnings scripts/matrix-run.mts \
  *        --version=0.2.1-rc.4 [--legs=unit+integration|+e2e] [--out=result.json]
  *
  * Also:
- *   node scripts/matrix-run.mts --list --json               # CI matrix source (registry ≥ 0.2.0)
+ *   node scripts/matrix-run.mts --list --json               # CI matrix source (registry >= 0.2.0)
  *   node scripts/matrix-run.mts --report [--readme]          # table from var/matrix-runs/*.json
  *
- * Restoring the family afterwards is the caller's business (CI workspaces are clean;
- * local callers run this inside a dedicated worktree). Exit 0 iff the selected legs
- * all passed for the version.
+ * The tree afterwards is modified (package.json rewritten); the caller owns the
+ * cleanup — CI workspaces are clean, local callers run this inside a worktree.
+ * Exit 0 iff the selected legs all passed for the version.
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -50,8 +50,18 @@ if (flag('list')) {
   if (r.status !== 0 || r.stdout === '') { console.error(`list failed: ${(r.stderr ?? '').slice(0, 200)}`); process.exit(2) }
   const raw = JSON.parse(r.stdout) as string | string[]
   const all = (Array.isArray(raw) ? raw : [raw]).map((x) => String(x))
-  const supported = all.filter((v) => cmp(v, MIN) >= 0).sort(cmp)
-  const below = all.filter((v) => cmp(v, MIN) < 0).sort(cmp)
+  // The floor is the VERSION LINE, prereleases included: the registry has no plain 0.2.0 —
+  // the first release of that line IS 0.2.0-rc.1. Strict semver would sort 0.2.0-rc.1 BELOW
+  // 0.2.0 and silently drop the floor line from its own block; the floor test therefore
+  // compares the numeric base only.
+  const base = (v: string): number[] => v.split('-')[0].split('.').map(Number)
+  const atLeastLine = (v: string, min: string): boolean => {
+    const a = base(v), b = base(min)
+    for (let i = 0; i < 3; i++) { const d = (a[i] ?? 0) - (b[i] ?? 0); if (d !== 0) return d > 0 }
+    return true
+  }
+  const supported = all.filter((v) => atLeastLine(v, MIN)).sort(cmp)
+  const below = all.filter((v) => !atLeastLine(v, MIN)).sort(cmp)
   const forced = arg('versions')
   const include = forced !== undefined && forced !== '' ? forced.split(',').map((s) => s.trim()) : supported
   const extra = arg('below') !== undefined && arg('below') !== '' ? arg('below')!.split(',').map((s) => s.trim()) : []
@@ -66,16 +76,13 @@ if (flag('list')) {
 if (flag('report')) {
   const RUNS_DIR = arg('runs') ?? path.join(ROOT, 'var', 'matrix-runs')
   const files = fs.existsSync(RUNS_DIR) ? fs.readdirSync(RUNS_DIR).filter((f) => f.endsWith('.json')) : []
+  interface Row { version: string; verdict: string; swap?: { ok: boolean; detail: string }
+    legs?: { leg: string; ok: boolean; detail: string }[]; ts?: string }
   const rows = files.map((f) => {
-    try {
-      return JSON.parse(fs.readFileSync(path.join(RUNS_DIR, f), 'utf8')) as {
-        version: string; verdict: string; swap?: { ok: boolean; detail: string }
-        legs?: { leg: string; ok: boolean; detail: string }[]; ts?: string
-      }
-    } catch { return null }
-  }).filter((r): r is { version: string; verdict: string; swap?: { ok: boolean; detail: string }; legs?: { leg: string; ok: boolean; detail: string }[]; ts?: string } => r !== null)
-    .sort((a, b) => cmp(a.version, b.version))
-  const fmt = (r: { version: string; verdict: string; legs?: { leg: string; ok: boolean }[]; ts?: string }): string => {
+    try { return JSON.parse(fs.readFileSync(path.join(RUNS_DIR, f), 'utf8')) as Row } catch { return null }
+  }).filter((r): r is Row => r !== null && typeof r.version === 'string').sort((a, b) => cmp(a.version, b.version))
+  if (rows.length === 0) { console.error(`report: no result files in ${RUNS_DIR}`); process.exit(2) }
+  const fmt = (r: Row): string => {
     const cells = (r.legs ?? []).map((l) => `${l.leg}:${l.ok ? '✅' : '❌'}`).join(' ')
     const verdict = r.verdict === 'pass' ? '✅ supported' : r.verdict === 'untestable' ? '❓ untestable' : `❌ ${r.verdict}`
     return `| ${r.version} | ${verdict} | ${cells || '—'} | ${(r.ts ?? '').slice(0, 10) || '—'} |`
@@ -85,13 +92,12 @@ if (flag('report')) {
     '|---|---|---|---|',
     ...rows.map(fmt),
   ].join('\n')
-  if (rows.length === 0) { console.error(`report: no result files in ${RUNS_DIR}`); process.exit(2) }
   if (flag('readme')) {
     const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8')
     const B = '<!-- versions:begin -->', E = '<!-- versions:end -->'
     const b = md.indexOf(B), e = md.indexOf(E)
     if (b < 0 || e < 0) { console.error('report: README.md lacks the versions:begin/end markers'); process.exit(2) }
-    const stamp = `> Regenerated by the \`de-de\` workflow on ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC — real test-suite legs per version with the whole \`@deepseek-ai/dsh-*\` family swapped. Verdicts from REAL runs, not compose probes.`
+    const stamp = `> Regenerated by the version-sweep workflow on ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC — real test-suite legs per version with the whole hat family re-resolved. Verdicts from REAL runs, not compose probes.`
     const next = md.slice(0, b + B.length) + `\n\n${stamp}\n\n${table}\n\n` + md.slice(e)
     fs.writeFileSync(path.join(ROOT, 'README.md'), next)
     console.log(`report: README.md updated with ${String(rows.length)} version rows`)
@@ -109,32 +115,90 @@ const LEGS = (arg('legs') ?? 'unit+integration').split('+').map((s) => s.trim())
 const OUT = arg('out') ?? path.join('var', 'matrix-runs', `result-${version}.json`)
 const LEG_TIMEOUT_MS = Number((arg('timeoutMs') ?? '1800000').replace(/_/g, ''))
 
-// ---------------------------------------------------------------- what family to swap
-
-const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')) as {
-  dependencies?: Record<string, string>; devDependencies?: Record<string, string>
-}
-const family = Object.entries({ ...pkg.dependencies, ...pkg.devDependencies })
-  .filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
-  .map(([name]) => name)
-if (family.length === 0) { console.error('matrix-run: no @deepseek-ai/dsh* family in the package.json — wrong tree?'); process.exit(2) }
-
 // ---------------------------------------------------------------- swap the family
 
-function swap(): { ok: boolean; detail: string } {
-  const spec = family.map((name) => `${name}@${version}`)
-  const r = spawnSync('npm', ['i', '--no-save', '--no-audit', '--no-fund', '--loglevel=error', ...spec],
-    { encoding: 'utf8', timeout: 900_000 })
-  if (r.status !== 0) {
-    return { ok: false, detail: `npm i exit ${String(r.status)}: ${(r.stderr ?? '').replace(/\n/g, ' ').slice(0, 300)}` }
+type Pkgj = { dependencies?: Record<string, string>; devDependencies?: Record<string, string> }
+
+function familyMissing(): Map<string, string> {
+  // Every @deepseek-ai package some installed @deepseek-ai package needs, which the tree
+  // does not have. Newer hat lines are 100+ packages modular — dependents name packages
+  // the OLD line never had, and --legacy-peer-deps never installs peers; this walk closes
+  // the gap at the depender's own range (sub-versions like cordis-plugin-* are NOT the hat
+  // version, and pinning them to it dies ETARGET).
+  const missing = new Map<string, string>()
+  let famDirs: string[] = []
+  try { famDirs = fs.readdirSync('node_modules/@deepseek-ai') } catch { return missing }
+  for (const d of famDirs) {
+    let p: Pkgj
+    try { p = JSON.parse(fs.readFileSync(`node_modules/@deepseek-ai/${d}/package.json`, 'utf8')) as Pkgj } catch { continue }
+    for (const map of [p.dependencies, p.peerDependencies]) {
+      for (const [dep, range] of Object.entries(map ?? {})) {
+        if (!dep.startsWith('@deepseek-ai/')) continue
+        if (fs.existsSync(`node_modules/${dep}`)) continue
+        if (missing.has(dep)) continue
+        if (range.startsWith('workspace:')) continue // monorepo-internal: not installable, and not the point
+        if (range === '*') missing.set(dep, dep.startsWith('@deepseek-ai/dsh') ? version : range)
+        else missing.set(dep, range)
+      }
+    }
   }
-  const got = spawnSync('npm', ['ls', '@deepseek-ai/dsh', '--depth=0', '--json'], { encoding: 'utf8', timeout: 60_000 })
+  return missing
+}
+
+function swap(): { ok: boolean; detail: string } {
+  const pkgPath = 'package.json'
+  const original = fs.readFileSync(pkgPath, 'utf8')
+  const pkgj = JSON.parse(original) as Pkgj
+  let changed = 0
+  for (const deps of [pkgj.dependencies ?? {}, pkgj.devDependencies ?? {}]) {
+    for (const name of Object.keys(deps)) {
+      if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) { deps[name] = version; changed++ }
+    }
+  }
+  ;(pkgj.dependencies ??= {})['@deepseek-ai/dsh'] = version
+  changed++
+  if (changed === 1) { fs.writeFileSync(pkgPath, original); return { ok: false, detail: 'no @deepseek-ai/dsh* family in package.json — wrong tree?' } }
+  fs.writeFileSync(pkgPath, JSON.stringify(pkgj, null, 2) + '\n')
+  const tryInstall = (extra: string[]): ReturnType<typeof spawnSync> =>
+    spawnSync('npm', ['install', '--no-audit', '--no-fund', ...extra], { encoding: 'utf8', timeout: 900_000 })
+  let r = tryInstall([])
+  let flagUsed = 'default resolver'
+  if (r.status !== 0) {
+    // peer-strict resolution trips where an exact independent sub-version peer conflicts;
+    // legacy-peer-deps is the fallback, and the family-missing walk below then closes the
+    // peers it skipped. Stated in the detail so the block stays honest about how it ran.
+    r = tryInstall(['--legacy-peer-deps'])
+    flagUsed = 'legacy-peer-deps fallback'
+  }
+  if (r.status !== 0) {
+    fs.writeFileSync(pkgPath, original)
+    return { ok: false, detail: `npm install exit ${String(r.status)}: ${(r.stderr ?? '').replace(/\n/g, ' ').slice(0, 300)}` }
+  }
+  // Close the family to closure — newer lines are 100+ packages and npm dedup+legacy-peer
+  // installs none of the peers. Bounded at 5 passes; a hat line whose closure never settles
+  // is itself a result, but never a silently-broken block.
+  let closed = 0
+  for (let pass = 0; pass < 5; pass++) {
+    const missing = familyMissing()
+    if (missing.size === 0) { closed = pass; break }
+    const add = [...missing].map(([n, range]) => `${n}@${range}`)
+    // NO --no-save here: a later install prunes no-save additions it does not know about,
+    // so the five passes would each delete the last one's peers and never settle. Saving makes
+    // them real direct dependencies — the tree is disposable (worktree / clean CI workspace).
+    const rr = tryInstall(['--legacy-peer-deps', ...add])
+    if (rr.status !== 0) {
+      return { ok: false, detail: `closure exit ${String(rr.status)} for ${add.slice(0, 3).join(' ')} (${add.length} pkgs): ${(rr.stderr ?? '').replace(/\n/g, ' ').slice(0, 220)}` }
+    }
+    closed = 5
+  }
+  let ok = false, detail = ''
   try {
-    const j = JSON.parse(got.stdout) as { dependencies?: Record<string, { version?: string }> }
-    const v = j.dependencies?.['@deepseek-ai/dsh']?.version
-    if (v !== version) return { ok: false, detail: `asked ${version}, tree carries ${String(v)}` }
-  } catch { /* npm ls noise — the install exit was the authority */ }
-  return { ok: true, detail: `swapped ${String(family.length)} family packages to ${version}` }
+    const got = JSON.parse(fs.readFileSync('node_modules/@deepseek-ai/dsh/package.json', 'utf8')) as { version?: string }
+    ok = got.version === version
+    detail = ok ? `re-resolved ${String(changed)} direct entries to ${version} (${flagUsed}, closed in ${String(closed)} pass${closed === 1 ? '' : 'es'})`
+      : `asked ${version}, tree carries ${String(got.version)}`
+  } catch { detail = `asked ${version}, no @deepseek-ai/dsh after install (${flagUsed})` }
+  return { ok, detail }
 }
 
 // ---------------------------------------------------------------- run the real legs
@@ -160,6 +224,10 @@ function runLeg(leg: string): void {
     const r = spawnSync('npm', ['run', 'test:e2e:replay'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
     ok = r.status === 0
     detail = ok ? 'replay legs passed' : `test:e2e:replay exit ${String(r.status)}`
+  } else if (leg === 'e2e-live') {
+    const r = spawnSync('npm', ['run', 'test:e2e:live'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
+    ok = r.status === 0
+    detail = ok ? 'live legs passed' : `test:e2e:live exit ${String(r.status)}`
   } else {
     ok = false; detail = `unknown leg ${leg}`
   }
@@ -168,7 +236,6 @@ function runLeg(leg: string): void {
 
 const result = {
   version,
-  family: family.length,
   swap: { ok: false, detail: 'not attempted' },
   legs,
   verdict: 'fail',
@@ -176,12 +243,25 @@ const result = {
 }
 
 result.swap = swap()
-if (result.swap.ok) for (const leg of LEGS) runLeg(leg)
-const passed = result.swap.ok
-  && LEGS.length > 0 && legs.length === LEGS.length && legs.every((l) => l.ok)
-result.verdict = result.swap.ok
-  ? (legs.every((l) => l.ok) ? 'pass' : 'fail')
-  : 'untestable'
+if (result.swap.ok && LEGS.length > 0) {
+  // Tests read the BUILT surface (lib/*.js — gitignored); a fresh workspace without a
+  // build fails on ENOENT lib/tools.js, which says nothing about the hat version. The tsc
+  // half of `npm run build` produces it; the tsdown client bundle is not needed here and
+  // OOMs on newer module graphs — run the compiler, not the bundler.
+  const b = spawnSync(process.execPath, ['--max-old-space-size=12288', './node_modules/typescript/bin/tsc', '-p', 'tsconfig.json'], { encoding: 'utf8', timeout: 900_000 })
+  if (b.status !== 0) {
+    // A build that fails AFTER a clean version re-resolve is a REAL result for the version —
+    // the compile itself is one of the tests. It is recorded as the `build` leg failing (with
+    // the compiler's head), never as an 'untestable' block; the tests would only echo it.
+    const head = `${b.stdout ?? ''}\n${b.stderr ?? ''}`.split('\n').filter((l) => /error TS\d+/.test(l))[0] ?? ''
+    result.legs.push({ leg: 'build', ok: false, ms: 0, detail: `exit ${String(b.status)}${head !== '' ? ` — ${head.slice(0, 220)}` : ''}` })
+    result.verdict = 'fail'
+  }
+}
+if (result.swap.ok && !result.legs.some((l) => l.leg === 'build' && !l.ok)) for (const leg of LEGS) runLeg(leg)
+const buildFailed = legs.some((l) => l.leg === 'build' && !l.ok)
+const passed = result.swap.ok && !buildFailed && LEGS.length > 0 && legs.filter((l) => l.leg !== 'build').length === LEGS.length && legs.every((l) => l.ok)
+result.verdict = result.swap.ok ? (passed ? 'pass' : 'fail') : 'untestable'
 
 fs.mkdirSync(path.dirname(path.resolve(ROOT, OUT)), { recursive: true })
 fs.writeFileSync(path.resolve(ROOT, OUT), JSON.stringify(result, null, 2) + '\n')
