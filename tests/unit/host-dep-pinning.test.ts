@@ -21,7 +21,7 @@ import path from 'node:path'
 const ROOT = path.resolve(import.meta.dirname, '..', '..')
 const SEPARATE_SERIES = new Set(['@deepseek-ai/cordis', '@deepseek-ai/cordis-plugin-loader'])
 
-test('every host devDependency is pinned exactly to the version the e2e lock boots', () => {
+test('every host devDependency is pinned exactly to the version the e2e lock boots', { skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: this row guards the REPO's root-vs-lock consistency, and a cell deliberately floats the root` : false }, () => {
   const lock = JSON.parse(fs.readFileSync(path.join(ROOT, 'dev', 'dsh-host-lock', 'package.json'), 'utf8')) as
     { dependencies?: Record<string, string> }
   const pin = lock.dependencies?.['@deepseek-ai/dsh']
