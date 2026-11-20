@@ -16,8 +16,8 @@
 export const SUPPORT_FLOOR = '0.2.0'
 
 const split = (v: string): { num: [number, number, number]; pre: string } => {
-  const [base, pre = ''] = v.split('-', 2)
-  const n = base.split('.').map((x) => Number(x) || 0)
+  const [baseRaw, pre = ''] = v.split('-', 2)
+  const n = (baseRaw ?? '').split('.').map((x) => Number(x) || 0)
   return { num: [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0], pre }
 }
 
