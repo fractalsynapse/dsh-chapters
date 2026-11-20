@@ -162,6 +162,15 @@ function swap(): { ok: boolean; detail: string } {
   const fromGit = spawnSync('git', ['show', 'HEAD:package.json'], { encoding: 'utf8', timeout: 30_000 })
   const original = fromGit.status === 0 && fromGit.stdout !== '' ? fromGit.stdout : fs.readFileSync(pkgPath, 'utf8')
   fs.writeFileSync(pkgPath, original)
+  // The LOCK belongs to the base as much as the manifest does: with only package.json
+  // reset, the previous cell's lockfile steers this version's npm install (measured in the
+  // #451 sequential re-sweep — the same 0.2.1-alpha.3 tree resolved with the previous
+  // cell's lock took `default resolver, closed in 2 passes` and died TS2379 with NO nested
+  // zod detected, while a fresh workspace resolved `legacy-peer-deps, closed in 1 pass`
+  // and aligned cleanly). CI never sees this because each matrix job is a fresh checkout;
+  // restoring the committed lock makes sequential local cells match that world.
+  const lockFromGit = spawnSync('git', ['show', 'HEAD:package-lock.json'], { encoding: 'utf8', timeout: 30_000 })
+  if (lockFromGit.status === 0 && lockFromGit.stdout !== '') fs.writeFileSync('package-lock.json', lockFromGit.stdout)
   const pkgj = JSON.parse(original) as Pkgj
   // The family SET differs between lines (measured: 0.2.0-rc.1 never published
   // dsh-experimental-client-ui-cot-translation; 0.2.1-rc.1 never published dsh-web-deepseek-api).
