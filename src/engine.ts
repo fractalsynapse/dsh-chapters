@@ -311,12 +311,30 @@ export interface ForeignCompactionFact {
   at: string
 }
 
+/** The engine row's declared config surface (#449: the portable annotation for
+ *  `static Config`). It EXTENDS the host's own config type — the override adds the headroom
+ *  and routing keys — so the static side stays assignable to the base class under
+ *  exactOptionalPropertyTypes, and the annotation names only packages reachable from our
+ *  own imports (the TS2742 portability cure). */
+export interface ChaptersEngineConfig extends BasicCompactionConfig {
+  headroomTokens?: number
+  summarizationProvider?: string
+  summarizationModel?: string
+  maxTokens?: number
+}
+
 export class ChaptersCompactionEngine extends BasicCompactionEngine {
   // Base inject is ['llm','tokenMeter','sessions']; subclassing INHERITS statics,
   // so re-declare with what the chapter flow adds (r12's crash, FINDINGS).
   static inject = ['llm', 'tokenMeter', 'sessions', 'storageDomain']
 
-  static override Config = z.object({
+  // #449 TS2742: the BARE inferred type of this static resolves through schemastery's
+  // zod→cosmokit chain, and when a hat line nests cosmokit under storage-domain (measured on
+  // 0.2.2-alpha.2/3), TypeScript refuses an inferred type it can only name through that
+  // nested copy. The host's own types declare the base as `static Config: z<BasicCompactionConfig>`
+  // — annotating the same way makes the type portable by construction, and the compiler's
+  // remedy, not our workaround.
+  static override Config: z<ChaptersEngineConfig> = z.object({
     thresholdRatio: z.number(),
     retainRatio: z.number(),
     retainTokens: z.number().step(1).min(0),
