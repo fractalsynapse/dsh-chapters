@@ -149,10 +149,20 @@ function swap(): { ok: boolean; detail: string } {
   const pkgPath = 'package.json'
   const original = fs.readFileSync(pkgPath, 'utf8')
   const pkgj = JSON.parse(original) as Pkgj
+  // The family SET differs between lines (measured: 0.2.0-rc.1 never published
+  // dsh-experimental-client-ui-cot-translation; 0.2.1-rc.1 never published dsh-web-deepseek-api).
+  // Pin every package.json name to the target version and npm dies ETARGET on a name that old
+  // line never had — which is a fact about OUR manifest's vintage, not about the block. Check
+  // each name's publication at the target version first; pin what exists, unpin what does not
+  // (the closure walk pulls whatever the version's own graph actually carries).
   let changed = 0
+  const droppedNames: string[] = []
   for (const deps of [pkgj.dependencies ?? {}, pkgj.devDependencies ?? {}]) {
     for (const name of Object.keys(deps)) {
-      if (name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) { deps[name] = version; changed++ }
+      if (!(name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))) continue
+      const seen = spawnSync('npm', ['view', `${name}@${version}`, 'version'], { encoding: 'utf8', timeout: 90_000 })
+      if (seen.status === 0 && (seen.stdout ?? '').trim() !== '') { deps[name] = version; changed++ }
+      else { delete deps[name]; droppedNames.push(name) }
     }
   }
   ;(pkgj.dependencies ??= {})['@deepseek-ai/dsh'] = version
@@ -195,7 +205,7 @@ function swap(): { ok: boolean; detail: string } {
   try {
     const got = JSON.parse(fs.readFileSync('node_modules/@deepseek-ai/dsh/package.json', 'utf8')) as { version?: string }
     ok = got.version === version
-    detail = ok ? `re-resolved ${String(changed)} direct entries to ${version} (${flagUsed}, closed in ${String(closed)} pass${closed === 1 ? '' : 'es'})`
+    detail = ok ? `re-resolved ${String(changed)} direct entries to ${version} (${flagUsed}, closed in ${String(closed)} pass${closed === 1 ? '' : 'es'}${droppedNames.length > 0 ? `; ${String(droppedNames.length)} manifest names not published at this version left unpinned` : ''})`
       : `asked ${version}, tree carries ${String(got.version)}`
   } catch { detail = `asked ${version}, no @deepseek-ai/dsh after install (${flagUsed})` }
   return { ok, detail }
@@ -212,13 +222,21 @@ function runLeg(leg: string): void {
   if (leg === 'unit' || leg === 'integration' || leg === 'unit+integration') {
     const r = spawnSync('npm', ['test'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
     const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
-    const counts = (re: RegExp): number => { const m = out.match(re); return m === null ? -1 : Number(m[1]) }
-    const pass = counts(/^# pass (\d+)$/m), fail = counts(/^# fail (\d+)$/m), todo = counts(/^# todo (\d+)$/m)
+    // Node's test summary lines in BOTH formats seen this session: spec reporter `\u2139 pass N`
+    // (what Node 24 prints without a TTY here) and TAP `# pass N`. A regex that matches
+    // neither reads -1, and -1 turned a 4-failure run into an unparseable one — the counts
+    // are part of the verdict, not decoration.
+    const counts = (word: string): number => { const m = out.match(new RegExp('(?:\\u2139|#) ' + word + ' (\\d+)', 'm')); return m === null ? -1 : Number(m[1]) }
+    const pass = counts('pass'), fail = counts('fail'), todo = counts('todo')
     ok = r.status === 0 && fail === 0
     detail = `pass ${String(pass)} / fail ${String(fail)} / todo ${String(todo)}`
     if (!ok) {
-      const first = out.match(/^not ok \d+ - .*/m)
-      detail += first != null ? ` — ${first[0].slice(0, 240)}` : ` — exit ${String(r.status)}`
+      // Name the failing rows in the verdict (spec reporter prints '✖ <name>'; TAP prints
+      // 'not ok N - <name>'). A red cell that names its rows is a finding; a red cell that
+      // only says 'exit 1' is a mystery the next reader re-investigates from zero.
+      const names = [...out.matchAll(/(?:^|\n)\s*(?:✖|not ok \d+ - )([^\n(]{4,120})/gm)].map((m) => m[1]!.trim())
+        .filter((n) => !/^failing tests/.test(n)).slice(0, 4)
+      detail += names.length > 0 ? ` — failing: ${names.join(' | ')}` : ` — exit ${String(r.status)}`
     }
   } else if (leg === 'e2e') {
     const r = spawnSync('npm', ['run', 'test:e2e:replay'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
@@ -242,6 +260,12 @@ const result = {
   ts: new Date().toISOString(),
 }
 
+// Mark the cell for the suite itself: rows that guard the REPO's pin consistency
+// (root devDeps vs e2e lock vs corpus record) are about the pinned world, not about
+// plugin compatibility with this version — in a matrix cell they would fire as false
+// reds, so they skip BY NAME (never silently, never vacuously — normal runs are
+// unaffected because the variable is absent outside a cell).
+process.env.DSH_MATRIX_VERSION = version
 result.swap = swap()
 if (result.swap.ok && LEGS.length > 0) {
   // Tests read the BUILT surface (lib/*.js — gitignored); a fresh workspace without a
