@@ -57,6 +57,21 @@ tools, the six `/chapters-*` commands, **both** archive buttons on assistant row
 *Continue with chapters* — one deterministic door, two intents), and the optional `chapters` preset that
 routes `/compact` through the zero-token engine.
 
+### Verifying an update without the checkout
+
+The version question after an update has one honest answer source: **the running process itself**.
+`/chapters-status` prints a `Version:` line naming the plugin version it loaded and the copy on disk it
+loaded from — so `dsh plugin --profile web update @fractalsynapse/dsh-chapters` (or the `npm i` path), a
+restart, and one look at `/chapters-status` closes the update loop entirely inside the product. No
+repo-bundled script is part of any human or agent-facing release step; the parity script remains exactly
+where its strength is — the CI job that reads all trees at once.
+
+Stated as what one process can see, because that is the rule of this whole page: the `Version:` line
+reports the copy **this** server loaded. Other homes, other profiles, other long-lived servers are
+invisible from inside a running process — each gets its own update, its own restart, and its own
+`/chapters-status`. A stale second harness does not disagree with this line; it simply never prints one
+about itself.
+
 ### The preset lines are the ones to read
 
 "Enabled and running" in Settings is **not** evidence that the preset exists, and a missing preset is the
