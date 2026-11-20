@@ -627,7 +627,13 @@ test('the realm bounds the pressure headroom and the engine schema carries it (#
   assert.match(body, /headroomTokens: \d+/, 'the engine row must bound headroomTokens, not inherit 65,536')
 
   const engine = readFileSync(join(PKG_ROOT, 'src', 'engine.ts'), 'utf8')
-  const schema = engine.slice(engine.indexOf('static override Config = z.object({'), engine.indexOf('modelPolicies'))
+  // The needle used to pin the EXACT declaration text — a portable type annotation
+  // (#449: `static override Config: z<ChaptersEngineConfig> = …`) silently broke the
+  // indexOf and the guard read garbage. The row's MEANING is 'the schema declares the key';
+  // match the declaration, do not memorize it.
+  const decl = /static override Config(:[^=]+)? = z\.object\(\{/.exec(engine)
+  assert.ok(decl !== null, 'the engine Config declaration must be findable — annotation or not')
+  const schema = engine.slice(decl.index, engine.indexOf('modelPolicies'))
   assert.match(schema, /headroomTokens:\s*z\.number\(\)/,
     'Config must declare headroomTokens or the Loader drops it before the base sees it')
 
