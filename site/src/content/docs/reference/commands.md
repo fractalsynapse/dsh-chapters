@@ -268,10 +268,28 @@ number stays spent forever, and a restore that would render nothing refuses rath
 Safety order is the #60 discipline: the journal under `<tree>/removals/` is written **before** the first
 unlink; if it cannot be written, nothing is deleted.
 
-Known scope limit, stated rather than hidden: v1 is **single-machine correct**. If the same pool is linked
-on a second machine that still holds the file locally, that machine can re-publish it until cross-machine
-removal tombstones land (follow-up issue). Dry-run is the default: `list` and `find` write nothing, and the
-`apply` word is the only thing that deletes.
+Cross-machine removal is tombstoned (#256). `apply` on the removing machine appends one
+**removal fact** per deleted chapter to the pool's already-synced, append-only per-session
+collections file (`collections/<projectKey>/<sessionId>.jsonl`, the channel §15's design record
+named for exactly this):
+
+```json
+{"type":"chapter-removed","tail":"<session>/chapters/<file>.md","span":[startSeq,endSeq],"by":"<harnessId>","at":"<iso>"}
+```
+
+Every machine consumes the facts on its next sync pass, in two places. Publishing skips any store
+chapter whose tail a fact claims — a second machine that never removed anything re-publishes
+nothing after pulling the deletion, and its `chapters_search` stops returning the chapter with that
+pull, because the pool copy is what search reads. Rehydration skips those tails too, even on a
+machine whose local registry has no stub for them. Facts are parse-tolerant: a malformed line is
+skipped, and it never blocks a pass.
+
+The local registry is deliberately NOT rewritten by someone else's judgment: on a machine that did
+not perform the removal, the row keeps its prior status (active rows read as missing at TOC build,
+and `report` names them). That is the conservative half of the decision in #256 — a remote
+operator's delete stops the bytes travelling, but the local operator decides what their own
+registry says. Dry-run is the default: `list` and `find` write nothing, and the `apply` word is the
+only thing that deletes.
 
 ## Auto-save when a subagent settles
 

@@ -17,6 +17,7 @@ import { buildIndexShards, entryFromChapter, parseCuration, stitchFragments, typ
 import { analyzeTopics, planAppends, type VocabOpts } from './vocabulary.ts'
 import { resolveStoreRoot } from './store.ts'
 import { isSessionRuleFile } from './rules.ts'
+import { isRemovedChapter } from './registry.ts'
 
 /** A linked knowledge project (record §2.1, §8): one record per linked
  * workspace cwd; deepest-cwd match resolves the active project. */
@@ -162,7 +163,9 @@ function acquireLock(lockPath: string, force: boolean): { held: boolean; release
  * Artifacts are content-addressed and shared across sessions, so their
  * per-session prefix is dropped; chapters keep it.
  */
-export function planStoreToRepo(storeDir: string, projectKey: string): { abs: string; rel: string }[] {
+export function planStoreToRepo(
+  storeDir: string, projectKey: string, removedChapterKeys?: ReadonlySet<string>,
+): { abs: string; rel: string }[] {
   const out: { abs: string; rel: string }[] = []
   const seen = new Set<string>()
   const push = (abs: string, rel: string): void => {
@@ -196,6 +199,11 @@ export function planStoreToRepo(storeDir: string, projectKey: string): { abs: st
     if (fs.existsSync(chaptersDir)) {
       for (const f of fs.readdirSync(chaptersDir)) {
         if (!f.endsWith('.md')) continue
+        // #256: a pulled tombstone is a pool DECISION. The removing machine (#255) and the
+        // machines that merely share the pool are refused the same resurrection, in the same
+        // key dialect. Artifacts are deliberately NOT keyed here: shared blobs belong to
+        // #255's orphan rule, and skipping one would break a live chapter's citation.
+        if (removedChapterKeys !== undefined && removedChapterKeys.has(`${sessionDir.name}#${f}`)) continue
         push(path.join(chaptersDir, f), path.join('chapters', projectKey, sessionDir.name, f))
       }
     }
@@ -341,18 +349,68 @@ export function buildIndexInClone(cloneDir: string): boolean {
  */
 function publishIntoClone(
   cloneDir: string, storeDir: string, opts: SyncOpts,
-): { copied: number; skipped: number; vocabReport?: string } {
+): { copied: number; skipped: number; vocabReport?: string; removalFactsSkipped: number; tombstonesCleared: number; tombstoneProblems: string[] } {
   let vocabReport: string | undefined
-  const storeFiles = planStoreToRepo(storeDir, opts.project.projectKey)
+  // #256: the tombstones the pool carries (every machine's deletions, including this one's).
+  const facts = readRemovalFacts(cloneDir, opts.project.projectKey)
+  const claimed = new Set<string>([...(opts.removed?.chapterKeys ?? []), ...facts.keys])
+  const storeFiles = planStoreToRepo(storeDir, opts.project.projectKey, claimed.size > 0 ? claimed : undefined)
+  const removalFactsSkipped = claimed.size > 0
+    ? planStoreToRepo(storeDir, opts.project.projectKey).length - storeFiles.length
+    : 0
   const { copied: storeCopied, skipped } = copyNewFiles(cloneDir, storeFiles)
   let copied = storeCopied
+  const tombstoneProblems: string[] = []
+  // #256 second half: tombstoned bytes must leave the MIRROR too, not merely avoid re-entering
+  // it. Without this, a divergence-rebuild restores the remote copy of a chapter this pool has
+  // decided away, and the deletion commit never re-appears — the tombstone would guard only the
+  // forward path. Only files whose STORE side is gone are unlinked (the #255 invariant: a live
+  // local copy is truth and keeps its mirror byte).
+  let tombstonesCleared = 0
+  if (claimed.size > 0) {
+    const chaptersRoot = path.join(cloneDir, 'chapters', opts.project.projectKey)
+    if (fs.existsSync(chaptersRoot)) {
+      for (const session of fs.readdirSync(chaptersRoot, { withFileTypes: true })) {
+        if (!session.isDirectory()) continue
+        const dir = path.join(chaptersRoot, session.name)
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith('.md')) continue
+          if (!claimed.has(`${session.name}#${f}`)) continue
+          if (fs.existsSync(path.join(storeDir, session.name, 'chapters', f))) continue
+          try {
+            fs.unlinkSync(path.join(dir, f))
+            tombstonesCleared += 1
+          } catch (error) {
+            tombstoneProblems.push(`tombstone clear ${session.name}/${f} failed: ${String((error as Error)?.message ?? error)}`)
+          }
+        }
+      }
+    }
+  }
   // collection files: write-if-changed. Unlike chapters they are REGENERATED
   // (a session keeps collecting signatures, so its JSONL grows); only THIS
   // harness writes its own sessions' files, so ff-only stays conflict-free.
+  // #256 corollary: regeneration must not EVAPORATE the tombstones already in the file —
+  // a fact is pool content every machine may have appended, so the existing fact lines are
+  // merged back after the signatures, deduped by exact bytes (never reordered into a rewrite).
   for (const c of opts.collections ?? []) {
     const rel = path.join('collections', opts.project.projectKey, `${c.sessionId}.jsonl`)
     const abs = path.join(cloneDir, rel)
-    const content = c.lines.join('\n') + (c.lines.length > 0 ? '\n' : '')
+    const existing: string[] = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf8').split('\n') : []
+    const nextSet = new Set(c.lines)
+    const factLines: string[] = []
+    const seenFact = new Set<string>()
+    for (const raw of existing) {
+      const t = raw.trim()
+      if (!t.startsWith('{')) continue
+      let type: unknown
+      try { type = (JSON.parse(t) as { type?: unknown }).type } catch { continue }
+      if (type !== 'chapter-removed') continue
+      if (seenFact.has(t) || nextSet.has(t)) continue // regenerated already carries this exact fact
+      seenFact.add(t)
+      factLines.push(t)
+    }
+    const content = [...c.lines, ...factLines].join('\n') + (c.lines.length + factLines.length > 0 ? '\n' : '')
     if (!fs.existsSync(abs) || fs.readFileSync(abs, 'utf8') !== content) {
       fs.mkdirSync(path.dirname(abs), { recursive: true })
       fs.writeFileSync(abs, content)
@@ -380,7 +438,7 @@ function publishIntoClone(
     // timestamps), so identical inputs never dirty the mirror
     emitVocabularyJson(cloneDir)
   } catch { /* index failure never blocks the pass (record §5.3) */ }
-  return { copied, skipped, ...(vocabReport !== undefined ? { vocabReport } : {}) }
+  return { copied, skipped, removalFactsSkipped, tombstonesCleared, tombstoneProblems, ...(vocabReport !== undefined ? { vocabReport } : {}) }
 }
 
 /** topics/vocabulary.json: canonical labels, live aliases, frequency. */
@@ -512,6 +570,82 @@ export interface RemovedGuard {
   blobKeys: ReadonlySet<string>
 }
 
+/**
+ * #256 — one cross-machine removal tombstone. It rides the pool's already-synced, append-only
+ * per-session collections JSONL (the channel #255's design record named): `apply` on the
+ * removing machine appends the fact, every machine's sync consumes it. The key dialect matches
+ * `RemovedGuard.chapterKeys` exactly (`<sessionDir>#<file>`) so the two sources of the same
+ * decision — local stubs and pulled facts — union into ONE guard with no translation.
+ */
+export interface RemovalFact {
+  type: 'chapter-removed'
+  /** `<session>/chapters/<file>.md` — the stored-path dialect, forward slashes, pool-canonical. */
+  tail: string
+  span: [number, number]
+  by: string
+  at: string
+}
+
+/** Parse fact lines out of a collections stream, TOLERANTLY (#256 acceptance: a malformed line
+ *  skips, it never blocks a pass). Anything that is not a `chapter-removed` object is somebody
+ *  else's line — signatures included — and passes silently. A line that CLAIMS to be a fact and
+ *  is not shaped like one is a NAMED problem: a deletion decision that silently fails to parse
+ *  is how a tombstone evaporates. */
+export function removalFactsFromLines(lines: readonly string[]): { keys: Set<string>; problems: string[] } {
+  const keys = new Set<string>()
+  const problems: string[] = []
+  lines.forEach((raw, i) => {
+    const t = raw.trim()
+    if (t === '') return
+    let parsed: unknown
+    try { parsed = JSON.parse(t) } catch { return } // unparseable: not claimably a fact, silently not ours
+    if (parsed === null || typeof parsed !== 'object') return
+    const o = parsed as Record<string, unknown>
+    if (o.type !== 'chapter-removed') return
+    if (typeof o.tail !== 'string') { problems.push(`line ${String(i + 1)}: chapter-removed fact without a string tail`); return }
+    const segs = o.tail.split('/').filter((s) => s !== '')
+    const ci = segs.lastIndexOf('chapters')
+    if (ci < 1 || ci !== segs.length - 2) {
+      problems.push(`line ${String(i + 1)}: fact tail "${o.tail}" is not <session>/chapters/<file>`)
+      return
+    }
+    keys.add(`${segs[ci - 1]}#${segs[ci + 1]}`)
+  })
+  return { keys, problems }
+}
+
+/** Append facts to a session's collections file in the mirror — APPEND only, never a rewrite:
+ *  the channel is durable pool content and a rewrite would re-open the resurrection window.
+ *  Throws only on filesystem failure, which the caller reports as a problem. */
+export function appendRemovalFacts(
+  cloneDir: string, projectKey: string, sessionId: string, facts: readonly RemovalFact[],
+): void {
+  if (facts.length === 0) return
+  const dir = path.join(cloneDir, 'collections', projectKey)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.appendFileSync(path.join(dir, `${sessionId}.jsonl`), facts.map((f) => JSON.stringify(f)).join('\n') + '\n')
+}
+
+/** Every fact the pool carries for this project — signatures of machines that deleted. */
+export function readRemovalFacts(cloneDir: string, projectKey: string): { keys: Set<string>; problems: string[] } {
+  const keys = new Set<string>()
+  const problems: string[] = []
+  const dir = path.join(cloneDir, 'collections', projectKey)
+  if (!fs.existsSync(dir)) return { keys, problems }
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith('.jsonl')) continue
+    let text = ''
+    try { text = fs.readFileSync(path.join(dir, f), 'utf8') } catch (error) {
+      problems.push(`${f}: unreadable (${String((error as Error)?.message ?? error)}) — facts in it are skipped this pass`)
+      continue
+    }
+    const parsed = removalFactsFromLines(text.split('\n'))
+    for (const k of parsed.keys) keys.add(k)
+    problems.push(...parsed.problems.map((p) => `${f} ${p}`))
+  }
+  return { keys, problems }
+}
+
 export function rehydrateStoreFromMirror(
   cloneDir: string, storeDir: string, projectKey: string, removed?: RemovedGuard,
 ): { restored: number; skippedRemoved: number } {
@@ -583,8 +717,15 @@ export async function runSync(opts: SyncOpts): Promise<SyncResult> {
   const remote: RemoteSpec = { url: opts.project.remote, ...(opts.token !== undefined ? { token: opts.token } : {}) }
   const author: CommitAuthor = { name: 'dsh-chapters', email: `${opts.project.harnessId}@dsh-chapters.local` }
   const publishCommit = async (): Promise<{ copied: number; committed: boolean }> => {
-    const { copied, skipped, vocabReport } = publishIntoClone(cloneDir, storeDir, opts)
+    const { copied, skipped, vocabReport, removalFactsSkipped, tombstonesCleared, tombstoneProblems } = publishIntoClone(cloneDir, storeDir, opts)
     steps.push(`published ${copied} new file(s), ${skipped} already mirrored`)
+    if (removalFactsSkipped > 0) {
+      steps.push(`removal facts: ${removalFactsSkipped} store chapter(s) SKIPPED from re-publish (#256: another machine deleted them)`)
+    }
+    if (tombstonesCleared > 0) {
+      steps.push(`tombstones: ${tombstonesCleared} mirror chapter copy(ies) cleared for the commit to carry (#256)`)
+    }
+    for (const p of tombstoneProblems) steps.push(`⚠ ${p}`)
     if (vocabReport !== undefined) steps.push(vocabReport)
     // P3: the commit is ATTEMPTED EVEN WHEN copied === 0. Command-written
     // curation facts (rule approvals) change the worktree without any store
@@ -627,7 +768,20 @@ export async function runSync(opts: SyncOpts): Promise<SyncResult> {
       }
     }
 
-    const { restored, skippedRemoved } = rehydrateStoreFromMirror(cloneDir, storeDir, opts.project.projectKey, opts.removed)
+    // #256: the tombstones the PULL just landed — read BEFORE rehydration, so a machine whose
+    // own registry never saw the deletion still refuses to resurrect it (store skip below,
+    // rehydrate skip here; one dialect, one read, both consumers).
+    const poolFacts = readRemovalFacts(cloneDir, opts.project.projectKey)
+    if (poolFacts.problems.length > 0) {
+      steps.push(`⚠ ${String(poolFacts.problems.length)} malformed removal fact line(s) skipped, never blocked: ${poolFacts.problems.slice(0, 3).join(' | ')}${poolFacts.problems.length > 3 ? ' …' : ''}`)
+    }
+    const guard: RemovedGuard | undefined = opts.removed === undefined && poolFacts.keys.size === 0
+      ? undefined
+      : {
+          chapterKeys: new Set<string>([...(opts.removed?.chapterKeys ?? []), ...poolFacts.keys]),
+          blobKeys: opts.removed?.blobKeys ?? new Set<string>(),
+        }
+    const { restored, skippedRemoved } = rehydrateStoreFromMirror(cloneDir, storeDir, opts.project.projectKey, guard)
     if (restored > 0 || skippedRemoved > 0) {
       steps.push(`rehydrated ${restored} file(s) from the pool into the store${skippedRemoved > 0 ? ` — ${skippedRemoved} SKIPPED as removed (#255: a deletion is a decision, not a gap)` : ''}`)
     }
@@ -729,13 +883,37 @@ export async function runPull(opts: Omit<SyncOpts, 'force'>): Promise<{ ok: bool
 export function makeCollectionsReader(
   sessions: () => IterableIterator<[string, import('./registry.ts').SessionState]>,
   storeRoot: string,
+  harnessFor: (cwd: string) => string = () => 'unknown',
 ): (cwd: string) => { sessionId: string; lines: string[] }[] {
   return (cwd: string) => {
     const out: { sessionId: string; lines: string[] }[] = []
+    const harness = harnessFor(cwd)
     for (const [sid, st] of sessions()) {
-      if (st.collections.length === 0) continue
+      const lines = (st.collections ?? []).map((c: unknown) => JSON.stringify(c))
+      // #256: this machine's own removal stubs EMIT their facts every pass. The apply-time
+      // mirror append is immediate, but a divergence-rebuild destroys the mirror worktree and
+      // republishes — if facts lived only there, the tombstone would evaporate exactly on the
+      // machine that made the decision, and the pool would re-open. Registry rows are durable;
+      // regenerating from them makes the fact survive any number of rebuilds. Byte-identical
+      // to the apply-time line by construction (same key order, stub holds the same values),
+      // so the merge dedup keeps one copy.
+      for (const c of st.chapters ?? []) {
+        if (!isRemovedChapter(c)) continue
+        const segs = (c.path ?? '').split('/').filter((s) => s !== '')
+        const ci = segs.lastIndexOf('chapters')
+        if (ci < 1 || ci !== segs.length - 2) continue
+        const fact: RemovalFact = {
+          type: 'chapter-removed',
+          tail: `${segs[ci - 1]}/chapters/${segs[ci + 1]}`,
+          span: [c.startSeq, c.endSeq],
+          by: harness,
+          at: c.removedAt ?? '',
+        }
+        lines.push(JSON.stringify(fact))
+      }
+      if (lines.length === 0) continue
       if (!fs.existsSync(path.join(resolveStoreRoot(cwd, storeRoot), st.rootSession))) continue
-      out.push({ sessionId: sid, lines: st.collections.map((c) => JSON.stringify(c)) })
+      out.push({ sessionId: sid, lines })
     }
     return out
   }
