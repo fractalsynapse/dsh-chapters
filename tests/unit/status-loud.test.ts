@@ -12,6 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { registerHostCommands } from '../../src/commands.ts'
+import { PLUGIN_VERSION } from '../../src/version.ts'
 import { freshSession, type SessionState } from '../../src/registry.ts'
 
 type Handler = (inv: { agent: unknown; rawInput?: string }) => Promise<{ kind: string; text?: string }>
@@ -40,6 +41,25 @@ function harness(opts: { sessions?: Array<[string, SessionState]> } = {}) {
   assert.ok(status !== undefined, 'chapters-status must be registered')
   return { cwd, status: status.handler, dispose: () => fs.rmSync(cwd, { recursive: true, force: true }) }
 }
+
+/**
+ * #260: the update loop closes INSIDE the product. A release must never hand a human a
+ * repo-bundled script to prove an install landed — the running process is the only honest
+ * answer source for "which copy did this server load", so the status names its own version,
+ * the disk copy it loaded from, and the blind spot (other homes/profiles/servers it cannot
+ * see), stated rather than implied clean.
+ */
+test('#260: the status names the loaded version, the copy, and the visibility limit', async () => {
+  const h = harness()
+  try {
+    const r = await h.status({ agent: { session: { id: 'sess-1', header: { cwd: h.cwd }, snapshotEvents: () => [] } } })
+    const t = r.text ?? ''
+    assert.ok(t.includes(`Version: ${PLUGIN_VERSION}`), `expected the running version line first, got: ${t.slice(0, 200)}`)
+    assert.match(t, /loaded from \/[^\n]+/, 'the directory of the copy THIS process booted, from its own module URL')
+    assert.match(t, /cannot see|not visible/i, 'and the honest scope: what one process cannot see is stated')
+    assert.equal(t.indexOf('Version:'), 0, 'the version line leads — an update check must not require scrolling past project state')
+  } finally { h.dispose() }
+})
 
 test('an UNLINKED project still gets the whole health block (#61)', async () => {
   const h = harness()

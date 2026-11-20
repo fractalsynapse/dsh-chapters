@@ -53,5 +53,8 @@ before publication.
 
 Verify the authorized tag-triggered release and the actual registry tarball.
 Distinguish build, publish, tarball availability, installed proof and the user's
-loaded process. Verify environment parity for the intended host, then report any
-drift and the authorized install or restart needed to deliver the fix.
+loaded process. Verify environment parity for the intended host — the product's
+`/chapters-status` `Version:` line is the proof of what a server actually loaded,
+and the repo-bundled parity script stays a CI-only gate (#260: no human-facing
+release step runs a checkout script) — then report any drift and the authorized
+install or restart needed to deliver the fix.
