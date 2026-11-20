@@ -1128,7 +1128,10 @@ tags, mutable understanding, one line in the right place.
 
 The rig pins ONE harness (`dev/dsh-host-lock`), the centrally installed app is a different,
 moving third thing, and the npm registry carries dozens more. "Support floor 0.2.0" was prose
-until this sweep existed; it is now a nightly-executed claim with per-version attribution.
+until this sweep existed; it is now an executed claim with per-version attribution.
+(#451 corrected the plane: the CI job goes live the day this workflow reaches the default
+branch, and until then refreshes come from sweep runs of committed code — the README stamp
+names which one produced the table, because a local run recorded as CI is a provenance bug.)
 
 ```bash
 bash scripts/host-matrix.sh                                # every published 0.2.x, isolated
@@ -1157,9 +1160,16 @@ Design rules, each earned:
   composition is the user fact and the classifier knows the loud lines from the quiet ones.
 - **Sequential cells, port band 41900+** — never two boots at once (the same-home rule), and a
   band clear of the rig's 41731-41746 so a sweep and a leg can never share home, proxy or sink.
-- CI: the `host-matrix.yml` workflow runs the whole block nightly with the runtime provisioning
-  the acceptance job records as load-bearing (bwrap, sysctl, chromium libs, zstd), uploads
-  `var/host-matrix-results.jsonl`, and does not gate PRs — the pinned chain is the PR gate.
+- Two planes, two entry points: `scripts/host-matrix.sh` (compose-probe boots, artifacts
+  `var/host-matrix-results.jsonl`) and `scripts/matrix-run.mts` (real unit+integration legs per
+  version, verdict JSONs under `var/matrix-runs/`, README table from `--report`). The
+  `host-matrix.yml` workflow runs the REAL-legs plane with the runtime provisioning
+  the acceptance job records as load-bearing (bwrap, sysctl, chromium libs, zstd), uploads each
+  verdict JSON, and does not gate PRs — the pinned chain is the PR gate. GitHub only registers
+  scheduled workflows from the DEFAULT branch, so the nightly activates when a release carries
+  the file to `main` (#451). The workflow's own references are guarded on the repo plane by
+  `tests/unit/host-matrix-workflow.test.ts` — the file shipped once with find/replace casualties
+  (`scripts/de-de-de.mjs`, `var/de-de-de`) and nothing noticed.
 
 The support BOUNDARY (oldest passing / newest failing version and the seam at each failure) is
 recorded in `docs/verify.md` per sweep run; the registry list re-bases nightly, so the claim
