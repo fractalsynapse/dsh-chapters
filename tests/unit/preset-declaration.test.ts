@@ -411,6 +411,18 @@ test('#437: hostNodeModulesRoot reads the tree out of both entry layouts, or say
   assert.equal(hostNodeModulesRoot(undefined), null)
 })
 
+test('#437: the mount call defaults to the REAL process entry — a guard only the tests pass is no guard', () => {
+  // The first cut of the fix wired `makeHostAwareResolver(plugins, { pluginResolvable })` and the
+  // implementation read opts.entryPath with NO default: under boot the predicate silently fell
+  // back to the plugin lineage and the polluted row stayed mounted — red at replay, green at
+  // unit, exactly how this class hides. Under `node --test` the entry is a test file with no
+  // node_modules segment, so the default path must keep the fallback behavior, never throw.
+  const r = makeHostAwareResolver(rowList(['a', '@deepseek-ai/dsh-a']), {
+    exists: () => true, pluginResolvable: () => false,
+  })
+  assert.equal(r('@deepseek-ai/dsh-a'), false, 'default entry is unprobeable here — pluginResolvable decides')
+})
+
 test('RUN — registerPrunedPreset classifies every outcome and never throws at the row', async () => {
   const definition: PresetDefinition = { id: PRESET_ID, name: 'Chapters', description: 'x', order: 0, plugins: [
     { id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },

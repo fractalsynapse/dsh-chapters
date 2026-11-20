@@ -135,7 +135,15 @@ export function makeHostAwareResolver(
   },
 ): (specifier: string) => boolean {
   const exists = opts.exists ?? hostExists
-  const root = hostNodeModulesRoot(opts.entryPath)
+  // The entry defaults to the REAL host process's own argv[1] — this runs inside the booted
+  // host, and #89's lesson is that a probe pointed at some other tree answers about a world
+  // this process never boots. realpath first: npm bin shims are symlinks, and the tree
+  // segment must belong to the file actually executing.
+  let entry = opts.entryPath ?? process.argv[1]
+  if (entry !== undefined) {
+    try { entry = fs.realpathSync(entry) } catch { /* keep the raw path if realpath fails */ }
+  }
+  const root = hostNodeModulesRoot(entry)
   const specs = flattenRowSpecs(mounted)
   if (root === null || !specs.some((s) => exists(path.join(root, packageKeyOf(s))))) {
     return opts.pluginResolvable
