@@ -1,0 +1,63 @@
+name: host-matrix
+# #443: the supported-harness-versions sweep. Nightly and manual ONLY — a PR is gated by the
+# pinned-host chain (one corpus, one world); this job is the standing answer to "which harness
+# versions does this plugin actually work against", enumerated from the registry at run time so
+# the claim re-bases itself every night without a human editing a list.
+on:
+  schedule:
+    - cron: '17 4 * * *'   # daily, off the :00 scrum
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'comma-separated versions (empty = whole 0.2.x registry block)'
+        required: false
+        default: ''
+      below:
+        description: 'comma-separated below-floor controls'
+        required: false
+        default: '0.1.7-rc.2'
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      # The same runtime provisioning the acceptance job records as load-bearing: chromium's
+      # shared libs, zstd for the durable logs, and bubblewrap + the userns sysctl, without which
+      # a runner boots a 7-tool host against a local 34-tool one and every comparison is fiction.
+      - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd bubblewrap
+      - name: allow unprivileged user namespaces (bubblewrap needs them)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>&1 || echo "sysctl: not available on this image"
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>&1 || echo "sysctl: setting not present on this image"
+          bwrap --ro-bind / / /bin/true && echo "bwrap probe: OK after sysctl" || echo "bwrap probe: still failing"
+      - name: install chromium (repo-local browsers path)
+        run: PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
+      - name: sweep the supported versions
+        env:
+          MATRIX_VERSIONS: ${{ github.event.inputs.versions }}
+          MATRIX_BELOW: ${{ github.event.inputs.below }}
+        run: |
+          ARGS=()
+          [ -n "${MATRIX_VERSIONS:-}" ] && ARGS+=("--versions=${MATRIX_VERSIONS}")
+          [ -n "${MATRIX_BELOW:-}" ] && ARGS+=("--below=${MATRIX_BELOW}")
+          bash scripts/host-matrix.sh "${ARGS[@]}" 2>&1 | tee var/host-matrix-sweep-ci.log
+      - name: upload the verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-matrix-results
+          path: |
+            var/host-matrix-sweep-ci.log
+            var/host-matrix-results.jsonl
+          if-no-files-found: warn
