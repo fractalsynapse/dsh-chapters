@@ -560,7 +560,9 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       // reads what the project table knows.
       resolveProject: (cwd) => projectForCwd(store.projects(), cwd),
       tokenFor: (cwd, projectKey) => readToken(cwd, this.chaptersConfig.artifactStoreRoot, projectKey),
-      collectionsFor: makeCollectionsReader(store.sessions.bind(store), this.chaptersConfig.artifactStoreRoot),
+      collectionsFor: makeCollectionsReader(store.sessions.bind(store), this.chaptersConfig.artifactStoreRoot,
+        // #256: the reader stamps the project's harness id into regenerated removal facts.
+        (cwd) => projectForCwd(store.projects(), cwd)?.harnessId ?? 'unknown'),
       // #255: rehydration must not resurrect removed chapters; the guard reads the stub rows.
       removedFor: () => removedGuard(store.sessions()),
       vocab: this.vocabCfg,

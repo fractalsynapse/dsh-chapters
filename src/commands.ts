@@ -849,6 +849,9 @@ export function registerHostCommands(
           store: config.store,
           cwd, rows, storeDir,
           ...(project !== undefined && fs.existsSync(mirrorAbs) ? { cloneDir: mirrorAbs, projectKey: project.projectKey } : {}),
+          // #256: the tombstone's attribution travels with the project record; fact writes are
+          // gated on the mirror existing anyway, so the id rides the same condition.
+          ...(project !== undefined && fs.existsSync(mirrorAbs) ? { harnessId: project.harnessId } : {}),
           now: () => new Date().toISOString(),
         }, plan)
         let syncLine = '  pool: unlinked project — store-only removal; this machine\u2019s memory is what got cleaned'
