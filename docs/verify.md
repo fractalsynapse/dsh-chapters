@@ -672,3 +672,9 @@ matrix exists, found on its first day. Follow-up issue tracks the 0.2.2 incompat
 proven live (acceptance 2): the below-floor cells go red for their own named reasons, and the
 0.2.2 cells carry the #437 compose symptom text verbatim. CI: `host-matrix.yml` (daily 04:17 UTC
 + dispatch), artifacts `host-matrix-results`.
+
+**DECIDED SAME DAY (#446, maintainer directive):** 0.1.* is DEPRECATED — the project started on
+it — so the nightly enumerates 0.2.0 and up ONLY; the three 0.1.x rows above stand as the
+pre-decision measurement that located the capability edge (they stay: records are records), and
+`--below=` remains for one-off controls. The support floor's single source is now `SUPPORT_FLOOR`
+in the matrix support module, asserted by a unit row (`no default list includes a 0.1 version`).
