@@ -71,7 +71,15 @@ export function classifyBootState(logText: string): { state: BootState; dropped:
       if (name !== undefined) dropped.push(name)
     }
   }
-  if (/DECLARED BUT BROKEN|refusing to compose|refused:/.test(logText) && /preset/i.test(logText)) return { state: 'broken', dropped }
+  if (/DECLARED BUT BROKEN|refusing to compose|refused:/.test(logText) && /preset/i.test(logText)) {
+    // The Details clause is where the host names WHAT broke — a package row, or its own
+    // internals (0.2.2-alpha.2 measured: `Cannot read properties of undefined (reading 'parent')`).
+    // Either way the sweep's table carries the verbatim reason; a bare `broken` is a shrug.
+    const details = logText.match(/Details: ([^\n]+)/)?.[1] ?? ''
+    const names = [...details.matchAll(/@deepseek-ai\/[^\s,()]+(?:\/[^\s,()]+)?/g)].map((m) => m[0])
+    const attributed = names.length > 0 ? names : [details.slice(0, 160) || 'no Details clause']
+    return { state: 'broken', dropped: attributed }
+  }
   if (/cannot register preset declaration rows/.test(logText)) return { state: 'unsupported', dropped }
   if (/is also declared by another row/.test(logText)) return { state: 'duplicate', dropped }
   if (dropLine !== null) return { state: 'pruned', dropped }
@@ -96,7 +104,7 @@ export function cellVerdict(cell: {
   if (!cell.bootOk) return { verdict: 'fail-boot', why: 'the host binary from this tree never produced a reachable server' }
   if (cell.preset === 'broken') return { verdict: 'fail-broken-preset', why: `DECLARED BUT BROKEN${cell.dropped.length > 0 ? ` — rows this host cannot activate: ${cell.dropped.join(', ')}` : ''}` }
   if (cell.preset === 'unsupported') return { verdict: 'fail-unsupported', why: 'the host cannot register preset declaration rows (below the 0.2.0 floor by design)' }
-  if (cell.preset === 'absent' && !cell.composed) return { verdict: 'fail-boot', why: 'neither a preset boot line nor a composed session — the cell cannot be attributed' }
+  if (cell.preset === 'absent' && !cell.composed) return { verdict: 'fail-compose', why: `no loud preset line and the realm never came up: ${cell.composeError ?? 'the session header never recorded agentPreset="chapters"'}` }
   if (cell.preset === 'absent') return { verdict: 'pass', why: 'composed with no loud preset failure — the healthy registration line is logger.info on the host log stream, not this pipe' }
   if (!cell.composed) return { verdict: 'fail-compose', why: `a new session never composed with the chapters preset${cell.composeError === undefined ? '' : `: ${cell.composeError}`}` }
   return { verdict: 'pass', why: cell.preset === 'pruned' ? `composed; rows pruned as unshipped: ${cell.dropped.join(', ')}` : 'composed' }

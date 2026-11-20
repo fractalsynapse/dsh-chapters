@@ -646,3 +646,29 @@ same tape then replayed MODEL-FREE green: `1 passed` (48.3s), zero MISSes — #1
 not bite; the byte-exact tape reproduces the local relief decisions. The tape is tracked corpus with
 PROVENANCE (11 entries) and the leg is a chain member: composition is pinned against every future
 code change, verified from the discussion itself — the corpus gap the maintainer named, closed. |
+
+## Host-version matrix sweeps (#443, 2026-11-20)
+
+Command: `bash scripts/host-matrix.sh [--versions=…] [--below=…]`; per-cell artifacts
+`var/host-matrix-results.jsonl`, boot logs `var/e2e-server-<419xx>.log`; candidate trees
+`var/host-matrix/<version>/` (isolated npm installs; the rig pin and the central app untouched).
+Compose = strict: new session, durable header `agentPreset="chapters"`.
+
+| version | verdict | attributed cause |
+|---|---|---|
+| 0.1.6-alpha.1 | fail-boot | the rig profile's declaration-row syntax aborts the legacy plugin tree — below the capability floor |
+| 0.1.6-alpha.2 | fail-unsupported | boots; the plugin's own loud line: host cannot register preset declaration rows; sessions never compose |
+| 0.1.7-rc.2 | **pass** | declaration rows exist since 0.1.7-alpha.1; composed with `chapters` — capability floor REAL, support floor (0.2.0) is policy |
+| 0.2.0-rc.1 … 0.2.0-rc.2 | pass ×2 | composed |
+| 0.2.1-alpha.1 … 0.2.1-rc.5 | pass ×10 | composed — the whole 0.2.1 series, including both #150 candidates (rc.4) |
+| 0.2.2-alpha.2 | fail-broken-preset | host-internal registration crash: `Cannot read properties of undefined (reading 'parent')` — sessions choosing chapters refuse |
+| 0.2.2-alpha.3, rc.1 … rc.5 | fail-broken-preset ×6 | `tool-subagent-list-agents (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started` — one preset child the 0.2.2 line cannot activate |
+
+**Support boundary executed, not prose:** every published 0.2.0 → 0.2.1 composes; the ENTIRE
+0.2.2 series does not, with two distinct named causes (the first changed internals, the second
+changed a child row's activatability). The maintainer's home app is 0.2.2-rc.5 — this is why the
+matrix exists, found on its first day. Follow-up issue tracks the 0.2.2 incompatibility; the
+0.1.7-rc.2 pass reopens the support-floor question as a DECISION with data. Negative controls
+proven live (acceptance 2): the below-floor cells go red for their own named reasons, and the
+0.2.2 cells carry the #437 compose symptom text verbatim. CI: `host-matrix.yml` (daily 04:17 UTC
++ dispatch), artifacts `host-matrix-results`.

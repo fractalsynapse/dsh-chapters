@@ -16,7 +16,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 process.chdir(ROOT)
@@ -46,7 +46,8 @@ function registryVersions(): string[] {
 
 let targets: string[]
 const forced = arg('versions')
-if (forced !== undefined && forced !== '') {
+if (forced === 'none') targets = []
+else if (forced !== undefined && forced !== '') {
   targets = forced.split(',').map((s) => s.trim())
 } else {
   targets = matrixTargets(JSON.stringify(registryVersions()))
@@ -94,7 +95,7 @@ function bindablePort(start: number): number {
 
 // ---------------------------------------------------------------- compose probe
 
-async function composeProbe(url: string): Promise<{ composed: boolean; error?: string }> {
+async function composeProbe(url: string, port: number): Promise<{ composed: boolean; error?: string }> {
   const browser = await chromium.launch({ chromiumSandbox: false })
   try {
     const page = await browser.newPage()
@@ -102,7 +103,7 @@ async function composeProbe(url: string): Promise<{ composed: boolean; error?: s
     await page.waitForTimeout(6000)
     // Notices are focus traps on every host generation that shows one (#54's lesson,
     // reused from the rig's own dismiss-and-proceed path).
-    const { dismissTestingNotice, currentSessionId } = await import('../tests/e2e/session.ts')
+    const { dismissTestingNotice, currentSessionId, sessionLogFileFor, agentPresetFromLog } = await import('../tests/e2e/session.ts')
     await dismissTestingNotice(page)
     await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll('button[aria-label="New session"]'))
@@ -115,7 +116,33 @@ async function composeProbe(url: string): Promise<{ composed: boolean; error?: s
       sid = await currentSessionId(page)
     }
     if (sid === null) return { composed: false, error: 'new-session click never set dsh.sessions.current' }
-    return { composed: true }
+    // The STRICT compose fact (round-1 lesson): a session existing is not a chapters session —
+    // a host with no preset realm happily composes plain sessions and the loose probe PASSED a
+    // below-floor version. The header line of the session's durable log carries
+    // agentPreset, exactly what the rig's own precondition reads — read it here.
+    const sessBase = path.join(os.tmpdir(), 'dsh-e2e', `e2e-home-${String(port)}`, 'sessions')
+    let seen: string = 'unreadable'
+    for (let round = 0; round < 30; round++) {
+      let wsDirs: string[] = []
+      try { wsDirs = fs.readdirSync(sessBase) } catch { wsDirs = [] }
+      for (const w of wsDirs) {
+        let sDirs: string[] = []
+        try { sDirs = fs.readdirSync(path.join(sessBase, w)) } catch { continue }
+        for (const s of sDirs) {
+          if (!s.includes(sid)) continue
+          const file = sessionLogFileFor(path.join(sessBase, w, s))
+          if (file === null) continue
+          try {
+            const text = execFileSync('zstd', ['-dc', file], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+            const preset = agentPresetFromLog(text)
+            seen = JSON.stringify(preset)
+            if (preset === 'chapters') return { composed: true }
+          } catch { /* unreadable this round; the poll budget decides */ }
+        }
+      }
+      await new Promise((res) => setTimeout(res, 1000))
+    }
+    return { composed: false, error: `agent-preset/selected never became "chapters" (header seen: ${seen})` }
   } catch (error) {
     return { composed: false, error: String((error as Error)?.message ?? error).slice(0, 200) }
   } finally {
@@ -174,7 +201,7 @@ for (const [i, version] of targets.entries()) {
             ? fs.readFileSync(path.join(ROOT, 'var', `e2e-engine-errors-${String(port)}.log`), 'utf8') : ''
           const classified = classifyBootState(`${logText}\n${sink}`)
           preset = classified.state; dropped = classified.dropped
-          const probe = await composeProbe(handle.url)
+          const probe = await composeProbe(handle.url, port)
           composed = probe.composed; error = probe.error
           return null
         })().catch((e: unknown) => String((e as Error)?.message ?? e)),

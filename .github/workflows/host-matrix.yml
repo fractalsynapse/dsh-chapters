@@ -15,7 +15,7 @@ on:
       below:
         description: 'comma-separated below-floor controls'
         required: false
-        default: '0.1.7-rc.2'
+        default: '0.1.6-alpha.1,0.1.6-alpha.2,0.1.7-rc.2'
 
 permissions:
   contents: read

@@ -34,7 +34,12 @@ test('#443: versionGe honors prerelease ordering (rc < final, alpha < rc)', () =
 const BROKEN_LINE = 'dsh-chapters: preset "chapters" is DECLARED BUT BROKEN — tool-schedule (@deepseek-ai/dsh-tool-schedule): never started — sessions choosing it will not compose. A preset row whose child plugin no longer resolves fails here; the plugin drops rows this host cannot import, so this line means a package that resolves but will not activate — re-anchor the preset-chapters row against this host. Details: tool-schedule (@deepseek-ai/dsh-tool-schedule): never started'
 
 test('#443: classifyBootState reads the four real boot states', () => {
-  assert.equal(classifyBootState(BROKEN_LINE).state, 'broken', 'the #437 line verbatim classifies broken')
+  const b1 = classifyBootState(BROKEN_LINE)
+  assert.equal(b1.state, 'broken', 'the #437 line verbatim classifies broken')
+  assert.deepEqual(b1.dropped, ['@deepseek-ai/dsh-tool-schedule'], 'the Details clause NAMED the unactivatable row — attribution, not just the fact')
+  const b2 = classifyBootState('dsh-chapters: preset "chapters" is DECLARED BUT BROKEN — Cannot read properties of undefined (reading \'parent\') — sessions choosing it will not compose. … Details: Cannot read properties of undefined (reading \'parent\')')
+  assert.equal(b2.state, 'broken')
+  assert.match(b2.dropped[0] ?? '', /Cannot read properties/, 'a host-INTERNAL fault is still attributed verbatim (0.2.2-alpha.2 measured)')
   assert.equal(classifyBootState('dsh-chapters: preset "chapters" registered as a declaration row').state, 'registered')
   assert.equal(classifyBootState('dsh-chapters: this host cannot register preset declaration rows (before 0.2.0) — every chapters session…').state, 'unsupported')
   const pruned = classifyBootState('dsh-chapters: preset "chapters" registered — dropped 2 row(s) this host cannot import: tool-schedule (@deepseek-ai/dsh-tool-schedule), planning (cordis:group) (one unresolvable row would…)')
@@ -52,7 +57,11 @@ test('#443: cellVerdict attributes before it concludes (the table says WHY)', ()
   const quiet = cellVerdict({ ...ok, preset: 'absent' as const })
   assert.equal(quiet.verdict, 'pass', 'composed + no loud failure line = pass, stated as such')
   assert.match(quiet.why, /info line|log stream/, 'and the why says where the quiet line lives')
-  assert.equal(cellVerdict({ ...ok, preset: 'absent' as const, composed: false }).verdict, 'fail-boot')
+  // The strict probe (#443 sweep round 1): a session that exists but never recorded
+  // agentPreset=chapters is NOT composed — the below-floor false-pass this closes.
+  const silent = cellVerdict({ ...ok, preset: 'absent' as const, composed: false, composeError: 'agent-preset/selected never became "chapters" (seen: null)' })
+  assert.equal(silent.verdict, 'fail-compose', 'no boot line and no chapters header is a compose failure with its own reason, not a boot failure')
+  assert.match(silent.why, /never became "chapters"/, 'and the probe text rides through')
   assert.equal(cellVerdict({ ...ok, composed: false, composeError: 'new-session click never set dsh.sessions.current' }).verdict, 'fail-compose')
   assert.match(cellVerdict({ ...ok, composed: false, composeError: 'new-session click never set dsh.sessions.current' }).why, /new-session click/, 'the probe error text rides the why')
   assert.match(cellVerdict({ ...ok, composed: false, composeError: 'x' }).why, /: x$/, 'verbatim, whatever it says')
