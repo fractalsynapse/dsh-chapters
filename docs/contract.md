@@ -544,6 +544,18 @@ ask (#138) and not a rig bug to fix.
 
 ### Presets are declaration rows now (host ≥ 0.1.7-alpha.1) — measured, with the incident
 
+**Capability edges as EXECUTED by the host matrix (#443, sweep 2026-11-20, per-version isolated
+installs, strict compose = durable header `agentPreset="chapters"`):** 0.1.6-alpha.1 cannot boot
+the rig profile at all (legacy tree abort — `fail-boot`); 0.1.6-alpha.2 boots and the plugin's own
+`unsupported` line fires, sessions never compose (`fail-unsupported`); 0.1.7-rc.2 COMPOSES — the
+capability floor in this section's heading is real, and the SUPPORT floor (0.2.0) is a policy
+choice, now with data; every published 0.2.0-rc.1 → 0.2.1-rc.5 composes (12/12 pass); the whole
+**0.2.2 series (alpha.2 → rc.5) is RED** — alpha.2 inside the host's own registration
+(`Cannot read properties of undefined (reading 'parent')`), alpha.3 onward
+`tool-subagent-list-agents (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started`.
+Both causes and the compose symptom (the #437 `new-session click never set dsh.sessions.current`)
+are attributed verbatim in the record at `docs/verify.md`; tracked in the follow-up issue.
+
 A user preset used to be a directory `$DSH_HOME/.agent-presets/<id>/` holding `preset.yml` +
 `agent.cordis.yml`. The host's own migration note is blunt: *"Nothing reads that directory any more."*
 (`@deepseek-ai/dsh-agent-preset/skills/editing-cordis-compositions/SKILL.md`). A preset is now an
