@@ -85,12 +85,27 @@ function makeWorld(opts: WorldOpts = {}) {
   return { tmp, store, states, schedules, enrichRuns, warnings, listener, events, childId }
 }
 
-const drain = () => new Promise((r) => setTimeout(r, 120))
+// #452: the 120 ms wall-clock drain is retired — it redshelled under parallel load (four
+// cold installs racing) exactly once per stream, which is a property of CPU starvation, not
+// of the settlement waterfall. Quiescence is now OBSERVED:
+//   until(label, pred)  — positive completions: poll the artifact the waterfall commits,
+//           with a generous ceiling and a NAMED timeout failure (the idiom already lives in
+//           prompt-runner.test.ts:45; this makes it the house standard).
+//   settle()            — negative observations: flush macrotasks/microtasks so a job that
+//           decided to do NOTHING has provably run to completion before we assert silence.
+const until = async (label: string, pred: () => boolean, ceilingMs = 15_000): Promise<void> => {
+  const deadline = Date.now() + ceilingMs
+  while (!pred() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10))
+  if (!pred()) assert.fail(`quiescence timeout: ${label} never became true within ${String(ceilingMs)}ms`)
+}
+const settle = async (ticks = 8): Promise<void> => {
+  for (let i = 0; i < ticks; i++) await new Promise<void>((r) => setImmediate(r))
+}
 
 test('acceptance: subagent end → verbatim chapters with lineage frontmatter, no compaction, no child', async () => {
   const w = makeWorld()
   w.listener({ id: w.childId, runId: 'r1', provider: 'spawn', stopReason: 'completed' })
-  await drain()
+  await until('settlement committed a chapter', () => (w.states.get('child-1')?.chapters.length ?? 0) >= 1)
 
   const state = w.states.get('child-1')
   assert.ok(state !== undefined, 'registry state committed')
@@ -127,11 +142,11 @@ test('acceptance: subagent end → verbatim chapters with lineage frontmatter, n
 test('idempotent: the same settled span re-settling adds nothing', async () => {
   const w = makeWorld()
   w.listener({ id: w.childId })
-  await drain()
+  await until('first settlement committed', () => (w.states.get('child-1')?.chapters.length ?? 0) >= 1)
   const first = w.states.get('child-1')!.chapters.length
   const files = fs.readdirSync(path.join(w.tmp, '.dsh-chapters', 'child-1', 'chapters')).sort()
   w.listener({ id: w.childId }) // continuable child settles again, nothing new said
-  await drain()
+  await settle()
   assert.equal(w.states.get('child-1')!.chapters.length, first, 'no duplicate records')
   const after = fs.readdirSync(path.join(w.tmp, '.dsh-chapters', 'child-1', 'chapters')).sort()
   assert.deepEqual(after, files, 'no new files — the watermark held')
@@ -140,7 +155,7 @@ test('idempotent: the same settled span re-settling adds nothing', async () => {
 test('growth: a re-woken child with a new turn archives ONLY the new span', async () => {
   const w = makeWorld({ events: turnEvents(1, 'first leg') })
   w.listener({ id: w.childId })
-  await drain()
+  await until('first span archived', () => (w.states.get('child-1')?.chapters.length ?? 0) >= 1)
   const rec1 = w.states.get('child-1')!.chapters[0]!
   const file1 = path.join(w.tmp, rec1.path)
   const bytes1 = fs.readFileSync(file1, 'utf8')
@@ -148,7 +163,7 @@ test('growth: a re-woken child with a new turn archives ONLY the new span', asyn
   // extend the SAME log with a second completed turn, then settle again
   ;(w.events as SessionEventLike[]).push(...turnEvents(2, 'second leg'))
   w.listener({ id: w.childId })
-  await drain()
+  await until('second span archived', () => (w.states.get('child-1')?.chapters.length ?? 0) >= 2)
 
   const state = w.states.get('child-1')!
   assert.equal(state.chapters.length, 2)
@@ -159,7 +174,7 @@ test('growth: a re-woken child with a new turn archives ONLY the new span', asyn
 test('gate: a non-chapters child settles and nothing is written', async () => {
   const w = makeWorld({ childHeader: { agentPreset: 'standard' } })
   w.listener({ id: w.childId })
-  await drain()
+  await settle() // the job RAN and chose to do nothing — loop-flush proves completion, not a wall-clock guess
   assert.equal(w.states.get('child-1'), undefined, 'no registry state touched')
   assert.equal(fs.existsSync(path.join(w.tmp, '.dsh-chapters')), false, 'no store tree at all')
 })
@@ -167,7 +182,7 @@ test('gate: a non-chapters child settles and nothing is written', async () => {
 test('gate: an interrupted child with zero completed turns archives nothing and says nothing loud', async () => {
   const w = makeWorld({ events: [{ type: 'user/message', seq: 1, data: { id: 'u', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'x' }] } }] as never })
   w.listener({ id: w.childId })
-  await drain()
+  await settle()
   assert.equal(w.states.get('child-1'), undefined)
   assert.equal(w.warnings.length, 0, 'a child that never completed a turn is a quiet skip, not an error')
 })
@@ -200,7 +215,7 @@ test('refused: the durable arm reads payload-less records → no chapter, no num
   }
   const listener = wireSubagentAutoSave(ctx as never, store, { presetId: 'chapters', ...CONFIG } as never)
   listener({ id: 'child-1' })
-  await new Promise((r) => setTimeout(r, 250))
+  await until('the payload-less refusal is narrated', () => warns.length >= 1)
   const st = w.states.get('child-1')
   assert.equal(st?.chapters.length ?? 0, 0, 'a payload-less read must NOT produce a chapter record')
   assert.equal(st?.nextChapterNumber ?? 1, 1, 'and must not spend a chapter number — a spent number is a poisoned watermark')
@@ -233,7 +248,7 @@ test('durable arm: the payload-bearing readSession archives a disposed continuab
   }
   const listener = wireSubagentAutoSave(ctx as never, store, { presetId: 'chapters', ...CONFIG } as never)
   listener({ id: 'child-1' })
-  await new Promise((r) => setTimeout(r, 250))
+  await until('the durable arm archived', () => (w.states.get('child-1')?.chapters.length ?? 0) >= 1)
   const st = w.states.get('child-1')
   assert.ok((st?.chapters.length ?? 0) >= 1, 'the durable arm archived the settled span')
   const md = fs.readFileSync(path.join(tmp, st!.chapters[0]!.path), 'utf8')
@@ -251,7 +266,7 @@ test('lineage by design: the child keeps its OWN tree, and is reachable via the 
   const w = makeWorld()
   w.states.set('parent-1', { ...freshSession('parent-1'), parentSession: null, rootSession: 'parent-1' })
   w.listener({ id: w.childId, runId: 'r1', provider: 'spawn', stopReason: 'completed' })
-  await drain()
+  await until('settlement committed its own tree', () => (w.states.get('child-1')?.chapters.length ?? 0) >= 1)
   const st = w.states.get('child-1')
   assert.equal(st?.rootSession, 'child-1', 'own root = own tree (the #47 decision, re-verified)')
   assert.equal(st?.parentSession, null, 'registry ancestry untouched; the parent-child fact lives in the chapter frontmatter, from the kernel header')
@@ -280,7 +295,7 @@ test('depth 2: a grandchild (its parent is a continuation child) archives throug
   }
   const listener = wireSubagentAutoSave(ctx as never, store, { presetId: 'chapters', ...CONFIG } as never)
   listener({ id: 'grand-1' })
-  await drain()
+  await until('grandchild archived', () => (states.get('grand-1')?.chapters.length ?? 0) >= 1)
   const st = states.get('grand-1')
   assert.ok((st?.chapters.length ?? 0) >= 1, 'grandchild archived')
   assert.equal(st?.rootSession, 'grand-1', 'own tree at depth 2 as well')
@@ -303,7 +318,7 @@ test('ONE BUILDER: /chapters-save on the same log archives byte-identically', as
   // same events, same config; two worlds, compared on disk.
   const auto = makeWorld()
   auto.listener({ id: auto.childId })
-  await drain()
+  await until('auto world archived', () => (auto.states.get('child-1')?.chapters.length ?? 0) >= 1)
   const autoRec = auto.states.get('child-1')!.chapters[0]!
   const autoMd = fs.readFileSync(path.join(auto.tmp, autoRec.path), 'utf8')
 
