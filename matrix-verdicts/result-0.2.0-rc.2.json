@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0-rc.2",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.0-rc.2 (default resolver, closed in 2 passes)"
+  },
+  "legs": [
+    {
+      "leg": "unit",
+      "ok": true,
+      "ms": 63780,
+      "detail": "pass 1731 / fail 0 / todo 1"
+    },
+    {
+      "leg": "integration",
+      "ok": true,
+      "ms": 63685,
+      "detail": "pass 1731 / fail 0 / todo 1"
+    }
+  ],
+  "verdict": "pass",
+  "ts": "2026-11-20T21:01:46.498Z"
+}
