@@ -718,3 +718,42 @@ under four-stream parallel load — the fixed-120ms-quiesce flake, isolated to #
 re-run green in a single stream; the failing row is listed there, not papered here.
 The registry enumeration was unchanged by the re-run (same 19 versions as the morning list).
 
+## The test-weakness program (#454/#455/#456 Tier A + #452, 2026-11-20, PR #457→staging)
+
+Release-blocking test fixes from the gap audit the maintainer endorsed:
+
+- **#454 compose leg VERIFIED end-to-end** (not just wired): `matrix-run --legs=compose
+  --version=0.2.1-alpha.1` on a fresh self-isolated cell → `[compose] PASS (41s) — pass —
+  composed with no loud preset failure`, verdict JSON `{verdict:"pass",
+  legs:[{leg:"compose", ok:true}]}` — the README renders `compose:✅` beside `unit:✅
+  integration:✅`. Cells now self-isolate: committed manifest + committed lock + empty
+  node_modules per version (CI fresh-checkout semantics as the tool's contract, not the
+  operator's hygiene — the #451 contamination class closes at the source).
+- **#455 receipts**: refresh PR commits `matrix-verdicts/` (initialized with the 19 #451
+  isolated-sweep verdicts); `matrix-verdicts-consistency.test.ts` cross-checks every
+  committed receipt against its README row (non-vacuous at 19 files). Resolved lockfiles
+  archive beside verdicts; `--enumerated=` names unverified registry versions instead of
+  omitting them; `nightly-liveness.mjs` (5-state unit-tested) rides the REGISTERED ci.yml
+  timer so a dead sweep is yesterday's red check; the DSH_MATRIX_VERSION skip roster is
+  frozen (2 named rows, announced reasons).
+- **#456 Tier A (targeted-conversation doctrine)**: `tests/scenarios/
+  targeted-conversations.ts` scripts conversations about THIS PROJECT that read REAL repo
+  files (existence-checked at import) with DECLARED topic boundaries;
+  `toc-targeted-conversation.test.ts` drives deriveRanges with the cut target COMPUTED from
+  the transcript's own measurements and asserts splits land at topic changes nowhere else,
+  topic attribution with zero bleed, a no-drift control, and a MUTATION row (reordered
+  topics move the attribution — expectations are properties of the input). Enrichment
+  inputs carry each chapter's own subject; the suggestion tail + rule ranking follow the
+  LAST topic. Tier B (re-distilling the pinned-world tapes from this catalog, per-line
+  corpora) stays open under #456.
+- **#452**: all 13 quiescence sites in subagent-auto-save converted to artifact predicates
+  (named timeout failures) or loop-flushes for silence assertions; 11/11 green; the
+  bare-sleep RATCHET (test-hygiene) freezes the remaining 25 legacy sites per file,
+  shrink-only, predicate-loop idiom sanctioned, `// negative-window:` annotation required
+  for deliberate silence waits, mutation fixture proves the scanner bites.
+
+Suite at the branch head: **1750 pass / 0 fail / 1 todo** (1756 tests). Compose legs for the
+remaining 18 versions run the first time the wired workflow executes (locally reproducible
+with `--legs=compose`); this entry records the leg's mechanism verified on a real host, not a
+19/19 compose table — that table is the nightly's to fill.
+

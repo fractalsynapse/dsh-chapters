@@ -15,7 +15,12 @@ Every published Deepseek Session Harness version **from 0.2.0 up** gets the real
 run against it, per version: the runner `scripts/matrix-run.mts` swaps the whole
 `@deepseek-ai/dsh-*` family to that version and runs the legs, and the
 `.github/workflows/host-matrix.yml` workflow (nightly + manual dispatch) assembles the table
-below from the executed verdicts. GitHub registers scheduled workflows only from the default
+below from the executed verdicts — per version BOTH planes: the deterministic suites
+(unit+integration) AND the compose probe (does a new chapters session actually compose on
+that host, #454), rendered side by side so suite-green never stands alone. Each nightly
+refresh also commits the per-version verdict JSONs under `matrix-verdicts/` as durable
+receipts cross-checked against the table, and a liveness sentinel in CI reddens if the
+sweep nightly itself dies (#455). GitHub registers scheduled workflows only from the default
 branch, so the nightly fires once the next release carries `host-matrix.yml` to `main`; until
 then the table is refreshed by sweep runs of the committed code. Either way the line above the
 table names the plane that actually executed the sweep — a verdict is only ever as good as the
