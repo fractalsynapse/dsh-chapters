@@ -1175,6 +1175,11 @@ Design rules, each earned:
   a verdict. `scripts/nightly-liveness.mjs`, scheduled inside the REGISTERED `ci.yml` (a
   sentinel cannot live in the workflow whose death it watches), reddens CI when no successful
   sweep is younger than 30 h — the silent-dead-nightly class #451 shipped behind.
+- **Release-table rule (learned cutting 0.2.41):** cells that fail for ENVIRONMENT reasons
+  (`untestable`, crashes, a depleted tmpfs inode pool mid-sweep) are RE-RUN, never released
+  as-is — an environmental sample is not a verdict about the version. The first RC pass lost
+  ten cells exactly this way (/tmp inodes hit 100% while bytes stayed at 17%); the ext4 rerun
+  settled all ten, and the shipped table states only settled cells.
 - The workflow does not gate PRs — the pinned chain is the PR gate. GitHub only registers
   scheduled workflows from the DEFAULT branch, so the nightly activates when a release carries
   the file to `main` (#451). The workflows' own references are guarded on the repo plane by
