@@ -757,3 +757,22 @@ remaining 18 versions run the first time the wired workflow executes (locally re
 with `--legs=compose`); this entry records the leg's mechanism verified on a real host, not a
 19/19 compose table — that table is the nightly's to fill.
 
+
+## Three-plane RC sweep for 0.2.41 (2026-11-21, candidate base 78b0f52)
+
+Every published ≥ 0.2.0 re-verified with the FULL wired protocol at the release-candidate
+base: one fresh workspace per version, committed manifests+lockfile+empty node_modules,
+legs `unit+integration+compose`, sequential boots. **12/19 pass all three planes** (0.2.0-rc.1
+→ 0.2.1-rc.5). **0.2.2 line: 7/7 suite-green, compose FAIL** — every one attributed,
+`fail-broken-preset — rows this host cannot activate:
+@deepseek-ai/dsh-tool-subagent-control/list-agents` (0.2.2-alpha.2 additionally carries the
+host-internal 'parent' crash); this is #445 rendered by #454's instrument, now visible in the
+shipped table rather than remembered in prose. Receipts: `matrix-verdicts/` (replaced at this
+table), resolved lockfiles archived beside each verdict.
+
+Operational incident, recorded as taught: the FIRST pass lost ten cells at 12:13Z when the
+/tmp tmpfs exhausted its 1,048,576-inode pool (bytes at 17% — the fresh-workspace protocol
+is inode-hungry). Three cells self-recorded `untestable` with npm's dying words; seven
+crashed pre-write. None shipped: the rerun on ext4 settled all ten, and docs/development.md
+gained the rule (`untestable` never rides a release table). The compose leg's first real
+multi-line run also proved its attribution text rides verdict JSONs verbatim on both outcomes.

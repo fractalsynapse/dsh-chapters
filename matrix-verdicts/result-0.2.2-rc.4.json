@@ -8,16 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 63645,
-      "detail": "pass 1731 / fail 0 / todo 1"
+      "ms": 63536,
+      "detail": "pass 1748 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 63682,
-      "detail": "pass 1731 / fail 0 / todo 1"
+      "ms": 63520,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "compose",
+      "ok": false,
+      "ms": 60871,
+      "detail": "fail-broken-preset — DECLARED BUT BROKEN — rows this host cannot activate: @deepseek-ai/dsh-tool-subagent-control/list-agents"
     }
   ],
-  "verdict": "pass",
-  "ts": "2026-11-20T21:07:44.611Z"
+  "verdict": "fail",
+  "ts": "2026-11-21T12:49:06.792Z"
 }
