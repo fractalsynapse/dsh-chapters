@@ -1,0 +1,166 @@
+name: Host version matrix
+# #443 + #447 + #451: the supported-harness-versions sweep — running THE REAL TEST SUITES
+# against every published hat version ≥ 0.2.0, not just a compose probe. A PR is still
+# gated by the pinned-host chain (one corpus, one world); THIS job is the standing answer
+# to "does this plugin actually work against version X?", enumerated from the registry at
+# run time so the claim re-bases itself every night without a human editing a list.
+# Each version gets its own runner: swap the whole `@deepseek-ai/dsh-*` family to that
+# version (`scripts/matrix-run.mts --version=X`) and run the real legs. The `report` job
+# assembles the README table from every leg's machine-readable verdict — so the README
+# always states what CI actually executed, latest run first.
+#
+# #451, guarded by tests/unit/host-matrix-workflow.test.ts: this file shipped once with a
+# find/replace pass's casualties — the runner path, the name/concurrency strings and the
+# result directories had all been rewritten to placeholder tokens, and a README table ended
+# up attributed to a run of it that could not have happened. Two lessons wired in: every
+# referenced path must resolve (a repo-plane guard now fails the mangle — which is why THIS
+# comment names no casualties), and GitHub registers SCHEDULED workflows only from the
+# DEFAULT branch — this file starts firing its nightly the day a release carries it to
+# main; until then the README table is refreshed by sweep runs of committed code, and the
+# stamp says which plane produced it (--source, #451).
+on:
+  schedule:
+    - cron: '17 4 * * *'   # daily, off the :00 scrum
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'comma-separated versions (empty = whole 0.2.x registry block)'
+        required: false
+        default: ''
+      below:
+        description: 'comma-separated below-floor controls (empty: 0.1.* is deprecated by maintainer decision #446 — the supported block starts at 0.2.0)'
+        required: false
+        default: ''
+      legs:
+        description: 'legs to run per version, plus-separated (unit, integration, compose, e2e, e2e-live)'
+        required: false
+        default: 'unit+integration+compose'
+      refresh_readme:
+        description: 'open a PR refreshing the README table when the sweep finishes'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-matrix
+  cancel-in-progress: false
+
+jobs:
+  list:
+    name: enumerate the registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.l.outputs.matrix }}
+      count: ${{ steps.l.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: l
+        run: |
+          mkdir -p var   # var/ is gitignored — a clean checkout has none until something makes it
+          ARGS=(--list --json)
+          [ -n "${{ inputs.versions }}" ] && ARGS+=("--versions=${{ inputs.versions }}")
+          [ -n "${{ inputs.below }}" ] && ARGS+=("--below=${{ inputs.below }}")
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts "${ARGS[@]}" > var/matrix.json
+          echo "matrix=$(node -p 'JSON.stringify(require("./var/matrix.json").include)')" >> "$GITHUB_OUTPUT"
+          echo "count=$(node -p 'require("./var/matrix.json").include.length')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: matrix, path: var/matrix.json }
+
+  test:
+    name: ${{ matrix.version }}
+    needs: list
+    if: needs.list.outputs.matrix != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false          # one red version must not cancel the rest of the truth
+      max-parallel: 10
+      matrix:
+        include: ${{ fromJSON(needs.list.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      # The same runtime provisioning the acceptance job records as load-bearing: chromium's
+      # shared libs, zstd for the durable logs, and bubblewrap + the userns sysctl, without
+      # which a runner boots a 7-tool hat against a 34-tool one and every comparison is fiction.
+      - run: sudo apt-get update && sudo apt-get install -y libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libgbm1 libasound2t64 zstd bubblewrap
+      - name: allow unprivileged user namespaces (bubblewrap needs it)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>&1 || echo "sysctl: not available on this image"
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>&1 || echo "sysctl: not present on this image"
+          bwrap --ro-bind / / /bin/true && echo "bwrap probe: OK" || echo "bwrap probe: failing"
+      - name: install chromium (repo-local browsers path)
+        run: PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
+      - name: run the real suites against ${{ matrix.version }}
+        run: |
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts \
+            --version=${{ matrix.version }} \
+            --legs=${{ inputs.legs || 'unit+integration+compose' }} \
+            --out=var/matrix-runs/result-${{ matrix.version }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.version }}
+          path: |
+            var/matrix-runs/result-${{ matrix.version }}.json
+            var/matrix-runs/result-${{ matrix.version }}.json.lock.json
+
+  report:
+    name: assemble the README table
+    needs: [list, test]
+    if: always() && needs.list.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'result-*', path: var/matrix-runs/, merge-multiple: true }
+      - uses: actions/download-artifact@v4
+        with: { name: matrix, path: var/ }
+      - name: assemble
+        run: |
+          # --source names the executing plane IN THE STAMP (#451): the README must never
+          # claim a workflow for a sweep a workflow did not run, so the claim is a parameter,
+          # never a literal. --enumerated names registry versions WITHOUT a verified verdict
+          # as visible gaps (#455) — absence is never silence.
+          node --experimental-strip-types --no-warnings scripts/matrix-run.mts --report --readme --runs=var/matrix-runs \
+            --enumerated=var/matrix.json \
+            --source='the host-matrix GitHub Actions workflow'
+          echo '## What the sweep executed' >> $GITHUB_STEP_SUMMARY
+          node -p 'require("fs").readFileSync("README.md","utf8").split("<!-- versions:begin -->")[1].split("<!-- versions:end -->")[0]' >> $GITHUB_STEP_SUMMARY
+      - name: refresh the README on the nightly
+        if: github.event_name == 'schedule' || inputs.refresh_readme
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          BR="chore/refresh-$(date -u +%Y%m%d%H%M)"
+          git checkout -b "$BR"
+          # #455: the verdicts COMMITTED alongside the table — evidence survives artifact
+          # retention and /tmp; the README row and matrix-verdicts/ are cross-checked by
+          # tests/unit/matrix-verdicts-consistency.test.ts. Lockfiles stay artifacts only.
+          mkdir -p matrix-verdicts
+          find var/matrix-runs -name 'result-*.json' ! -name '*.lock.json' -exec cp {} matrix-verdicts/ \;
+          git add README.md matrix-verdicts
+          if git diff --cached --quiet; then echo "table unchanged — no PR needed"; exit 0; fi
+          git commit -m "docs(#447): the sweep ran — README table and committed verdicts regenerated from this run"
+          git push -u origin "$BR"
+          gh pr create --title "docs(#447): refresh the version-support table ($(date -u +%F))" \
+            --body "Auto-generated by the \`host-matrix\` workflow: README table regenerated from the verdicts of the sweep that just ran, with the per-version verdict JSONs committed under matrix-verdicts/ as the durable receipts (the stamp in the table names the plane that executed it). Review the verdicts, then merge."

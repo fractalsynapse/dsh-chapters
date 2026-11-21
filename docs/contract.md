@@ -544,6 +544,22 @@ ask (#138) and not a rig bug to fix.
 
 ### Presets are declaration rows now (host ≥ 0.1.7-alpha.1) — measured, with the incident
 
+**Capability edges as EXECUTED by the host matrix (#443, sweep 2026-11-20, per-version isolated
+installs, strict compose = durable header `agentPreset="chapters"`):** 0.1.6-alpha.1 cannot boot
+the rig profile at all (legacy tree abort — `fail-boot`); 0.1.6-alpha.2 boots and the plugin's own
+`unsupported` line fires, sessions never compose (`fail-unsupported`); 0.1.7-rc.2 COMPOSES — the
+capability floor in this section's heading is real, and the SUPPORT floor (0.2.0) is a policy
+choice, now with data; every published 0.2.0-rc.1 → 0.2.1-rc.5 composes (12/12 pass); the whole
+**0.2.2 series (alpha.2 → rc.5) is RED** — alpha.2 inside the host's own registration
+(`Cannot read properties of undefined (reading 'parent')`), alpha.3 onward
+`tool-subagent-list-agents (@deepseek-ai/dsh-tool-subagent-control/list-agents): never started`.
+Both causes and the compose symptom (the #437 `new-session click never set dsh.sessions.current`)
+are attributed verbatim in the record at `docs/verify.md`; tracked in the follow-up issue (#445).
+**Maintainer decision 2026-11-20 (#446): the support floor stays 0.2.0 and 0.1.* is DEPRECATED**
+(the project started on it; the matrix evidence that 0.1.7-rc.2 technically composes is kept as
+history, not as a support claim). Cells below 0.2.0 are controls for one-off runs only — the
+nightly block is 0.2.0 and up, one source: `SUPPORT_FLOOR` in `tests/e2e/host-matrix-support.ts`.
+
 A user preset used to be a directory `$DSH_HOME/.agent-presets/<id>/` holding `preset.yml` +
 `agent.cordis.yml`. The host's own migration note is blunt: *"Nothing reads that directory any more."*
 (`@deepseek-ai/dsh-agent-preset/skills/editing-cordis-compositions/SKILL.md`). A preset is now an
@@ -744,6 +760,61 @@ Two corollaries, both bought once:
 - An injected port that is optional and stops being wired fails as a symptom, not as an error:
   `tests/unit/client-doors.test.ts` has a row that fails if `src/client/index.ts` drops
   `uiWorkspace` from `inject` or stops passing it.
+
+## The two session LIST surfaces, measured (#180, host 0.2.0-rc.2)
+
+Two services list sessions, they return **different shapes**, and neither is a bare array:
+
+- **Gateway (what the browser renders and `open()`s against)** — `ctx.get('sessionController')`
+  resolves the host's `SessionController` (`@deepseek-ai/dsh-api-session-controller`, declared in
+  `lib/types/index.d.ts` as `list(_request: SessionListRequest, signal): Promise<SessionListValue>`).
+  `SessionListValue` is an **object envelope**: `{ items: readonly SessionSummary[] }`
+  (`lib/types/types.d.ts`), and each summary row carries **`sessionId`** (plus `updatedAt`,
+  `running`, `blank`, `parentSessionId?`, …) — not `header.id`.
+- **Client roster (what `doors.ts` reads)** — `ISessions.list` is **not callable at all**: it is an
+  `ObservableSnapshot<SessionListState>` property (`lib/types/client/contract/sessions.d.ts`) read
+  via `list.getSnapshot() → { ids: SessionId[], byId: Record<SessionId, SessionSummary>, phase, … }`
+  (`lib/types/client/sessions/service.d.ts`).
+
+The #180 defect: `src/attach.ts` called `sc.list()` and piped the result straight into `.map`.
+The call itself succeeds — `list` *is* a function on the gateway service — but it resolves to the
+`{items}` envelope, a truthy non-array, so `?? []` does not catch it and `.map` throws. The catch
+converted it to `gatewayListed: undefined`, which is why the browser-visibility verification —
+the exact fact the 0.2.x door hunt needed — has been unreadable on the real host since it shipped.
+The unit fixtures at the time pinned an *imagined* array shape, which is how the row the issue
+calls "the row that should have existed" never existed: a fixture is only evidence when it was
+measured. The normalizer in `attach.ts` now accepts, in order: a bare array of rows, the
+`{items: rows}` envelope, and an `ObservableSnapshot` (`list` or its call result exposing
+`getSnapshot` → `{ids}` or `{byId}`); anything else is `gatewayListed: undefined` **with the
+received shape named in the warning**, never a TypeError path and never silence.
+
+## Which lineage resolves a plugin's rows — measured (#437)
+
+There are THREE resolution contexts, and only one decides whether a preset child row can
+activate. Measured on the rig machine the day a live DSH self-update published
+`@deepseek-ai/dsh-tool-schedule` (absent at the pinned host 0.2.0-rc.2) into `~/node_modules`:
+
+- **The plugin's own lineage** — `import.meta.resolve` from `lib/*.js`. The rig profile
+  SYMLINKS the plugin into the repo checkout, so this walk goes repo `node_modules` →
+  `~/node_modules`. It resolves packages the host has never shipped: the pre-#437 drop-guard
+  asked exactly this, kept the row, and the host then reported `DECLARED BUT BROKEN —
+  tool-schedule: never started` and every chapters session refused to compose.
+- **The host tree** — the first `node_modules` ancestor segment of `process.argv[1]` (the npm
+  `.bin/dsh` shim or `node_modules/dsh/bin/*`). Rows are imported by the HOST, so containment
+  (`<tree>/@scope/<package>`) is the only keep/drop predicate that cannot be polluted — every
+  filesystem walk-up from any path under `$HOME` reaches the pollution itself. This is
+  `makeHostAwareResolver` in `src/preset.ts`; when the entry has no probeable tree (compiled
+  single-file hosts) it falls back to the plugin lineage rather than mass-dropping rows.
+- **Dev checks against the pinned host** must require through `dev/dsh-host-lock/package.json`
+  first (`createRequire(new URL('../../dev/dsh-host-lock/package.json', …))`), or list the rig
+  tree ahead of the PATH probe — `preset-declaration` and `host-plan-card-shape` both did their
+  first-look the other way and turned red the moment HOME updated. `tape-proxy-window.test.ts`
+  was already pin-first; it is the pattern.
+
+The rig boot itself is NOT polluted the same way: `boot.ts` keeps the home under `os.tmpdir`
+because Node walks up from the PROFILE directory — but the symlinked plugin drags the host
+process's realpath back into the repo lineage regardless. Isolation of the HOME is not isolation
+of the resolution ancestry.
 
 ## `ContinuePorts.mutateState` — the row write seam (#101)
 

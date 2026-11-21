@@ -14,6 +14,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   DEFAULT_CLONE_DIR, planStoreToRepo, projectForCwd, readSyncStatus, readToken, runSync, writeToken,
   type ProjectRecord, type SyncScheduler,
@@ -26,6 +27,7 @@ import { createTreeDxClient } from './treedx/client.ts'
 import { resolveRepoId } from './treedx/provider.ts'
 import { readState } from './treedx/state.ts'
 import { selectProvider } from './provider.ts'
+import { PLUGIN_VERSION } from './version.ts'
 import type { DomainLike } from './store.ts'
 import type { ToolsCtx } from './tools.ts'
 import type { PromptCommandSurface } from './prompt.ts'
@@ -301,6 +303,12 @@ export function registerHostCommands(
       // line below it (Enrichment, Diagnostics, Auto-save, Findings) was unreachable precisely for the
       // users who most needed it. An unlinked project is a STATE, not an absence of health.
       const lines: string[] = []
+      // #260: the update ritual ends inside the product. This is the ONLY honest source for
+      // "which copy did this server load" — the running process's own module URL — so the
+      // human never needs a repo-bundled script to prove a restart took. The scope line is
+      // the #61 posture kept: one process states what it cannot see instead of implying
+      // the other trees are clean.
+      lines.push(`Version: ${PLUGIN_VERSION} \u00B7 loaded from ${path.dirname(fileURLToPath(import.meta.url))} \u2014 the copy THIS process booted; other homes, profiles and long-lived servers are not visible from here, each with its own restart and its own /chapters-status`)
       if (project === undefined && status === null) {
         lines.push('No knowledge repository is linked yet. Link one with /chapters-link <https-remote-url> [token] — '
           + 'until then this project\u2019s chapters, rules and index stay on THIS machine only.')
@@ -849,6 +857,9 @@ export function registerHostCommands(
           store: config.store,
           cwd, rows, storeDir,
           ...(project !== undefined && fs.existsSync(mirrorAbs) ? { cloneDir: mirrorAbs, projectKey: project.projectKey } : {}),
+          // #256: the tombstone's attribution travels with the project record; fact writes are
+          // gated on the mirror existing anyway, so the id rides the same condition.
+          ...(project !== undefined && fs.existsSync(mirrorAbs) ? { harnessId: project.harnessId } : {}),
           now: () => new Date().toISOString(),
         }, plan)
         let syncLine = '  pool: unlinked project — store-only removal; this machine\u2019s memory is what got cleaned'

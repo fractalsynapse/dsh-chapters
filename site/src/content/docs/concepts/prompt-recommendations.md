@@ -192,7 +192,11 @@ same bytes) carries, in order:
   its lineage's history, not an empty list), each as **title + detailed summary + every plot line**
   its span carries. Plots are the historical trajectory, extracted deterministically from the
   archived bytes (`PLOT:` lines — zero model tokens), and the summaries are detailed because
-  enrichment writes them for exactly this reader (#188),
+  enrichment writes them for exactly this reader (#188). The section opens with a **tense label**
+  (#317): everything it introduces is PAST, *including archived blocks phrased as open work* —
+  the generator was once faithfully offering "check whether bash-32 has completed the 0.2.26
+  release chain" because a chapter verbatim still said OPEN REQUEST. An archived dispatch, merge,
+  publication or awaited notification is history, never a next step,
 - **the last turn**, whole: the human's request through the final response,
 - nothing else. Host-injected context is defused before assembly; command results, notices, and
   your private instruction files are not silently fed to a second model.

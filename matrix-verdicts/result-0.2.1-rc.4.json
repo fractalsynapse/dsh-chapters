@@ -1,0 +1,29 @@
+{
+  "version": "0.2.1-rc.4",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.1-rc.4 (legacy-peer-deps fallback, closed in 1 pass; aligned root zod 4.6.7 -> 4.4.3 (every host exact pin agrees — one instance, the version's own resolution))"
+  },
+  "legs": [
+    {
+      "leg": "unit",
+      "ok": true,
+      "ms": 63740,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "integration",
+      "ok": true,
+      "ms": 63616,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "compose",
+      "ok": true,
+      "ms": 64882,
+      "detail": "pass — composed with no loud preset failure — the healthy registration line is logger.info on the host log stream, not this pipe"
+    }
+  ],
+  "verdict": "pass",
+  "ts": "2026-11-21T12:24:09.365Z"
+}

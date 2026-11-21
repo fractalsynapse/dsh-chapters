@@ -1,0 +1,29 @@
+{
+  "version": "0.2.1-alpha.1",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.1-alpha.1 (legacy-peer-deps fallback, closed in 1 pass)"
+  },
+  "legs": [
+    {
+      "leg": "unit",
+      "ok": true,
+      "ms": 63626,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "integration",
+      "ok": true,
+      "ms": 63606,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "compose",
+      "ok": true,
+      "ms": 41514,
+      "detail": "pass — composed with no loud preset failure — the healthy registration line is logger.info on the host log stream, not this pipe"
+    }
+  ],
+  "verdict": "pass",
+  "ts": "2026-11-21T11:50:26.505Z"
+}

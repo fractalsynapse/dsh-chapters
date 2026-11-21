@@ -45,6 +45,10 @@ decide whether those referrers need to stay too.
   pulled after the deletion commit. A second machine holding a local copy can re-publish it; the
   follow-up is a removal fact carried in the per-session collections JSONL (which already syncs),
   consumed by `planStoreToRepo`. Filed as follow-up at PR time.
+  **Landed as #256:** one `{"type":"chapter-removed",…}` fact per deleted chapter rides the
+  collections file it names; publish-skip and rehydrate-skip consume it on every machine's next
+  sync pass, parse-tolerantly. The registry decision went the documented conservative way:
+  a remote fact stops bytes travelling; it never rewrites a local row's status.
 
 ## Anti-goals (what would make this a failure)
 

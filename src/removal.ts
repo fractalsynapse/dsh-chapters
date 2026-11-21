@@ -27,7 +27,7 @@ import { ancestorPath, buildIndex, isActiveChapter, isRemovedChapter, type Sessi
 import type { RegistryStore } from './store.ts'
 // One dialect, one direction: the removal imports the store→pool mapping from sync (it never
 // re-implements it — a second mapping is a second truth), and sync never imports removal.
-import { planStoreToRepo, type RemovedGuard } from './sync.ts'
+import { planStoreToRepo, appendRemovalFacts, type RemovedGuard, type RemovalFact } from './sync.ts'
 
 export type RemovalRows = readonly (readonly [string, SessionState])[]
 
@@ -76,6 +76,9 @@ export interface ApplyPorts {
    * store-only removal (an unlinked project), which is the normal state, not an error. */
   cloneDir?: string | undefined
   projectKey?: string | undefined
+  /** #256: the harness name etched into each cross-machine removal fact ("who deleted this").
+   *  Absent ⇒ 'unknown' — the fact still tombstones; the attribution is what degrades. */
+  harnessId?: string | undefined
 }
 
 export interface ApplyOutcome {
@@ -385,6 +388,42 @@ export async function applyRemoval(ports: ApplyPorts, plan: RemovalPlan): Promis
         removed.push(`mirror:${rel}`)
       } catch (error) {
         problems.push(`mirror unlink ${rel} failed: ${String((error as Error)?.message ?? error)}`)
+      }
+    }
+  }
+
+  // 2c. #256 — cross-machine tombstones. The mirror unlink alone only reaches machines that
+  // pull AFTER it; a machine that already holds the bytes re-publishes them. One fact line per
+  // DELETED chapter (whose store unlink actually landed — a failed unlink means the chapter is
+  // still knowledge, and tombstoning it would delete a live byte from every other machine)
+  // rides the already-synced collections channel, keyed by the target session's collections
+  // file. A fact write that fails is a loud problem: without it the deletion half-ships.
+  if (ports.cloneDir !== undefined && ports.projectKey !== undefined) {
+    const byRoot = new Map<string, RemovalFact[]>()
+    for (const t of plan.targets) {
+      if (!goneAbs.has(resolveStoredPath(cwd, t.record.path))) continue
+      const segs = t.record.path.split('/').filter((s) => s !== '')
+      const ci = segs.lastIndexOf('chapters')
+      if (ci < 1 || ci !== segs.length - 2) {
+        problems.push(`removal fact skipped for ${t.sessionId}:${t.record.number} — path "${t.record.path}" is not <session>/chapters/<file>; another machine could re-publish it`)
+        continue
+      }
+      const fact: RemovalFact = {
+        type: 'chapter-removed',
+        tail: `${segs[ci - 1]}/chapters/${segs[ci + 1]}`,
+        span: [t.record.startSeq, t.record.endSeq],
+        by: ports.harnessId ?? 'unknown',
+        at,
+      }
+      const list = byRoot.get(t.sessionId) ?? []
+      list.push(fact)
+      byRoot.set(t.sessionId, list)
+    }
+    for (const [sessionId, facts] of byRoot) {
+      try {
+        appendRemovalFacts(ports.cloneDir, ports.projectKey, sessionId, facts)
+      } catch (error) {
+        problems.push(`removal facts for ${sessionId} could not be appended (${String((error as Error)?.message ?? error)}) — a second machine holding this file WILL re-publish it until the next removal or an operator repair`)
       }
     }
   }

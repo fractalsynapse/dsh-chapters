@@ -1123,3 +1123,69 @@ tonight). Until one lands, the honest release sentence stays: first-attempt coll
 the recorded rerun is green, and the guard now measures the right thing. The wrong-teardown theory
 in the 0.2.37/0.2.38 ship records stands corrected here rather than silently rewritten — immutable
 tags, mutable understanding, one line in the right place.
+
+## The host-version matrix (#443): supported harness versions as EXECUTED evidence
+
+The rig pins ONE harness (`dev/dsh-host-lock`), the centrally installed app is a different,
+moving third thing, and the npm registry carries dozens more. "Support floor 0.2.0" was prose
+until this sweep existed; it is now an executed claim with per-version attribution.
+(#451 corrected the plane: the CI job goes live the day this workflow reaches the default
+branch, and until then refreshes come from sweep runs of committed code — the README stamp
+names which one produced the table, because a local run recorded as CI is a provenance bug.)
+
+```bash
+bash scripts/host-matrix.sh                                # every published 0.2.x, isolated
+bash scripts/host-matrix.sh --versions=0.2.1-rc.4,0.2.2-rc.5 --below=0.1.7-rc.2
+```
+
+Design rules, each earned:
+
+- **One tree per version** (`var/host-matrix/<version>/`, hermetic `npm install` of exactly that
+  `@deepseek-ai/dsh`). Cells boot via `E2E_HOST_DIR` — the seam #89 built for an external pin —
+  so the centrally installed app is NEVER on any resolution path; the #437 incident (a newer
+  home harness leaking rows through the plugin's module ancestry) is the cautionary tale, and
+  a matrix cell whose lineage wobbles between versions is the point of the exercise.
+- **The rig pin is not touched.** The tape corpus stays anchored to its recorded world;
+  the matrix tests PRODUCT-against-HOSTS (install → boot → compose probe), never re-interpret
+  tapes against other versions. **The supported block is 0.2.0 and up — 0.1.* is deprecated by
+  maintainer decision (#446), so the nightly enumerates no 0.1.x cells at all.** `--below=`
+  still accepts controls for one-off runs, and the pre-decision sweep cells (0.1.6 fail-boot /
+  fail-unsupported, 0.1.7 compose) stay recorded in `docs/verify.md` as the measurement that
+  located the capability edge before policy fixed the support edge.
+- **The verdict IS the attribution.** `fail-broken-preset` names the rows the host cannot
+  activate; `pass` with `rows pruned as unshipped: …` is drift NAMED, not hidden (that is
+  #437's drop-guard reporting through the sweep); `fail-compose` carries the probe's own text
+  (`new-session click never set dsh.sessions.current` — the exact #437 user symptom). Absence of
+  the quiet `registered` info line is NOT failure: it rides the host's log stream, not the pipe;
+  composition is the user fact and the classifier knows the loud lines from the quiet ones.
+- **Sequential cells, port band 41900+** — never two boots at once (the same-home rule), and a
+  band clear of the rig's 41731-41746 so a sweep and a leg can never share home, proxy or sink.
+- Two planes, two entry points: `scripts/host-matrix.sh` (compose-probe boots, artifacts
+  `var/host-matrix-results.jsonl`) and `scripts/matrix-run.mts` (real unit+integration legs
+  per version, verdict JSONs under `var/matrix-runs/`, README table from `--report`). Since
+  #454 the nightly DEFAULT legs are `unit+integration+compose` — the compose leg invokes the
+  host-matrix instrument for one version and rides the README as its own column, so a line
+  that tests green but never composes (the #445 class) is visible on every nightly instead
+  of remembered in prose. Cells self-isolate (#454): committed manifests AND lockfile AND
+  an empty `node_modules` per version — fresh-checkout semantics, the #451 contract.
+- Evidence and liveness (#455): each verdict JSON is archived with its RESOLVED lockfile as
+  CI artifacts, and the refresh PR commits the verdicts to `matrix-verdicts/` (a unit row
+  cross-checks every committed receipt against the README table). `--report --enumerated=`
+  renders registry versions without a verdict as `⏳ enumerated, unverified` — silence is not
+  a verdict. `scripts/nightly-liveness.mjs`, scheduled inside the REGISTERED `ci.yml` (a
+  sentinel cannot live in the workflow whose death it watches), reddens CI when no successful
+  sweep is younger than 30 h — the silent-dead-nightly class #451 shipped behind.
+- **Release-table rule (learned cutting 0.2.41):** cells that fail for ENVIRONMENT reasons
+  (`untestable`, crashes, a depleted tmpfs inode pool mid-sweep) are RE-RUN, never released
+  as-is — an environmental sample is not a verdict about the version. The first RC pass lost
+  ten cells exactly this way (/tmp inodes hit 100% while bytes stayed at 17%); the ext4 rerun
+  settled all ten, and the shipped table states only settled cells.
+- The workflow does not gate PRs — the pinned chain is the PR gate. GitHub only registers
+  scheduled workflows from the DEFAULT branch, so the nightly activates when a release carries
+  the file to `main` (#451). The workflows' own references are guarded on the repo plane by
+  `tests/unit/host-matrix-workflow.test.ts` — the file shipped once with find/replace casualties
+  and nothing noticed.
+
+The support BOUNDARY (oldest passing / newest failing version and the seam at each failure) is
+recorded in `docs/verify.md` per sweep run; the registry list re-bases nightly, so the claim
+cannot go stale the way a typed version list does.

@@ -63,6 +63,7 @@ acceptance open until the evidence exists or the maintainer explicitly decides o
 | Knowledge rules, topic composition, enrichment, sync and P1–P3 | [Knowledge design record](docs/knowledge-repo.md) |
 | Git and TreeDX transport contracts | [Provider contract](docs/provider.md) |
 | Isolated build, harness boot, tapes and parity | [Development](docs/development.md), [dev install](dev/install/README.md) |
+| Which harness versions are supported and where each seam breaks | the host-matrix record in [Verification](docs/verify.md); run `bash scripts/host-matrix.sh` (nightly workflow `host-matrix.yml`) |
 | Claims, field checks and reproduction | [Verification record](docs/verify.md) |
 | Dated results, corrections and open work | [Project state](docs/project-state.md), [backlog](docs/backlog.md) |
 
