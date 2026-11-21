@@ -8,6 +8,52 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.41 — 2026-11-21 · the support claim becomes an executed fact — per version, both planes, with receipts
+
+**Version support, executed rather than asserted (#443–#456).** The README's support table is
+now the output of machines, not prose: every published harness version ≥ 0.2.0 gets the real
+suites AND the compose probe run against it in a fresh per-version workspace (#447, #454), its
+verdict JSON is committed under `matrix-verdicts/` and cross-checked against its table row by
+a unit guard, its resolved lockfile is archived beside it, and a liveness sentinel in the
+registered CI workflow reddens if the sweep nightly ever dies of silence (#455). The pipeline
+got the audit it deserved and none wanted: as shipped it had never run, called a script that
+never existed, and attributed real local sweeps to a CI run that could not have happened
+(#451 — refs restored, `--source` stamps naming the executing plane, committed manifests AND
+lockfile per cell). Two compile-boundary cures came out of the first live sweeps: nested-zod
+instance alignment (#449) and a portable `Config` annotation at the schema's declaration
+(#450). The support floor moved from prose to policy with data behind it — 0.1.* deprecated
+by maintainer decision (#446), executed capability edge at 0.1.7-rc.2.
+
+**What this release ships as supported state:** 0.2.0-rc.1 → 0.2.1-rc.5, twelve versions, green
+on all three planes. **The entire 0.2.2 line — including the harness version the maintainer's
+home app runs — is compose-RED and shipped as such**: the host retired the
+`tool-subagent-control/list-agents` row (and its export subpath) at 0.2.2-alpha.2 while our
+composition still carries it past the drop-guard; tracked as #445 with root-cause facts pinned
+to shipped bytes. Seeing it red on every nightly is the point of the compose plane.
+
+**Earlier range:** gateway-list verification reads the measured host shapes (#180, PR #435);
+explore-dev made deterministic with claims moved to their owners (#222, PR #436); preset rows
+kept or dropped by the HOST's own resolution tree — the central-home lineage leak that made a
+7-tool session, closed (#437, PR #438); suggested next steps stop presenting archived history
+as a to-do list — tense-aware labels (#317, PR #439); cross-machine removal tombstones, plus
+the discovery that pool deletion was never actually wired (#256, PR #440); update verification
+lives in the product — `/chapters-status` `Version:` is now the proof of what a server loaded,
+no checkout script in any human-facing release step (#260, PR #441).
+
+**Test doctrine, renewed (#456 Tier A + #452):** TOC, enrichment and suggestion legs are now
+driven by targeted conversations about THIS project reading REAL repository files, with topic
+variation making split correctness checkable by construction — boundaries computed from the
+transcript's own measurements, attribution that must move when the conversation is reordered,
+zero-bleed assertions, and mutation proofs. Fixed-sleep quiescence (the family behind a
+parallel-load flake, #452) is retired at the root and ratcheted against return. Tier B —
+re-distilling the tape corpora from the same scenario catalog and per-line e2e corpora — stays
+open under #456.
+
+**And this release is its own activation event:** GitHub registers scheduled workflows only
+from the default branch, so the sweep nightly and the liveness sentinel start firing the
+moment this tag lands. The first nightly after 0.2.41 is the morning the machine-regeneration
+claim becomes literally true.
+
 ### 0.2.40 — 2026-11-19 · promises prose made kept as code — and a history rewritten, said plainly
 
 **History-rewrite notice (this release's tags are new objects):** on 2026-11-19 the repository's

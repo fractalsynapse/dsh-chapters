@@ -1292,3 +1292,27 @@ records start lying.
 refresh) · rig-band sysctl · gatewayList shape · host option-(d) · five credential-gated TreeDX
 rows · #138's rest-state half as a host gap (contract-documented). #397, #372, #349, #429, #138,
 #433's in-repo halves: all closed/shipped.
+
+## 0.2.41 cut (2026-11-21): version support executed, not asserted
+
+**What shipped:** the #443–#456 program end to end — per-version real-legs + compose sweep in
+fresh isolated workspaces (#447/#449/#450/#454), the pipeline repair and provenance correction
+(#451: never-runnable refs, phantom-nightly attribution, committed manifest+lock cells,
+`--source` plane stamps), committed `matrix-verdicts/` receipts with README cross-check,
+lockfile archiving, unverified-enumeration rows, the liveness sentinel, the frozen cell-skip
+roster (#455), the targeted-conversation TOC/enrichment/suggestion tests with measured cut
+targets and mutation proofs (#456 Tier A), and the quiescence conversion + bare-sleep ratchet
+(#452). Earlier range: #435/#436/#438/#439/#440/#441 (#180, #222, #437, #317, #256, #260).
+
+**Support state at this cut:** 12/19 versions green on all three planes (0.2.0-rc.1 →
+0.2.1-rc.5); the 0.2.2 line (7) suite-green, compose-FAIL, cause attributed verbatim
+(list-agents retired by the host; our composition carries it — #445 OPEN, and now visible on
+every nightly by design). The RC sweep's first pass lost ten cells to /tmp INODE exhaustion
+(100% at 17% bytes); rerun on ext4 settled all ten before the table shipped — the
+re-run-environmental-failures rule is now in docs/development.md.
+
+**Open after this cut:** #445 (0.2.2 compose — THE headline gate; root cause pinned, fix is
+in our preset assembly/probe path), #456 Tier B (tape re-distillation from the scenario
+catalog; per-line corpora), #433's two maintainer residuals, rig-band sysctl, host option-(d),
+five credential-gated TreeDX rows, #138 rest-state half. The sweep nightly + sentinel
+ACTIVATE when this release lands on the default branch — this cut is their registration event.
