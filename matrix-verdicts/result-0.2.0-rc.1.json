@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0-rc.1",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.0-rc.1 (legacy-peer-deps fallback, closed in 1 pass)"
+  },
+  "legs": [
+    {
+      "leg": "unit",
+      "ok": true,
+      "ms": 64593,
+      "detail": "pass 1731 / fail 0 / todo 1"
+    },
+    {
+      "leg": "integration",
+      "ok": true,
+      "ms": 63622,
+      "detail": "pass 1731 / fail 0 / todo 1"
+    }
+  ],
+  "verdict": "pass",
+  "ts": "2026-11-20T20:59:16.371Z"
+}

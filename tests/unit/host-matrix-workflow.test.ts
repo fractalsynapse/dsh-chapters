@@ -61,6 +61,31 @@ function unresolvedScriptRefs(dir: string, base = ROOT): string[] {
   return bad
 }
 
+test('#454/#455: the compose plane is a DEFAULT leg, the evidence is committed, the enumeration is checked', () => {
+  const doc = parseWorkflow(wfPath)
+  assert.equal(doc.on.workflow_dispatch.inputs.legs.default, 'unit+integration+compose',
+    'suite-green must never stand alone in the nightly — compose rides by default (#454)')
+  const reportRun = (doc.jobs.report.steps ?? []).flatMap((s: any) => String(s.run ?? '').split('\n')).join('\n')
+  assert.match(reportRun, /--enumerated=var\/matrix\.json/, 'unverified enumerated versions ride the table as named gaps (#455)')
+  assert.match(reportRun, /mkdir -p matrix-verdicts/, 'verdicts are committed alongside the table (#455)')
+  assert.match(reportRun, /git add README\.md matrix-verdicts/, 'the refresh PR carries the receipts, not just the prose')
+  assert.match(wf, /result-\$\{\{ matrix\.version \}\}\.json\.lock\.json/, 'the RESOLVED lock is uploaded beside the verdict (#455)')
+})
+
+test('#455: the liveness sentinel lives in the REGISTERED CI workflow and only runs on its timer', () => {
+  const ci = parseWorkflow(join(WF_DIR, 'ci.yml'))
+  assert.ok(ci.on.schedule !== undefined, 'ci.yml carries a schedule — the sentinel must be in a registered workflow')
+  const job = ci.jobs?.['nightly-liveness']
+  assert.ok(job !== undefined, 'the sentinel job exists')
+  assert.equal(job.if, "github.event_name == 'schedule'", 'and fires only on the timer')
+  const raw = readFileSync(join(WF_DIR, 'ci.yml'), 'utf8')
+  assert.match(raw, /scripts\/nightly-liveness\.mjs/, 'it runs the tested script')
+  // the heavy jobs must opt OUT of schedule events, or every 04:47 would re-run the full chain
+  for (const name of ['test', 'host-capability', 'e2e-replay', 'environment-parity']) {
+    assert.match(String(ci.jobs[name]?.if ?? ''), /github\.event_name != 'schedule'/, `${name} skips schedule events`)
+  }
+})
+
 test('#451: every scripts/<file> reference in EVERY workflow resolves to a real file', () => {
   // This is the row whose absence let #451 ship: host-matrix.yml called
   // scripts/de-de-de.mjs, which never existed.

@@ -1,0 +1,23 @@
+{
+  "version": "0.2.1-rc.3",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.1-rc.3 (legacy-peer-deps fallback, closed in 1 pass; aligned root zod 4.6.7 -> 4.4.3 (every host exact pin agrees — one instance, the version's own resolution))"
+  },
+  "legs": [
+    {
+      "leg": "unit",
+      "ok": true,
+      "ms": 63824,
+      "detail": "pass 1731 / fail 0 / todo 1"
+    },
+    {
+      "leg": "integration",
+      "ok": true,
+      "ms": 63637,
+      "detail": "pass 1731 / fail 0 / todo 1"
+    }
+  ],
+  "verdict": "pass",
+  "ts": "2026-11-20T21:09:57.717Z"
+}

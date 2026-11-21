@@ -9,7 +9,9 @@
  * registry, never from a human-edited list here.
  *
  *   node --experimental-strip-types --no-warnings scripts/matrix-run.mts \
- *        --version=0.2.1-rc.4 [--legs=unit+integration|+e2e] [--out=result.json]
+ *        --version=0.2.1-rc.4 [--legs=unit+integration+compose|+e2e] [--out=result.json]
+ *        compose = the boot-level user fact (#454): a new chapters session composes on
+ *        THAT version, via the host-matrix instrument; suite legs never substitute for it.
  *
  * Also:
  *   node scripts/matrix-run.mts --list --json               # CI matrix source (registry >= 0.2.0)
@@ -77,13 +79,25 @@ if (flag('list')) {
 
 if (flag('report')) {
   const RUNS_DIR = arg('runs') ?? path.join(ROOT, 'var', 'matrix-runs')
-  const files = fs.existsSync(RUNS_DIR) ? fs.readdirSync(RUNS_DIR).filter((f) => f.endsWith('.json')) : []
+  const files = fs.existsSync(RUNS_DIR) ? fs.readdirSync(RUNS_DIR).filter((f) => f.endsWith('.json') && !f.endsWith('.lock.json')) : []
   interface Row { version: string; verdict: string; swap?: { ok: boolean; detail: string }
     legs?: { leg: string; ok: boolean; detail: string }[]; ts?: string }
   const rows = files.map((f) => {
     try { return JSON.parse(fs.readFileSync(path.join(RUNS_DIR, f), 'utf8')) as Row } catch { return null }
   }).filter((r): r is Row => r !== null && typeof r.version === 'string').sort((a, b) => cmp(a.version, b.version))
   if (rows.length === 0) { console.error(`report: no result files in ${RUNS_DIR}`); process.exit(2) }
+  // #455: versions the enumeration claims but no artifact verified ride the table as
+  // NAMED gaps — a new registry publish must shrink the support claim LOUDLY, never by
+  // absence. The list comes from the same enumeration the sweep ran (--list output).
+  const enumPath = arg('enumerated')
+  const unverified: string[] = []
+  if (enumPath !== undefined && fs.existsSync(enumPath)) {
+    try {
+      const list = JSON.parse(fs.readFileSync(enumPath, 'utf8')) as { include?: { version: string }[] }
+      const seen = new Set(rows.map((r) => r.version))
+      for (const item of list.include ?? []) if (!seen.has(item.version)) unverified.push(item.version)
+    } catch { /* a malformed enumeration is simply absent — the sweep itself failed loudly */ }
+  }
   const fmt = (r: Row): string => {
     const cells = (r.legs ?? []).map((l) => `${l.leg}:${l.ok ? '✅' : '❌'}`).join(' ')
     const verdict = r.verdict === 'pass' ? '✅ supported' : r.verdict === 'untestable' ? '❓ untestable' : `❌ ${r.verdict}`
@@ -93,6 +107,7 @@ if (flag('report')) {
     '| DSH host version | Verdict | Real-leg results | Last run (UTC) |',
     '|---|---|---|---|',
     ...rows.map(fmt),
+    ...unverified.map((v) => `| ${v} | ⏳ enumerated, unverified | — | — |`),
   ].join('\n')
   // #451: the stamp names the plane that EXECUTED the sweep. Claiming "the version-sweep
   // workflow" when a local run produced the verdicts is how a real, good sweep ended up
@@ -171,6 +186,11 @@ function swap(): { ok: boolean; detail: string } {
   // restoring the committed lock makes sequential local cells match that world.
   const lockFromGit = spawnSync('git', ['show', 'HEAD:package-lock.json'], { encoding: 'utf8', timeout: 30_000 })
   if (lockFromGit.status === 0 && lockFromGit.stdout !== '') fs.writeFileSync('package-lock.json', lockFromGit.stdout)
+  // #454 self-isolation: manifest+lock reset fixes WHAT npm is asked to install; removing the
+  // inherited tree fixes WHERE it starts. A cell must resolve THIS version's resolution, not
+  // reconcile a neighbour's node_modules — CI gets this for free (fresh checkout per job),
+  // and now sequential local cells get it too.
+  fs.rmSync('node_modules', { recursive: true, force: true })
   const pkgj = JSON.parse(original) as Pkgj
   // The family SET differs between lines (measured: 0.2.0-rc.1 never published
   // dsh-experimental-client-ui-cot-translation; 0.2.1-rc.1 never published dsh-web-deepseek-api).
@@ -311,6 +331,31 @@ function runLeg(leg: string): void {
         .filter((n) => !/^failing tests/.test(n)).slice(0, 4)
       detail += names.length > 0 ? ` — failing: ${names.join(' | ')}` : ` — exit ${String(r.status)}`
     }
+  } else if (leg === 'compose') {
+    // #454: the COMPOSE plane per version — does a new chapters session actually compose on
+    // this host? Reuses the proven instrument (scripts/host-matrix.mts boots a hermetic tree
+    // for the version via the E2E_HOST_DIR seam #89 and probes the strict user fact: durable
+    // header agentPreset=chapters). We read the verdict from its durable JSONL record, never
+    // from console prose. Browser env (PLAYWRIGHT_BROWSERS_PATH, bwrap provisioning) is the
+    // caller's job — the CI matrix job already provisions it exactly like the acceptance job.
+    const probe = spawnSync(process.execPath,
+      ['--experimental-strip-types', '--no-warnings', 'scripts/host-matrix.mts', `--versions=${version}`],
+      { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
+    let verdict = ''
+    let why = ''
+    try {
+      const lines = fs.readFileSync('var/host-matrix-results.jsonl', 'utf8').trim().split('\n')
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const cell = JSON.parse(lines[i] ?? '') as { version?: string; verdict?: string; why?: string }
+          if (cell.version === version) { verdict = String(cell.verdict ?? ''); why = String(cell.why ?? ''); break }
+        } catch { /* skip an unparsable line — the fallback below stays honest */ }
+      }
+    } catch { /* no results file */ }
+    ok = verdict.startsWith('pass')
+    detail = verdict === ''
+      ? `no verdict row for ${version} (probe exit ${String(probe.status)}): ${String(probe.stderr ?? probe.stdout ?? '').replace(/\n/g, ' ').slice(0, 160)}`
+      : `${verdict}${why !== '' ? ` — ${why}` : ''}`
   } else if (leg === 'e2e') {
     const r = spawnSync('npm', ['run', 'test:e2e:replay'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
     ok = r.status === 0
@@ -362,6 +407,12 @@ result.verdict = result.swap.ok ? (passed ? 'pass' : 'fail') : 'untestable'
 
 fs.mkdirSync(path.dirname(path.resolve(ROOT, OUT)), { recursive: true })
 fs.writeFileSync(path.resolve(ROOT, OUT), JSON.stringify(result, null, 2) + '\n')
+// #455: archive the RESOLVED lock beside the verdict — the verdict states what passed; the
+// lock states against WHICH GRAPH it passed, so a future registry drift is a comparison,
+// not a mystery. Skipped by --report (never parsed as a verdict), uploaded as an artifact.
+if (result.swap.ok) {
+  try { fs.copyFileSync('package-lock.json', path.resolve(ROOT, `${OUT}.lock.json`)) } catch { /* no lock to archive */ }
+}
 for (const l of legs) console.log(`  [${l.leg}] ${l.ok ? 'PASS' : 'FAIL'} (${String(Math.round(l.ms / 1000))}s) — ${l.detail}`)
 console.log(`${version}: ${result.verdict} — ${result.swap.detail}; ${legs.map((l) => `${l.leg}:${l.ok ? 'pass' : 'fail'}`).join(' ')}`)
 process.exit(passed ? 0 : 1)
