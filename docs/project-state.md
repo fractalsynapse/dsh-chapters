@@ -1250,3 +1250,69 @@ v24.22.0 rerun is the counted evidence, disclosed not deleted). `corpus:stamp` o
 · gatewayList shape (observed, recorded) · host option-(d) todo row · five credential-gated TreeDX
 live rows. #138's rest-state half is now a CONTRACT fact, not an open question; #429 is closed with
 its fix measured in both failure contexts.
+
+
+**7fa3c83-era candidate SHIPPED — 0.2.40, published and registry-proven — AND THE 2026-11-19
+HISTORY REWRITE, DISCLOSED IN FULL.** PR #432 merged `7fa3c83`; four CI gates green at the head
+(acceptance replayed the twelve-leg chain on the runner); tag `0.2.40`; release run
+`44606285443` success; `latest` = 0.2.40, tarball manifest + bundled version agree, provenance
+attestation present.
+
+**What was rewritten and why:** 33 commits (2026-11-14/15) carried
+`Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` — a vendor attribution no authorized tool
+of this project wrote. Sessions of that era predate this OpenCode install (whose entire DB runs
+`qwen3.8-flash` with a single authenticated integration and zero Claude strings in its events);
+whether the source was a prior install's model selection or a distilled model bleeding its training
+lineage's attribution habit cannot be proven from here, and the guards cover BOTH theories (the
+distillation-residue suspicion is recorded in #433 rather than resolved). `git-filter-repo` message
+rewrites: 185 branches + main + staging force-pushed, tags 0.2.33–0.2.39 deleted and re-pointed,
+all verified **tree-identical** per branch (content untouched, messages only) and 0 trailer commits
+reachable from any ref on the remote.
+
+**Costs, named:** (1) published versions 0.2.33–0.2.39 keep their npm packages and attestations,
+but their attestation-referenced gitHead SHAs are no longer branch-reachable — the audit chain from
+those seven versions to repo history is severed; 0.2.40+ run clean. (2) Two stale stashes
+(`fix/243b-refuse-wording` WIP from the 0.2.2 era; a held `0.2.2-dev.2` version bump — both long
+obsolete) were destroyed by the reflog expiry + gc the purge required; disclosed because records
+stay complete even about their own losses. (3) GitHub may still SERVE the old objects by raw SHA
+until its network GC — the purge request (support.github.com, "remove cached/detached commit
+objects") is filed as the remaining checklist item on #433, together with refreshing any external
+clone (distillation box). (4) Contributors must `git fetch --prune --prune-tags` + reset (or
+re-clone); merging old local history forward would resurrect the trailers.
+
+**Guards shipped (PR #434):** AGENTS § Attribution and identity rules; `~/.git-hooks/commit-msg`
+(global `core.hooksPath`, strips ANY AI-attribution trailer from ANY vendor, chains repo-local
+hooks, fixture-tested); OpenCode config pins `model`/`small_model` to
+`alibaba-token-plan/qwen3.8-flash` (no catalog-default or auto-router ambiguity). The vendored
+names the pinned harness itself ships (`@anthropic-ai/sdk` in the host lock, the claude-code
+subagent row in `cordis.patch.yml`) stay — they are dependency facts, and renaming facts is how
+records start lying.
+
+**Open after this cut:** #433 (its two maintainer-hand residuals: support purge + external clone
+refresh) · rig-band sysctl · gatewayList shape · host option-(d) · five credential-gated TreeDX
+rows · #138's rest-state half as a host gap (contract-documented). #397, #372, #349, #429, #138,
+#433's in-repo halves: all closed/shipped.
+
+## 0.2.41 cut (2026-11-21): version support executed, not asserted
+
+**What shipped:** the #443–#456 program end to end — per-version real-legs + compose sweep in
+fresh isolated workspaces (#447/#449/#450/#454), the pipeline repair and provenance correction
+(#451: never-runnable refs, phantom-nightly attribution, committed manifest+lock cells,
+`--source` plane stamps), committed `matrix-verdicts/` receipts with README cross-check,
+lockfile archiving, unverified-enumeration rows, the liveness sentinel, the frozen cell-skip
+roster (#455), the targeted-conversation TOC/enrichment/suggestion tests with measured cut
+targets and mutation proofs (#456 Tier A), and the quiescence conversion + bare-sleep ratchet
+(#452). Earlier range: #435/#436/#438/#439/#440/#441 (#180, #222, #437, #317, #256, #260).
+
+**Support state at this cut:** 12/19 versions green on all three planes (0.2.0-rc.1 →
+0.2.1-rc.5); the 0.2.2 line (7) suite-green, compose-FAIL, cause attributed verbatim
+(list-agents retired by the host; our composition carries it — #445 OPEN, and now visible on
+every nightly by design). The RC sweep's first pass lost ten cells to /tmp INODE exhaustion
+(100% at 17% bytes); rerun on ext4 settled all ten before the table shipped — the
+re-run-environmental-failures rule is now in docs/development.md.
+
+**Open after this cut:** #445 (0.2.2 compose — THE headline gate; root cause pinned, fix is
+in our preset assembly/probe path), #456 Tier B (tape re-distillation from the scenario
+catalog; per-line corpora), #433's two maintainer residuals, rig-band sysctl, host option-(d),
+five credential-gated TreeDX rows, #138 rest-state half. The sweep nightly + sentinel
+ACTIVATE when this release lands on the default branch — this cut is their registration event.

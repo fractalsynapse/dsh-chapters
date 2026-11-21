@@ -37,7 +37,15 @@ function pinnedHostVersion(): string | null {
 }
 
 function hostTree(): string {
-  const candidates: string[] = []
+  // #437: the PINNED rig tree is the first candidate, not the global `dsh` on PATH. The live
+  // DSH self-update installed 0.2.2-rc.5 into the developer's HOME, and the PATH probe then
+  // shadowed the pin this corpus is anchored to — the version guard correctly refused, but a
+  // guard that only fires after a stale-first ordering turns every host-shape row red on an
+  // updated machine. The PATH probe stays as the fallback for checkouts without an `npm ci`d
+  // host-lock, still version-guarded below.
+  const candidates: string[] = [
+    path.join(ROOT, 'dev', 'dsh-host-lock', 'node_modules', '@deepseek-ai'),
+  ]
   try {
     const bin = execSync('readlink -f "$(command -v dsh)"', { encoding: 'utf8' }).trim()
     if (bin) {
@@ -45,7 +53,6 @@ function hostTree(): string {
       if (at > 0) candidates.push(`${bin.slice(0, at)}/@deepseek-ai`)
     }
   } catch { /* no dsh on PATH — fall through to the installed trees */ }
-  candidates.push(path.join(ROOT, 'dev', 'dsh-host-lock', 'node_modules', '@deepseek-ai'))
   candidates.push(path.join(ROOT, 'node_modules', '@deepseek-ai'))
   for (const c of candidates) {
     if (!fs.existsSync(path.join(c, 'dsh-client-ui-plan', 'lib', 'client.js'))) continue

@@ -9,6 +9,51 @@ source at [fractalsynapse/dsh-chapters](https://github.com/fractalsynapse/dsh-ch
 > **All documentation lives on the documentation site — this README is a doorway, not a duplicate.**
 > ### 📖 https://fractalsynapse.github.io/dsh-chapters/
 
+## Supported DSH host versions
+
+Every published Deepseek Session Harness version **from 0.2.0 up** gets the real test suites
+run against it, per version: the runner `scripts/matrix-run.mts` swaps the whole
+`@deepseek-ai/dsh-*` family to that version and runs the legs, and the
+`.github/workflows/host-matrix.yml` workflow (nightly + manual dispatch) assembles the table
+below from the executed verdicts — per version BOTH planes: the deterministic suites
+(unit+integration) AND the compose probe (does a new chapters session actually compose on
+that host, #454), rendered side by side so suite-green never stands alone. Each nightly
+refresh also commits the per-version verdict JSONs under `matrix-verdicts/` as durable
+receipts cross-checked against the table, and a liveness sentinel in CI reddens if the
+sweep nightly itself dies (#455). GitHub registers scheduled workflows only from the default
+branch, so the nightly fires once the next release carries `host-matrix.yml` to `main`; until
+then the table is refreshed by sweep runs of the committed code. Either way the line above the
+table names the plane that actually executed the sweep — a verdict is only ever as good as the
+run that produced it, and which run that was is part of the record.
+
+<!-- versions:begin -->
+
+> Regenerated from the verdicts of a three-plane local sweep of the release-candidate base (unit+integration+compose, one fresh workspace per version) on 2026-11-21 12:57 UTC — real test-suite legs per version with the whole hat family re-resolved. Verdicts from REAL runs, not compose probes.
+
+| DSH host version | Verdict | Real-leg results | Last run (UTC) |
+|---|---|---|---|
+| 0.2.0-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.0-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-alpha.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-alpha.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-alpha.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-alpha.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-alpha.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-rc.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-rc.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.1-rc.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-21 |
+| 0.2.2-alpha.2 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+| 0.2.2-alpha.3 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+| 0.2.2-rc.1 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+| 0.2.2-rc.2 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+| 0.2.2-rc.3 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+| 0.2.2-rc.4 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+| 0.2.2-rc.5 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-21 |
+
+<!-- versions:end -->
+
 ## Install (the whole setup)
 
 ```bash

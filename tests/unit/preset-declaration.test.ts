@@ -54,7 +54,7 @@ import { createRequire } from 'node:module'
 import { readRosterVerdict, rosterRemediation, reportPresetRoster, describeMountedRows } from '../../src/index.ts'
 import {
   CHAPTERS_PRESET_ID, pruneUnresolvableRows, registerPrunedPreset, resolvableFromThisPackage,
-  inventoryEntry, unusableRows,
+  inventoryEntry, unusableRows, makeHostAwareResolver, hostNodeModulesRoot,
   type PresetDefinition, type PresetRow, type PresetRegistryLike,
 } from '../../src/preset.ts'
 import { extractPlot } from '../../src/engine-core.ts'
@@ -169,10 +169,20 @@ test('RUN — the patch stays a string, packed, and the row module stays exporte
 })
 
 // The host's own shipped preset list, when a 0.1.7+/0.2.x web bundle is installed here.
+// #437: ask the PINNED rig tree first. A lineage resolve from this checkout walks up into
+// the developer's HOME, and the self-updated DSH app there ships a NEWER standard list than
+// the host the acceptance corpus is anchored to — the drift rows then compare against a host
+// the product never boots. The walk-up fallback stays for checkouts without `npm ci`d host-lock.
+const hostLockRequire = createRequire(new URL('../../dev/dsh-host-lock/package.json', import.meta.url).pathname)
+const hostMounted = (specifier: string): boolean => {
+  try { hostLockRequire.resolve(specifier); return true } catch { return resolvableFromThisPackage(specifier) }
+}
+const hostRequireFor = (specifier: string): string => {
+  try { return hostLockRequire.resolve(specifier) } catch { return createRequire(import.meta.url).resolve(specifier) }
+}
 let hostStandard: string | undefined
 try {
-  const req = createRequire(import.meta.url)
-  hostStandard = join(dirname(req.resolve('@deepseek-ai/dsh-web-app/package.json')), 'presets', 'standard.patch.yml')
+  hostStandard = join(dirname(hostRequireFor('@deepseek-ai/dsh-web-app/package.json')), 'presets', 'standard.patch.yml')
   if (!existsSync(hostStandard)) hostStandard = undefined
 } catch {
   hostStandard = undefined
@@ -185,7 +195,7 @@ test(`${guard} — every module the preset mounts resolves against the installed
   assert.ok(hostStandard !== undefined)
   const unresolved: string[] = []
   for (const name of mountedNames(rowLines())) {
-    if (resolvableFromThisPackage(name) || KNOWN_OPTIONAL.has(name)) continue
+    if (hostMounted(name) || KNOWN_OPTIONAL.has(name)) continue
     unresolved.push(name)
   }
   assert.deepEqual(unresolved, [],
@@ -275,9 +285,10 @@ test('RUN — the composition references only prompt variables every supported h
 
 test(`${guard} — the installed host really does register what the composition references`, { skip: skip ?? false }, () => {
   // The drift half: read the kernel's OWN registrations rather than trusting the list above, so
-  // a host that drops `model` fails here instead of in someone's session.
-  const req = createRequire(import.meta.url)
-  const loop = (() => { try { return req.resolve('@deepseek-ai/dsh-agent-loop') } catch { return undefined } })()
+  // a host that drops `model` fails here instead of in someone's session. #437: the same probe the
+  // guard uses — the rig tree first; the test file's own lineage holds no @deepseek-ai packages on
+  // a CI runner, which is exactly why this row skipped for weeks while claiming to verify the host.
+  const loop = (() => { try { return hostRequireFor('@deepseek-ai/dsh-agent-loop') } catch { return undefined } })()
   assert.ok(loop !== undefined, 'the host loop package must resolve when this row runs')
   const registered = new Set([...readFileSync(loop, 'utf8').matchAll(/\.variable\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']/g)].map((m) => m[1]!))
   assert.ok(registered.size >= 2, `expected provider+model at minimum, saw: ${[...registered]}`)
@@ -337,6 +348,80 @@ test('RUN — the pruner drops an unresolvable row instead of mounting a broken 
   // silently delete the feature the preset exists to provide.
   const none = pruneUnresolvableRows([{ id: 'engine', name: '@fractalsynapse/dsh-chapters/engine' }], () => false)
   assert.deepEqual(none.dropped, [], 'the chapters engine row must never be prunable')
+})
+
+/**
+ * #437 — the drop-guard asked the WRONG lineage. `import.meta.resolve` from the plugin's module
+ * URL walks up through the repo checkout and into the developer's HOME (`~/node_modules`), which
+ * a live DSH self-update populates with packages the PINNED host has never shipped. Measured:
+ * `dsh-tool-schedule` appeared in `~/node_modules` at 18:31; distill boots minutes later said
+ * `DECLARED BUT BROKEN — tool-schedule: never started` — resolved-for-plugin, unactivatable-for-
+ * host, and one such row bricks the preset. The predicate must ask the HOST's tree: the first
+ * `node_modules` ancestor of the host entry, checked by CONTAINMENT (a filesystem walk-up from
+ * any path under $HOME reaches the polluted home, so no resolution walk can distinguish them).
+ */
+const rowList = (...names: [string, string][]) => names.map(([id, name]) => ({ id, name }))
+
+test('#437: a row resolvable to the PLUGIN but absent from the HOST tree is dropped — the home-pollution case', () => {
+  const hostTree = new Set([
+    '/opt/dsh/node_modules/@deepseek-ai/dsh-tool-bash',
+    '/opt/dsh/node_modules/@deepseek-ai/dsh-tool-fs',
+  ])
+  const r = makeHostAwareResolver(
+    rowList(['tool-bash', '@deepseek-ai/dsh-tool-bash'], ['tool-schedule', '@deepseek-ai/dsh-tool-schedule']),
+    { entryPath: '/opt/dsh/node_modules/.bin/dsh', exists: (p) => hostTree.has(p), pluginResolvable: () => true },
+  )
+  assert.equal(r('@deepseek-ai/dsh-tool-bash'), true, 'the host ships it — mounted, polluted lineage or not')
+  assert.equal(r('@deepseek-ai/dsh-tool-schedule'), false, 'the host cannot import it, whatever the plugin lineage says')
+  const { dropped } = pruneUnresolvableRows(
+    rowList(['tool-bash', '@deepseek-ai/dsh-tool-bash'], ['tool-schedule', '@deepseek-ai/dsh-tool-schedule']), r,
+  )
+  assert.deepEqual(dropped, ['tool-schedule (@deepseek-ai/dsh-tool-schedule)'], 'and the drop is NAMED, as ever')
+})
+
+test('#437: an unprobeable host entry falls back to the plugin lineage — a bundled host must not mass-drop', () => {
+  // A compiled single-file host has no node_modules in its entry path; a flat install whose tree
+  // holds none of the mounted names gives the containment probe no reason to be trusted. Both
+  // keep the pre-#437 behavior, because the WRONG drop (silent missing tools, #57's class) is
+  // worse than the honest BROKEN line this guard exists to prevent.
+  const rBundled = makeHostAwareResolver(rowList(['a', '@deepseek-ai/dsh-a']), {
+    entryPath: '/usr/local/bin/dsh', exists: () => false, pluginResolvable: (s) => s === '@deepseek-ai/dsh-a',
+  })
+  assert.equal(rBundled('@deepseek-ai/dsh-a'), true, 'no node_modules segment in the entry — unchanged')
+  const rBlind = makeHostAwareResolver(rowList(['a', '@deepseek-ai/dsh-a']), {
+    entryPath: '/x/node_modules/dsh/bin/dsh.js', exists: () => false, pluginResolvable: () => true,
+  })
+  assert.equal(rBlind('@deepseek-ai/dsh-a'), true, 'tree resolves NOTHING mounted — not trustworthy, fall back')
+})
+
+test('#437: subpath specifiers are contained by their package directory; scoped by their pair', () => {
+  const exists = (p: string) => p === '/t/node_modules/@deepseek-ai/dsh-agent-list' || p === '/t/node_modules/isomorphic-git'
+  const r = makeHostAwareResolver(
+    rowList(['list', '@deepseek-ai/dsh-agent-list/list-agents'], ['git', 'isomorphic-git/pkg']),
+    { entryPath: '/t/node_modules/.bin/dsh', exists, pluginResolvable: () => true },
+  )
+  assert.equal(r('@deepseek-ai/dsh-agent-list/list-agents'), true, 'the package dir is in the host tree')
+  assert.equal(r('isomorphic-git/pkg'), true, 'unscoped package name is the containment key')
+  assert.equal(r('@deepseek-ai/dsh-gone/x'), false, 'a package not in the tree never passes containment')
+})
+
+test('#437: hostNodeModulesRoot reads the tree out of both entry layouts, or says nothing', () => {
+  assert.equal(hostNodeModulesRoot('/a/b/node_modules/.bin/dsh'), '/a/b/node_modules')
+  assert.equal(hostNodeModulesRoot('/a/b/node_modules/dsh/bin/dsh.js'), '/a/b/node_modules')
+  assert.equal(hostNodeModulesRoot('/usr/local/bin/dsh'), null, 'a compiled entry has no tree — the fallback path')
+  assert.equal(hostNodeModulesRoot(undefined), null)
+})
+
+test('#437: the mount call defaults to the REAL process entry — a guard only the tests pass is no guard', () => {
+  // The first cut of the fix wired `makeHostAwareResolver(plugins, { pluginResolvable })` and the
+  // implementation read opts.entryPath with NO default: under boot the predicate silently fell
+  // back to the plugin lineage and the polluted row stayed mounted — red at replay, green at
+  // unit, exactly how this class hides. Under `node --test` the entry is a test file with no
+  // node_modules segment, so the default path must keep the fallback behavior, never throw.
+  const r = makeHostAwareResolver(rowList(['a', '@deepseek-ai/dsh-a']), {
+    exists: () => true, pluginResolvable: () => false,
+  })
+  assert.equal(r('@deepseek-ai/dsh-a'), false, 'default entry is unprobeable here — pluginResolvable decides')
 })
 
 test('RUN — registerPrunedPreset classifies every outcome and never throws at the row', async () => {
@@ -542,7 +627,13 @@ test('the realm bounds the pressure headroom and the engine schema carries it (#
   assert.match(body, /headroomTokens: \d+/, 'the engine row must bound headroomTokens, not inherit 65,536')
 
   const engine = readFileSync(join(PKG_ROOT, 'src', 'engine.ts'), 'utf8')
-  const schema = engine.slice(engine.indexOf('static override Config = z.object({'), engine.indexOf('modelPolicies'))
+  // The needle used to pin the EXACT declaration text — a portable type annotation
+  // (#449: `static override Config: z<ChaptersEngineConfig> = …`) silently broke the
+  // indexOf and the guard read garbage. The row's MEANING is 'the schema declares the key';
+  // match the declaration, do not memorize it.
+  const decl = /static override Config(:[^=]+)? = z\.object\(\{/.exec(engine)
+  assert.ok(decl !== null, 'the engine Config declaration must be findable — annotation or not')
+  const schema = engine.slice(decl.index, engine.indexOf('modelPolicies'))
   assert.match(schema, /headroomTokens:\s*z\.number\(\)/,
     'Config must declare headroomTokens or the Loader drops it before the base sees it')
 

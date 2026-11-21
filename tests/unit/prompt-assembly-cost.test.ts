@@ -233,6 +233,34 @@ test('#379: measure() equals assemble().length for EVERY drop value, on varied f
   }
 })
 
+test('#317 hardening: the budget is HARD at EVERY drop boundary — no admitted input exceeds its budget', () => {
+  // The exactness row above walks random fixtures and checks the CHOSEN drop only; a small constant
+  // divergence (a block item on one side of the arithmetic and not the other) slips every seeded
+  // trial until a budget lands inside the gap. #317's tense label did exactly that — the block
+  // measurement was short by the label while assemble() emitted it, and the ladder admitted docs
+  // over budget at tight boundaries. This row closes the cheap way: sweep budgets downward from a
+  // fixture's own full length and demand that no returned input is longer than the budget it was
+  // fitted to. Refusal at the tight end is the other legal answer; over-length admission never is.
+  const chapters: ChapterHistoryEntry[] = [1, 2, 3, 4, 5, 6].map((n) => ({
+    number: n, title: `T${String(n)}`, summary: `summary ${String(n)} ` + 'x'.repeat(140 + n * 17),
+    plots: n % 2 === 0 ? [`plot ${String(n)} ` + 'y'.repeat(90)] : [],
+  }))
+  const f = facts(chapters)
+  const fullOut = buildSuggestInput(f, 200_000, 4096)
+  assert.ok('input' in fullOut, 'the generous budget must admit the whole document')
+  const full = (fullOut as { input: string }).input
+  let admitted = 0
+  for (let k = 1; k <= 900; k += 3) {
+    const budget = full.length - k
+    const out = buildSuggestInput(f, budget, 4096)
+    if ('input' in out) {
+      admitted += 1
+      assert.ok(out.input.length <= budget, `budget ${String(budget)} admitted ${String(out.input.length)} bytes (over by ${String(out.input.length - budget)})`)
+    }
+  }
+  assert.ok(admitted > 0, 'the sweep must actually admit at the loose end, or it tests only refusals')
+})
+
 test('#379: the chapter block cannot exceed its share of the budget, even when the total would fit', () => {
   // The point of the change: a 1M-token route gives a ~2,000,000-char budget, and the block used to be
   // allowed to fill it. With the cap, the block is bounded by the SHARE while the newest turn survives.

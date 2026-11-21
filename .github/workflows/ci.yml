@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch: {}
+  schedule:
+    # #455: the liveness sentinel's own timer — the heavy jobs below skip schedule events.
+    # A sentinel must live in a REGISTERED workflow: host-matrix.yml's own schedule cannot
+    # watch itself die (that is precisely the silent-failure class #451 shipped with).
+    - cron: '47 5 * * *'
 
 # Never two GPU-free but browser-heavy e2e chains fighting for the same
 # throwaway homes/ports across concurrent pushes of the same branch.
@@ -15,6 +20,7 @@ concurrency:
 jobs:
   # ───────────────────────── deterministic plane: unit + integration ─────────────────────────
   test:
+    if: github.event_name != 'schedule'   # #455: schedule events run ONLY the liveness sentinel
     name: typecheck · build · unit + integration (coverage gate 85/85/85)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -113,6 +119,7 @@ jobs:
   # so in the run log; the acceptance job below is SKIPPED-BY-DECISION, visibly, rather
   # than silently red or silently green over a preset it never mounted.
   host-capability:
+    if: github.event_name != 'schedule'   # #455: schedule events run ONLY the liveness sentinel
     name: does the pinned host support preset declaration rows?
     runs-on: ubuntu-latest
     outputs:
@@ -159,7 +166,7 @@ jobs:
     # name was claiming coverage of a leg it no longer runs. The list below is generated from scripts/chain-replay.sh.
     name: acceptance — ten tape-replay legs, no LLM
     needs: host-capability
-    if: needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'
+    if: github.event_name != 'schedule' && needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'   # #455: schedule events run ONLY the liveness sentinel
     runs-on: ubuntu-latest
     # BLOCKING again as of #178 (2026-10-30). This job was made advisory by maintainer decision on
     # 2026-10-24 (#92, "ship first, prove second") UNTIL its evidence landed — and it landed: the nine
@@ -277,6 +284,7 @@ jobs:
   # burned us — a stale plugin copy under a live ~/.dsh — is caught by running this locally as
   # part of every release step (documented in AGENTS.md).
   environment-parity:
+    if: github.event_name != 'schedule'   # #455: schedule events run ONLY the liveness sentinel
     name: environment parity — live hosts vs rig pin vs installed copies (#228)
     runs-on: ubuntu-latest
     steps:
@@ -285,3 +293,21 @@ jobs:
         with: { node-version: '24' }
       - run: npm ci
       - run: node scripts/check-env-parity.mjs
+
+  nightly-liveness:
+    name: the version-sweep nightly is alive (#455)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: ask the API what host-matrix actually did
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p var
+          gh api 'repos/{owner}/{repo}/actions/workflows/host-matrix.yml/runs?per_page=20' > var/matrix-runs.json
+      - run: node scripts/nightly-liveness.mjs --runs=var/matrix-runs.json

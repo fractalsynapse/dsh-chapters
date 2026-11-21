@@ -36,6 +36,8 @@
  *
  * @module dsh-chapters/src/preset
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import { EntryGroup } from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
@@ -85,6 +87,84 @@ function needsProbe(row: PresetRow): boolean {
  * @returns the composition to register, and every drop NAMED — a silent drop is how a
  *          preset loses a tool nobody notices.
  */
+/**
+ * #437 — the tree the HOST resolves its plugin rows from: the first `node_modules` ancestor
+ * segment of the host entry path (the npm `node_modules/.bin/dsh` shim and the package's own
+ * `node_modules/dsh/bin/dsh.js` both contain it; a compiled single-file entry does not).
+ */
+export function hostNodeModulesRoot(entryPath: string | undefined): string | null {
+  if (typeof entryPath !== 'string' || entryPath === '') return null
+  const segs = entryPath.split('/')
+  const i = segs.indexOf('node_modules')
+  if (i <= 0) return null
+  return segs.slice(0, i + 1).join('/')
+}
+
+/** The package directory a specifier's containment is decided against: `@scope/name[/sub]` or
+ *  `name[/sub]` — the subpath is an EXPORT question, but exports cannot be listed without
+ *  importing, and a package the host tree does not hold has no exports to miss. */
+function packageKeyOf(specifier: string): string {
+  const segs = specifier.split('/')
+  return specifier.startsWith('@') ? segs.slice(0, 2).join('/') : segs[0]!
+}
+
+/**
+ * #437 — the drop-guard must ask the HOST, not the plugin lineage. `import.meta.resolve` from
+ * this package walks up through the repo checkout into the developer's HOME, and a live DSH
+ * self-update there publishes rows the pinned host cannot activate (`dsh-tool-schedule`,
+ * measured in #437): resolved-for-plugin, never-starts-for-host, one row makes the preset
+ * BROKEN. Containment in the host's own tree is the only test that cannot be polluted by an
+ * ancestor walk — on this machine every walk-up path from inside $HOME reaches that pollution.
+ *
+ * The fallback is deliberate and load-bearing: when the host tree cannot be PROBED (compiled
+ * entry, or a layout where NONE of the mounted names exists directly in it), trust the probe
+ * not at all and keep the pre-#437 behavior. A wrong drop silently removes tools (the #57
+ * class — file presence is not existence); the honest BROKEN line this guard pre-empts is the
+ * LESSER failure only when we are SURE we read the host's tree.
+ *
+ * @param mounted the rows actually in the composition, groups included — the trustworthiness
+ *        sample and the specs to decide.
+ * @param opts.pluginResolvable the lineage this module can see — the fallback.
+ */
+export function makeHostAwareResolver(
+  mounted: PresetRow[],
+  opts: {
+    entryPath?: string
+    exists?: (p: string) => boolean
+    pluginResolvable: (specifier: string) => boolean
+  },
+): (specifier: string) => boolean {
+  const exists = opts.exists ?? hostExists
+  // The entry defaults to the REAL host process's own argv[1] — this runs inside the booted
+  // host, and #89's lesson is that a probe pointed at some other tree answers about a world
+  // this process never boots. realpath first: npm bin shims are symlinks, and the tree
+  // segment must belong to the file actually executing.
+  let entry = opts.entryPath ?? process.argv[1]
+  if (entry !== undefined) {
+    try { entry = fs.realpathSync(entry) } catch { /* keep the raw path if realpath fails */ }
+  }
+  const root = hostNodeModulesRoot(entry)
+  const specs = flattenRowSpecs(mounted)
+  if (root === null || !specs.some((s) => exists(path.join(root, packageKeyOf(s))))) {
+    return opts.pluginResolvable
+  }
+  return (specifier: string) => exists(path.join(root, packageKeyOf(specifier)))
+}
+
+/** The default `exists`: a plain synchronous filesystem check, never throwing. */
+const hostExists = (p: string): boolean => {
+  try { return fs.existsSync(p) } catch { return false }
+}
+
+function flattenRowSpecs(rows: PresetRow[]): string[] {
+  const out: string[] = []
+  for (const row of rows) {
+    if (row.group === true && Array.isArray(row.config)) out.push(...flattenRowSpecs(row.config as PresetRow[]))
+    else if (needsProbe(row)) out.push(row.name)
+  }
+  return out
+}
+
 export function pruneUnresolvableRows(
   rows: PresetRow[],
   resolvable: (specifier: string) => boolean,
@@ -279,7 +359,10 @@ export default class ChaptersPresetRow {
   /** Registers, then yields the disposer so Cordis owns the registration's lifetime — the
    *  host's own row plugin does exactly this (`yield await this.ctx.agentPresets.register(…)`). */
   async *[Service.init](): AsyncGenerator<() => Promise<void>, void> {
-    const { outcome, disposer } = await registerPrunedPreset(this.ctx.agentPresets, this.config, resolvableFromThisPackage)
+    const { outcome, disposer } = await registerPrunedPreset(this.ctx.agentPresets, this.config,
+      // #437 — the keep/drop decision is asked of the HOST's tree when it can be probed; the
+      // plugin lineage stays the fallback for entries whose tree a disk check cannot read.
+      makeHostAwareResolver(this.config.plugins, { pluginResolvable: resolvableFromThisPackage }))
     const log = (message: string, warn: boolean): void => {
       // `ctx.logger` alone is invisible to a headless `dsh web` (r19), so the loud arms go
       // to stderr as well — a health line nobody reads is how the silent case survived.

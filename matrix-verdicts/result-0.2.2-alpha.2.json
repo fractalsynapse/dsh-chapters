@@ -1,0 +1,29 @@
+{
+  "version": "0.2.2-alpha.2",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.2-alpha.2 (legacy-peer-deps fallback, closed in 1 pass; aligned root zod 4.6.7 -> 4.4.3 (every host exact pin agrees — one instance, the version's own resolution))"
+  },
+  "legs": [
+    {
+      "leg": "unit",
+      "ok": true,
+      "ms": 63574,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "integration",
+      "ok": true,
+      "ms": 63580,
+      "detail": "pass 1748 / fail 0 / todo 1"
+    },
+    {
+      "leg": "compose",
+      "ok": false,
+      "ms": 74285,
+      "detail": "fail-broken-preset — DECLARED BUT BROKEN — rows this host cannot activate: Cannot read properties of undefined (reading 'parent')"
+    }
+  ],
+  "verdict": "fail",
+  "ts": "2026-11-21T12:30:57.469Z"
+}

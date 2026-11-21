@@ -149,12 +149,14 @@ export async function stageAllAndCommit(dir: string, message: string, author: Co
       head.set(f, text)
     }
     const changed: string[] = []
+    const seenWork = new Set<string>()
     const walk = (rel: string) => {
       for (const e of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
         if (e.name === '.git' || e.name.startsWith('.')) continue
         const relPath = rel === '' ? e.name : path.join(rel, e.name)
         if (e.isDirectory()) walk(relPath)
         else {
+          seenWork.add(relPath)
           const content = fs.readFileSync(path.join(dir, relPath), 'utf8')
           const prev = head.get(relPath) ?? null
           if (prev === null || prev !== content) changed.push(relPath)
@@ -162,10 +164,22 @@ export async function stageAllAndCommit(dir: string, message: string, author: Co
       }
     }
     walk('')
-    if (changed.length === 0) return { ok: true, detail: 'nothing to commit' }
+    // #256 (root cause under #255): deletions. The workdir walk only sees files that EXIST, so a
+    // mirror unlink — the very thing /chapters-remove performs to carry a deletion — was invisible
+    // to this commit forever: the pool kept the bytes in every tree and the deletion never shipped.
+    // HEAD entries missing from the workdir are staged with git.remove, the same diff direction.
+    const removedPaths: string[] = []
+    for (const f of head.keys()) {
+      if (!seenWork.has(f)) removedPaths.push(f)
+    }
+    if (changed.length === 0 && removedPaths.length === 0) return { ok: true, detail: 'nothing to commit' }
     for (const f of changed) {
       await git.add({ fs, dir, filepath: f })
     }
+    for (const f of removedPaths) {
+      await git.remove({ fs, dir, filepath: f })
+    }
+    changed.push(...removedPaths)
     await git.commit({ fs, dir, message, author, committer: author })
     return { ok: true, detail: `committed ${changed.length} path(s)`, changed: true }
   } catch (error) {
