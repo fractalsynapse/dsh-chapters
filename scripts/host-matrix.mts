@@ -44,6 +44,17 @@ function registryVersions(): string[] {
   return Array.isArray(parsed) ? parsed : [parsed]
 }
 
+// #467/flight-3: the compose leg boots through the e2e harness, which copies its scratch home
+// from the GITIGNORED .dshdev-local template — and a pristine home NEVER MINTS a draft session
+// (boot.ts, measured): the probe's new-session click can only fail. The acceptance chain guards
+// exactly this (ci-replay.sh:65); the matrix's compose legs must not rely on the workflow to
+// remember it — the tool self-heals. Bootstrap is npm-only (no host binary on PATH, #260 law).
+if (!fs.existsSync(path.join(ROOT, '.dshdev-local'))) {
+  const b = spawnSync('bash', ['scripts/bootstrap-dev-profile.sh', '--home', '.dshdev-local'], { encoding: 'utf8', timeout: 300_000 })
+  if (b.status !== 0) console.error(`host-matrix: dev-profile bootstrap failed (exit ${String(b.status)}) — compose legs will attribute it: ${String(b.stderr ?? '').replace(/\n/g, ' ').slice(0, 200)}`)
+  else console.log('host-matrix: bootstrapped .dshdev-local (absent in this fresh checkout — compose cells now have a mintable home)')
+}
+
 let targets: string[]
 const forced = arg('versions')
 if (forced === 'none') targets = []
