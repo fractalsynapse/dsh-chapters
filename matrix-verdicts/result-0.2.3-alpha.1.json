@@ -1,0 +1,17 @@
+{
+  "version": "0.2.3-alpha.1",
+  "swap": {
+    "ok": true,
+    "detail": "re-resolved 14 direct entries to 0.2.3-alpha.1 (legacy-peer-deps fallback, closed in 1 pass; aligned root zod 4.6.7 -> 4.6.6 (every host exact pin agrees — one instance, the version's own resolution))"
+  },
+  "legs": [
+    {
+      "leg": "build",
+      "ok": false,
+      "ms": 0,
+      "detail": "exit 2 — src/engine.ts(25,32): error TS2307: Cannot find module '@deepseek-ai/dsh-commands/brand' or its corresponding type declarations."
+    }
+  ],
+  "verdict": "fail",
+  "ts": "2026-11-22T09:09:58.517Z"
+}
