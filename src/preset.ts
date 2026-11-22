@@ -134,7 +134,7 @@ function exportsSubpathKeys(ex: unknown): string[] | null {
  *   exports present, no match → Node would refuse with ERR_PACKAGE_PATH_NOT_EXPORTED; we drop,
  *                           NAMED — not a guess, the same predicate Node applies.
  */
-function hostSubpathExported(pkgDir: string, subpath: string, exists: (p: string) => boolean, read: (p: string) => string): boolean {
+export function hostSubpathExported(pkgDir: string, subpath: string, exists: (p: string) => boolean, read: (p: string) => string): boolean {
   if (!exists(path.join(pkgDir, 'package.json'))) return true // legacy shape: containment already decided
   let manifest: { exports?: unknown }
   try { manifest = JSON.parse(read(path.join(pkgDir, 'package.json'))) as { exports?: unknown } } catch { return true }
