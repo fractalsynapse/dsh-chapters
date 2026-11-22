@@ -1316,3 +1316,17 @@ in our preset assembly/probe path), #456 Tier B (tape re-distillation from the s
 catalog; per-line corpora), #433's two maintainer residuals, rig-band sysctl, host option-(d),
 five credential-gated TreeDX rows, #138 rest-state half. The sweep nightly + sentinel
 ACTIVATE when this release lands on the default branch — this cut is their registration event.
+
+## 0.2.42 cut (2026-11-22): the 0.2.2 line composes
+
+**What shipped:** #445's plugin-side fix (export-map keep/drop, PR #461) + the three-plane
+re-sweep table at the candidate (PR #463). Support state executed: 18/19 green on
+unit+integration+compose; 0.2.2-alpha.2 attributed-red as the host `impl.fiber` prerelease
+defect (upstream report filed; fixed by alpha.3). Receipts replaced in `matrix-verdicts/`;
+the #462 one-sample CI stall documented with its discriminator, decision parked.
+
+**Open after this cut:** #445 stays open ONLY for the alpha.2 disposition call (maintainer:
+deprecate-the-prerelease vs name-in-table — the shipped table already names it) — plugin-side
+acceptance fully met; #462 ceiling-vs-artifact decision; #456 Tier B (atomic corpus
+campaign — dependency now cleared); the standing residuals (#433 maintainer items, rig-band
+sysctl, TreeDX gated rows, #138 rest-state). Nightly + sentinel keep activating since 0.2.41.
