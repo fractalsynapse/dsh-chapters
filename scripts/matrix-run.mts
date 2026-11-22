@@ -312,8 +312,11 @@ const legs: LegResult[] = []
 function runLeg(leg: string): void {
   const t0 = Date.now()
   let ok = false, detail = ''
-  if (leg === 'unit' || leg === 'integration' || leg === 'unit+integration') {
-    const r = spawnSync('npm', ['test'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
+  if (leg === 'unit' || leg === 'integration') {
+    // #466: the labels must mean the runs. `npm test` was BOTH legs — one execution
+    // double-reported as unit:✅ integration:✅ (identical counts in CI run 44995703642
+    // were the tell). Each leg now runs its own suite command.
+    const r = spawnSync('npm', ['run', leg === 'unit' ? 'test:unit' : 'test:integration'], { encoding: 'utf8', timeout: LEG_TIMEOUT_MS })
     const out = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
     // Node's test summary lines in BOTH formats seen this session: spec reporter `\u2139 pass N`
     // (what Node 24 prints without a TTY here) and TAP `# pass N`. A regex that matches

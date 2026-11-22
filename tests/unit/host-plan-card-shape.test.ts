@@ -75,7 +75,11 @@ function hostTree(): string {
   }
   throw new Error(`no pinned-host tree with dsh-client-ui-plan found; tried: ${candidates.join(' , ')}`)
 }
-const HOST = hostTree()
+// A matrix cell has no dev/dsh-host-lock install (CI installs it only in the pinned-chain jobs); this
+// file guards the PINNED world's host types — inside a cell it skips BY NAME (roster in
+// matrix-verdicts-consistency.test.ts). The gate must precede hostTree() because resolution
+// throws at MODULE scope — a test-level skip would never be reached (measured: CI run 44995703642).
+const HOST = process.env.DSH_MATRIX_VERSION !== undefined ? '' : hostTree()
 
 const read = (pkg: string): string => {
   const p = path.join(HOST, pkg, 'lib', 'client.js')
@@ -83,11 +87,15 @@ const read = (pkg: string): string => {
   return fs.readFileSync(p, 'utf8')
 }
 
-test('the pinned host is present at all — no host, no assertion', () => {
+test('the pinned host is present at all — no host, no assertion', {
+  skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: this file reads the PINNED host tree's plan-card types — a CI matrix cell has no host-lock install` : false,
+}, () => {
   assert.ok(fs.existsSync(HOST), `no pinned host tree at ${HOST}: run the lock install before trusting this gate`)
 })
 
-test('the review takeover still renders the plan as first-line + first-paragraph', () => {
+test('the review takeover still renders the plan as first-line + first-paragraph', {
+  skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: this file reads the PINNED host tree's plan-card types — a CI matrix cell has no host-lock install` : false,
+}, () => {
   const s = read('dsh-client-ui-user-questions')
   // the bundle form is `(0, pkg.extractMarkdownPlainText)(review.plan, { mode: "…" })` — the
   // call is separated from the name by `)(`, so a `\([^)]*` pattern matches nothing and the
@@ -98,13 +106,17 @@ test('the review takeover still renders the plan as first-line + first-paragraph
     'and its description is the FIRST PARAGRAPH — which is why asserting the last body line here was wrong')
 })
 
-test('the whole document is reachable through a named preview affordance', () => {
+test('the whole document is reachable through a named preview affordance', {
+  skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: this file reads the PINNED host tree's plan-card types — a CI matrix cell has no host-lock install` : false,
+}, () => {
   const s = read('dsh-client-ui-plan')
   assert.match(s, /preview\.full/, 'the host exposes a full-plan preview entry')
   assert.match(s, /["']View full plan["']/, 'with the label the browser test clicks — if this string moves, the journey must move in the same change')
 })
 
-test('the browser journey asserts the card AND the full document, never one for the other', () => {
+test('the browser journey asserts the card AND the full document, never one for the other', {
+  skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: this file reads the PINNED host tree's plan-card types — a CI matrix cell has no host-lock install` : false,
+}, () => {
   const spec = fs.readFileSync(path.join(ROOT, 'tests', 'e2e', 'plans.spec.ts'), 'utf8')
   assert.match(spec, /View full plan/, 'it must open the full document')
   assert.match(spec, /first paragraph|firstParagraph|PARA1/i, 'and state what the collapsed card is expected to show')

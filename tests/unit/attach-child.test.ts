@@ -273,7 +273,9 @@ test('#180: an unreadable result is UNVERIFIED with the received shape named —
   assert.match(noList.warnings.join(' '), /gateway/i)
 })
 
-test('#180 drift row: the shapes we read are pinned to the INSTALLED host types', async () => {
+test('#180 drift row: the shapes we read are pinned to the INSTALLED host types', {
+  skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: this row reads dev/dsh-host-lock types — the PINNED world; a CI matrix cell has no host-lock install, and version drift is tested by the rows that read the cell tree itself` : false,
+}, async () => {
   // The measure-the-shape rule's own remedy (AGENTS): this row fails the day the host package
   // changes the list surface out from under attach.ts, instead of the sink silently losing the
   // verdict again for another release. Reads the SAME .d.ts files the rig compiles against.
