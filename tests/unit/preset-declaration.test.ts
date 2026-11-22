@@ -191,7 +191,7 @@ try {
 const guard = hostStandard === undefined ? 'SKIP' : 'RUN'
 const skip = hostStandard === undefined ? '@deepseek-ai/dsh-web-app not installed (the pinned e2e host predates declaration rows)' : false
 
-test(`${guard} — every module the preset mounts resolves against the installed host`, { skip }, () => {
+test(`${guard} — every module the preset mounts resolves against the installed host`, { skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: these rows assert the PINNED world's standard-list identity — a matrix cell installs a DIFFERENT version's standard, and this identity guards repo-vs-pin, not version compatibility` : skip }, () => {
   assert.ok(hostStandard !== undefined)
   const unresolved: string[] = []
   for (const name of mountedNames(rowLines())) {
@@ -207,7 +207,7 @@ test(`${guard} — every module the preset mounts resolves against the installed
   assert.deepEqual(dropped, ['x (@deepseek-ai/dsh-tool-schedule)'], 'the pruner is not reaching the row it exists for')
 })
 
-test(`${guard} — our list differs from the host standard list ONLY by the declared deltas`, { skip }, () => {
+test(`${guard} — our list differs from the host standard list ONLY by the declared deltas`, { skip: process.env.DSH_MATRIX_VERSION !== undefined ? `matrix cell for ${process.env.DSH_MATRIX_VERSION}: these rows assert the PINNED world's standard-list identity — a matrix cell installs a DIFFERENT version's standard, and this identity guards repo-vs-pin, not version compatibility` : skip }, () => {
   assert.ok(hostStandard !== undefined)
   const ours = new Set(mountedNames(rowLines()))
   const theirs = new Set(mountedNames(significantLines(hostStandard)))
