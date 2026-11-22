@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 68316,
-      "detail": "pass 1541 / fail 0 / todo 1"
+      "ms": 68447,
+      "detail": "pass 1543 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 9146,
+      "ms": 8860,
       "detail": "pass 196 / fail 0 / todo 0"
     },
     {
       "leg": "compose",
       "ok": false,
-      "ms": 64311,
+      "ms": 65359,
       "detail": "fail-broken-preset — DECLARED BUT BROKEN — rows this host cannot activate: Cannot read properties of undefined (reading 'parent')"
     }
   ],
   "verdict": "fail",
-  "ts": "2026-11-22T09:09:37.007Z"
+  "ts": "2026-11-22T21:43:55.363Z"
 }
