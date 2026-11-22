@@ -789,3 +789,12 @@ EXECUTION, not extrapolation; alpha.2's detail line carries the host crash text 
 exactly as the attribution doctrine requires. Registry drift during the run was again
 absorbed by the #449 alignment (rc.5: `aligned root zod 4.6.7 -> 4.6.6`, host's own pin).
 The compose-leg timing stall seen once on CI (#462) did not recur in any of the 19 legs.
+
+## The table goes CI-authored (#455/#454, 2026-11-22, run 45005876213)
+
+Verification flight 4 — dispatched `--ref staging` after the instrument repairs (#466 leg-split + roster, #468 workflow-env expression, #469 compose home self-heal) — executed the whole matrix ON GITHUB RUNNERS: 20 versions enumerated from the live registry, one fresh workspace per cell, three real legs. Result: **18/20 green on all three planes by CI's own hand**; the two reds are attributed facts, not instrument states:
+
+- `0.2.2-alpha.2` — compose `fail-broken-preset` carrying the host's `impl.fiber` prerelease typo verbatim (fixed upstream at alpha.3; #445's evidence).
+- `0.2.3-alpha.1` — published the very morning of the flight, pulled into the matrix by the enumeration with no human list edit (the #455 re-basing claim, first live proof), and died at COMPILE naming its own cause: `src/engine.ts(25,32): error TS2307: Cannot find module '@deepseek-ai/dsh-commands/brand'` — the 0.2.3 host folded the `./brand` subpath (verified: 0.2.2-rc.5 exports map has it; 0.2.3-alpha.1's does not). Filed as **#470** with the maps; type-level forward drift, the runtime twin of #445's row story.
+
+This table and the receipts in `matrix-verdicts/` are the run's artifacts — download, no re-execution; the README↔receipts guard verifies against them. The nightly cron on `main` now refreshes exactly this way; 0.2.43 releases instrument + CI-authored state together.
