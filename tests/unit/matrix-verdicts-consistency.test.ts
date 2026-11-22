@@ -42,6 +42,7 @@ test('#455: the matrix-cell skip roster is exactly the frozen named set — no s
     'unit/host-dep-pinning.test.ts': 2, // root-vs-lock pin row + installed-types row (#447)
     'unit/attach-child.test.ts': 1,     // #180 drift row — reads dev/dsh-host-lock types (#466)
     'unit/host-plan-card-shape.test.ts': 4, // all four rows read the pinned host tree (#466)
+    'unit/preset-declaration.test.ts': 2,     // the two host-standard identity rows (#467)
   }
   const found = new Map<string, number>()
   const walk = (d: string): void => {
