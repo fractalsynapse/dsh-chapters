@@ -798,3 +798,13 @@ Verification flight 4 — dispatched `--ref staging` after the instrument repair
 - `0.2.3-alpha.1` — published the very morning of the flight, pulled into the matrix by the enumeration with no human list edit (the #455 re-basing claim, first live proof), and died at COMPILE naming its own cause: `src/engine.ts(25,32): error TS2307: Cannot find module '@deepseek-ai/dsh-commands/brand'` — the 0.2.3 host folded the `./brand` subpath (verified: 0.2.2-rc.5 exports map has it; 0.2.3-alpha.1's does not). Filed as **#470** with the maps; type-level forward drift, the runtime twin of #445's row story.
 
 This table and the receipts in `matrix-verdicts/` are the run's artifacts — download, no re-execution; the README↔receipts guard verifies against them. The nightly cron on `main` now refreshes exactly this way; 0.2.43 releases instrument + CI-authored state together.
+
+## Flight 5: 0.2.3 support settled by CI (#470/#475, 2026-11-22, run 45073399861)
+
+Post-#474 staging, the full matrix re-flew on CI with one new fact: the host published
+**0.2.3-alpha.2** mid-flight, the enumeration absorbed it, and it executed green on all
+three planes on first contact — 0.2.3 support is real, CI-taken, receipted. The two
+standing reds are the host's own broken prereleases, each with suites green and compose
+naming the host defect verbatim (alpha.2 of 0.2.2: the impl.fiber typo; alpha.1 of 0.2.3:
+the app-boot/loader selector skew, #475 — upstream report updated: fixed by 0.2.3-alpha.2).
+Table + 21 receipts shipped from CI artifacts only.
