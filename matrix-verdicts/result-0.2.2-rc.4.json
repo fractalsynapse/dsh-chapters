@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 63536,
-      "detail": "pass 1748 / fail 0 / todo 1"
+      "ms": 63599,
+      "detail": "pass 1754 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 63520,
-      "detail": "pass 1748 / fail 0 / todo 1"
+      "ms": 63617,
+      "detail": "pass 1754 / fail 0 / todo 1"
     },
     {
       "leg": "compose",
-      "ok": false,
-      "ms": 60871,
-      "detail": "fail-broken-preset — DECLARED BUT BROKEN — rows this host cannot activate: @deepseek-ai/dsh-tool-subagent-control/list-agents"
+      "ok": true,
+      "ms": 62341,
+      "detail": "pass — composed with no loud preset failure — the healthy registration line is logger.info on the host log stream, not this pipe"
     }
   ],
-  "verdict": "fail",
-  "ts": "2026-11-21T12:49:06.792Z"
+  "verdict": "pass",
+  "ts": "2026-11-22T00:21:12.581Z"
 }

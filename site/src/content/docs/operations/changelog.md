@@ -8,6 +8,31 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.42 — 2026-11-22 · the 0.2.2 line composes — the drop-guard reads exports, and the table says so per version
+
+**#445, the plugin-side half: fixed.** 0.2.2 retired the `./list-agents` subpath from
+`@deepseek-ai/dsh-tool-subagent-control`'s exports map while leaving the package in place.
+#437's keep/drop — retreated to package containment to kill the walk-up pollution — saw the
+package and kept the row; Node itself refuses the subpath at activation, one dead child makes
+the whole preset BROKEN, and every chapters session on 0.2.2 refused to compose. The guard
+now decides subpaths from the HOST's own copy of `package.json` — read, never imported;
+Node's exports-matching applied as a filesystem fact; keep-on-uncertainty (a wrong drop
+silently deletes tools, the #57 class), drop-on-certainty, always named. Six versions flipped
+red→green **by execution**: the full three-plane re-sweep at this candidate has every 0.2.2
+version from alpha.3 through rc.5 composing, suites and all — 18/19 of the supported block
+green on ALL planes, receipts committed in `matrix-verdicts/`.
+
+**One version stays red, and it is not ours:** 0.2.2-alpha.2's registry reads `impl.fiber`
+where cordis 4.x provides `impl.ctx.fiber` — a two-line host typo, fixed upstream in alpha.3
+(byte-diffed evidence on #445; report filed with a deprecation ask). The table carries its
+cause verbatim rather than hiding the version — an attributed red is the support claim
+working, not failing.
+
+**Range also carries:** the #462 record (one CI replay-leg timing stall, exonerated by
+deterministic re-run + a static zero-flips proof, the ceiling decision parked on the
+ticket), and #449's zod alignment absorbing overnight registry drift mid-sweep without a
+human noticing (`aligned 4.6.7 → 4.6.6`, the host's own consensus pin).
+
 ### 0.2.41 — 2026-11-21 · the support claim becomes an executed fact — per version, both planes, with receipts
 
 **Version support, executed rather than asserted (#443–#456).** The README's support table is

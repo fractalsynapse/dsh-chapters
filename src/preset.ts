@@ -101,11 +101,53 @@ export function hostNodeModulesRoot(entryPath: string | undefined): string | nul
 }
 
 /** The package directory a specifier's containment is decided against: `@scope/name[/sub]` or
- *  `name[/sub]` — the subpath is an EXPORT question, but exports cannot be listed without
- *  importing, and a package the host tree does not hold has no exports to miss. */
+ *  `name[/sub]`. */
 function packageKeyOf(specifier: string): string {
   const segs = specifier.split('/')
   return specifier.startsWith('@') ? segs.slice(0, 2).join('/') : segs[0]!
+}
+
+/** Subpath keys of a package.json `exports` field — the './...' entries; a string or array
+ *  exports covers ONLY '.', so it contributes no subpath keys. */
+function exportsSubpathKeys(ex: unknown): string[] | null {
+  if (typeof ex === 'string' || Array.isArray(ex)) return []
+  if (ex !== null && typeof ex === 'object') return Object.keys(ex as Record<string, unknown>).filter((k) => k.startsWith('.'))
+  return null // unrecognizable shape — no verdict; the caller keeps the row
+}
+
+/**
+ * #445 — is a SUBPATH actually exported by the package the HOST tree holds?
+ *
+ * The containment-only decision #437 retreated to fixed the walk-up pollution but re-opened
+ * the retired-subpath class: 0.2.2 removed `./list-agents` from
+ * `@deepseek-ai/dsh-tool-subagent-control`'s exports map while the PACKAGE remains present —
+ * kept-for-containment, ERR_PACKAGE_PATH_NOT_EXPORTED at activation, one dead row makes the
+ * whole preset BROKEN (measured 7/7 versions across the 0.2.2 line, #445/#454's sweep).
+ *
+ * The answer is a FILESYSTEM FACT about the host's own copy — read its package.json, never
+ * import it (no code from the tree runs; no ancestor walk can pollute the verdict):
+ *   no exports field      → subpaths follow legacy file resolution; containment is our best
+ *                           fact → keep (a wrong drop silently removes tools, the #57 class)
+ *   unreadable / alien    → keep, same reason; the loud BROKEN line stays honest telemetry
+ *   exact './sub' key     → matches Node's own resolution → keep
+ *   pattern './x/*' key   → Node's prefix/suffix rule, existence form
+ *   exports present, no match → Node would refuse with ERR_PACKAGE_PATH_NOT_EXPORTED; we drop,
+ *                           NAMED — not a guess, the same predicate Node applies.
+ */
+function hostSubpathExported(pkgDir: string, subpath: string, exists: (p: string) => boolean, read: (p: string) => string): boolean {
+  if (!exists(path.join(pkgDir, 'package.json'))) return true // legacy shape: containment already decided
+  let manifest: { exports?: unknown }
+  try { manifest = JSON.parse(read(path.join(pkgDir, 'package.json'))) as { exports?: unknown } } catch { return true }
+  const keys = exportsSubpathKeys(manifest.exports)
+  if (keys === null) return true
+  if (keys.length === 0) return false // string/array exports cover '.' only — './sub' is refused by Node
+  if (keys.includes(subpath)) return true
+  for (const k of keys) {
+    const star = k.indexOf('*')
+    if (star < 0) continue
+    if (subpath.startsWith(k.slice(0, star)) && subpath.endsWith(k.slice(star + 1)) && subpath.length >= k.length - 1) return true
+  }
+  return false
 }
 
 /**
@@ -148,7 +190,14 @@ export function makeHostAwareResolver(
   if (root === null || !specs.some((s) => exists(path.join(root, packageKeyOf(s))))) {
     return opts.pluginResolvable
   }
-  return (specifier: string) => exists(path.join(root, packageKeyOf(specifier)))
+  return (specifier: string) => {
+    const key = packageKeyOf(specifier)
+    const pkgDir = path.join(root, key)
+    if (!exists(pkgDir)) return false
+    const sub = specifier.slice(key.length)
+    if (sub === '' || !sub.startsWith('/')) return true // bare package: containment is the decision
+    return hostSubpathExported(pkgDir, `.${sub}`, exists, (f) => fs.readFileSync(f, 'utf8')) // export keys are './…' as Node matches them
+  }
 }
 
 /** The default `exists`: a plain synchronous filesystem check, never throwing. */
