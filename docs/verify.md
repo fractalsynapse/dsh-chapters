@@ -776,3 +776,16 @@ is inode-hungry). Three cells self-recorded `untestable` with npm's dying words;
 crashed pre-write. None shipped: the rerun on ext4 settled all ten, and docs/development.md
 gained the rule (`untestable` never rides a release table). The compose leg's first real
 multi-line run also proved its attribution text rides verdict JSONs verbatim on both outcomes.
+
+## Post-#445 three-plane table (2026-11-22, base ddc841b, receipts in matrix-verdicts/)
+
+Full registry sweep re-executed at the release-candidate base with the export-map keep/drop
+merged: **18/19 versions green on ALL THREE planes** — suites AND compose — including every
+0.2.2 version except **0.2.2-alpha.2, which stands attributed-red**: its registry reads
+`impl.fiber` where cordis 4.x provides `impl.ctx.fiber` (host-side two-line typo, fixed
+upstream in alpha.3 — byte-diffed evidence on #445, host-bug report at
+var/evidence/445-host-bug-alpha2.md). The compose column flipped 6 versions red→green by
+EXECUTION, not extrapolation; alpha.2's detail line carries the host crash text verbatim,
+exactly as the attribution doctrine requires. Registry drift during the run was again
+absorbed by the #449 alignment (rc.5: `aligned root zod 4.6.7 -> 4.6.6`, host's own pin).
+The compose-leg timing stall seen once on CI (#462) did not recur in any of the 19 legs.
