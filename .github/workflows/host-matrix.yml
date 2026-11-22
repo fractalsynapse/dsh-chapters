@@ -104,6 +104,12 @@ jobs:
       - name: install chromium (repo-local browsers path)
         run: PLAYWRIGHT_BROWSERS_PATH="$PWD/var/ms-playwright" npx playwright install chromium
       - name: run the real suites against ${{ matrix.version }}
+        env:
+          # #466: the e2e boot harness pins browsers to the TREE-LOCAL var/ms-playwright (where
+          # the step above installs them); without this the compose leg launches from the default
+          # user cache and dies "Executable doesn't exist" — the local drivers had the export,
+          # CI did not, and only the CI run could tell (measured: run 44995703642).
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/var/ms-playwright   # env: does NOT shell-expand — the $PWD form shipped this path literally (CI run 44998646657)
         run: |
           node --experimental-strip-types --no-warnings scripts/matrix-run.mts \
             --version=${{ matrix.version }} \

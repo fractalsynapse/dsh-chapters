@@ -8,6 +8,32 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.43 — 2026-11-22 · the machine finished building itself: instrument proven on CI, and the support table is now CI-authored
+
+**No product-behavior change** — this patch release exists so `main` carries the verified
+machine. Since 0.2.42, four verification flights on GitHub Actions repaired the version-sweep
+instrument one layer per flight, each defect printing its own cause: legs that had been one
+`npm test` wearing two labels are now genuinely split unit/integration commands (#466); the
+cell-skip roster grew as CI flights revealed the pinned-world guard rows it was missing, now
+9 named skips across 4 files (#466/#468); the workflow `env:` literal-`$PWD` trap (a workflow
+env value is not a shell — the compose leg shipped the string `$PWD` inside a browser path
+until #468); and the compose legs now self-heal the gitignored home template a fresh runner
+has never had (`ci-replay.sh` had carried that guard for six months — #469 taught the matrix
+to do the same, verified in CI's exact shape).
+
+**The support table shipped here was produced by CI, not transcribed from local runs**:
+verification flight 4 (run 45005876213) enumerated 20 registry versions live, executed one
+fresh workspace per cell with three real legs on GitHub runners, and the README rows plus
+`matrix-verdicts/` receipts are that run's downloaded artifacts. **18/20 green on all three
+planes** — every 0.2.2 from alpha.3 onward composes. Two reds stand as attributed facts:
+0.2.2-alpha.2 (the host's own `impl.fiber` prerelease typo, upstream-fixed at alpha.3 — the
+table quotes the boot's verbatim cause) and **0.2.3-alpha.1 — the machine's first automated
+encounter with a version published the same morning**: the nightly enumeration absorbed it
+without a human edit, the matrix gave it a full cell, and the compiler answered that
+`dsh-commands/brand` was retired in 0.2.3. Filed as #470 with the export maps; the support
+claim now includes versions it honestly refuses, and the nightly re-verifies all of it every
+morning from tomorrow.
+
 ### 0.2.42 — 2026-11-22 · the 0.2.2 line composes — the drop-guard reads exports, and the table says so per version
 
 **#445, the plugin-side half: fixed.** 0.2.2 retired the `./list-agents` subpath from

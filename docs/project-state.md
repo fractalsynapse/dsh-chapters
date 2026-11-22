@@ -1330,3 +1330,18 @@ deprecate-the-prerelease vs name-in-table — the shipped table already names it
 acceptance fully met; #462 ceiling-vs-artifact decision; #456 Tier B (atomic corpus
 campaign — dependency now cleared); the standing residuals (#433 maintainer items, rig-band
 sysctl, TreeDX gated rows, #138 rest-state). Nightly + sentinel keep activating since 0.2.41.
+
+## 0.2.43 cut (2026-11-22): the instrument is proven on CI; the table turned CI-authored
+
+**Shipped:** the verification-flight repairs (#466/#468/#469: split real legs, roster at 9
+named skips, workflow-env expression fix, compose home self-heal) and the first CI-authored
+support table + receipts (PR #471, from run 45005876213). State: 18/20 versions green on unit
++ integration + compose on GitHub runners; alpha.2 attributed host-prerelease defect; 0.2.3-
+alpha.1 build-red at first contact (#470 open — registry re-basing worked exactly as designed,
+including on a version it refuses). Product behavior unchanged since 0.2.42 except the version
+constant; the release's purpose is that `main` now carries the verified nightly instrument.
+
+**Open after this cut:** #470 (0.2.3 brand-subpath drift — next product work), #445 stays
+for the alpha.2 disposition call only, #462 (ceiling decision), #456 Tier B (atomic corpus
+campaign, dependency cleared), plus the standing residuals. Tomorrow 04:17/04:47 UTC: first
+scheduled nightly + first scheduled sentinel firing on `main`.
