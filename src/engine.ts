@@ -22,7 +22,11 @@ import { configureDiagnosticsCap, diagnosticNote, diagnosticWarn, ensureDiagnost
 import { makeChildArchiveListener } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
-import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+// #470: import from the package ROOT, not the './brand' subpath — 0.2.3 retired that
+// export while the root keeps re-exporting CommandId across the ENTIRE supported block
+// (verified against the published tarballs of 0.2.0-rc.1 / 0.2.2-rc.5 / 0.2.3-alpha.1).
+// Subpaths are the host's rearrangeable furniture; '.' is its promised door.
+import type { CommandId } from '@deepseek-ai/dsh-commands'
 import z from '@deepseek-ai/schemastery'
 import {
   assertReservationMatchesPlan,
