@@ -1345,3 +1345,17 @@ constant; the release's purpose is that `main` now carries the verified nightly 
 for the alpha.2 disposition call only, #462 (ceiling decision), #456 Tier B (atomic corpus
 campaign, dependency cleared), plus the standing residuals. Tomorrow 04:17/04:47 UTC: first
 scheduled nightly + first scheduled sentinel firing on `main`.
+
+## 0.2.44 cut (2026-11-22): 0.2.3 support by execution
+
+**Shipped:** #470's full disposition (root import for CommandId; sessionProjections-aware
+harness fakes; the host-subpath-imports guard so the drift class self-names in every future
+cell) and flight 5's CI-taken table (#476): 19/21 versions green on all three planes, the
+only reds being the host's own prereleases (#445 alpha.2 typo; #475 0.2.3-alpha.1 boot skew,
+upstream-fixed by 0.2.3-alpha.2, which CI swept green on first contact). Maintainer
+authorization for merge + tag recorded on #477.
+
+**Open after this cut:** #445's alpha.2 disposition call (table already names it), #462
+ceiling decision, #456 Tier B (corpus campaign), #433 residuals, TreeDX gated rows, #138
+rest-state. Nightly + sentinel live on `main` since 0.2.41; the registry keeps feeding the
+matrix by itself.
