@@ -8,6 +8,22 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.46 — 2026-11-23 · the nightly learns to hand off like a colleague when the org says no
+
+Tooling-only release (the 0.2.43 precedent). Two full cycles — one dispatched, one truly
+scheduled — ran the matrix to the ledger everyone had been fighting for: 21 registry
+versions, fresh workspace per cell, three real legs, **19 green**, the two reds being the
+host's own broken prereleases with their causes quoted verbatim from CI receipts. And both
+cycles then died at the SAME last step, for a reason no repository can fix: this org's
+policy forbids GitHub Actions creating pull requests (409, `createPullRequest` — the repo
+even declines to let the setting be attempted). The fix (#487) is the honest shape of an
+unmovable wall: try the PR — and when policy refuses, file the **handoff issue** with the
+compare link for the branch that always pushed fine, a run annotation marking the refusal,
+and a guard row pinning the fallback exists. The loop stays machine-closed; one human click
+moves from invisible-failure to recorded-handoff. From the next scheduled cycle on, `main`
+carries this behavior, and the refresh arrives as an issue titled for exactly what to do
+about it — or as a PR the moment org policy ever loosens, zero code changes required.
+
 ### 0.2.45 — 2026-11-23 · the timeline tells the truth once; the gate stops being a promise
 
 **Your sessions, your complaint, the machine's answer (#482).** Long-lived sessions that get

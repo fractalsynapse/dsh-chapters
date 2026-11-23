@@ -1375,3 +1375,15 @@ the sentinel correctly screams). #462/#484 stay open as observation ledgers; ton
 runs against this lineage. #456 Tier B: driver + bridge live; nine journeys + one campaign
 run to go. #445 closed (dispositions shipped); #433/#150/#130/#126 unchanged in character
 (maintainer- or host-owned).
+
+## 0.2.46 cut (2026-11-23): handoff over silence
+
+**Shipped:** #487's refresh fallback (PR-attempt-then-issue with compare link, annotation,
+guard row) reaches main. **Ledger at this cut:** the first truly SCHEDULED honest cycle ran
+(run 45197704536, 21 cells): 19/21 three-plane green; reds = 0.2.2-alpha.2 (host-internal
+crash, attributed per #445's probe work) + 0.2.3-alpha.1 (#475 boot skew); compose legs ran
+within #462's sourced ceiling with zero stalls; report step refused by ORG policy
+(createPullRequest) — the exact wall #487 turns into a recorded handoff. #488 (the scheduled
+ledger's table PR) open green under the new protection awaiting maintainer merge. Orphan
+refresh branches deduped to the one #488 lives on. #462/#484 close on the next two data
+points now that cron carries the fallback.
