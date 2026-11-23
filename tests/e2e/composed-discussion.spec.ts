@@ -44,11 +44,14 @@ import { openApp, newSessionWithTurn, typeComposer, localModelUp, sessionLogText
  *     name — never healed into silence (#411's rule).
  */
 
-const ARCH_DOC = 'docs/architecture.md'
-const DEV_DOC = 'docs/development.md'
+// #456 Tier B: the conversation lives in the scenario catalog (single source). These
+// constants are tape keys — change only with a governed scripts/corpus-campaign.sh re-distill.
+import { COMPOSE_JOURNEY } from '../scenarios/targeted-conversations.ts'
+const ARCH_DOC = COMPOSE_JOURNEY.docs.arch
+const DEV_DOC = COMPOSE_JOURNEY.docs.dev
 const CHANGELOG = path.join(ROOT, 'site', 'src', 'content', 'docs', 'operations', 'changelog.md')
-const SUNSTONE = 'SUNSTONE-41' // exists only in topic 1's user turn
-const BREADCRUST = 'BREADCRUST-77' // exists only in topic 2's user turn
+const SUNSTONE = COMPOSE_JOURNEY.codewords.topic1 // exists only in topic 1's user turn
+const BREADCRUST = COMPOSE_JOURNEY.codewords.topic2 // exists only in topic 2's user turn
 
 function pageMarkerSubstrings(): string[] {
   // Chosen from the LIVE file at RECORD time and frozen into the tape's bytes by the run itself;
@@ -112,7 +115,7 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
     // bounded, signature-bearing; the codeword rides the USER message so it is durable regardless
     // of what the model recites (heavy's lesson: assistant TEXT is not a compliance signal).
     const sid = await newSessionWithTurn(page,
-      `Discussion about this workspace, no side tasks: read ${ARCH_DOC} with ONE read call, offset 1 limit 20. In two or three sentences, what does that opening say about the durable session log? Include the codeword ${SUNSTONE} verbatim in your reply, then stop.`,
+      COMPOSE_JOURNEY.turnTopic1,
       900_000, false)
 
     // #56 sequencing, load-bearing HERE specifically: turn 1 must CLOSE (durable turn/end) before
@@ -123,8 +126,8 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
 
     // ── topic 2: a genuinely different subject — the development loop. Second boundary.
     await typeComposer(page,
-      `New topic about this repo, same rules — no side tasks: read ${DEV_DOC} with ONE read call, offset 1 limit 20. In two or three sentences, what does it say about why the tests isolate homes and ports? Include the codeword ${BREADCRUST} verbatim, then stop.`,
-      deliveredFor(sid, `New topic about this repo`))
+      COMPOSE_JOURNEY.turnTopic2,
+      deliveredFor(sid, COMPOSE_JOURNEY.deliveryProbes.topic2))
     await expect.poll(() => eventTypes(sessionLogTextById(sid), 'turn/end').length >= 2,
       { timeout: 900_000, intervals: [5000] }).toBe(true)
 
@@ -132,8 +135,8 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
     // named calls are forced (1236+ lines, 600-line host cap); the first landed page alone blows
     // the headroom left by the two small turns — the crossing is arithmetic, not hope.
     await typeComposer(page,
-      `Bigger task on this repo: read site/src/content/docs/operations/changelog.md using the read tool in EXACTLY THREE calls, no more and no fewer: offset 1 limit 600, then offset 601 limit 600, then offset 1201 limit 600. Do NOT read any other range, do NOT read the whole file in one call, and do NOT use grep or bash. Afterwards finish with one short answer, then stop.`,
-      deliveredFor(sid, 'Bigger task on this repo'))
+      COMPOSE_JOURNEY.turnCrossing,
+      deliveredFor(sid, COMPOSE_JOURNEY.deliveryProbes.crossing))
 
     // compliance (RECORD/live only — see the replay-discipline header): a slice that exists only in
     // the changelog's MIDDLE pages must arrive in the durable bytes (tool results live there),
@@ -221,7 +224,7 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
       if (next.startSeq <= c.endSeq) return false
       const opensExactlyAtTopic2 = next.startSeq === u2
       const closesExactlyAtTurnEnd = turnEnds.includes(c.endSeq)
-      const rightSignedByNextTopic = chapterBytes(next).includes(BREADCRUST) || chapterBytes(next).includes('Bigger task on this repo')
+      const rightSignedByNextTopic = chapterBytes(next).includes(BREADCRUST) || chapterBytes(next).includes(COMPOSE_JOURNEY.deliveryProbes.crossing)
       return (opensExactlyAtTopic2 || closesExactlyAtTurnEnd) && rightSignedByNextTopic
     })
     expect(aligned, `C3 (#420): >=2 chapters exist but NO adjacent boundary separates the topics (u2=${String(u2)}, u3=${String(u3)}): ${JSON.stringify(sorted.map((c) => ({ n: c.number, r: [c.startSeq, c.endSeq], sun: chapterBytes(c).includes(SUNSTONE), bread: chapterBytes(c).includes(BREADCRUST) })))}`).toBe(true)

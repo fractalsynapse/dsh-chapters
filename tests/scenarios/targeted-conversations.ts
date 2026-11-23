@@ -159,3 +159,20 @@ export function targetForInterval(iv: { lo: number; hi: number }): number {
   }
   throw new Error('no target brackets the topic interval')
 }
+
+/**
+ * #456 Tier B bridge: the COMPOSE journey's recorded conversation, hoisted verbatim into
+ * the catalog as the pattern for the campaign. These strings are message-0/turn KEYS of
+ * the committed tapes (boot.ts: 'Message 0 is the tape key') — any change here MUST be
+ * followed by a governed `scripts/corpus-campaign.sh` re-distill, never a lone re-record.
+ * The migration is byte-identical BY CONSTRUCTION: run the compose replay leg and it must
+ * pass against the pre-existing tapes; that is the bridge's own proof.
+ */
+export const COMPOSE_JOURNEY = {
+  docs: { arch: 'docs/architecture.md', dev: 'docs/development.md' },
+  codewords: { topic1: 'SUNSTONE-41', topic2: 'BREADCRUST-77' },
+  turnTopic1: 'Discussion about this workspace, no side tasks: read docs/architecture.md with ONE read call, offset 1 limit 20. In two or three sentences, what does that opening say about the durable session log? Include the codeword SUNSTONE-41 verbatim in your reply, then stop.',
+  turnTopic2: 'New topic about this repo, same rules — no side tasks: read docs/development.md with ONE read call, offset 1 limit 20. In two or three sentences, what does it say about why the tests isolate homes and ports? Include the codeword BREADCRUST-77 verbatim, then stop.',
+  turnCrossing: 'Bigger task on this repo: read site/src/content/docs/operations/changelog.md using the read tool in EXACTLY THREE calls, no more and no fewer: offset 1 limit 600, then offset 601 limit 600, then offset 1201 limit 600. Do NOT read any other range, do NOT read the whole file in one call, and do NOT use grep or bash. Afterwards finish with one short answer, then stop.',
+  deliveryProbes: { topic2: 'New topic about this repo', crossing: 'Bigger task on this repo' },
+} as const
