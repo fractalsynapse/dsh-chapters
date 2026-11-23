@@ -69,6 +69,10 @@ test('#454/#455: the compose plane is a DEFAULT leg, the evidence is committed, 
   assert.match(reportRun, /--enumerated=var\/matrix\.json/, 'unverified enumerated versions ride the table as named gaps (#455)')
   assert.match(reportRun, /mkdir -p matrix-verdicts/, 'verdicts are committed alongside the table (#455)')
   assert.match(reportRun, /git add README\.md matrix-verdicts/, 'the refresh PR carries the receipts, not just the prose')
+  // #484: org policy blocks bot-created PRs — the workflow must fall back to filing the
+  // handoff ISSUE with a compare link, never swallow the refusal into silence.
+  assert.match(reportRun, /if ! gh pr create/, 'PR creation is attempted first')
+  assert.match(reportRun, /gh issue create --title "nightly table refresh ready/, 'and the issue fallback is the recorded alternative — a half-succeeded refresh is a loud refresh')
   assert.match(wf, /result-\$\{\{ matrix\.version \}\}\.json\.lock\.json/, 'the RESOLVED lock is uploaded beside the verdict (#455)')
 })
 
