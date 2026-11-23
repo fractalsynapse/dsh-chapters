@@ -28,31 +28,31 @@ run that produced it, and which run that was is part of the record.
 
 <!-- versions:begin -->
 
-> Regenerated from the verdicts of the host-matrix GitHub Actions workflow (run 45073399861 — flight 5, post-#470) on 2026-11-22 21:51 UTC — real test-suite legs per version with the whole hat family re-resolved. Verdicts from REAL runs, not compose probes.
+> Regenerated from the verdicts of the host-matrix GitHub Actions workflow on 2026-11-23 07:29 UTC — real test-suite legs per version with the whole hat family re-resolved. Verdicts from REAL runs, not compose probes.
 
 | DSH host version | Verdict | Real-leg results | Last run (UTC) |
 |---|---|---|---|
-| 0.2.0-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.0-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-alpha.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-alpha.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-alpha.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-alpha.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-alpha.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-rc.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-rc.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.1-rc.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.2-alpha.2 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-22 |
-| 0.2.2-alpha.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.2-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.2-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.2-rc.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.2-rc.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.2-rc.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
-| 0.2.3-alpha.1 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-22 |
-| 0.2.3-alpha.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-22 |
+| 0.2.0-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.0-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-alpha.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-alpha.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-alpha.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-alpha.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-alpha.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-rc.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-rc.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.1-rc.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.2-alpha.2 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-23 |
+| 0.2.2-alpha.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.2-rc.1 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.2-rc.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.2-rc.3 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.2-rc.4 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.2-rc.5 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
+| 0.2.3-alpha.1 | ❌ fail | unit:✅ integration:✅ compose:❌ | 2026-11-23 |
+| 0.2.3-alpha.2 | ✅ supported | unit:✅ integration:✅ compose:✅ | 2026-11-23 |
 
 <!-- versions:end -->
 
