@@ -121,3 +121,34 @@ test('#225: the fold refuses a record whose payload is not an object, and a v-mi
   assert.ok(good !== null)
   assert.equal(foldPromptRecord(good, { type: 'other/kind', data: {} }), good, 'unrelated events pass through untouched')
 })
+
+// ── #482: the dedup predicate — content decides, presentation metadata never does ──
+import { offerRecordIsRedundant } from '../../src/prompt-push.ts'
+
+const offer = (over: Partial<PromptPushPayload> = {}): PromptPushPayload => ({
+  v: 1, status: 'ready', text: 'Investigate the stagingPrefix divergence and unify it.',
+  turnSeq: 26159, error: '', intent: 'worker-step', goalRevision: null,
+  autorun: 'disarmed', at: '2026-11-23T06:00:00.000Z', ...over,
+})
+
+test('#482: an identical unconsumed offer is a restatement — redundant, timeline stays a singleton', () => {
+  assert.equal(offerRecordIsRedundant(offer(), offer({ turnSeq: 26161, at: '2026-11-23T07:30:00.000Z' })), true,
+    'same content at a newer turn/at: exactly the dormant-revisit pile-up, suppressed')
+})
+
+test('#482: a genuinely different next step is never suppressed — content is the boundary', () => {
+  assert.equal(offerRecordIsRedundant(offer(), offer({ text: 'Now fix the failing nightly report job.' })), false)
+})
+
+test('#482: state transitions ride — analyzing/ready/failed/off and consumption-shaped changes are information', () => {
+  for (const over of [{ status: 'analyzing' as const }, { status: 'failed' as const, error: 'boom' }, { status: 'off' as const }, { autorun: 'armed' as const }, { intent: 'goal-edit' as const }, { goalRevision: 3 }]) {
+    assert.equal(offerRecordIsRedundant(offer(), offer(over)), false, `${JSON.stringify(over)} changes meaning`)
+  }
+})
+
+test('#482: nothing is ever redundant against no-record, and unknown shapes never justify a suppression', () => {
+  assert.equal(offerRecordIsRedundant(null, offer()), false, 'the first record always rides (#218 birth holds)')
+  assert.equal(offerRecordIsRedundant(undefined, offer()), false)
+  assert.equal(offerRecordIsRedundant({ v: 2, status: 'ready' } as unknown as PromptPushPayload, offer()), false,
+    'a projection state we cannot read is not evidence that this record is a duplicate')
+})

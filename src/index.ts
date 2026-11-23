@@ -45,7 +45,7 @@ import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
 import { deliveredOffer, makePromptRoundRunner, reconcilePromptRow } from './prompt-runner.ts'
 import { makeReloadSelfCheckListener, type ReloadCheckDeps } from './reload-check.ts'
-import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, type PushWriter } from './prompt-push.ts'
+import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, offerRecordIsRedundant, PROMPT_PROJECTION_KEY, type PushWriter, type PromptPushPayload } from './prompt-push.ts'
 import { classifyOffer, goalDirectiveOf, noSuggestion, readActiveGoal, type PromptBarAccess } from './prompt-state.ts'
 import { rulesCommand, type RulesIo } from './rules-commands.ts'
 import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAncestorSet } from './session-rules.ts'
@@ -724,12 +724,14 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // registration is the feature signal the client reads through its standard `useProjection` seat.
     // No writer ⇒ no projection ⇒ every client keeps the #203/#208 pull schedule, unchanged.
     let pushWriter: PushWriter | null = null
+    let pushProjections: { stateOf?: (s: unknown, k: string) => unknown } | undefined
     try {
       pushWriter = await resolvePushWriter({ log: (m) => { console.error(`[chapters-push] ${m}`); ctx.logger?.warn?.(`dsh-chapters: ${m}`) } })
       if (pushWriter !== null) {
         const projections = ctx.sessionProjections as unknown as { register?: (def: unknown) => unknown } | undefined
         if (typeof projections?.register === 'function') {
           projections.register(promptProjectionDefinition())
+          pushProjections = ctx.sessionProjections as unknown as { stateOf?: (s: unknown, k: string) => unknown } | undefined
           // stderr witness, same discipline as the turn/end door's armed line: ctx.logger.info never
           // reaches a boot log a probe can read, and "is push live?" is exactly the question a
           // failed proof must answer first (#194).
@@ -746,9 +748,13 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     // One serialized push per session: the fold is last-wins, so records must land in mutation
     // order — a ready that overtakes its own analyzing would show a stale offer as fresh.
     const pushChains = new Map<string, Promise<void>>()
-    // #218: sessions that already carry a birth record this process; a Set, not persistence —
-    // the record itself is durable, and a restarted process re-birthing would append a duplicate
-    // (harmless: the fold is last-wins, but a duplicate is a log write for nothing).
+    let pushSuppressed = 0
+    // #218: sessions that already carry a birth record this process; a Set, not persistence.
+    // #482 corrected the parenthetical: re-birthing an unchanged state was called 'harmless'
+    // because the FOLD is last-wins — but every append is a visible timeline node, and the
+    // maintainer's long-lived sessions showed the cost: a wall of identical ready records.
+    // pushBar now compares against the projection's current state and suppresses restatements;
+    // the Set stays as the cheap same-process guard for the first pass.
     const seenBirthSessions = new Set<string>()
     // #225: sessions whose first-boundary verdict has been printed (per process), and the total
     // boundaries sighted — the status command prints both. "No suggestion ever" must not be a
@@ -762,10 +768,17 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       const next = prev.then(async () => {
         const row = (await promptRow.get(sessionId)).promptSuggestion ?? noSuggestion
         const live = promptLoop.statusOf(sessionId)
-        writer.append(session, promptRecordPayload({
+        const payload = promptRecordPayload({
           status: row.status, text: row.text, turnSeq: row.turnSeq, error: row.error,
           intent: row.intent, goalRevision: row.goalRevision, autorun: live.autorun, at: row.at,
-        }))
+        })
+        // #482: an unchanged, unconsumed offer is a singleton on the human timeline. The
+        // projection's CURRENT fold is the last record that ever rode — content-equal to it
+        // means this append would restate, not inform; suppress it (row and fold stay true,
+        // the durable log stays append-only — we simply never write the noise record).
+        const cur = pushProjections?.stateOf?.(session, PROMPT_PROJECTION_KEY) as PromptPushPayload | null | undefined
+        if (offerRecordIsRedundant(cur ?? null, payload)) { pushSuppressed++; return }
+        writer.append(session, payload)
       }, () => undefined)
       pushChains.set(sessionId, next.then(() => undefined, () => undefined))
     }
@@ -955,6 +968,10 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           const { spec, source } = prompt.effective()
           lines.push(`Prompt plane: model ${spec !== '' ? `${spec} (${source})` : 'UNSET — the bar is absent (§28)'}`)
           lines.push(`  transport: ${pushWriter === null ? 'pull (this host has no appendPluginRecord — state reads are commands)' : 'push LIVE (plugin records; the bar rides the projection)'}`)
+          // #482's own visibility: suppression must be countable, or 'no records' and
+          // 'suppressed records' are the same silence. This is a diagnostic surface, not
+          // the timeline — the human sees one offer where the wall used to be.
+          if (pushWriter !== null) lines.push(`  duplicate offer records suppressed: ${String(pushSuppressed)}`)
           lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
           lines.push(...engineProvenanceLines(store))
           lines.push(...arrivalFloorLines(store))

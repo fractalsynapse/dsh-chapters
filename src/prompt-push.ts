@@ -39,6 +39,35 @@ export function promptRecordPayload(facts: Omit<PromptPushPayload, 'v'>): Prompt
   return { v: 1, ...facts }
 }
 
+/**
+ * #482 — the dedup predicate: is appending `next` a RESTATEMENT of what the projection
+ * already says (`prev`)? Content fields decide; presentation metadata does not.
+ *
+ * The contract from the issue: an unchanged, unconsumed offer is a SINGLETON in the human
+ * timeline. The bar itself is indifferent — the fold is last-wins — but every append is a
+ * visible timeline node, and a long-lived session re-visited after each restart used to
+ * re-birth an identical `ready` record per process (#218's own comment called this
+ * 'harmless' from the fold's view; the maintainer's timeline is the human's view, and it is
+ * not harmless there). The birth comment's 'a log write for nothing' IS the bug, seen from
+ * the wrong side of the glass.
+ *
+ * Compared: status, text, intent, autorun, goalRevision, error — the fields that change what
+ * the offer MEANS. Ignored: turnSeq and at — restating the same suggestion at a newer turn is
+ * exactly the pile-up the contract forbids; a genuinely different next step differs by text.
+ * Never redundant against: nothing (null prev — the first record always rides) and unknown
+ * shapes (defensive; a record we cannot read is not evidence that a record is duplicate).
+ */
+export function offerRecordIsRedundant(prev: PromptPushPayload | null | undefined, next: PromptPushPayload): boolean {
+  if (prev === null || prev === undefined) return false
+  if (typeof prev.status !== 'string' || prev.v !== 1) return false
+  return prev.status === next.status
+    && prev.text === next.text
+    && prev.intent === next.intent
+    && prev.autorun === next.autorun
+    && prev.goalRevision === next.goalRevision
+    && prev.error === next.error
+}
+
 /** Projection fold: ours last-wins (each record carries the WHOLE state), anything else is not ours. */
 export function foldPromptRecord(state: PromptPushPayload | null, event: { type?: unknown; data?: unknown } | null | undefined): PromptPushPayload | null {
   if (event === null || event === undefined) return state

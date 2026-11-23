@@ -88,3 +88,13 @@ test('#443: matrix ports live in their own band, clear of the rig chain', () => 
   // proxy = boot + 1000 must also stay out of the rig proxies
   assert.ok(matrixPort(0) + 1000 > 42731)
 })
+
+test('#445: a BROKEN preset is attributed by shape — host crash vs retired rows, never conflated', () => {
+  const base = { installOk: true, bootOk: true, preset: 'broken' as const, composed: false }
+  const crash = cellVerdict({ ...base, dropped: ["Cannot read properties of undefined (reading 'parent')"] })
+  assert.match(crash.why, /host-internal crash during preset mount/, 'an exception payload says CRASH, not rows')
+  assert.match(crash.why, /reading 'parent'/, 'verbatim, unedited')
+  const rows = cellVerdict({ ...base, dropped: ['@deepseek-ai/dsh-tool-subagent-control/list-agents'] })
+  assert.match(rows.why, /rows this host cannot activate/, 'a row-spec payload keeps the row attribution')
+  assert.equal(rows.verdict, 'fail-broken-preset', 'both stay the same verdict — only the attribution differs')
+})

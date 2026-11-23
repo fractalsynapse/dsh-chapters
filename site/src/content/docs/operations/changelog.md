@@ -8,6 +8,41 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.45 — 2026-11-23 · the timeline tells the truth once; the gate stops being a promise
+
+**Your sessions, your complaint, the machine's answer (#482).** Long-lived sessions that get
+referenced occasionally were accumulating wall after wall of identical `ready` prompt-suggestion
+records in the human timeline — every process restart re-birthing an offer the fold was already
+showing. #218's own comment called those duplicates "harmless", and it was half right: harmless
+to the projection, not to the person scrolling 26,000 turns of someone's patience. The push
+transport now asks the host's own projection what it ALREADY says, and an append that would
+restate — same status, text, intent, autorun, goal, error — simply does not happen. `turnSeq`
+and timestamps can no longer manufacture a timeline node; a genuinely different next step always
+lands. The suppression counter rides `/chapters-status` so "nothing happened" and "we chose not
+to repeat ourselves" are distinguishable facts, not shared silence.
+
+**The gate is the machine now (#92).** Branch protection is live on `main`: five required
+contexts (typecheck/coverage, preset-declaration, tape-replay acceptance, environment parity,
+liveness sentinel), admins unblocked, the sentinel reporting on every event while watching only
+on its timer (#244's precedent — a skipped job cannot satisfy a required check). "Ship first,
+prove second" is structurally gone; the proof happens or the merge does not.
+
+**Instrument, finished (#479, #480, #483/#484).** The compose-leg coverage predicate now runs
+the measured-slowest-sibling ceiling and RETURNS THE UNCOVERED SEQ LIST when it waits, so a
+stall quotes its own evidence. `fail-broken-preset` attributes by shape after probes settled
+that 0.2.2-alpha.2 crashes on ANY preset — the host's own included — a host defect, said as
+one. The nightly refresh exports `GH_TOKEN` (three orphan branches existed because
+`git push` half-succeeded and `gh` did not; deleted, and a guard row pins the env now).
+
+**And #456 grows its campaign tooling:** the compose journey's conversation now lives in the
+scenario catalog byte-identically (zero-miss replay as proof), and `scripts/corpus-campaign.sh`
+runs the #90 law: one build, distill all, paired replays, stamp only on double-green.
+
+**Ledger honesty:** at this release the scheduled nightly has still not completed a green run —
+every attempt predates the fixes it needed, and the sentinel says so. Tonight's cycle runs
+against a `main` that finally contains the whole corrected machine; the first green refresh PR
+will be the instrument certifying itself, which was always the point.
+
 ### 0.2.44 — 2026-11-22 · 0.2.3 support, settled the way everything else is now settled: by execution
 
 **The host line the day was afraid of is now the line the machine certified.** 0.2.3-alpha.1

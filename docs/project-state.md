@@ -1359,3 +1359,19 @@ authorization for merge + tag recorded on #477.
 ceiling decision, #456 Tier B (corpus campaign), #433 residuals, TreeDX gated rows, #138
 rest-state. Nightly + sentinel live on `main` since 0.2.41; the registry keeps feeding the
 matrix by itself.
+
+## 0.2.45 cut (2026-11-23): the timeline truth + the hard gate
+
+**Shipped:** #482 (offer records content-deduped against the projection's live state — the
+maintainer's pile-up, killed at the predicate; suppression count visible), #92 (branch
+protection on main: five required contexts, sentinel reports-always/watches-on-timer),
+#484 (GH_TOKEN for the nightly refresh — orphan branches ended, three deleted), #479 (#462's
+sourced ceiling + self-naming predicate), #480 (host-crash attribution, probe-settled), #481
+(catalog bridge + campaign driver). Product bytes move this time — the prompt door's human
+surface behaves differently, by design, because the maintainer's own session measured it.
+
+**Ledger at this cut:** nightly scheduled-green = 0/N (all attempts predate their own fixes;
+the sentinel correctly screams). #462/#484 stay open as observation ledgers; tonight's cycle
+runs against this lineage. #456 Tier B: driver + bridge live; nine journeys + one campaign
+run to go. #445 closed (dispositions shipped); #433/#150/#130/#126 unchanged in character
+(maintainer- or host-owned).
