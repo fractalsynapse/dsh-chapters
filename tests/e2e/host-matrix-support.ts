@@ -102,7 +102,21 @@ export function cellVerdict(cell: {
 }): { verdict: CellVerdict; why: string } {
   if (!cell.installOk) return { verdict: 'fail-install', why: 'the isolated harness tree could not be installed' }
   if (!cell.bootOk) return { verdict: 'fail-boot', why: 'the host binary from this tree never produced a reachable server' }
-  if (cell.preset === 'broken') return { verdict: 'fail-broken-preset', why: `DECLARED BUT BROKEN${cell.dropped.length > 0 ? ` — rows this host cannot activate: ${cell.dropped.join(', ')}` : ''}` }
+  if (cell.preset === 'broken') {
+    // #445 precision: the BROKEN Details clause carries EITHER retired row specs OR the host's
+    // own exception text (0.2.2-alpha.2 measured: `Cannot read properties of undefined (reading
+    // 'parent')` — a crash in the host's mount walk that fires for its OWN standard preset too,
+    // proven by direct session-creation probes). One label for both misattributes a host bug to
+    // our rows; the table's only job is saying the true thing.
+    const rowSpecs = cell.dropped.filter((d) => /^@deepseek-ai\//.test(d))
+    const crash = cell.dropped.length > 0 && rowSpecs.length === 0
+    return {
+      verdict: 'fail-broken-preset',
+      why: `DECLARED BUT BROKEN — ${crash
+        ? `host-internal crash during preset mount (fires for ANY preset on this build, standard included — probed 2026-11-23): ${cell.dropped.join(', ')}`
+        : `rows this host cannot activate: ${cell.dropped.join(', ')}`}`,
+    }
+  }
   if (cell.preset === 'unsupported') return { verdict: 'fail-unsupported', why: 'the host cannot register preset declaration rows (below the 0.2.0 floor by design)' }
   if (cell.preset === 'absent' && !cell.composed) return { verdict: 'fail-compose', why: `no loud preset line and the realm never came up: ${cell.composeError ?? 'the session header never recorded agentPreset="chapters"'}` }
   if (cell.preset === 'absent') return { verdict: 'pass', why: 'composed with no loud preset failure — the healthy registration line is logger.info on the host log stream, not this pipe' }
