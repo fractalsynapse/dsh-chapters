@@ -154,6 +154,12 @@ jobs:
           node -p 'require("fs").readFileSync("README.md","utf8").split("<!-- versions:begin -->")[1].split("<!-- versions:end -->")[0]' >> $GITHUB_STEP_SUMMARY
       - name: refresh the README on the nightly
         if: github.event_name == 'schedule' || inputs.refresh_readme
+        env:
+          # #483: the runner's `gh` needs GH_TOKEN explicitly — `git push` rode checkout's
+          # credentials and succeeded, then `gh pr create` died with exit 4 AFTER the branch
+          # was pushed, orphaning chore/refresh-* branches with no PR (three of them the first
+          # three nights; deleted, recorded). A step that half-succeeds is a step that fails.
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

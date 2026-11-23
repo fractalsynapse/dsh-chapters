@@ -296,18 +296,27 @@ jobs:
 
   nightly-liveness:
     name: the version-sweep nightly is alive (#455)
-    if: github.event_name == 'schedule'
+    # #92: reports on EVERY event (skipped jobs never satisfy a required check — the
+    # host-capability precedent, #244); it only EXERCISES the watch on schedule events,
+    # where it must pass for the rest of the fleet to mean anything.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: schedule-only gate
+        if: github.event_name == 'schedule'
+        run: echo "watching"
       - uses: actions/checkout@v4
+        if: github.event_name == 'schedule'
       - uses: actions/setup-node@v4
+        if: github.event_name == 'schedule'
         with:
           node-version: 24
       - name: ask the API what host-matrix actually did
+        if: github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p var
           gh api 'repos/{owner}/{repo}/actions/workflows/host-matrix.yml/runs?per_page=20' > var/matrix-runs.json
       - run: node scripts/nightly-liveness.mjs --runs=var/matrix-runs.json
+        if: github.event_name == 'schedule'
