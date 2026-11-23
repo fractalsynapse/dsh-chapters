@@ -77,13 +77,25 @@ test('#455: the liveness sentinel lives in the REGISTERED CI workflow and only r
   assert.ok(ci.on.schedule !== undefined, 'ci.yml carries a schedule — the sentinel must be in a registered workflow')
   const job = ci.jobs?.['nightly-liveness']
   assert.ok(job !== undefined, 'the sentinel job exists')
-  assert.equal(job.if, "github.event_name == 'schedule'", 'and fires only on the timer')
+  // #92: the job reports on every event (a skipped job cannot satisfy a required check —
+  // #244's host-capability lesson); only its STEPS are schedule-gated.
+  assert.ok(job.if === undefined || job.if === null, 'the job itself is unconditional — presence as a required check must never depend on the event')
+  const gated = (job.steps ?? []).filter((st: any) => String(st.if ?? '').includes('schedule')).length
+  assert.ok(gated >= 5, `sentinel steps are schedule-gated (${String(gated)} of ${String(job.steps.length)}) — it still only WATCHES on the timer`)
   const raw = readFileSync(join(WF_DIR, 'ci.yml'), 'utf8')
   assert.match(raw, /scripts\/nightly-liveness\.mjs/, 'it runs the tested script')
   // the heavy jobs must opt OUT of schedule events, or every 04:47 would re-run the full chain
   for (const name of ['test', 'host-capability', 'e2e-replay', 'environment-parity']) {
     assert.match(String(ci.jobs[name]?.if ?? ''), /github\.event_name != 'schedule'/, `${name} skips schedule events`)
   }
+})
+
+test('#483: the refresh step exports GH_TOKEN — gh after git push must not orphan branches', () => {
+  const doc = parseWorkflow(wfPath)
+  const step = (doc.jobs.report.steps ?? []).find((s: any) => String(s.name).startsWith('refresh the README'))
+  assert.ok(step !== undefined, 'the refresh step exists')
+  assert.equal(step.env?.GH_TOKEN, '${{ github.token }}',
+    'without it, gh pr create fails AFTER the branch push — three orphan chore/refresh-* branches proved the half-success failure mode')
 })
 
 test('#451: every scripts/<file> reference in EVERY workflow resolves to a real file', () => {
