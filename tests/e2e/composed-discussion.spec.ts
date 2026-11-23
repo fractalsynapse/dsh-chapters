@@ -164,12 +164,23 @@ test.describe('composed checkpoints from live discussion (#420/C3)', () => {
     }
 
     // (1) coverage invariant first (never widened): nothing shadowed unarchived.
+    // #462: the artifact-driven design stays (this predicate already POLLS the durable
+    // registry, not a wall-clock sleep) — what needed fixing was the budget and the silence.
+    // The one CI stall (run 44959000086: leg 17m13s vs the 8m40s band; the 480s outlier
+    // ceiling expired with the predicate still answering a mute 'false' while the journey's
+    // sibling steps run 900s/1200s ceilings) is answered on both counts: the ceiling now
+    // matches the slowest sibling, and the poll returns the uncovered SEQ LIST instead of a
+    // boolean — Playwright prints the received array on timeout, so a future stall names
+    // exactly which shadowed seqs went unarchived across how many chapters, no message hook
+    // required (and the message option in this Playwright is a plain string — a function
+    // would not evaluate per attempt anyway; the ratchet caught that first draft).
     let chapters = registryChapters(sid)
     await expect.poll(() => {
       chapters = registryChapters(sid)
       const shadowedAll = summaries.flatMap(shadowedOf)
-      return shadowedAll.length > 0 && shadowedAll.every((seq) => chapters.some((c) => seq >= c.startSeq && seq <= c.endSeq))
-    }, { timeout: 480_000, intervals: [5000] }).toBe(true)
+      if (shadowedAll.length === 0) return ['shadowed-set-empty']
+      return shadowedAll.filter((seq) => !chapters.some((c) => seq >= c.startSeq && seq <= c.endSeq))
+    }, { timeout: 1_200_000, intervals: [5000] }).toEqual([])
 
     // (2) COMPOSED, honestly per pass (false positive retired 2026-11-19 by the first live record):
     // counting registry rows whose RANGE fell inside a pass's bounding region passed six LEGACY
