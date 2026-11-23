@@ -98,6 +98,11 @@ function harness(config: Record<string, unknown> = {}, opts: { plotStream?: bool
   })
   ctx.provide('sessions', {})
   ctx.provide('registry', {})
+  // #470 (0.2.3): the base compaction engine registers an answered-route projection on
+  // ctx.sessionProjections at construction, returning Promise<{ stateOf }>. Null state is the
+  // REAL init (the projection's init() returns null) — a faithful fake, not a clever one.
+  // Pre-0.2.3 bases never read it: shape-tolerant on both sides, per the #180 drift doctrine.
+  ctx.provide('sessionProjections', { register: () => Promise.resolve({ stateOf: () => null }) })
   const engine = new ChaptersCompactionEngine(ctx as never, {
     thresholdRatio: 0.9, retainRatio: 0.15,
     summarizationProvider: '', summarizationModel: '',

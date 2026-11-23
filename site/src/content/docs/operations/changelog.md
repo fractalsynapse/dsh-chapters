@@ -8,6 +8,32 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.44 — 2026-11-22 · 0.2.3 support, settled the way everything else is now settled: by execution
+
+**The host line the day was afraid of is now the line the machine certified.** 0.2.3-alpha.1
+arrived on the registry, the nightly enumeration pulled it into the matrix unasked, and the
+first cell's answer was a compiler line: the `@deepseek-ai/dsh-commands/brand` subpath — where
+our engine typed its `CommandId` — had been retired. Fix: import from the package root, the
+surface every version in the block re-exports (verified against the published tarballs of
+0.2.0-rc.1, 0.2.2-rc.5 and 0.2.3 alike; PR #474). The same cell run then surfaced 0.2.3's
+base engine constructing against a new `ctx.sessionProjections` service — 26 unit rows died
+inside the HOST constructor, which is precisely the #180 drift-row contract ("fail the day the
+host changes the surface out from under the code") firing in anger for the first time; the
+test fakes grew a faithful null-state projection, shape-tolerant in both directions.
+
+**The class, not just the instance, is now guarded:** `host-subpath-imports.test.ts` runs the
+#445 export-map predicate over every host SUBPATH import in `src/` against the installed tree —
+the pinned world outside matrix cells, the version-under-test inside them. The next retired
+subpath names itself at guard time instead of dying anonymous at tsc.
+
+**And the support table states the result as machines measured it** (flight 5, run
+45073399861): 19 of 21 published versions green on unit + integration + compose. The two reds
+are the host's own published prereleases — 0.2.2-alpha.2 (`impl.fiber` typo, #445) and
+0.2.3-alpha.1 (app-boot importing exports its pinned loader cannot provide, #475) — each with
+suites green and compose quoting the host defect verbatim. Meanwhile **0.2.3-alpha.2 shipped
+mid-flight, was swept automatically, and went green on all three planes at first CI contact**:
+0.2.3 support is not a claim in this release, it is a receipt.
+
 ### 0.2.43 — 2026-11-22 · the machine finished building itself: instrument proven on CI, and the support table is now CI-authored
 
 **No product-behavior change** — this patch release exists so `main` carries the verified
