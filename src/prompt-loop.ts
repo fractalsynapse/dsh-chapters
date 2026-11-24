@@ -97,7 +97,7 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
         ? `prompt: autorun armed for ${id} — ${displaced
             ? "goal continuation DISARMED (objective unchanged); the suggestion loop drives the worker"
             : 'the goal keeps its own continuation; this loop yields the turn to it'}`
-        : `prompt: autorun disarmed for ${id} (${String(s.fired)} round(s) spent of ${String(deps.maxRounds())})`)
+        : `prompt: autorun disarmed for ${id} (${String(s.fired)} round(s) spent of ${(() => { const c = deps.maxRounds(); return c > 0 ? String(c) : '∞' })()})`)
       return { autorun: s.armed, fired: s.fired, displaced }
     },
 
@@ -143,7 +143,7 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
       // No goal, or a goal that reached a terminal phase: the budget applies exactly as before.
       const goalBoundsIt = goal !== null && (goal.phase === 'active' || goal.phase === 'paused')
       const cap = deps.maxRounds()
-      if (!goalBoundsIt && s.fired >= cap) {
+      if (!goalBoundsIt && cap > 0 && s.fired >= cap) { // #505: cap <= 0 is UNLIMITED by contract
         s.armed = 'disarmed'
         deps.warn?.(`prompt: autorun stopped for ${id} after ${String(cap)} rounds (promptMaxRounds) — re-arm to continue`)
         return false
@@ -151,7 +151,7 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
       s.fired += 1
       s.firedFor = state.turnSeq
       deps.followup(id, state.text)
-      note(`prompt: autorun fired round ${String(s.fired)} of ${String(cap)} for ${id} (turn ${String(state.turnSeq)})`)
+      note(`prompt: autorun fired round ${String(s.fired)} of ${cap > 0 ? String(cap) : '∞'} for ${id} (turn ${String(state.turnSeq)})`)
       return true
     },
 

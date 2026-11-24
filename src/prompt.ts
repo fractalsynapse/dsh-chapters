@@ -26,6 +26,25 @@ import type { SessionEventLike } from './types.ts'
 
 /** The stored override key (durable kv, same table as `enrichment.model`). */
 export const PROMPT_SETTING_KEY = 'prompt.model'
+// #505: the autorun round ceiling rides the SAME settings mechanism as the model overrides
+// (putSetting/getSetting; empty = fall through to config). Default UNLIMITED: the maintainer's
+// rule — no cap nobody can raise at runtime; the real brakes are structural (one round per
+// offer, human displacement, the goal's lifecycle).
+export const ROUNDS_SETTING_KEY = 'prompt.maxRounds'
+
+/** #505: effective rounds cap, precedence override > config; cap <= 0 = unlimited.
+ *  One pure predicate for the loop, the verb and the status — never three readings. */
+export function effectiveRoundsCap(settingVal: string | undefined | null, configVal: number | undefined): { cap: number; source: 'override' | 'config' } {
+  const raw = (settingVal ?? '').trim()
+  if (raw === 'unlimited') return { cap: 0, source: 'override' }
+  if (raw !== '') {
+    const n = Number(raw)
+    if (Number.isInteger(n) && n > 0) return { cap: n, source: 'override' }
+  }
+  return Number.isInteger(configVal) && (configVal as number) > 0
+    ? { cap: configVal as number, source: 'config' }
+    : { cap: 0, source: 'config' }
+}
 
 export interface PromptRoute { provider: string; model: string }
 
@@ -53,6 +72,8 @@ export interface PromptLimits { maxChars: number; contextChars: number }
 export interface PromptConfig {
   /** config default for the model; '' ⇒ off unless a stored override says otherwise. */
   model: string
+  /** #505: config fallback for the rounds cap; 0 or absent = unlimited (the shipped default). */
+  maxRounds?: number | undefined
   /** hard total budget on the assembled input slice. */
   contextChars: number
   /** cap on the accepted recommendation; over-cap is invalid, never truncated. */
@@ -94,6 +115,10 @@ export interface PromptSurface {
   /** Effective spec after precedence; '' ⇒ OFF. */
   effective(): { spec: string; source: 'override' | 'config' | 'unset' }
   setModel(spec: string | null): Promise<void>
+  /** #505: the EFFECTIVE autorun rounds cap with its source; cap <= 0 = unlimited. */
+  roundsCap(): { cap: number; source: 'override' | 'config' }
+  /** #505: stored override ('unlimited' | positive int string | '' = fall to config). */
+  setRoundsCap(v: string | null): Promise<void>
   suggest(session: SuggestSession): Promise<PromptSuggestionResult>
   /** #113: the Suggested Next Step bar's server-side access — the row plus the process-local loop flags. */
   bar?: import('./prompt-state.ts').PromptBarAccess
@@ -593,6 +618,14 @@ export function createPromptSurface(deps: PromptDeps): PromptSurface {
       else await deps.putSetting(PROMPT_SETTING_KEY, spec.trim())
       cache.clear()
       inflight.clear()
+    },
+
+    roundsCap() {
+      // #505: one resolution for the loop, the verb and the status — never three readings.
+      return effectiveRoundsCap(deps.getSetting(ROUNDS_SETTING_KEY), deps.config.maxRounds)
+    },
+    async setRoundsCap(v) {
+      await deps.putSetting(ROUNDS_SETTING_KEY, v ?? '')
     },
 
     async suggest(session) {

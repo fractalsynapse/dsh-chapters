@@ -609,6 +609,8 @@ export function registerHostCommands(
             // schedule is the operator's setting, not a compile-time guess. Zero (the default) means
             // no ambient clock exists at all; the sanctioned moments still do.
             `  heartbeat: ${String((config.prompt.bar as { quietHeartbeatSec?: number }).quietHeartbeatSec ?? 0)}s`,
+            // #505: the LIVE cap, not the file's — same honesty rule as the model row.
+            `  rounds: ${(() => { const rc = config.prompt.roundsCap(); return `${rc.cap <= 0 ? 'unlimited' : String(rc.cap)} (${rc.source === 'override' ? 'stored override' : 'config default'})` })()}`,
             ...(st.error === '' ? [] : [`  error: ${st.error}`]),
             ...(st.text === '' ? [] : ['  prompt:', ...st.text.split('\n').map((l) => `    ${l}`)]),
           ].join('\n') }
@@ -658,6 +660,26 @@ export function registerHostCommands(
                 ? ' The goal remains the objective; its own auto-continuation is disarmed, so the suggestion loop now drives the worker. Re-arm it with /goal resume.'
                 : ' The goal still owns the turn; this loop yields to it until the goal is paused, completed, or disarmed.') + ' State: /chapters-prompt state'
             : `autorun disarmed for ${sessId} — offers still appear each turn; nothing runs itself (${String(live.fired)} round(s) were started this process)` }
+        }
+        if (verb === 'rounds') {
+          // #505: the cap is a runtime control like the model — same settings spine, one resolver.
+          const arg = parts[1]
+          if (arg === undefined || arg === 'show') {
+            const r = config.prompt.roundsCap()
+            return { kind: 'success', text: r.cap <= 0
+              ? `autorun rounds: UNLIMITED (${r.source === 'override' ? 'stored override' : 'default, #505'}) — cap it with /chapters-prompt rounds <n>; a goal-active run was never capped anyway (#188)`
+              : `autorun rounds cap: ${String(r.cap)} (${r.source === 'override' ? 'stored override' : 'config'}) — 'rounds unlimited' removes it; goal-active runs ignore the cap (#188)` }
+          }
+          if (arg === 'unlimited' || arg === 'clear') {
+            await config.prompt.setRoundsCap(arg === 'unlimited' ? 'unlimited' : '')
+            return { kind: 'success', text: arg === 'clear'
+              ? 'rounds override cleared — back to the config default (unlimited unless the config sets a number)'
+              : 'autorun rounds cap REMOVED — the loop runs until the goal ends, you stop it, or you send a prompt' }
+          }
+          const n = Number(arg)
+          if (!Number.isInteger(n) || n <= 0) return { kind: 'error', text: `rounds needs a positive whole number, 'unlimited' or 'show' (got ${arg}) — e.g. /chapters-prompt rounds 50` }
+          await config.prompt.setRoundsCap(String(n))
+          return { kind: 'success', text: `autorun rounds cap set to ${String(n)} — goal-less runs disarm loudly at the ceiling; goal-active runs stay bounded by the goal (#188)` }
         }
         if (verb === 'on') {
           if (config.prompt.bar === undefined) return { kind: 'error', text: 'the chapters prompt store is unavailable in this context' }
@@ -718,7 +740,7 @@ export function registerHostCommands(
           }
           return { kind: 'error', text: `chapters-prompt: ${r.text}\n  model: ${spec !== '' ? spec : 'unset'} (${source})` }
         }
-        return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest' }
+        return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest | autorun on|off | rounds [n | unlimited | show] | state' }
       } catch (error) {
         return { kind: 'error', text: `chapters-prompt failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
       }
@@ -953,7 +975,7 @@ export function registerHostCommands(
       const rulesCommandDef = {
         name: 'chapters-rule',
         description: 'Rules (record \u00A77): project tier propose/approve/revoke per machine; session tier review, pin, conflict report.',
-        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts' },
+        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts | model <provider/model | clear>' },
         async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
           // the session id reaches the resolver because the SESSION tier activates
           // by ancestry (§7.5): `active` cannot answer without knowing which tree

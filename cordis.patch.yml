@@ -145,9 +145,15 @@
 #                                  # '' ⇒ the feature does not exist (zero calls,
 #                                  # zero surface); setting one IS the enable.
 #                                  # Runtime: /chapters-prompt model <p/m|clear>
+#   promptMaxRounds: 0           # #505: 0 = UNLIMITED (default). Runtime: /chapters-prompt
+#                                  # rounds <n|unlimited|show> — the stored override wins; goal-active
+#                                  # runs answer to the GOAL, never this number (#188).
 #   promptPushBirth: false         # #497: a session LOAD writes nothing — set true to restore the
 #                                  # #218 birth record (first-event push so the bar mounts pushed).
 #                                  # Default false is policy, not preference: see the pile-up in #482/#497.
+#   rulesModel: ''               # dedicated mining model; '' ⇒ rides the enrichment call.
+#                                  # Runtime: /chapters-rule model <provider/model | clear> — the verb
+#                                  # existed all along, the hint now says so (#506).
 #   promptContextChars: 32000      # hard budget on the assembled input slice
 #                                  # (chapter summaries + screened live tail)
 #   promptMaxChars: 4096           # cap on the recommendation; over-cap ⇒ retry
