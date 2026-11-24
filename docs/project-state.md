@@ -1387,3 +1387,12 @@ within #462's sourced ceiling with zero stalls; report step refused by ORG polic
 ledger's table PR) open green under the new protection awaiting maintainer merge. Orphan
 refresh branches deduped to the one #488 lives on. #462/#484 close on the next two data
 points now that cron carries the fallback.
+
+## 0.2.47 cut (2026-11-24): the watchers watch the right things
+
+**Shipped:** #492 — liveness semantics (ALIVE = pipeline produced, honest cell-reds are not
+system death) + the report job's `issues:write`. Same-day proof chain completed: dispatch on the
+fix ref → report job SUCCEEDS → first machine-filed handoff issue (#493) → its execution PR to
+main (#494, 19/21 ledger, awaiting maintainer merge). Nightly loop is now genuinely unattended:
+cron sweeps, handoff lands as issue, human merges — the sentinel screams only when screaming is
+warranted.
