@@ -55,6 +55,9 @@ export function assessLiveness (payload, nowMs, maxAgeHours = 30) {
 }
 
 const arg = (name) => process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1]
+// #511: the usage documents the BARE [--no-enrich]; assignment-style matching alone made the
+// documented form silently enable enrichment (404-noise, unexpected heuristic). Presence counts.
+const flag = (name) => process.argv.some((a) => a === `--${name}` || a.startsWith(`--${name}=`))
 if (process.argv[1] !== undefined && process.argv[1].endsWith('nightly-liveness.mjs')) {
   const runsPath = arg('runs')
   if (runsPath === undefined || !fs.existsSync(runsPath)) {
@@ -64,15 +67,21 @@ if (process.argv[1] !== undefined && process.argv[1].endsWith('nightly-liveness.
   const payload = JSON.parse(fs.readFileSync(runsPath, 'utf8'))
   // #491: enrich each completed run with whether its REPORT stage produced.
   // Enrichment failure falls back to the conclusion-heuristic — never to a false ALIVE.
-  if (arg('no-enrich') === undefined && Array.isArray(payload.workflow_runs)) {
+  let enrichFailures = 0
+  if (!flag('no-enrich') && Array.isArray(payload.workflow_runs)) {
     for (const r of payload.workflow_runs.slice(0, 10)) {
       try {
         const jobs = JSON.parse(execSync(`gh api repos/${process.env.GITHUB_REPOSITORY ?? ''}/actions/runs/${r.id}/jobs?per_page=50`, { encoding: 'utf8', timeout: 30_000 }))
         r.reportJobOk = (jobs.jobs ?? []).some((j) => String(j.name).startsWith('assemble') && j.conclusion === 'success')
-      } catch { /* gh absent/unauthed (pure-function tests) — conclusion heuristic stands */ }
+      } catch { enrichFailures += 1 /* gh absent/unauthed — heuristic stands, but blindness gets said aloud (#513) */ }
     }
   }
   const verdict = assessLiveness(payload, Date.now(), Number(arg('maxAgeHours') ?? '30'))
+  // #513: a watchdog that could not see must declare itself blind, never dress blindness as a
+  // verdict — the false DEAD of 2026-11-24T16:27Z was exactly this silence.
+  if (enrichFailures > 0) {
+    console.error(`nightly-liveness: NOTE — ${String(enrichFailures)} job lookups failed (gh absent or unauthenticated? the step needs GH_TOKEN); verdict used the conclusion heuristic WITHOUT report-stage verification. Check the step's credentials before trusting a DEAD here.`)
+  }
   console.log(`nightly-liveness: ${verdict.ok ? 'ALIVE' : 'DEAD'} — ${verdict.reason}`)
   process.exit(verdict.ok ? 0 : 1)
 }

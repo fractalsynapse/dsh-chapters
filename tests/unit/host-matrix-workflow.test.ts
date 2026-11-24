@@ -74,6 +74,12 @@ test('#454/#455: the compose plane is a DEFAULT leg, the evidence is committed, 
   assert.match(reportRun, /if ! gh pr create/, 'PR creation is attempted first')
   assert.match(reportRun, /gh issue create --title "nightly table refresh ready/, 'and the issue fallback is the recorded alternative — a half-succeeded refresh is a loud refresh')
   assert.match(wf, /result-\$\{\{ matrix\.version \}\}\.json\.lock\.json/, 'the RESOLVED lock is uploaded beside the verdict (#455)')
+  // #513: the sentinel step must carry what its own script calls — measured: without GH_TOKEN on
+  // the liveness step every job lookup failed silently and an honest-red fleet mis-read DEAD (16:27Z run).
+  {
+    const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8')
+    assert.match(ci, /nightly-liveness\.mjs[\s\S]{0,600}?GH_TOKEN/, 'the liveness step has the token its enrichment needs')
+  }
   // #491: the fallback files a handoff issue when the org blocks bot PRs — measured dead
   // without issues:write (createIssue: Resource not accessible by integration)
   const reportPerms = doc.jobs.report.permissions ?? {}
