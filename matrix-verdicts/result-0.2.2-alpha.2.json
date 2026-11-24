@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 66790,
-      "detail": "pass 1552 / fail 0 / todo 1"
+      "ms": 66249,
+      "detail": "pass 1560 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 7573,
+      "ms": 7696,
       "detail": "pass 196 / fail 0 / todo 0"
     },
     {
       "leg": "compose",
       "ok": false,
-      "ms": 54354,
+      "ms": 53168,
       "detail": "fail-broken-preset — DECLARED BUT BROKEN — host-internal crash during preset mount (fires for ANY preset on this build, standard included — probed 2026-11-23): Cannot read properties of undefined (reading 'parent')"
     }
   ],
   "verdict": "fail",
-  "ts": "2026-11-24T06:26:47.681Z"
+  "ts": "2026-11-24T14:59:07.113Z"
 }
