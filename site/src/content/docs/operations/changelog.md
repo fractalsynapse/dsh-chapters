@@ -8,6 +8,16 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.47 — 2026-11-24 · the alarm learns the difference between bad news and a broken bell
+
+Two flaws in the machine's own self-observation, both found by executing it, both now closed:
+
+**The watchdog was barking at the truth.** Liveness demanded a nightly run with `conclusion == success` — but the support ledger legitimately contains two permanent reds (0.2.2-alpha.2 and 0.2.3-alpha.1, the host's own broken prereleases, quoted verbatim in their cells). No future honest cycle could ever satisfy that rule: the sentinel was scheduled to scream *forever* at a fleet working perfectly — which is how real alarms get ignored. ALIVE now means what it should: the pipeline **completed and its report stage produced**. Cell reds are version truths; a dead report or an unrun schedule is the system failure, and those still go red — with distinct, named messages, and three new unit rows pinning the semantics (honest-red → ALIVE, dead-report → DEAD, stale → DEAD).
+
+**The handoff was seatless.** 0.2.46 shipped the fallback ("try the PR; if the org refuses, file an issue") — and the issue itself failed: the report job never had `issues: write`. The org's bot-PR block does *not* cover issues, so the design was right, the permission was missing. Added, pinned by a guard row. The proof ran the same day: cycle 45340030824's report job succeeded, and **issue #493 became the first handoff the machine ever filed** — title, branch, compare link, all of it; PR #494 is its human-instructed execution, and the refresh loop is now closed end-to-end with exactly one deliberate human seat (the merge to main — where policy wanted a person anyway).
+
+Tooling-only release (0.2.43/0.2.46 precedent); the version constant is the only lib byte that moves.
+
 ### 0.2.46 — 2026-11-23 · the nightly learns to hand off like a colleague when the org says no
 
 Tooling-only release (the 0.2.43 precedent). Two full cycles — one dispatched, one truly
