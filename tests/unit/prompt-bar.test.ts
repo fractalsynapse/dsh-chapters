@@ -438,13 +438,13 @@ test('#309: rowTooltip states the click outcome AND the empty-composer precondit
 // tested'.
 
 test('#429: firstPullRetryDue retries ONLY while no reply has arrived, up to the ceiling', () => {
-  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: 0 }), true, 'owed pull, nothing answered, room left')
-  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: FIRST_PULL_RETRY_CEILING - 1 }), true, 'the last allowed attempt is due')
-  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: FIRST_PULL_RETRY_CEILING }), false, 'bounded — the ceiling comment stays a ceiling')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: 0, owed: true, pushLive: false }), true, 'owed pull, nothing answered, room left')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: FIRST_PULL_RETRY_CEILING - 1, owed: true, pushLive: false }), true, 'the last allowed attempt is due')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: FIRST_PULL_RETRY_CEILING, owed: true, pushLive: false }), false, 'bounded — the ceiling comment stays a ceiling')
 })
 
 test('#429: ANY honest reply ends the loop — an `off` included (#304, the seam claims the wire ANSWERED, never that the feature is on)', () => {
-  assert.equal(firstPullRetryDue({ answered: true, featureAbsent: false, attempts: 0 }), false, 'answered is answered — including a real off')
+  assert.equal(firstPullRetryDue({ answered: true, featureAbsent: false, attempts: 0, owed: true, pushLive: false }), false, 'answered is answered — including a real off')
   assert.equal(firstPullRetryDue({ answered: false, featureAbsent: true, attempts: 0 }), false, 'the model-absent plane spends nothing, retries included')
 })
 
@@ -454,4 +454,16 @@ test('#429: the shape of the bound is the measured need — spacing under the CI
   const totalMs = FIRST_PULL_RETRY_CEILING * FIRST_PULL_RETRY_SPACING_MS
   assert.ok(totalMs >= 8_000 && totalMs <= 30_000,
     `the retry window must outlast a loaded boot's composer hydration but stay small next to the leg's 480s ceiling: ${String(totalMs)}ms`)
+})
+
+// #497: the retry loop was the THIRD writer of the maintainer's reload pair (log: command/run
+// 'chapters-prompt state' 23s after mount on 0.2.48 — the mount tick was correctly silent, the
+// retry chased an answer the projection already owned). The predicate now knows both truths.
+test('#497: the retry only chases a SANCTIONED starved pull — silence by design owes nothing, and a live projection IS the answer', () => {
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: 0, owed: false, pushLive: false }), false,
+    'mount decided not to pull (trustworthy cache) — nothing was ever owed, so the retry must not invent the pair the tick skipped')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: 0, owed: true, pushLive: true }), false,
+    'push mode: the cell is the channel — retrying against it is the load-time drumbeat the #194 gate exists to stop')
+  assert.equal(firstPullRetryDue({ answered: false, featureAbsent: false, attempts: 2, owed: true, pushLive: false }), true,
+    '#429 preserved EXACTLY: a sanctioned pull starved by a hydrating exec still retries (the revival flake stays fixed)')
 })

@@ -1405,3 +1405,13 @@ maintainer's duplicate-timeline report (#497, reopened #482) traced to the mount
 command/run+command/done pair — 0.2.45's suppression was real but on the record path. Suite
 1770/0/1, five required contexts green on 8c2696e, bundle-verified latch. #482 acceptance moved to
 the maintainer's reload on this release: zero new chapters-prompt nodes.
+
+## 0.2.49 cut (2026-11-24): the retry loop — third writer, named by the maintainer's log
+
+**Shipped:** #501 (dd92f37) — firstPullRetryDue gains owed+pushLive; dock tracks the sanction,
+latches push mode on cell presence. Suite 1772/0/1; five contexts green on staging.
+**Withdrawn the same day by CI:** the blanket seat gate (#503) — prompt and prompt-off-revival legs
+assert the cold-boot discovery pull BY NAME (#231/#276 revival contract). Door inventory: record
+door sealed+production-proven, warm-mount sealed, retry sealed, cold-discovery CONTRACTED (one
+pair per profile's first-ever visit per session; revisits silent). #482 closes on maintainer reload
+on 0.2.49.
