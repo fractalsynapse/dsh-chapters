@@ -337,6 +337,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // page paid the pull the maintainer's rule forbids. Absent cell (pre-projection host, or the
   // writer refused at boot) ⇒ undefined ⇒ the honest pull-first fallback stands, unchanged.
   const pushLiveRef = useRef<boolean>(pushed !== undefined)
+  // #497: did the MOUNT tick sanction a pull? The retry loop may only chase a starved pull (exec
+  // not hydrated yet, #429's whole point) — never invent one the silent-by-design mount skipped.
+  const pullOwed = useRef<boolean>(false)
   // #221: the last turn-end seq observed; the pulse fires when the host advances past it.
   const seenTurnRef = useRef<number>(0)
   const lastPushAt = useRef<number | null>(null)
@@ -401,6 +404,9 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // ABOVE the mount poll so pushLive is set before the first tick decides anything. Any push also
   // retires a pending edge timer in push mode — the record IS the answer the confirm would fetch.
   useEffect(() => {
+    // #497: a cell that EXISTS is an answer channel even before its first payload — retry pulls
+    // are owed to exec, never to a projection that has not been given its chance to hydrate.
+    if (pushed !== undefined) pushLiveRef.current = true
     const evs = pushEventsOf(pushed)
     if (evs === null) return
     pushLiveRef.current = true
@@ -481,7 +487,10 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // tells the bar whether the feature exists at all. Measured cost of getting this wrong: the
       // rig's prompt leg failed four-for-four because no pull ever fired and the dock stayed hidden.
       const mountDiscovery = opts?.mount === true && duePull()
-      if (opts?.force === true || mountDiscovery || (spacing !== null && opts?.mount !== true)) await refresh()
+      if (opts?.force === true || mountDiscovery || (spacing !== null && opts?.mount !== true)) {
+        if (opts?.mount === true) pullOwed.current = true // #497: the sanction IS the debt
+        await refresh()
+      }
       if (replyStatus.current === 'off') return
       // The reply, not the React state: the row is hidden while `off`, and a hidden row renders
       // nothing, so stateRef can lag. The schedule reads the wire truth whenever it exists.
@@ -511,8 +520,8 @@ export function PromptDock(props: DockProps): ReactElement | null {
     let firstPullRetries = 0
     let firstPullTimer: ReturnType<typeof setTimeout> | undefined = undefined
     const retryFirstPull = (): void => {
-      if (!firstPullRetryDue({ answered: answered.current, featureAbsent, attempts: firstPullRetries })) {
-        if (!answered.current && !featureAbsent && firstPullRetries >= FIRST_PULL_RETRY_CEILING) {
+      if (!firstPullRetryDue({ answered: answered.current, featureAbsent, attempts: firstPullRetries, owed: pullOwed.current, pushLive: pushLiveRef.current })) {
+        if (!answered.current && !featureAbsent && pullOwed.current && !pushLiveRef.current && firstPullRetries >= FIRST_PULL_RETRY_CEILING) {
           console.warn(`[client:prompt] first-pull retry ceiling (${String(FIRST_PULL_RETRY_CEILING)} x ${String(FIRST_PULL_RETRY_SPACING_MS)}ms) reached with NO wire answer — the mount pull remains owed; edges are the recovery path (#429)`)
         }
         return
