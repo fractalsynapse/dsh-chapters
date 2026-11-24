@@ -113,3 +113,15 @@ test('with NO goal the budget governs exactly as before', () => {
   assert.equal(loop.maybeFire('s2', offer(2), null), false, 'open-ended iteration stays bounded')
 })
 
+
+// #505: the maintainer's rule — no wall nobody can raise. cap <= 0 is UNLIMITED by contract.
+test('#505: maxRounds 0 fires past every old ceiling until a real brake (human, off, ceiling>0) stops it', () => {
+  const w = world({ maxRounds: 0 })
+  w.loop.setArmed('S', true)
+  for (let i = 1; i <= 30; i++) {
+    assert.equal(w.loop.maybeFire('S', ready(i)), true, `round ${String(i)} still fires — no 24-wall`)
+  }
+  assert.equal(w.loop.statusOf('S').fired, 30)
+  assert.ok(w.logs.some((l: string) => l.includes('of ∞')), 'the log states the truth it ran with')
+  assert.equal(w.loop.disarmForHuman('S'), 'disarmed', 'the human remains a brake — unlimited is not unreachable')
+})

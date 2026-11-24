@@ -87,6 +87,7 @@ provider or capability the host does not expose is reported as absent, never gue
 /chapters-rule list [--all|--proposed|--category <c>]      # review surface
 /chapters-rule view <id>                                   # ONE rule, completely — full text, status, basis
 /chapters-rule approve <id> | revoke <id>                  # YOUR machine's curation fact — never a shared rewrite
+/chapters-rule model <provider/model | clear>      # #506: dedicated mining model at runtime; clear ⇒ rides the enrichment call. Effective value in /chapters-models
 ```
 
 `list` shows titles, and a title is the first sentence of the body cut at 60 characters — enough to
@@ -333,6 +334,7 @@ zero chapters. Close it with `childAutoArchive: false`.
 /chapters-prompt model clear                 # drop the override; falls back to `promptModel` ('' ⇒ off)
 /chapters-prompt off                         # disable regardless of config (stores the empty override)
 /chapters-prompt suggest                     # machine verb: the composer ghost pulls this; ≤ one bounded call per turn boundary
+/chapters-prompt rounds [n | unlimited | show]  # #505: the autorun round cap, live — the default is UNLIMITED; a goal-active run was never capped (#188)
 ```
 
 `suggest` is the client's door: it answers `{kind:'success', text:<one prompt>}` when a
