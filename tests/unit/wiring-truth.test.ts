@@ -264,3 +264,17 @@ test('#497: push-live latches from the projection CELL, before the mount tick ca
   // Door 2: arrival still latches (a cell that registers after first render must not need a reload).
   assert.ok(dockCode.includes('pushLiveRef.current = true'), 'the arrival latch stays — late registration also disables the clock')
 })
+
+// #497: the retry-owed gate is a WIRING fact, same doctrine as #429's own row — the predicate
+// change only stops the maintainer's 11:27:06Z pair if the dock actually feeds it the two truths.
+test('#497: the dock feeds the retry its debts and the projection — one sanction site, both inputs live', () => {
+  const dock = readFileSync(new URL('../../src/client/prompt-dock.ts', import.meta.url), 'utf8')
+  const dockCode = dock.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  assert.equal(dockCode.split('pullOwed.current = true').length - 1, 1,
+    'the sanction IS the debt, and it is set at exactly ONE site: the mount branch that calls refresh')
+  assert.ok(dockCode.includes('if (pushed !== undefined) pushLiveRef.current = true'),
+    'a registering cell latches push mode immediately — the retry stops the moment a channel exists, not only at first payload')
+  assert.ok(dockCode.includes('owed: pullOwed.current, pushLive: pushLiveRef.current'),
+    'the due-check consumes both truths')
+  assert.ok(/import \{[^}]*firstPullRetryDue[^}]*\} from '\.\/prompt-bar\.ts'/s.test(dock), 'still ONE predicate, still in prompt-bar (#429 doctrine holds)')
+})

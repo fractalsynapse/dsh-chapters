@@ -195,8 +195,16 @@ export const FIRST_PULL_RETRY_SPACING_MS = 2_000
  * honest `off` included (#304's seam claim is THAT the wire answered, never that the feature is
  * on), the feature plane is present, and the ceiling has room.
  */
-export function firstPullRetryDue(c: { answered: boolean, featureAbsent: boolean, attempts: number }): boolean {
+export function firstPullRetryDue(c: { answered: boolean, featureAbsent: boolean, attempts: number, owed: boolean, pushLive: boolean }): boolean {
   if (c.answered || c.featureAbsent) return false
+  // #497 (third writer, finally named): the maintainer's reload pair at 2026-11-24T11:27:06Z was
+  // NOT the mount tick — it was this retry. The mount tick correctly stayed silent (push mode),
+  // but `answered` flips only on a WIRE reply, so the loop pulled `state` every 2s until exec
+  // hydrated: a self-inflicted load-time pair on the exact hosts the #194 gate exists to protect.
+  // Two truths the predicate now requires: the mount actually SANCTIONED a pull (owed) — silence
+  // by design owes nothing — and the projection is NOT live (pushLive): a cell that answers is an
+  // answer; retrying against it is the drumbeat the maintainer's rule forbids.
+  if (c.pushLive || !c.owed) return false
   return c.attempts < FIRST_PULL_RETRY_CEILING
 }
 
