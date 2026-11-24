@@ -1415,3 +1415,13 @@ assert the cold-boot discovery pull BY NAME (#231/#276 revival contract). Door i
 door sealed+production-proven, warm-mount sealed, retry sealed, cold-discovery CONTRACTED (one
 pair per profile's first-ever visit per session; revisits silent). #482 closes on maintainer reload
 on 0.2.49.
+
+## 0.2.50 cut (2026-11-24): runtime everything — uncapped autorun, findable rules model
+
+**Shipped:** #507. promptMaxRounds default 0 (unlimited) + `/chapters-prompt rounds` verb on the
+settings spine; #506 = the rules model verb's DISCOVERABILITY fix (it worked all along). Five
+contexts green on 8929452 incl. tape legs accepting the uncapped default. Next on deck (maintainer
+plan on record): SAIP self-driving journey — end-state file drafted with the agent, goal from file,
+three models swapped live at runtime, autorun uncapped; durable-log watching names every stop by
+mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
+pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
