@@ -205,6 +205,8 @@ export interface Config {
   /** #113: how many turns an armed autorun may start before it stops and says so. Re-arming does NOT
    * refresh it, so arming cannot become an infinite loop; the budget is per process, like the flag. */
   promptMaxRounds: number
+  /** #497: push the birth 'idle' record at a session's first event? Default false — loads never write. */
+  promptPushBirth: boolean
   /** #117: cap on the printed `/chapters-repair` report, so one dry-run cannot emit 300 KB into a 32K window. */
   repairReportMaxLines: number
   /** §15 amendment: transport policy — 'auto' dispatches on the remote
@@ -333,6 +335,12 @@ export const Config = Schema.object({
   // the user's absolute rule, and every pull is two visible history nodes on every host so far.
   promptQuietHeartbeatSec: Schema.number().default(0),
   promptMaxRounds: Schema.number().default(24),
+  // #497: the birth push (the #218 first-event 'idle' record) is OFF by default, because it
+  // runs on every session LOAD in a fresh process and its dedup depends on reading the host
+  // projection at boot — a path that fails exactly when generations shift, appending another
+  // visible ready-record per visit. The maintainer's rule owns the design now: loads never
+  // write. Set true only if the saved pull at first mount is worth the risk of reappearance.
+  promptPushBirth: Schema.boolean().default(false),
   /** #117: how many lines a `/chapters-repair` report may print. The finding COUNT always leads; */
   repairReportMaxLines: Schema.number().default(60),
   // enum-style string (same register as `fallbackPreset`): 'auto' | 'git' |
@@ -971,7 +979,10 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           // #482's own visibility: suppression must be countable, or 'no records' and
           // 'suppressed records' are the same silence. This is a diagnostic surface, not
           // the timeline — the human sees one offer where the wall used to be.
-          if (pushWriter !== null) lines.push(`  duplicate offer records suppressed: ${String(pushSuppressed)}`)
+          if (pushWriter !== null) {
+        lines.push(`  duplicate offer records suppressed: ${String(pushSuppressed)}`)
+        lines.push(`  birth push at session load: ${config.promptPushBirth ? 'ON (per config)' : 'off — loads never write (#497)'}`)
+      }
           lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
           lines.push(...engineProvenanceLines(store))
           lines.push(...arrivalFloorLines(store))
@@ -1161,7 +1172,11 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         // zero commands forever.
         if (pushWriter !== null && !seenBirthSessions.has(session.id)) {
           seenBirthSessions.add(session.id)
-          if (prompt.effective().spec !== '') pushBar(session, session.id)
+          // #497: loads never write — the birth push is a saved pull at first mount, worth
+          // nothing against a visible record on every revisit of an old session. The client's
+          // own mount-time discovery read covers the state; the durable projection covers the
+          // fold; nothing about correctness is lost by never appending this.
+          if (config.promptPushBirth && prompt.effective().spec !== '') pushBar(session, session.id)
         }
         promptRunner(session as never, event as never)
       }) as never)

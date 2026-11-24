@@ -242,3 +242,25 @@ test('#429: the dock wires the first-pull retry — one predicate, one call site
   assert.ok(dock.includes('retry ceiling'), 'giving up is LOUD (#54: a detected failure that is not delivered is the same bug)')
   assert.ok(dock.includes('clearTimeout(firstPullTimer)'), 'the retry timer is reclaimed on unmount — a dock that navigates away must not keep pulling')
 })
+
+// #497: the maintainer's per-load pile-up was the MOUNT PULL — a pull is a command/run +
+// command/done pair of durable nodes (prompt-bar.ts #229 comment, measured on their live log),
+// and the #194 push-mode gate could never fire at mount because pushLiveRef latched only when a
+// payload ARRIVED — strictly after the mount tick had already pulled. The fix is a wiring fact:
+// the latch reads the CELL (synchronous seat on first render), so push hosts pull NOTHING on
+// load; and the two escape doors must stay exactly as they were.
+test('#497: push-live latches from the projection CELL, before the mount tick can pull', () => {
+  const dock = readFileSync(new URL('../../src/client/prompt-dock.ts', import.meta.url), 'utf8')
+  const dockCode = dock.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  assert.ok(dockCode.includes('const pushLiveRef = useRef<boolean>(pushed !== undefined)'),
+    '#497: the ref initializes from the seat — a registered cell means records ride, a mount pull would restate and pay two durable nodes')
+  const seatLine = dockCode.indexOf('const pushed = useProjectionHook(PROMPT_PROJECTION_KEY)')
+  const latchLine = dockCode.indexOf('const pushLiveRef = useRef<boolean>(pushed !== undefined)')
+  assert.ok(seatLine >= 0 && latchLine > seatLine, 'the seat read happens BEFORE the latch — first render carries the synchronous cell')
+  // Door 1 (fallback honesty): no cell (pre-projection host, refused writer) ⇒ pulled !== latched ⇒
+  // useRef(false)-equivalent behavior — the old pull-first mount stands. Verified by the predicate:
+  assert.ok(dockCode.includes('if (pushLiveRef.current && opts?.force !== true) return'),
+    'the tick gate is unchanged — non-forced ticks stop in push mode; FORCED confirms (push did NOT arrive) still pull in BOTH modes')
+  // Door 2: arrival still latches (a cell that registers after first render must not need a reload).
+  assert.ok(dockCode.includes('pushLiveRef.current = true'), 'the arrival latch stays — late registration also disables the clock')
+})
