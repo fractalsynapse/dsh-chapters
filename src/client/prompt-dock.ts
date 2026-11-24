@@ -327,10 +327,16 @@ export function PromptDock(props: DockProps): ReactElement | null {
   // and the pending debounced edge pull, which a rising edge cancels.
   const lastPullAt = useRef<number | null>(null)
   const edgeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  // #194: push-mode bookkeeping. pushLive flips on the first ACCEPTED payload and stays true for
-  // the page lifetime — a projection that existed and went silent is the confirm-pull's job to
-  // police, not a reason to resurrect the clock.
-  const pushLiveRef = useRef<boolean>(false)
+  // #194: push-mode bookkeeping. A projection that existed and went silent is the confirm-pull's
+  // job to police, not a reason to resurrect the clock — once live, live for the page lifetime.
+  // #497: live is decided by the CELL, not by an arrival. The server registers this projection
+  // only after the push transport resolved, and the seat read is a synchronous cut over the host's
+  // watermark cache — so a cell that EXISTS on first render (payload or null: registered means the
+  // records ride) can gain nothing from a mount pull except two durable command nodes. The old
+  // latch-on-arrival always lost the race with the mount tick, so EVERY session load of EVERY
+  // page paid the pull the maintainer's rule forbids. Absent cell (pre-projection host, or the
+  // writer refused at boot) ⇒ undefined ⇒ the honest pull-first fallback stands, unchanged.
+  const pushLiveRef = useRef<boolean>(pushed !== undefined)
   // #221: the last turn-end seq observed; the pulse fires when the host advances past it.
   const seenTurnRef = useRef<number>(0)
   const lastPushAt = useRef<number | null>(null)

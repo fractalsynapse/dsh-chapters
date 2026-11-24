@@ -112,3 +112,4 @@ test('with NO goal the budget governs exactly as before', () => {
   assert.equal(loop.maybeFire('s2', offer(1), null), true)
   assert.equal(loop.maybeFire('s2', offer(2), null), false, 'open-ended iteration stays bounded')
 })
+

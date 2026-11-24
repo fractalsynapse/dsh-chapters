@@ -1396,3 +1396,12 @@ fix ref → report job SUCCEEDS → first machine-filed handoff issue (#493) →
 main (#494, 19/21 ledger, awaiting maintainer merge). Nightly loop is now genuinely unattended:
 cron sweeps, handoff lands as issue, human merges — the sentinel screams only when screaming is
 warranted.
+
+## 0.2.48 cut (2026-11-24): loads never write
+
+**Shipped:** #498 — promptPushBirth default OFF (server writes no record at session load) + the
+dock latches push-live from the projection CELL (client runs no command at session load). The
+maintainer's duplicate-timeline report (#497, reopened #482) traced to the mount pull's
+command/run+command/done pair — 0.2.45's suppression was real but on the record path. Suite
+1770/0/1, five required contexts green on 8c2696e, bundle-verified latch. #482 acceptance moved to
+the maintainer's reload on this release: zero new chapters-prompt nodes.

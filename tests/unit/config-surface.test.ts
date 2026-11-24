@@ -167,3 +167,16 @@ test('#354: childAutoArchive is a realm-row key, and the patch says so rather th
     'the patch lists childAutoArchive in its host config block; it must be labelled as a realm-row key (#354)')
   assert.ok('childAutoArchive' in rowDefaults(), 'and it really is declared on the engine row')
 })
+
+// #497: the birth-push policy knob — default OFF (loads never write), readable on the host
+// plane (not inert), and referenced where operators read config truth.
+test('#497: promptPushBirth exists, is host-plane readable, and is not inert-by-accident', () => {
+  const schema = hostSchemaKeys()
+  assert.ok(schema.includes('promptPushBirth'), 'in the plugin Config schema (src/index.ts)')
+  const iface = new Set(hostInterfaceKeys())
+  assert.ok(iface.has('promptPushBirth'),
+    'read on the host plane by the engine wiring — the birth gate in the turn/end listener consumes config.promptPushBirth; not inert')
+  const src = read('src/index.ts')
+  assert.match(src, /promptPushBirth: Schema\.boolean\(\)\.default\(false\)/, 'the shipped default is false — loads never write, by construction')
+  assert.match(src, /if \(config\.promptPushBirth && prompt\.effective\(\)\.spec !== \'\'\)/, 'the gate uses it at the birth push and nowhere is the birth push ungated')
+})
