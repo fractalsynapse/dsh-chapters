@@ -8,6 +8,20 @@ Releases publish automatically from a bare-semver tag. Since **#261** the publis
 
 **And one dead VERSION, distinct from the dead tags: 0.2.20** reached the registry via a manual `npm publish` from a stale working tree — manifest `0.2.20`, bundled `lib/version.js` still `0.2.18`. Versions, like tags, are forever; it is deprecated, and the release workflow now verifies every published tarball agrees with its tag before the run may pass, while `prepublishOnly: npm run build` makes the stale-tree failure mode unreachable locally. **Three dead tags, for the record: 0.2.17** (cut mid-migration; the old trusted-publisher binding 404'd it), **0.2.18** (token fix landed, the PUT became authorized — the transparency log then rejected its own earlier entry, which no re-run of the same commit escapes), and **0.2.19** (nothing reached the registry at all: a plain-scalar colon in the release workflow's own text poisoned GitHub's parse — zero jobs. The class is now gated: every CI run parses every workflow file as its first step, because a landmine that only explodes on a tag trigger costs one discovery per number). Pushed tags are immutable; each names its commit forever and the ship steps around them. 0.1.0, the one manual ship, predates attestation.
 
+### 0.2.48 — 2026-11-24 · session loads never write — the duplicate timeline messages end
+
+The maintainer's rule was absolute from the start ("never want to see repeated chapters-prompt executions in a session"), and 0.2.45's fix — while real — sealed the wrong door: it suppressed duplicate **records**, but what kept piling up was **commands**. The pasted evidence decoded cleanly: each session load mounted the bar, the bar pulled its state, and a pull on this host *is* a `chapters-prompt` execution — a `command/run` + `command/done` pair of durable timeline nodes rendering the status text verbatim. A gate meant to skip that pull in push mode latched on a payload **arriving** — always after the mount tick had already pulled. The gate could never fire when it mattered.
+
+Two doors, both closed structurally:
+
+**The server writes nothing at load.** `promptPushBirth` (default **false**) retires the #218 birth record — the first-event-per-process append that deduped by reading the host projection at boot, a read that can answer nothing exactly when generations shift. The discovery pull the client already owns covers the same state for free. New knob pinned across config-surface rows, the patch reference, the site table, and a printed line in `/chapters-prompt` status ("birth push at session load: off — loads never write") so the policy is visible where operators look.
+
+**The client commands nothing at load.** Push-mode is now decided by the projection **cell existing** — the server registers it only when the push transport resolved, and the seat read is a synchronous cut over the host's watermark cache, so a present cell on first render already proves records ride. Absent cell (pre-projection hosts, refused writer) keeps the old pull-first fallback byte-for-byte, and the forced staleness confirm still pulls in both modes. A new wiring-truth row pins the seat-before-latch order in code-shaped lines, and the release verified the **built bundle**, not the source prose — the #429 lesson, kept.
+
+Historical records in long-lived sessions stay in the log (the archive is append-only — invariant #1); the bar folds them to one current state, and no new load ever adds one. The projection `stateOf(session, key)` contract now has its own drift row against the pinned host's shipped types, so the next host reshuffle goes red in CI instead of silently restoring the wall.
+
+Closes #497; #482 closes on the maintainer's reload showing zero new nodes.
+
 ### 0.2.47 — 2026-11-24 · the alarm learns the difference between bad news and a broken bell
 
 Two flaws in the machine's own self-observation, both found by executing it, both now closed:
