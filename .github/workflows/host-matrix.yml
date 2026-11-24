@@ -132,6 +132,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write   # #491: the handoff fallback files an ISSUE when the org blocks bot PRs — measured: createIssue died 'Resource not accessible by integration' without this; the org's PR policy does NOT cover issues, so the fallback works, it just needed its seat
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

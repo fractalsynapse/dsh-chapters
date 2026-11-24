@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 67842,
-      "detail": "pass 1549 / fail 0 / todo 1"
+      "ms": 67833,
+      "detail": "pass 1552 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 9204,
+      "ms": 8968,
       "detail": "pass 196 / fail 0 / todo 0"
     },
     {
       "leg": "compose",
       "ok": true,
-      "ms": 59004,
+      "ms": 59457,
       "detail": "pass — composed with no loud preset failure — the healthy registration line is logger.info on the host log stream, not this pipe"
     }
   ],
   "verdict": "pass",
-  "ts": "2026-11-23T07:23:47.562Z"
+  "ts": "2026-11-24T06:27:10.710Z"
 }

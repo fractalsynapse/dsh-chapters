@@ -74,6 +74,10 @@ test('#454/#455: the compose plane is a DEFAULT leg, the evidence is committed, 
   assert.match(reportRun, /if ! gh pr create/, 'PR creation is attempted first')
   assert.match(reportRun, /gh issue create --title "nightly table refresh ready/, 'and the issue fallback is the recorded alternative — a half-succeeded refresh is a loud refresh')
   assert.match(wf, /result-\$\{\{ matrix\.version \}\}\.json\.lock\.json/, 'the RESOLVED lock is uploaded beside the verdict (#455)')
+  // #491: the fallback files a handoff issue when the org blocks bot PRs — measured dead
+  // without issues:write (createIssue: Resource not accessible by integration)
+  const reportPerms = doc.jobs.report.permissions ?? {}
+  assert.equal(reportPerms['issues'], 'write', 'the refresh job must be allowed to file its fallback issue')
 })
 
 test('#455: the liveness sentinel lives in the REGISTERED CI workflow and only runs on its timer', () => {
