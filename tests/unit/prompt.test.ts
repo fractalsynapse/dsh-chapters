@@ -7,7 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  PROMPT_SETTING_KEY, buildSuggestInput, createPromptSurface, type ChapterHistoryEntry, effectivePromptSpec,
+  PROMPT_SETTING_KEY, ROUNDS_SETTING_KEY, buildSuggestInput, createPromptSurface, type ChapterHistoryEntry, effectivePromptSpec, effectiveRoundsCap,
   lastHumanTurnSeq, lastTurnFromEvents, promptChaptersOf, resolvePromptRoute, tailFromEvents, validateSuggestion,
   type PromptDeps, type PromptRoute,
 } from '../../src/prompt.ts'
@@ -482,4 +482,33 @@ test('#340: lastHumanTurnSeq ignores injected and relayed user messages', () => 
   assert.equal(lastHumanTurnSeq(events as never), 1,
     'only the typed message advances the key — a relay or a goal round is not the human speaking')
   assert.equal(lastHumanTurnSeq([] as never), -1, 'no human turn at all')
+})
+
+// #505: the cap resolution — one pure predicate for the loop, the verb and the status.
+test('#505: effectiveRoundsCap — override > config, unlimited is real, garbage never invents a cap', () => {
+  assert.deepEqual(effectiveRoundsCap('unlimited', 24), { cap: 0, source: 'override' })
+  assert.deepEqual(effectiveRoundsCap('50', 24), { cap: 50, source: 'override' })
+  assert.deepEqual(effectiveRoundsCap('', 24), { cap: 24, source: 'config' }, 'empty setting falls to config')
+  assert.deepEqual(effectiveRoundsCap(undefined, 0), { cap: 0, source: 'config' }, 'the shipped default: unlimited')
+  assert.deepEqual(effectiveRoundsCap('nonsense', 7), { cap: 7, source: 'config' }, 'a broken override degrades honestly, never silently')
+  assert.deepEqual(effectiveRoundsCap('-3', undefined), { cap: 0, source: 'config' }, 'no config ⇒ unlimited; a negative setting is not a cap either')
+})
+
+test('#505: the surface round-trips the cap through the same settings spine as the model', async () => {
+  const settings = new Map<string, string>()
+  const surface = createPromptSurface({
+    getSetting: (k) => settings.get(k),
+    putSetting: async (k, v) => { settings.set(k, v) },
+    deleteSetting: async (k) => { settings.delete(k) },
+    chaptersOf: async () => [],
+    config: { model: '', contextChars: 4000, maxChars: 240 },
+    conversationRoute: () => null,
+    fetch: async () => '',
+  })
+  assert.deepEqual(surface.roundsCap(), { cap: 0, source: 'config' }, 'no override, no config number ⇒ unlimited')
+  await surface.setRoundsCap('42')
+  assert.equal(settings.get(ROUNDS_SETTING_KEY), '42', 'stored on the plane settings, like enrichment.model')
+  assert.deepEqual(surface.roundsCap(), { cap: 42, source: 'override' })
+  await surface.setRoundsCap('unlimited')
+  assert.deepEqual(surface.roundsCap(), { cap: 0, source: 'override' }, 'an explicit unlimited outranks a config number too')
 })

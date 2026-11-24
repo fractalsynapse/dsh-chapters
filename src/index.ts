@@ -334,7 +334,10 @@ export const Config = Schema.object({
   // #229: the ambient heartbeat is OFF by default — "never repeated chapters-prompt executions" is
   // the user's absolute rule, and every pull is two visible history nodes on every host so far.
   promptQuietHeartbeatSec: Schema.number().default(0),
-  promptMaxRounds: Schema.number().default(24),
+  // #505: the cap is UNLIMITED by default (0) — the maintainer's rule: no round wall nobody can
+  // raise at runtime. /chapters-prompt rounds <n|unlimited> overrides live; a positive config
+  // value still means an operator asked for one.
+  promptMaxRounds: Schema.number().default(0),
   // #497: the birth push (the #218 first-event 'idle' record) is OFF by default, because it
   // runs on every session LOAD in a fresh process and its dedup depends on reading the host
   // projection at boot — a path that fails exactly when generations shift, appending another
@@ -612,6 +615,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       },
       config: {
         model: config.promptModel,
+        maxRounds: config.promptMaxRounds, // #505
         contextChars: config.promptContextChars,
         maxChars: config.promptMaxChars,
         contextRatio: config.promptContextRatio,
@@ -668,7 +672,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
     }
     const promptLoop = makePromptLoop({
       followup: submitOffer,
-      maxRounds: () => config.promptMaxRounds,
+      // #505: override > config, resolved by the ONE predicate the verb and status share.
+      maxRounds: () => prompt.roundsCap().cap,
       // The host's cooperative brake: `GoalService.disarm` stops the driver re-injecting rounds and changes
       // NOTHING durable ("without changing durable goal phase or revision"), so the objective stays
       // authoritative while exactly one loop — the one the human armed last — starts the next turn.

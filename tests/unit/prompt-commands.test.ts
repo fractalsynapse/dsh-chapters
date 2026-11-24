@@ -30,7 +30,10 @@ function harness(prompt?: {
     artifactStoreRoot: '.dsh-chapters',
     harnessId: 'h',
     subagentAutoSave: false,
-    prompt: prompt as never,
+    // #505: the state block prints the LIVE rounds cap — stub surfaces get the shipped default
+    // (unlimited/config) unless a row overrides it. UNWIRED stays unwired: undefined must not
+    // become an object, or the plane's honest 'not wired' refusal turns into a TypeError.
+    prompt: prompt === undefined ? undefined : { roundsCap: () => ({ cap: 0, source: 'config' as const }), setRoundsCap: async () => undefined, ...prompt } as never,
   })
   const run = async (input: string, agent: unknown = {}) => await defs.get('chapters-prompt')!.handler({ agent, rawInput: input })
   return { defs, run, disposer }
