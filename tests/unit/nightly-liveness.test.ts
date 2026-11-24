@@ -24,17 +24,34 @@ test('#455: a 40h-old success is DEAD — named, with its hours', () => {
 test('#455: never-run is DEAD and says the schedule never fired', () => {
   const v = assessLiveness({ workflow_runs: [] }, NOW)
   assert.equal(v.ok, false)
-  assert.match(v.reason, /never completed/)
+  assert.match(v.reason, /never executed|never completed/)
 })
 
 test('#455: only-failures is DEAD — no success, however many runs', () => {
   const v = assessLiveness({ workflow_runs: [run({ conclusion: 'failure' }), run({ conclusion: 'cancelled' })] }, NOW)
   assert.equal(v.ok, false)
-  assert.match(v.reason, /no successful host-matrix run/)
+  assert.match(v.reason, /never executed|no completed run produced|never produced its report/)
 })
 
 test('#455: successes that were never scheduled are called out — registration, not luck', () => {
   const v = assessLiveness({ workflow_runs: [run({ event: 'workflow_dispatch', updated_at: '2026-11-18T20:00:00Z' })] }, NOW)
   assert.equal(v.ok, false)
   assert.match(v.reason, /never fired/)
+})
+
+test('#491: honest-red ledger with a produced report is ALIVE — version truths are not system deaths', () => {
+  const v = assessLiveness({ workflow_runs: [run({ conclusion: 'failure', reportJobOk: true })] }, NOW)
+  assert.equal(v.ok, true, v.reason)
+})
+
+test('#491: a run that completed but whose report stage never produced is DEAD — the pipeline is broken even when cells run', () => {
+  const v = assessLiveness({ workflow_runs: [run({ conclusion: 'failure', reportJobOk: false })] }, NOW)
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /report/)
+})
+
+test('#491: stale-but-honest is still stale — the truth does not buy immunity from the ceiling', () => {
+  const v = assessLiveness({ workflow_runs: [run({ conclusion: 'failure', reportJobOk: true, updated_at: '2026-11-18T20:00:00Z' })] }, NOW)
+  assert.equal(v.ok, false)
+  assert.match(v.reason, /h old \(ceiling 30h\)/)
 })
