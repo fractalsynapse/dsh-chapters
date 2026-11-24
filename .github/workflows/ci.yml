@@ -320,3 +320,7 @@ jobs:
           gh api 'repos/{owner}/{repo}/actions/workflows/host-matrix.yml/runs?per_page=20' > var/matrix-runs.json
       - run: node scripts/nightly-liveness.mjs --runs=var/matrix-runs.json
         if: github.event_name == 'schedule'
+        # #513: the script's job enrichment calls `gh api` — without this env every lookup fails
+        # into the catch, the heuristic fallback applies, and an honest-red ledger misreads DEAD.
+        env:
+          GH_TOKEN: ${{ github.token }}
