@@ -278,3 +278,19 @@ test('#497: the dock feeds the retry its debts and the projection — one sancti
     'the due-check consumes both truths')
   assert.ok(/import \{[^}]*firstPullRetryDue[^}]*\} from '\.\/prompt-bar\.ts'/s.test(dock), 'still ONE predicate, still in prompt-bar (#429 doctrine holds)')
 })
+
+// #502: the FOURTH door is a wiring fact — the mount pull is dead on seat hosts regardless of the
+// cell's hydration state. The maintainer's rule ("gone for good") only holds if no load path can
+// reach refresh() BEFORE the projection speaks, and seat presence is the one input that cannot
+// lose a race (static prop, first render, synchronous).
+test('#502: the mount tick sanctions no pull on projection-seat hosts; non-seat hosts keep #231 exactly', () => {
+  const dock = readFileSync(new URL('../../src/client/prompt-dock.ts', import.meta.url), 'utf8')
+  const dockCode = dock.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  assert.ok(dockCode.includes('if (opts?.mount === true && props.useProjection !== undefined) return'),
+    'seat presence (not cell data) gates the mount tick — capability is decided before any hydration race')
+  const gate = dockCode.indexOf('props.useProjection !== undefined) return')
+  const sanction = dockCode.indexOf('pullOwed.current = true')
+  assert.ok(gate < sanction && gate > 0 && sanction > 0, 'the seat gate sits BEFORE the sanction site — a skipped mount never owes, so the retry cannot resurrect it')
+  assert.ok(dockCode.includes('const mountDiscovery = opts?.mount === true && duePull()'),
+    '#231 preserved for non-seat hosts: the discovery decision still exists and still sanctions')
+})

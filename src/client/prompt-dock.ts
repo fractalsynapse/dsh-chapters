@@ -471,6 +471,14 @@ export function PromptDock(props: DockProps): ReactElement | null {
       // projection. A FORCED tick still runs: that is the staleness confirm firing because the
       // push did NOT arrive, and the pull is then the honest fallback, not waste.
       if (pushLiveRef.current && opts?.force !== true) return
+      // #502 (the fourth door): hosts that PUBLISH the projection seat have a mount truth channel —
+      // the fold rides the durable log, records and all, with no commands whatsoever. The 0.2.48
+      // cell latch covers a hydrated cell but LOSES the race: at first render the cell can still be
+      // undefined, and by the time it registers the mount tick has pulled. The SEAT is not race
+      // data — it is a static capability, decided synchronously at mount — so on any seat host the
+      // mount tick sanctions NO pull, cold profile included: session loads write nothing, full stop.
+      // Hosts without the seat (pre-projection rig worlds) keep the #231 discovery pull byte-for-byte.
+      if (opts?.mount === true && props.useProjection !== undefined) return
       // #208: not relevant, not visible — an unset-model plane spends nothing, ever.
       if (featureAbsent) return
       if (effectiveStatus() === 'off') {
