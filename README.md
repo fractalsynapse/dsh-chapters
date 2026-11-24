@@ -28,7 +28,7 @@ run that produced it, and which run that was is part of the record.
 
 <!-- versions:begin -->
 
-> Regenerated from the verdicts of the host-matrix GitHub Actions workflow on 2026-11-24 06:32 UTC — real test-suite legs per version with the whole hat family re-resolved. Verdicts from REAL runs, not compose probes.
+> Regenerated from the verdicts of the host-matrix GitHub Actions workflow on 2026-11-24 15:05 UTC — real test-suite legs per version with the whole hat family re-resolved. Verdicts from REAL runs, not compose probes.
 
 | DSH host version | Verdict | Real-leg results | Last run (UTC) |
 |---|---|---|---|

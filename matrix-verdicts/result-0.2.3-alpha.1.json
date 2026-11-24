@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 67850,
-      "detail": "pass 1552 / fail 0 / todo 1"
+      "ms": 66677,
+      "detail": "pass 1560 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 8231,
+      "ms": 7102,
       "detail": "pass 196 / fail 0 / todo 0"
     },
     {
       "leg": "compose",
       "ok": false,
-      "ms": 158406,
+      "ms": 153443,
       "detail": "fail-boot — the host binary from this tree never produced a reachable server"
     }
   ],
   "verdict": "fail",
-  "ts": "2026-11-24T06:27:15.973Z"
+  "ts": "2026-11-24T14:59:29.230Z"
 }
