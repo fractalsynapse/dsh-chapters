@@ -145,6 +145,9 @@
 #                                  # '' ⇒ the feature does not exist (zero calls,
 #                                  # zero surface); setting one IS the enable.
 #                                  # Runtime: /chapters-prompt model <p/m|clear>
+#   promptPushBirth: false         # #497: a session LOAD writes nothing — set true to restore the
+#                                  # #218 birth record (first-event push so the bar mounts pushed).
+#                                  # Default false is policy, not preference: see the pile-up in #482/#497.
 #   promptContextChars: 32000      # hard budget on the assembled input slice
 #                                  # (chapter summaries + screened live tail)
 #   promptMaxChars: 4096           # cap on the recommendation; over-cap ⇒ retry
