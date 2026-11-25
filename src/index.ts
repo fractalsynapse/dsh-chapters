@@ -43,6 +43,7 @@ import { buildRulesSection } from './rules.ts'
 import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } from './prompt.ts'
 import type { ModelsLlm } from './models-command.ts'
 import { makePromptLoop, suggestPromptMessage, SUGGESTED_ID_PREFIX } from './prompt-loop.ts'
+import { formatRetrievalSummary } from './retrieval-stats.ts'
 import { deliveredOffer, makePromptRoundRunner, reconcilePromptRow } from './prompt-runner.ts'
 import { makeReloadSelfCheckListener, type ReloadCheckDeps } from './reload-check.ts'
 import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, offerRecordIsRedundant, PROMPT_PROJECTION_KEY, type PushWriter, type PromptPushPayload } from './prompt-push.ts'
@@ -993,6 +994,7 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         lines.push(`  duplicate offer records suppressed: ${String(pushSuppressed)}`)
         lines.push(`  birth push at session load: ${config.promptPushBirth ? 'ON (per config)' : 'off — loads never write (#497)'}`)
       }
+          lines.push(formatRetrievalSummary()) // #531: the maintainer's question, answerable without log archaeology
           lines.push(`  turn/end door: ${String(promptBoundariesSighted)} boundary event(s) sighted this process across ${String(promptVerdictSighted.size)} session(s)`)
           lines.push(...engineProvenanceLines(store))
           lines.push(...arrivalFloorLines(store))

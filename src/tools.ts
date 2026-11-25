@@ -18,6 +18,7 @@ import { runRestoreHandler } from './restore.ts'
 import { makeRestoreCommand } from './restore-command.ts'
 import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
+import { bumpRetrieval } from './retrieval-stats.ts'
 import { candidateTotals, defersAtArchive, nextUnarchivedSeq, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
@@ -951,6 +952,7 @@ export function buildChaptersTools(
     async execute(args: { query: string; maxTokens?: number }, exec: ToolRunContext) {
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
+      bumpRetrieval(String((caller.session as { id?: string }).id ?? '?'), 'search') // #531: counted at the door itself
       const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
       // Typed once rather than spread from a conditional: the union of `{…} | {}` is
       // not spreadable under this tsconfig, and the alternative was casting blind.
@@ -1037,6 +1039,7 @@ export function buildChaptersTools(
     async execute(args: { path: string; action: string; query?: string; offset?: number; limit?: number; maxTokens?: number }, exec: ToolRunContext) {
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
+      bumpRetrieval(String((caller.session as { id?: string }).id ?? '?'), 'artifact') // #531
       const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
       const storeDir = resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters')
       let abs: string | null
@@ -1123,6 +1126,7 @@ export function buildChaptersTools(
     async execute(args: { query: string; scope?: string; maxTokens?: number }, exec: ToolRunContext) {
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
+      bumpRetrieval(String((caller.session as { id?: string }).id ?? '?'), 'rules') // #531
       if (config.harnessId === undefined || config.coreRulesBudgetTokens === undefined) {
         return { ok: false as const, error: 'rules surface not configured (harnessId/budget absent)' }
       }
