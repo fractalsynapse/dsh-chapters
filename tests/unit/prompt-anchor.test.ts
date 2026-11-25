@@ -158,3 +158,29 @@ test('#362: preset.ts stays out of the manifest, and the reason is policed', asy
   assert.equal(personaish, null,
     `src/preset.ts gained persona text (${personaish?.[0]}) — the manifest removal in #362 must be reverted`)
 })
+
+// #540: the anchor measures the TEXT A MODEL SEES — no more (a human-menu string that moves the
+// digest teaches people to route around the guard, #362's own words), no less (bytes that vanish
+// from the scan are the quiet escape, #526's lesson).
+test('#540: human command-plane bytes are anchor-blind; model tool bytes are not', async () => {
+  const { PROMPT_SURFACE, extractTokens } = await import('../../scripts/prompt-anchor.mjs')
+  assert.equal(PROMPT_SURFACE.includes('src/commands.ts'), false,
+    'commands.ts is the human menu plane (contract: human command text is not model-visible) — it left the manifest in #540')
+  const cmds = fs.readFileSync('src/commands.ts', 'utf8')
+  // tripwire: if this file ever registers a TOOL, its literals ARE model-facing and it returns.
+  assert.equal(/ctx\.tools\.register|jsonOutput\(/.test(cmds), false,
+    'src/commands.ts now registers tools — #540 removal must be reverted')
+  // hint/description EDITS of commands are the docs-truth edits the old rule punished: they must not move anything
+  const tools = fs.readFileSync('src/tools.ts', 'utf8')
+  const t0 = extractTokens('src/tools.ts', tools)
+  const door = extractTokens('src/tools.ts', tools.replace(
+    "input: { hint: '[messageSeq] [title]' },", "input: { hint: 'CHANGED by a hint-truth fix' },"))
+  assert.deepEqual(door, t0, 'a DOOR hint edit is human plane — it must not move the anchor')
+  const toolDesc = extractTokens('src/tools.ts', tools.replace(/description: '([^'\n]{20,})'/, "description: 'ZZZ model-visible rewrite ZZZ'"))
+  assert.notDeepEqual(toolDesc, t0, 'a TOOL description is model-visible — it MUST move the anchor')
+  // the command OBJECTS are stripped whole: a repair/save description edit changes nothing scanned
+  const saveDesc = extractTokens('src/tools.ts', tools.replace(
+    "description: 'Save completed turns as searchable chapters without creating a new session.",
+    "description: 'CHANGED save menu text — human plane only."))
+  assert.deepEqual(saveDesc, t0, 'the /chapters-save description is menu text, not model text')
+})

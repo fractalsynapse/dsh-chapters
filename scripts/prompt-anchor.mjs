@@ -19,10 +19,24 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** The files whose bytes reach the model. Adding a file here is a deliberate act: it becomes part of every anchor. */
+/**
+ * #540: `src/commands.ts` REMOVED from the manifest. The anchor's premise (#156) is "the TEXT A
+ * MODEL SEES", and this file is the human menu plane: its descriptions and hints render in the
+ * slash list, and command text is measured NOT model-visible (docs/contract.md: "human command
+ * text is not model-visible"; command output never enters the model context, §7.2). Hashing them
+ * made doc-truth edits — correcting a hint to match its own handler! — declare the whole corpus
+ * stale for bytes no request ever carried: #362's "measures more than the model sees" failure in
+ * a new costume. A tripwire row pins that no tool-registration literal enters this file; if one
+ * ever does, the file comes back.
+ *
+ * #540 part 2: within src/tools.ts, the COMMAND-shape blocks (objects carrying `input: { hint:`
+ * — the door commands /chapters-fork, /chapters-continue, /chapters-save, /chapters-repair) are
+ * filtered out; the chapters_* TOOL blocks (no hint key) stay. Tool descriptions are model bytes;
+ * door descriptions are the same human menu plane as commands.ts.
+ */
 export const PROMPT_SURFACE = [
   'cordis.patch.yml',
   'src/tools.ts',
-  'src/commands.ts',
 ]
 
 /**
@@ -97,8 +111,35 @@ export function yamlScalars(text) {
  * file through the same literal rule. (#362: `src/preset.ts` used to be "taken in full" on the claim
  * that it is the persona file. It is not — see the manifest note above.)
  */
+/**
+ * #540: strip the HUMAN command objects from a TS file before literal extraction. A command object
+ * is identifiable structurally — it carries `input: { hint:`; tool objects carry parameter schemas and
+ * an output schema instead. The strip spans from the `name:` line of each such object through the end
+ * of its `input:` line; descriptions inside are menu text, not model text.
+ */
+export function withoutCommandBlocks(text) {
+  const lines = text.split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /\bname: '(chapters-[a-z-]+)'/.exec(lines[i])
+    if (m !== null) {
+      // look ahead (the object header, within a few lines) for the command shape marker
+      const head = lines.slice(i, i + 6).join('\n')
+      if (/input:\s*\{\s*hint:/.test(head)) {
+        let j = i
+        while (j < lines.length && !/input:\s*\{\s*hint:/.test(lines[j])) j += 1
+        i = j // skip the name/description/hint header lines of the human command object
+        continue
+      }
+    }
+    out.push(lines[i])
+  }
+  return out.join('\n')
+}
+
 export function extractTokens(path, text) {
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return yamlScalars(text)
+  if (path === 'src/tools.ts') return tsStringLiterals(withoutCommandBlocks(text))
   return tsStringLiterals(text)
 }
 
