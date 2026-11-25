@@ -42,7 +42,7 @@ import { carryActivePlan, detectPlans } from './plans.ts'
 import { buildRulesSection } from './rules.ts'
 import { createPromptSurface, promptChaptersForLineage, PROMPT_SETTING_KEY } from './prompt.ts'
 import type { ModelsLlm } from './models-command.ts'
-import { makePromptLoop, suggestPromptMessage } from './prompt-loop.ts'
+import { makePromptLoop, suggestPromptMessage, SUGGESTED_ID_PREFIX } from './prompt-loop.ts'
 import { deliveredOffer, makePromptRoundRunner, reconcilePromptRow } from './prompt-runner.ts'
 import { makeReloadSelfCheckListener, type ReloadCheckDeps } from './reload-check.ts'
 import { resolvePushWriter, promptProjectionDefinition, promptRecordPayload, offerRecordIsRedundant, PROMPT_PROJECTION_KEY, type PushWriter, type PromptPushPayload } from './prompt-push.ts'
@@ -1151,7 +1151,11 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         // first turn/end; doomed shapes announce themselves NOW (stderr + registry fact) instead
         // of ambushing a restart. The factory owns all its failure; see src/reload-check.ts.
         reloadSelfCheck(session as { id?: string; snapshotEvents?: () => readonly import('./reload-check.ts').ReloadEvent[] }, event as { type?: string })
-        if (event?.type === 'user/message' && event.data?.source?.kind === 'user') promptBar.disarmHuman(session.id, session)
+        // #532: "a human took the wheel" must mean a HUMAN typed — since #522 the loop's OWN fired
+        // prompts are user-kind user/messages, and without this exclusion autorun disarmed itself
+        // after its first fire. The id prefix is the producer identity; humans never mint it.
+        if (event?.type === 'user/message' && event.data?.source?.kind === 'user'
+          && !String((event.data as { id?: unknown })?.id ?? '').startsWith(SUGGESTED_ID_PREFIX)) promptBar.disarmHuman(session.id, session)
         // Sighted, not assumed. Whether this listener is invoked at all is the question that has been
         // unanswered for a day, and `ctx.logger` answers it only inside a home the rig deletes. stderr is
         // captured by the boot's server log, so the answer survives the leg (#61).

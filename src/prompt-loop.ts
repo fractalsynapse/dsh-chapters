@@ -191,13 +191,19 @@ export function makePromptLoop(deps: PromptLoopDeps): PromptLoop {
  * gate against the kernel's own rules is the point of the call, not a formality.
  */
 export const AUTO_PREFIX = '[auto] '
+// #532: the fired prompt's producer identity, exported because the HUMAN-TYPED listener must be
+// able to tell our own user-lane messages apart from a human taking the wheel. Humans never mint
+// this prefix; #522 moved the kind to 'user' for visibility, and this constant is what keeps the
+// authority semantics honest: visible as conversation, invisible as authorization.
+export const SUGGESTED_ID_PREFIX = 'suggested-'
+
 export function suggestPromptMessage(text: string, id: string): Record<string, unknown> {
   // The marker is applied HERE and only here: the offer text stays clean in the bar, the records,
   // and dedup — the timeline is the only surface that learns it was machine-authored. Idempotent:
   // a row that somehow carries the marker already never doubles it.
   const marked = text.startsWith(AUTO_PREFIX) ? text : `${AUTO_PREFIX}${text}`
   const data = {
-    id: `suggested-${id}`,
+    id: `${SUGGESTED_ID_PREFIX}${id}`,
     role: 'user',
     source: { kind: 'user' },
     content: [{ type: 'text', text: marked }],
