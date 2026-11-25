@@ -214,6 +214,33 @@ function flattenRowSpecs(rows: PresetRow[]): string[] {
   return out
 }
 
+/** Version-dependent rows the STATIC composition must never carry (#526): the host loads static
+ *  specifiers before our code runs, so rows whose subpath some host versions retire are appended
+ *  here — gated on `activatable`, the same host-exports predicate that prunes. Insertion is
+ *  positional (after the anchor row, inside its group) so the delegation group's isolate context
+ *  applies exactly as it did when the row was static. Idempotent: an already-present id is left. */
+export const VERSIONED_ROWS: Array<{ group: string; after: string; row: PresetRow }> = [
+  {
+    group: 'delegation',
+    after: 'tool-subagent-control',
+    row: { id: 'tool-subagent-list-agents', name: '@deepseek-ai/dsh-tool-subagent-control/list-agents' },
+  },
+]
+
+export function ensureVersionedRows(rows: PresetRow[], activatable: (specifier: string) => boolean): PresetRow[] {
+  const out: PresetRow[] = rows.map((r) => ({ ...r }))
+  for (const v of VERSIONED_ROWS) {
+    const g = out.find((r) => r.id === v.group && r.group === true && Array.isArray(r.config))
+    if (g === undefined || !Array.isArray(g.config)) continue
+    const children = g.config as PresetRow[]
+    if (children.some((c) => c.id === v.row.id)) continue // idempotent
+    if (!activatable(v.row.name)) continue // the host's own exports map answers; we only obey
+    const at = children.findIndex((c) => c.id === v.after)
+    children.splice(at < 0 ? children.length : at + 1, 0, { ...v.row })
+  }
+  return out
+}
+
 export function pruneUnresolvableRows(
   rows: PresetRow[],
   resolvable: (specifier: string) => boolean,
@@ -408,10 +435,16 @@ export default class ChaptersPresetRow {
   /** Registers, then yields the disposer so Cordis owns the registration's lifetime — the
    *  host's own row plugin does exactly this (`yield await this.ctx.agentPresets.register(…)`). */
   async *[Service.init](): AsyncGenerator<() => Promise<void>, void> {
-    const { outcome, disposer } = await registerPrunedPreset(this.ctx.agentPresets, this.config,
+    const hostResolver = makeHostAwareResolver(this.config.plugins, {
       // #437 — the keep/drop decision is asked of the HOST's tree when it can be probed; the
       // plugin lineage stays the fallback for entries whose tree a disk check cannot read.
-      makeHostAwareResolver(this.config.plugins, { pluginResolvable: resolvableFromThisPackage }))
+      pluginResolvable: resolvableFromThisPackage,
+    })
+    // #526: version-dependent rows join the composition HERE — predicate-gated, so a host that
+    // retired the subpath never sees the specifier at load time, and a host that ships it gets
+    // the tool. The static patch no longer carries either outcome's risk.
+    this.config.plugins = ensureVersionedRows(this.config.plugins, hostResolver)
+    const { outcome, disposer } = await registerPrunedPreset(this.ctx.agentPresets, this.config, hostResolver)
     const log = (message: string, warn: boolean): void => {
       // `ctx.logger` alone is invisible to a headless `dsh web` (r19), so the loud arms go
       // to stderr as well — a health line nobody reads is how the silent case survived.

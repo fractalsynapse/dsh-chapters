@@ -54,7 +54,7 @@ import { createRequire } from 'node:module'
 import { readRosterVerdict, rosterRemediation, reportPresetRoster, describeMountedRows } from '../../src/index.ts'
 import {
   CHAPTERS_PRESET_ID, pruneUnresolvableRows, registerPrunedPreset, resolvableFromThisPackage,
-  inventoryEntry, unusableRows, makeHostAwareResolver, hostNodeModulesRoot,
+  inventoryEntry, unusableRows, makeHostAwareResolver, hostNodeModulesRoot, ensureVersionedRows,
   type PresetDefinition, type PresetRow, type PresetRegistryLike,
 } from '../../src/preset.ts'
 import { extractPlot } from '../../src/engine-core.ts'
@@ -125,7 +125,13 @@ function blockOf(id: string, lines = rowLines()): string[] {
  * alpha standard list) and `dsh-tool-ralph` (row dropped from the alpha.2 list, package still
  * published through alpha.4).
  */
-const KNOWN_OPTIONAL = new Set(['@deepseek-ai/dsh-tool-schedule'])
+const KNOWN_OPTIONAL = new Set([
+  '@deepseek-ai/dsh-tool-schedule',
+  // #526: appended at runtime by ensureVersionedRows when the host's exports map carries the
+  // subpath; absent from the STATIC list by design — the host-standard list still has it, and
+  // that difference is now the declared delta, not a silent loss.
+  '@deepseek-ai/dsh-tool-subagent-control/list-agents',
+])
 
 test('RUN — the bundle ships the preset as a visible declaration row', () => {
   const lines = significantLines(PATCH)
@@ -640,4 +646,29 @@ test('the realm bounds the pressure headroom and the engine schema carries it (#
   const policy = engine.slice(engine.indexOf('modelPolicies: z.array(z.object({'))
   assert.match(policy.slice(0, 1200), /headroomTokens:\s*z\.number\(\)/,
     'per-model policies must carry it too — a narrow child schema strips what super would honour')
+})
+
+// #526: version-dependent rows must not sit in the STATIC composition — the host loads static
+// specifiers before any chapters code runs, so one retired subpath (0.2.2-rc.5's removal of
+// ./list-agents) marks the whole preset BROKEN. The dynamic append is now the only route, and
+// these rows pin both halves: the patch stays clean, the append behaves.
+test('#526: cordis.patch.yml no longer statically declares the list-agents subpath row', () => {
+  const patch = readFileSync(PATCH, 'utf8')
+  assert.ok(!/- id: tool-subagent-list-agents/.test(patch), 'the static row is retired — if this fails, someone re-added the landmine')
+  assert.ok(patch.includes('#526'), 'and the WHY stays in the patch, not just the diff')
+})
+
+test('#526: ensureVersionedRows appends after the anchor when the host exports the subpath, and not when it retired it', () => {
+  const group = (children: PresetRow[]): PresetRow[] => [{ id: 'delegation', name: 'cordis:group', group: true, isolate: { workflowEngine: true }, config: children }]
+  const base = group([{ id: 'tool-subagent-control', name: '@deepseek-ai/dsh-tool-subagent-control' }])
+  const yes = ensureVersionedRows(base, () => true)
+  const kids = (yes[0]!.config as PresetRow[])
+  assert.equal(kids.length, 2, 'appended when activatable')
+  assert.equal(kids[1]!.id, 'tool-subagent-list-agents', 'positioned after its anchor, inside the group (isolate context preserved)')
+  const no = ensureVersionedRows(group([{ id: 'tool-subagent-control', name: '@deepseek-ai/dsh-tool-subagent-control' }]), () => false)
+  assert.equal((no[0]!.config as PresetRow[]).length, 1, 'a retired subpath never enters the composition — the host never sees the specifier')
+  const twice = ensureVersionedRows(yes, () => true)
+  assert.equal((twice[0]!.config as PresetRow[]).length, 2, 'idempotent')
+  const noGroup = ensureVersionedRows([{ id: 'other', name: 'x' }], () => true)
+  assert.equal(noGroup.length, 1, 'missing group is a no-op, not a crash')
 })
