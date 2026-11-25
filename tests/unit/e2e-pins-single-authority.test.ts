@@ -162,7 +162,10 @@ test('the acceptance gate is BLOCKING — no ci.yml job may be advisory (#92 res
   const ci = fs.readFileSync(path.join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8')
   const advisory = ci.split('\n').filter((l) => /continue-on-error:\s*true/.test(l))
   assert.equal(advisory.length, 0, `no job may be advisory without amending this row and citing the issue that authorizes it; found ${String(advisory.length)}: ${JSON.stringify(advisory)}`)
-  assert.match(ci, /name: acceptance — ten tape-replay legs/, 'the acceptance job must EXIST to be blocking — deleting it is not restoring the gate')
+  // #528 corrected the label to the truth (chain-replay orders TWELVE legs; 'ten'/'nine' were stale
+  // counts of its own). The name is matched looser now — the gate's POINT is that the job EXISTS and
+  // stays blocking, not its wording; the leg count is pinned by 'the e2e chain covers every leg'.
+  assert.match(ci, /name: acceptance — tape-replay legs/, 'the acceptance job must EXIST to be blocking — deleting it is not restoring the gate')
   assert.match(ci, /issues\/92/, 'the restoration comment cites the decision it completes')
 })
 
