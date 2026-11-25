@@ -55,3 +55,38 @@ test('#491: stale-but-honest is still stale — the truth does not buy immunity 
   assert.equal(v.ok, false)
   assert.match(v.reason, /h old \(ceiling 30h\)/)
 })
+
+// #511/#513: the CLI's own eyes — bare flags parse, and failed enrichment declares itself.
+import { spawnSync } from 'node:child_process'
+import fsTmp from 'node:fs'
+import osTmp from 'node:os'
+import pathTmp from 'node:path'
+import urlTmp from 'node:url'
+
+const scriptPath = urlTmp.fileURLToPath(new URL('../../scripts/nightly-liveness.mjs', import.meta.url))
+const failOnlyPayload = () => {
+  const dir = fsTmp.mkdtempSync(pathTmp.join(osTmp.tmpdir(), 'nl-'))
+  const f = pathTmp.join(dir, 'runs.json')
+  fsTmp.writeFileSync(f, JSON.stringify({
+    workflow_runs: [{ id: 1, event: 'schedule', status: 'completed', conclusion: 'failure', updated_at: new Date().toISOString() }],
+  }))
+  return f
+}
+
+test('#513: with gh-failing enrichment the heuristic verdict still prints AND the blindness is named', () => {
+  const f = failOnlyPayload()
+  const r = spawnSync(process.execPath, [scriptPath, `--runs=${f}`], {
+    encoding: 'utf8', env: { ...process.env, PATH: '/nonexistent' }, timeout: 60_000,
+  })
+  assert.match(r.stdout + r.stderr, /DEAD/, 'heuristic: no verified-successful run reads DEAD (never a false ALIVE)')
+  assert.match(r.stderr, /job lookups failed/, 'but the run says it could NOT verify the report stage (#513)')
+}, 90_000)
+
+test('#511: the BARE --no-enrich flag the usage documents actually disables enrichment', () => {
+  const f = failOnlyPayload()
+  const r = spawnSync(process.execPath, [scriptPath, `--runs=${f}`, '--no-enrich'], {
+    encoding: 'utf8', timeout: 60_000,
+  })
+  assert.match(r.stdout + r.stderr, /DEAD/)
+  assert.ok(!r.stderr.includes('job lookups failed'), 'no enrichment attempted ⇒ no blindness note — the flag was honored')
+}, 90_000)
