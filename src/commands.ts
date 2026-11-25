@@ -293,8 +293,8 @@ export function registerHostCommands(
 
   const statusCommand = {
     name: 'chapters-status',
-    description: 'Show the knowledge-repo mirror status for this project.',
-    input: { hint: '[prints project, remote, and last sync result]' },
+    description: 'The project\u2019s whole health surface: version and loaded copy, upstream/mirror/sync, identity, enrichment, prompt plane, retrieval counters, diagnostics, auto-save, findings, removals.',
+    input: { hint: '(no arguments \u2014 prints every block; unlinked projects still print health)' },
     async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
       const cwd = cwdOf(invocation.agent)
       const project = projectForCwd(domain.table('projects').entries(), cwd)
@@ -404,7 +404,7 @@ export function registerHostCommands(
   const enrichCommand = {
     name: 'chapters-enrich',
     description: 'P2 chapter enrichment (record \u00A76): run a batch now, set the model, or report pending work.',
-    input: { hint: 'run | model <provider/model | clear> | report' },
+    input: { hint: 'run | model [<provider/model> | clear] | report' },
     async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
       if (config.enrich === undefined) return { kind: 'error', text: 'enrichment is not wired on this plane' }
       const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((p) => p.length > 0)
@@ -426,7 +426,7 @@ export function registerHostCommands(
         if (verb === 'report') {
           return { kind: 'success', text: `${config.enrich.statusLine()}\npending: ${await config.enrich.pendingCount()} chapter(s)` }
         }
-        return { kind: 'success', text: 'usage: /chapters-enrich run | model <provider/model | clear> | report' }
+        return { kind: 'success', text: 'usage: /chapters-enrich run | model [<provider/model> | clear] | report' }
       } catch (error) {
         return { kind: 'error', text: `chapters-enrich failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
       }
@@ -477,8 +477,12 @@ export function registerHostCommands(
 
   const promptCommand = {
     name: 'chapters-prompt',
-    description: 'Prompt recommendations (#71, site \u00A728): set the defining model, turn the composer ghost off, or answer the client\u2019s pull.',
-    input: { hint: 'model [provider/model | clear] | off | suggest' },
+    description: 'Prompt recommendations (#71, site \u00A728): the composer bar and its autorun loop \u2014 model, on/off, state, run, rounds.',
+    // #540: the hint is what the harness shows WHILE TYPING — it must name every verb the handler
+    // parses, or the affordance lies by omission (maintainer: "missing command options on some
+    // commands over time"). This list mirrors the handler's parsed verbs exactly; a unit row pins
+    // the correspondence so a future verb cannot ship without its hint.
+    input: { hint: 'model [<provider/model> [maxChars [contextChars]] | clear] | on | off | off-session | state | run | suggest | autorun on|off | rounds [n | unlimited | show | clear]' },
     async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
       if (config.prompt === undefined) return { kind: 'error', text: 'prompt recommendations are not wired on this plane' }
       const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((p) => p.length > 0)
@@ -740,7 +744,7 @@ export function registerHostCommands(
           }
           return { kind: 'error', text: `chapters-prompt: ${r.text}\n  model: ${spec !== '' ? spec : 'unset'} (${source})` }
         }
-        return { kind: 'success', text: 'usage: /chapters-prompt model [provider/model | clear] | off | suggest | autorun on|off | rounds [n | unlimited | show] | state' }
+        return { kind: 'success', text: 'usage: /chapters-prompt model [<provider/model> [maxChars [contextChars]] | clear] | on | off | off-session | state | run | suggest | autorun on|off | rounds [n | unlimited | show | clear]' }
       } catch (error) {
         return { kind: 'error', text: `chapters-prompt failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
       }
@@ -975,7 +979,7 @@ export function registerHostCommands(
       const rulesCommandDef = {
         name: 'chapters-rule',
         description: 'Rules (record \u00A77): project tier propose/approve/revoke per machine; session tier review, pin, conflict report.',
-        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts | model <provider/model | clear>' },
+        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts | model [<provider/model> | clear]' },
         async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
           // the session id reaches the resolver because the SESSION tier activates
           // by ancestry (§7.5): `active` cannot answer without knowing which tree

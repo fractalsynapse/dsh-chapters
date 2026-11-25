@@ -145,7 +145,7 @@ test('unwired plane: every verb refuses with its reason; usage prints for unknow
     assert.match(r.text!, /not wired on this plane/)
   }
   const wired = harness({ effective: () => ({ spec: '', source: 'unset' }), statusLine: () => 'x' })
-  assert.match((await wired.run('wat')).text!, /usage: \/chapters-prompt model \[provider\/model \| clear\] \| off \| suggest/)
+  assert.match((await wired.run('wat')).text!, /usage: \/chapters-prompt model \[<provider\/model>.*\| off \| off-session \| state \| run \| suggest \| autorun.*rounds/)
 })
 
 test('/chapters-status prints the prompt state, wired or not — never omits the line', async () => {
@@ -164,7 +164,9 @@ test('the prompt command ships a hint the composer can render', async () => {
   const registered = (h.defs.get('chapters-prompt') as unknown as { name: string; description: string; input: { hint: string } })
   assert.equal(registered.name, 'chapters-prompt')
   assert.match(registered.description, /Prompt recommendations \(#71, site §28\)/)
-  assert.equal(registered.input.hint, 'model [provider/model | clear] | off | suggest')
+  // #540: the hint row used to pin the STALE three-verb list — the full verb set (and the rule
+  // that hints and handlers cannot drift) is policed by tests/unit/command-hint-truth.test.ts.
+  assert.match(registered.input.hint, /model .* on \| off \| off-session \| state \| run \| suggest \| autorun .* rounds/)
 })
 
 /**

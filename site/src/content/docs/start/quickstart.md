@@ -6,7 +6,10 @@ lastUpdated: true
 
 ## Three steps
 
-**1. Install the plugin** (DeepSeek Harness ≥ 0.1.5-rc.x, Node ≥ 24). A harness profile is a directory
+**1. Install the plugin.** Requires DeepSeek Harness (`@deepseek-ai/dsh`) **≥ 0.2.0** — the floor the
+maintainer set in #446; the 0.1.\* line is deprecated, because below 0.2.0 a host cannot register the
+preset declaration rows the doors mount on (§19 says what you'll see there), and Node ≥ 24. A harness
+profile is a directory
 with its own `package.json` and `node_modules` (`~/.dsh/profiles/<profile>/`), so the plain npm install is
 the path this project documents and uses:
 

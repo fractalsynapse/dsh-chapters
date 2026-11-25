@@ -283,9 +283,9 @@ test('#497: the dock feeds the retry its debts and the projection — one sancti
 // These rows pin the ADVERTISEMENT of both verbs to the code that implements them.
 test('#505+#506: the caps and the rules model are discoverable exactly where an operator looks', () => {
   const cmds = readFileSync(new URL('../../src/commands.ts', import.meta.url), 'utf8')
-  assert.match(cmds, /conflicts \| model <provider\/model \| clear>/, 'the chapters-rule hint names its model verb (#506 — it worked all along and told no one)')
+  assert.match(cmds, /conflicts \| model \[<provider\/model> \| clear\]/, 'the chapters-rule hint names its model verb (#506; #540: brackets, because bare `model` SHOWS the route)')
   assert.match(cmds, /verb === 'rounds'/, 'the rounds verb exists as code (#505)')
-  assert.match(cmds, /rounds \[n \| unlimited \| show\]/, 'the usage line lists it')
+  assert.match(cmds, /rounds \[n \| unlimited \| show \| clear\]/, 'the usage line lists it (#540: with its clear arm)')
   assert.match(cmds, /`  rounds: /, 'the state block prints the LIVE cap with its source')
   const loop = readFileSync(new URL('../../src/prompt-loop.ts', import.meta.url), 'utf8')
   assert.match(loop, /cap > 0 && s\.fired >= cap/, 'unlimited is honored in the fire path, not just in the default')

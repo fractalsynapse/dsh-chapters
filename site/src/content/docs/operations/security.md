@@ -17,7 +17,7 @@ The plugin has no network of its own: it writes files (workspace store, mirror c
 
 - **The log is append-only** — no tool path rewrites or deletes durable history; compaction *shadows* in the rendered surface and the shadowed spans are archived verbatim with coverage checked per span.
 - **Write-once everywhere it matters** — chapters are never edited (the body-hash guard makes the enrichment metadata regions the only sanctioned mutation, with provenance chains), rules are never edited, artifacts are content-addressed.
-- **Supply chain**: published versions (0.1.1 onward) are provenance-attested via OIDC trusted publishing (no long-lived npm tokens exist in the pipeline), and `npm audit signatures` verifies any install.
+- **Supply chain**: every CI-published version (0.1.1 onward) carries an **npm provenance attestation** signed from the run's OIDC identity — publish auth is an npm org token held in the `Production` environment since #261 (before it: OIDC trusted publishing); **no long-lived token is ever stored in the repo**. The ledger's stated exceptions stay true: a repeat-provenance 409 forces one documented republish-without-attestation path behind a loud run warning, and the manual 0.2.20 predates the tarball-verify gate. `npm audit signatures` verifies any install.
 
 ## If your sessions contain sensitive text
 
