@@ -94,15 +94,39 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         }
         lastBatch = done
         if (done > 0) deps.log(`enrichment batch: ${done}/${pending.length} chapter(s) via ${model}`)
+        // #529: a full batch means the cap clipped the backlog — chase. A partial batch means
+        // the queue is empty — nothing to schedule. The honest read of pending.length vs done,
+        // not an estimate, because this is the last place the real numbers exist.
+        if (done > 0 && pending.length >= deps.batchCap) scheduleChase()
         return done
       } catch (error) {
         deps.log(`enrichment drain failed (kept silent for the user): ${String(error)}`)
+        stopChase() // #529: a chase against a failing model would hammer it — stop, let the next event restart
         return 0
       } finally {
         draining = null
       }
     })()
     return draining
+  }
+
+  // #529: BACKLOG CHASE. A drain that leaves pending work schedules its own follow-up, at a
+  // fixed modest spacing, until the queue is empty. The maintainer's directive: enrichment runs
+  // on ALL non-enriched chapters whenever a new chapter is created, directly after, if a model
+  // is set — and the measured defect was that busy self-driving sessions NEVER idle, so the
+  // idle sweeper starved the backlog for hours. batchCap stays per pass (memory discipline
+  // unchanged); only the WAITING changes. Failure paths stop the chase (the batchCap-less loop
+  // against a broken model would hammer it); dispose cancels it; nothing here outlives the realm.
+  let chaseTimer: { cancel: () => void } | null = null
+  const CHASE_SPACING_MS = 5_000
+  const stopChase = (): void => { chaseTimer?.cancel(); chaseTimer = null }
+  const scheduleChase = (): void => {
+    if (!deps.enabled || deps.trigger === 'manual') return
+    stopChase()
+    chaseTimer = setTimer(() => {
+      chaseTimer = null
+      void drain().then((done) => { if (done > 0) scheduleChase() })
+    }, CHASE_SPACING_MS)
   }
 
   return {
@@ -131,6 +155,6 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
       lastBatch,
       model: modelCache,
     }),
-    dispose: () => { idleTimer?.cancel(); idleTimer = null },
+    dispose: () => { idleTimer?.cancel(); idleTimer = null; stopChase() },
   }
 }

@@ -2,6 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createEnrichQueue, type EnrichQueueDeps } from '../../src/enrich-queue.ts'
 
+/** #456 ratchet: deterministic yielding WITHOUT timers — the fake-timer harness path resolves on
+ * microtasks alone, so N awaits of a resolved promise is a complete, sleep-free observation. */
+async function flush(n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) await Promise.resolve()
+}
+
 function harness(over: Partial<EnrichQueueDeps> = {}) {
   const calls: string[] = []
   let pending = ['c1', 'c2', 'c3']
@@ -81,4 +87,49 @@ test('a throwing enrichOne... queue survives (enrichOne must not throw, but defe
   await q.drainNow()
   assert.equal(q.state().lastBatch, 0, 'failure reported zero processed, no crash')
   q.dispose()
+})
+
+// #529: backlog chase — a full batch schedules its follow-up until the queue is empty; failure
+// stops the chase; dispose stops the chase. Busy sessions never idle; the backlog must not wait
+// for silence it will never see (measured: a model change left pending chapters for HOURS).
+test('#529: afterPush drains the WHOLE backlog in capped passes, chasing itself between them', async () => {
+  let chase: (() => void) | null = null
+  let backlog = ['c1', 'c2', 'c3', 'c4']
+  const { q } = harness({
+    batchCap: 1,
+    listPending: async (m: string, cap: number) => {
+      void m
+      const take = backlog.slice(0, cap)
+      backlog = backlog.slice(cap)
+      return take.map((k) => ({ key: k, label: k }))
+    },
+    setTimer: (fn: () => void) => { chase = fn; return { cancel: () => { chase = null } } },
+  })
+  q.onSyncDone('test') // void-drain by design — the seam does NOT return the pass
+  // #456 ratchet honored: NO bare sleeps. The harness path is pure promises (resolveModel,
+  // listPending, enrichOne — no timers), so deterministic microtask flushes observe each pass.
+  await flush(12)
+  assert.equal(backlog.length, 3, 'first capped pass took one')
+  assert.equal(typeof chase, 'function', '#529: a full batch left work — the chase is scheduled, not optional')
+  // The timer callback fires its drain WITHOUT awaiting (fire-and-forget by design — a realm
+  // timer must not hold a promise), so the pump settles-and-polls like the runtime does.
+  let guard = 0
+  while (guard < 40 && backlog.length > 0) {
+    guard += 1
+    if (chase !== null) { const run = chase; chase = null; run() }
+    await flush(12)
+  }
+  assert.equal(backlog.length, 0, 'chased to empty without any idle event')
+  assert.ok(guard < 40, 'the chase terminated by itself')
+})
+
+test('#529: a failing drain stops the chase — the loop never hammers a broken model', async () => {
+  let chase: (() => void) | null = null
+  const { q } = harness({
+    batchCap: 1,
+    listPending: async () => { throw new Error('model down') },
+    setTimer: (fn: () => void) => { chase = fn; return { cancel: () => { chase = null } } },
+  })
+  await q.onSyncDone('test')
+  assert.equal(chase, null, 'failure ⇒ no follow-up scheduled')
 })
