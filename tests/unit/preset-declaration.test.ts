@@ -672,3 +672,28 @@ test('#526: ensureVersionedRows appends after the anchor when the host exports t
   const noGroup = ensureVersionedRows([{ id: 'other', name: 'x' }], () => true)
   assert.equal(noGroup.length, 1, 'missing group is a no-op, not a crash')
 })
+
+// #537: platform eligibility lives in code, not in YAML-executed JS. Rows: the drop-and-name
+// behavior on both platforms, and the drift guard that the patch never regrows a !!js VALUE.
+test('#537: pruneUnresolvableRows drops the wrong-platform shell tool and NAMES the reason', () => {
+  const rows = [
+    { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash' },
+    { id: 'tool-pwsh', name: '@deepseek-ai/dsh-tool-pwsh' },
+    { id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
+  ]
+  const posix = pruneUnresolvableRows(rows as never, () => true, 'linux')
+  assert.deepEqual(posix.kept.map((r: { id: string }) => r.id), ['tool-bash', 'tool-fs'])
+  assert.deepEqual(posix.dropped, ['tool-pwsh (platform linux)'])
+  const win = pruneUnresolvableRows(rows as never, () => true, 'win32')
+  assert.deepEqual(win.kept.map((r: { id: string }) => r.id), ['tool-pwsh', 'tool-fs'])
+  assert.deepEqual(win.dropped, ['tool-bash (platform win32)'])
+})
+
+test('#537: cordis.patch.yml carries NO !!js in any value position — the tag may exist only in prose', () => {
+  const patch = readFileSync(new URL('../../cordis.patch.yml', import.meta.url), 'utf8')
+  for (const line of patch.split('\n')) {
+    if (line.includes('!!js')) {
+      assert.match(line, /^\s*#/, `!!js must be comment-only, found in: ${line.slice(0, 80)}`)
+    }
+  }
+})

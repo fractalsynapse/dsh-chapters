@@ -241,12 +241,32 @@ export function ensureVersionedRows(rows: PresetRow[], activatable: (specifier: 
   return out
 }
 
+/**
+ * #537: platform-conditional rows, decided IN CODE. The maintainer's ruling on `!!js` in YAML:
+ * "I don't like the idea of Javascript in YAML" — and the cost was measured the same day: the
+ * patch file became unparseable by standard YAML tooling (PyYAML refused the tag), and config
+ * load executed expressions. These two rows are the entire historical use; they now ride the
+ * SAME drop-and-name path as import-unresolvable rows, with the reason stated the same way.
+ */
+export const PLATFORM_ELIGIBLE: Record<string, (platform: string) => boolean> = {
+  'tool-bash': (p) => p !== 'win32', // bash is not guaranteed on Windows
+  'tool-pwsh': (p) => p === 'win32', // PowerShell is the Windows shell
+}
+
 export function pruneUnresolvableRows(
   rows: PresetRow[],
   resolvable: (specifier: string) => boolean,
+  /** Injectable for tests; production reads the real platform once at boot (parity with the
+   *  host's own loader, which interpolates against the HOST context, not the child's). */
+  platform: string = process.platform,
 ): { kept: PresetRow[]; dropped: string[] } {
   const dropped: string[] = []
   const keep = (row: PresetRow): boolean => {
+    const rule = PLATFORM_ELIGIBLE[row.id]
+    if (rule !== undefined && !rule(platform)) {
+      dropped.push(`${row.id} (platform ${platform})`)
+      return false
+    }
     if (!needsProbe(row)) return true
     if (resolvable(row.name)) return true
     dropped.push(`${row.id} (${row.name})`)

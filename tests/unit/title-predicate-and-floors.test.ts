@@ -219,3 +219,29 @@ test('#58 gate vs #60 split: a TOOL-ONLY part archives; a wholly payloadless rea
   assert.equal((await shells.store.get('S')).nextChapterNumber, 1, 'and no number was spent')
   assert.equal(shells.states.size, 0, 'and no state was written at all')
 })
+
+// #530: the goal objective enters the deterministic identity chain — plan still wins, goal beats
+// machine-prose spans' fallback, cleared goals fall through, and no-goal spans are byte-identical.
+test('#530: deriveIdentity precedence — plan > goal > first human line > generic', () => {
+  const machineOnly = [
+    { role: 'user', content: [{ type: 'text', text: '<goal_round>\nObjective: Close the SAIP learning loop per docs/plans/2026-11-05-close-the-loop.md\n</goal_round>' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Working on the storage contract.' }] },
+  ] as never
+  const withGoal = deriveIdentity(machineOnly, false, undefined, 'Close the SAIP learning loop per docs/plans/2026-11-05-close-the-loop.md')
+  assert.ok(withGoal.title.startsWith('Close the SAIP learning loop'), `goal titles the machine-prose span (got: ${withGoal.title})`)
+  const planWins = deriveIdentity(machineOnly, false, 'Ship R1 storage', 'Close the SAIP learning loop')
+  assert.equal(planWins.title, 'Ship R1 storage', 'a plan still beats the goal, unchanged')
+  const humanWins = deriveIdentity([{ role: 'user', content: [{ type: 'text', text: 'Please fix the flaky test.' }] }] as never, false, undefined, 'Some goal')
+  assert.equal(humanWins.title, 'Please fix the flaky test.', 'when a HUMAN line exists, it still titles — goal only rescues spans that had nothing')
+  const noGoal = deriveIdentity(machineOnly, false)
+  assert.ok(/Conversation span|Earlier history/.test(noGoal.title), 'no goal passed ⇒ byte-for-byte the old behavior')
+})
+
+test('#530: the title screen uses the REAL producer prefixes — behavior-pinned, no literal drift room', async () => {
+  const { AUTO_PREFIX } = await import('../../src/prompt-loop.ts')
+  const { SUGGESTED_ID_PREFIX } = await import('../../src/prompt-loop.ts')
+  void SUGGESTED_ID_PREFIX
+  const span = [{ role: 'user', content: [{ type: 'text', text: `${AUTO_PREFIX}Refactor the pipeline.` }] }] as never
+  const t = deriveIdentity(span, false, undefined, 'Close the loop').title
+  assert.equal(t, 'Close the loop', 'an [auto]-prefixed fired prompt (exported prefix, live value) never titles — goal rescues')
+})

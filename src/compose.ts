@@ -21,6 +21,7 @@ import { detectPlans } from './plans.ts'
 import type { CollectionSignature } from './signature.ts'
 import type { ChapterRange } from './types.ts'
 import type { SessionEventLike } from './types.ts'
+import { readActiveGoal } from './prompt-state.ts'
 
 export interface ComposeConfig {
   /** Merge threshold τ in [0,1]: collections merge while overlap score ≥ τ. */
@@ -219,7 +220,11 @@ export function composeChapters(
   function close(hiOverride?: number): void {
     const lo = pendingLo
     const hi = hiOverride ?? running.endSeq
-    const identity = deriveIdentity(messagesOf(events, lo, hi), false, firstPlanTitleIn(lo, hi))
+    // #530: the goal ACTIVE at this close point is the span's identity when no plan owns it —
+    // self-driving spans have only screened machine prose as "user lines", and their chapters
+    // were arriving nameless while the objective sat in the very events being archived.
+    const goalHere = readActiveGoal(events.filter((e) => ((e as { seq?: number }).seq ?? 0) <= hi))?.objective
+    const identity = deriveIdentity(messagesOf(events, lo, hi), false, firstPlanTitleIn(lo, hi), goalHere)
     const pathsHint = [...running.paths].slice(0, 3).join(', ')
     chapters.push({
       title: identity.title,

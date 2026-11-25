@@ -24,6 +24,9 @@ jobs:
     name: typecheck · build · unit + integration (coverage gate 85/85/85)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # #462 mechanism named: this account runs SELF-HOSTED capacity (the mem= lines prove it), and
+    # two concurrent deterministic suites on one machine turned a timing-sensitive file red on two
+    # different heads at the same minute. One heavy suite at a time; the wait is cheap, the lie is not.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -168,6 +171,9 @@ jobs:
     needs: host-capability
     if: github.event_name != 'schedule' && needs.host-capability.outputs.preset-rows == 'true' && needs.host-capability.outputs.corpus-anchored == 'true'   # #455: schedule events run ONLY the liveness sentinel
     runs-on: ubuntu-latest
+    concurrency:
+      group: tape-replay-runner   # #462 mechanism: chain-replay is the heaviest tenant of this shared self-hosted runner; two at once is the measured stall family
+      cancel-in-progress: false
     # BLOCKING again as of #178 (2026-10-30). This job was made advisory by maintainer decision on
     # 2026-10-24 (#92, "ship first, prove second") UNTIL its evidence landed — and it landed: the nine
     # legs replay green on CI run after run, the corpus carries a prompt-byte anchor, and corpus:check
