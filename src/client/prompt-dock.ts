@@ -598,6 +598,14 @@ export function PromptDock(props: DockProps): ReactElement | null {
         // flag wire-first. Replaces #282's collapse-only success fold, which left a just-run offer
         // sitting there re-runnable — the hole the maintainer's double-Click found.
         else dispatch({ t: 'running', running: true } as PromptBarEvent)
+        // #518: the consumed state must OUTLIVE the reload. The disk cache kept the pre-run ready
+        // entry, so a cold mount resurrected the executed offer with enabled buttons — the bar must
+        // show the truth (nothing to run; next offer arrives at the next completed turn) everywhere.
+        if (sessionId !== undefined) {
+          const runEntry = { ev: { t: 'polled', status: 'off' } as CacheEntry['ev'], autorun: null, at: Date.now() }
+          stateCache.set(sessionId, runEntry)
+          writePersisted(sessionId, runEntry)
+        }
       })
       .catch((error: unknown) => { console.warn(`[client:prompt] run failed: ${String((error as Error)?.message ?? error).slice(0, 160)}`) })
       .finally(() => { if (alive.current) setBusy(false) })

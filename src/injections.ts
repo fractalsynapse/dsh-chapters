@@ -69,12 +69,12 @@ export function isSessionStateNarration(data: Record<string, unknown>): boolean 
   // signature toward the filenames it mentions (record r28).
   if (source?.kind === 'agent-message' && source.form === 'relay') return true
   if (source?.kind === 'subagent-settled' && source.form === 'notice') return true
-  // #113: a Suggested Next Step the human armed. It is conversation the human authorized — a chapter that
-  // records an autorun response without the prompt that produced it is unexplainable — so it is captured like
-  // the others. Deliberately NOT `kind: 'user'`: the host's goal tool decides "a direct human turn exists" by
-  // looking for exactly that (measured, dsh-tool-goal:49-65), and laundering our loop through it would let a
-  // suggestion authorize model-side goal operations. Named by producer AND form like every arm above: the TOC
-  // notice (`form: 'snapshot'`) and any other plugin's message stay screened.
+  // #113 as built, and STILL NEEDED for history: pre-#522 releases fired suggestions with producer kind
+  // 'plugin:dsh-chapters' + form 'notice', and durable logs from those versions must keep archiving them —
+  // a chapter that records an autorun response without the prompt that produced it is unexplainable.
+  // Since #522 new fired prompts arrive as kind 'user' with an '[auto] ' marker and are captured by the
+  // human lane upstream; this arm is history, not the live path, and it stays named producer AND form so
+  // the TOC notice and other plugins' messages remain screened.
   if (source?.kind === 'plugin:dsh-chapters' && source.form === 'notice') return true
   // v3 logs, still replayed from disk: the retired wrapper the exception was
   // written against. Both arms stay named by producer AND form — neither widens.

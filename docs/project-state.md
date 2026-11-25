@@ -1425,3 +1425,10 @@ plan on record): SAIP self-driving journey — end-state file drafted with the a
 three models swapped live at runtime, autorun uncapped; durable-log watching names every stop by
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
+
+## 0.2.51 cut (2026-11-25): prompts in the human lane, marked; the ghost bar dies
+
+**Shipped:** #523 (auto lane + [auto] marker, maintainer delegation, tape re-recorded green) and
+#519 (run-consumption immediate mirror + persisted cache). Live SAIP self-driving session drove the
+findings; #520/#521 filed for the host team. Rounds stay uncapped, models stay live-swappable, and
+the next self-driving session sees every machine-written prompt in its own timeline.
