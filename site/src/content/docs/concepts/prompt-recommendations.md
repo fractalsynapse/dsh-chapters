@@ -238,10 +238,15 @@ dsh-chapters is zero-inference (rendered from the log, indexed without a model).
 
 - **Never into the system prompt.** The header is process-global; a suggestion is per-session,
   per-turn, and append-only.
-- **Never as you.** A prompt you Run yourself is your message. A prompt the *loop* starts is
-  authored under the plugin's own producer kind, so it is captured as conversation — you can
-  read what drove each response — while never counting as human input for anything that gates
-  on a human turn.
+- **As you, marked.** Since #522 (maintainer delegation: *"I am authorizing the agent to write
+  prompts on my behalf"*), every fired prompt — Run-clicked or loop-fired — enters the
+  conversation as a human-lane message carrying the `[auto] ` marker. It renders in the timeline
+  like any prompt (one way to see prompts, no second-class kind), it is archived as the
+  conversation it is, and the marker keeps its provenance readable in the text itself. The trade
+  is stated plainly: human-lane turns carry the host's goal-edit authority, so a fired turn can
+  edit the goal; what still holds is that a *goal-re-cutting offer* is never auto-fired — that
+  one needs your keystroke. Sessions from before 0.2.51 keep their original producer-kind
+  records; the archive reads both eras.
 - **Never across a restart armed.** Like the goal loop, autorun is process-local: it starts
   disarmed, and a restart cannot resurrect it. An unattended loop is impossible by
   construction, not by promise.

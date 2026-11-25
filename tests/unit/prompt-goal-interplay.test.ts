@@ -92,13 +92,18 @@ test('no goal at all: the suggestion stands alone and governs the worker', () =>
   assert.equal(l.maybeFire('S', offer(), null), false, 'but still one turn per offer')
 })
 
-test('a director re-cut survives authorship: clean bytes to the worker, our kind, never the human kind', () => {
+test("#522: a director re-cut survives authorship — clean bytes to the worker, human lane with the [auto] marker (policy flip recorded, not deleted)", () => {
   const classified = classifyOffer('GOAL: narrow the objective to the replay failures')
   assert.equal(classified.intent, 'goal-edit')
   assert.equal(classified.text, 'narrow the objective to the replay failures', 'the worker never sees the protocol prefix')
-  const message = suggestPromptMessage(classified.text, 'turn-9') as { source: { kind: string; form: string }; content: Array<{ text: string }> }
-  assert.equal(message.source.kind, 'plugin:dsh-chapters', 'autorun authorship stays ours — kind user would launder goal-edit authority')
-  assert.equal(message.content[0]!.text, 'narrow the objective to the replay failures')
+  const message = suggestPromptMessage(classified.text, 'turn-9') as { source: { kind: string; form?: string }; content: Array<{ text: string }> }
+  // The old row pinned kind 'plugin:dsh-chapters' with the words "kind user would launder goal-edit
+  // authority" — #113's policy. #522 supersedes it by maintainer decision: the delegation IS the
+  // product, and the authority that remains lives in the OFFER gate (goal-edit offers are never
+  // auto-fired — rows below hold that unchanged), not in a hidden kind field.
+  assert.equal(message.source.kind, 'user', 'human lane, marked')
+  assert.equal(message.source.form, undefined, 'no form on a human-lane message')
+  assert.equal(message.content[0]!.text, '[auto] narrow the objective to the replay failures', 'GOAL: protocol prefix still never reaches the worker; the marker is provenance, not protocol')
 })
 
 test('the intent rides the wire and gates the client gate too, so the bar cannot disagree with the server', () => {

@@ -63,17 +63,18 @@ test('a human prompt disarms the loop; the budget survives re-arming (#113)', ()
   assert.match(w.warns[warnsBefore]!, /promptMaxRounds/)
 })
 
-test('the authored message carries our producer kind and form — never the human kind (#113)', () => {
+test("#522: fired prompts ride the human lane with an [auto] marker — the maintainer's delegation, superseding #113 (policy flip recorded, not deleted)", () => {
   const data = suggestPromptMessage('Land #114.', 'turn-41')
   assert.equal(data.role, 'user')
   assert.equal(data.id, 'suggested-turn-41', 'an identified message, or the kernel refuses the row')
-  assert.equal((data.source as Record<string, string>).kind, 'plugin:dsh-chapters')
-  assert.equal((data.source as Record<string, string>).form, 'notice', 'a published ContextForm, not an invented one')
-  assert.deepEqual(data.content, [{ type: 'text', text: 'Land #114.' }])
-  // `kind:'user'` satisfies the host goal tool's direct-human test and would let this loop authorize
-  // pause/resume on goals; `kind:'goal'` is deep-equal-checked against the host's own round template.
-  assert.notEqual((data.source as Record<string, string>).kind, 'user', 'a suggestion must not impersonate the human')
-  assert.notEqual((data.source as Record<string, string>).kind, 'goal', 'nor impersonate the goal driver')
+  // #113's old policy was kind 'plugin:dsh-chapters' + form 'notice' — legal, and invisible on every
+  // host surface, which produced three UI defects in one day (#518/#520/#521). #522: the principal's
+  // own lane, provenance in the text. The trade (goal-edit authority inside fired turns) is accepted
+  // on the issue; goal-edit OFFERS still never auto-fire, and 'goal' kind stays forbidden.
+  assert.equal((data.source as Record<string, string>).kind, 'user', 'the delegation decision, verbatim on #522')
+  assert.equal((data.source as Record<string, string>).form, undefined, 'no form field on a human-lane message')
+  assert.deepEqual(data.content, [{ type: 'text', text: '[auto] Land #114.' }], 'the marker is part of the message')
+  assert.notEqual((data.source as Record<string, string>).kind, 'goal', 'nor impersonate the goal driver — that line did not move')
 
   // NOTE, kept because it records a correction: an earlier version of this row asserted that an empty id
   // throws. It cannot — the id is composed as `suggested-${id}`, so it is never empty whatever the caller
@@ -124,4 +125,11 @@ test('#505: maxRounds 0 fires past every old ceiling until a real brake (human, 
   assert.equal(w.loop.statusOf('S').fired, 30)
   assert.ok(w.logs.some((l: string) => l.includes('of ∞')), 'the log states the truth it ran with')
   assert.equal(w.loop.disarmForHuman('S'), 'disarmed', 'the human remains a brake — unlimited is not unreachable')
+})
+
+test('#522: the marker is applied exactly once and only at message construction', () => {
+  const once = suggestPromptMessage('[auto] already marked.', 's1')
+  assert.equal((once.content as [{ text: string }])[0].text, '[auto] already marked.', 'never [auto] [auto]')
+  const clean = suggestPromptMessage('plain offer', 's2')
+  assert.equal((clean.content as [{ text: string }])[0].text, '[auto] plain offer')
 })
