@@ -2,6 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createEnrichQueue, type EnrichQueueDeps } from '../../src/enrich-queue.ts'
 
+/** #456 ratchet: deterministic yielding WITHOUT timers — the fake-timer harness path resolves on
+ * microtasks alone, so N awaits of a resolved promise is a complete, sleep-free observation. */
+async function flush(n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) await Promise.resolve()
+}
+
 function harness(over: Partial<EnrichQueueDeps> = {}) {
   const calls: string[] = []
   let pending = ['c1', 'c2', 'c3']
@@ -99,9 +105,10 @@ test('#529: afterPush drains the WHOLE backlog in capped passes, chasing itself 
     },
     setTimer: (fn: () => void) => { chase = fn; return { cancel: () => { chase = null } } },
   })
-  q.onSyncDone('test') // void-drain by design — the seam does NOT return the pass; wait for it honestly
-  let waited = 0
-  while (backlog.length === 4 && waited < 100) { await new Promise((r) => setTimeout(r, 5)); waited += 1 }
+  q.onSyncDone('test') // void-drain by design — the seam does NOT return the pass
+  // #456 ratchet honored: NO bare sleeps. The harness path is pure promises (resolveModel,
+  // listPending, enrichOne — no timers), so deterministic microtask flushes observe each pass.
+  await flush(12)
   assert.equal(backlog.length, 3, 'first capped pass took one')
   assert.equal(typeof chase, 'function', '#529: a full batch left work — the chase is scheduled, not optional')
   // The timer callback fires its drain WITHOUT awaiting (fire-and-forget by design — a realm
@@ -110,7 +117,7 @@ test('#529: afterPush drains the WHOLE backlog in capped passes, chasing itself 
   while (guard < 40 && backlog.length > 0) {
     guard += 1
     if (chase !== null) { const run = chase; chase = null; run() }
-    await new Promise((r) => setTimeout(r, 2))
+    await flush(12)
   }
   assert.equal(backlog.length, 0, 'chased to empty without any idle event')
   assert.ok(guard < 40, 'the chase terminated by itself')
