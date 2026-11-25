@@ -29,6 +29,7 @@ import { PLAN_MODE_EVENT, buildPlansSection, detectPlans, type PlanIntent } from
 // #349: the goal fold and its notice block live in their own module (goal-carriage.ts), so the
 // one-selector-one-renderer rule is checkable in one file rather than spread across plans.ts.
 import { foldGoalFromLog, foldTaskListFromLog, goalRearmDecision, renderGoalCarriage, renderTaskCarriage } from './goal-carriage.ts'
+import { readActiveGoal } from './prompt-state.ts'
 
 export interface ContinueArgs {
   callerSessionId: string
@@ -780,6 +781,8 @@ export function deriveRanges(
         planHere !== undefined
           ? (detectPlans(seg).plans.find((p) => p.seq === planHere)?.title ?? undefined)
           : undefined,
+        // #530: goal-active-at-span-end titles machine-prose spans (see compose.ts for the why).
+        readActiveGoal(seg as unknown as Parameters<typeof readActiveGoal>[0])?.objective,
       )
       chapters.push({
         title: `${identity.title} (${chapters.length + 1})`,

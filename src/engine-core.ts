@@ -386,6 +386,12 @@ export interface SummarizePlan {
 
 
 /** Deterministic title/summary from region content. Never model-authored (invariant 4 — the model is absent). */
+/** #530: machine-authored user-role text that must never TITLE a span (see deriveIdentity). */
+function isMachineProseForTitle(text: string): boolean {
+  const t = text.trimStart()
+  return t.startsWith('<goal_round>') || t.startsWith('[auto] ') || t.startsWith('suggested next step:')
+}
+
 export function deriveIdentity(
   messages: readonly EngineMessage[],
   hasCheckpoint: boolean,
@@ -397,6 +403,17 @@ export function deriveIdentity(
    * messages only, passes nothing and keeps the old derivation.
    */
   planTitle?: string,
+  /**
+   * #530: the ACTIVE GOAL objective, when the span ran under one. In a self-driving session the
+   * user-role messages are machine prose (goal rounds, [auto] prompts) screened by the injection
+   * predicate — so the old chain fell to 'Conversation span (N) (part M)' for exactly the chapters
+   * that most needed identity. The objective is durable host content, never model-authored
+   * (invariant 4 unchanged), and it beats prose the way a plan does: a goal-driven span IS its
+   * goal. Callers that hold events pass it (compose, continuation archive); the summarize path
+   * sees provider messages only and keeps the old derivation. It sits BELOW the first human line:
+   * goal rescues machine-prose spans, it does not out-title a human who spoke.
+   */
+  goalObjective?: string,
 ): { title: string; summary: string } {
   // Title source: the first USER message that is actual human/agent prose.
   // Harness injections (system reminders, runtime-context snapshots) ride as
@@ -405,14 +422,28 @@ export function deriveIdentity(
   // r29 command tests pin this behavior.
   // The same predicate that screens chapter BODIES chooses a title (#59). Two lists of what counts as
   // injected context is how a runtime snapshot became a filename and a TOC citation.
+  // #530: TITLE selection gets its own machine-prose screen, deliberately SEPARATE from the body
+  // predicate (invariant 4 keeps the archive body rules distinct): goal-round envelopes and
+  // [auto]-fired prompts are conversation for the archive — and were arriving AS titles verbatim
+  // ('<goal_round>' beat a human line nobody typed). A title is identity, not content: identity
+  // must come from a human, a plan, or the goal — in that order.
   const firstUser = messages.find((m) => m.role === 'user'
     && !messageText(m).includes(SUMMARY_OPEN_TAG)
-    && !isInjectedProse(messageText(m)))
+    && !isInjectedProse(messageText(m))
+    && !isMachineProseForTitle(messageText(m)))
   const userCount = messages.filter((m) => m.role === 'user').length
   const assistantCount = messages.filter((m) => m.role === 'assistant').length
+  // #530 precedence: plan > first HUMAN line > goal objective > generic. The goal RESCUES spans
+  // whose user-role messages are all screened machine prose (self-driving sessions) — it does not
+  // out-title a human who actually spoke in the span, so mixed spans keep their battle-tested
+  // titles with zero drift.
   const headLine = planTitle !== undefined && planTitle.trim() !== ''
     ? planTitle.trim()
-    : firstUser === undefined ? '' : messageText(firstUser).split('\n')[0]!.trim()
+    : firstUser !== undefined
+      ? messageText(firstUser).split('\n')[0]!.trim()
+      : goalObjective !== undefined && goalObjective.trim() !== ''
+        ? goalObjective.trim().split('\n')[0]!.trim()
+        : ''
   const title = headLine.length > 0
     ? headLine.length > 72 ? `${headLine.slice(0, 72)}…` : headLine
     : hasCheckpoint ? 'Earlier history' : 'Conversation span'
