@@ -88,3 +88,23 @@ test('#289: runNow refuses a delivered offer before it can ever fire again', () 
   assert.ok(block.indexOf('deliveredOffer(session, st)') < block.indexOf('submitOffer(sessionId'), 'refusal precedes submission — a delivered offer never fires')
   assert.match(block, /already sent as your own turn/, 'and the refusal names what happened')
 })
+
+// #518: the consumed offer must be DEAD in every surface the moment Run succeeds — the row, the
+// projection fold, and the browser's disk cache. Both halves are wiring facts; the maintainer's
+// ghost bar proved the old arrangement (fold "rides the next write", cache never written) resurrects
+// an executed instruction with live buttons after one reload.
+test('#518: runNow mirrors the consumption into the push fold in the same breath as the row mutate', () => {
+  const src = readFileSync(path.join(ROOT, 'src', 'index.ts'), 'utf8')
+  const runBlock = src.slice(src.indexOf('runNow: async'), src.indexOf('setAutorun:'))
+  const mutate = runBlock.indexOf('promptSuggestion: noSuggestion })) as never)')
+  const mirror = runBlock.indexOf('if (session !== undefined) pushBar(session, sessionId)')
+  assert.ok(mutate >= 0 && mirror > mutate, 'the immediate pushBar rides AFTER the mutate and BEFORE the ok return — a mirror after the return is unreachable, before it mirrors the un-consumed row')
+  assert.ok(mirror < runBlock.indexOf('return { ok: true'), 'same call, same breath')
+})
+
+test('#518: the dock persists the consumed state on a successful run — reload cannot resurrect the ghost', () => {
+  const dock = readFileSync(path.join(ROOT, 'src', 'client', 'prompt-dock.ts'), 'utf8')
+  const runBlock = dock.slice(dock.indexOf('const run = useCallback'), dock.indexOf('if (!shouldAutoFire(state)) return'))
+  assert.ok(runBlock.includes("writePersisted(sessionId, runEntry)"), 'run() writes the disk cache, not just memory — the #251 mirror is what cold mounts read')
+  assert.ok(runBlock.includes("status: 'off'"), 'the persisted entry is the consumed/resting shape, so lineFor renders the idle sentence, not the executed offer')
+})

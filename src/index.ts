@@ -844,6 +844,11 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         // already happened. mutate, never a snapshot (the shared-row rule); push mirror rides the
         // next write — the clicking tab folds locally immediately (prompt-dock run()).
         await promptRow.mutate(sessionId, ((row: Record<string, unknown>) => ({ ...row, promptSuggestion: noSuggestion })) as never)
+        // #518: consumption must ride the fold NOW. A mirror that "rides the next write" left the
+        // executed offer rendered, with live buttons, on every reload — the maintainer's ghost bar.
+        // This is a state CHANGE append (ready -> resting/off), exactly the mirror the off-button
+        // and model-change paths already make in the same breath as their writes.
+        if (session !== undefined) pushBar(session, sessionId)
         return { ok: true, text: st.text }
       },
       setAutorun: (sessionId: string, on: boolean, session?: unknown) => {
