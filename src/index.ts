@@ -481,6 +481,13 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     const enrich = createEnrichWiring({
       store,
       cwd: () => undefined,
+      // #557: on this plane a legacy row locates itself through the registry's OWN project
+      // records (bounded, sorted for determinism) — the ladder stamps the row from a resolved
+      // read, never a guess.
+      projectCwds: () => [...(store.projects?.() ?? new Map<string, { cwd?: string }>().entries())]
+        .map(([, rec]) => rec?.cwd ?? '')
+        .filter((c) => c !== '')
+        .sort(), 
       config: {
         enabled: config.enrichmentEnabled,
         model: config.enrichmentModel,
