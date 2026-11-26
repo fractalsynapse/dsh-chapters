@@ -18,6 +18,7 @@ import { runRestoreHandler } from './restore.ts'
 import { makeRestoreCommand } from './restore-command.ts'
 import { continueFromRestored } from './continue-core.ts'
 import * as path from 'node:path'
+import { bumpRetrieval } from './retrieval-stats.ts'
 import { candidateTotals, defersAtArchive, nextUnarchivedSeq, toolResultCandidates } from './render.ts'
 import {detectPlans, type PlanIntent} from './plans.ts'
 import { makeHeaderParentReader, queryTopics, renderRulesBlock } from './session-rules.ts'
@@ -635,8 +636,8 @@ export function buildChaptersTools(
   const deterministicCommand = (door: DeterministicDoor) => ({
     name: door.name,
     description: door.intent === 'branch'
-      ? 'Fork this conversation into a new session: archive everything so far into verbatim chapters and open a child whose history is the table of contents. Optional argument: a title for the branch.'
-      : 'Continue this conversation in a new session: archive everything so far into verbatim chapters and open a child that carries the same stream of work — its notice names the operative plan, if one is still standing. Optional argument: a title for the continuation.',
+      ? 'Fork this conversation into a new session: archive everything so far into verbatim chapters and open a child whose history is the table of contents. Optional arguments (#221): a completed-turn message seq to fork FROM, then a title for the branch.'
+      : 'Continue this conversation in a new session: archive everything so far into verbatim chapters and open a child that carries the same stream of work — its notice names the operative plan, if one is still standing. Optional arguments (#221): a completed-turn message seq to continue FROM, then a title for the continuation.',
     input: { hint: '[messageSeq] [title]' },
     async handler(invocation: { agent: unknown; rawInput?: string; signal?: AbortSignal }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
       const agent = invocation.agent as CallerAgent
@@ -773,7 +774,7 @@ export function buildChaptersTools(
   const saveCommand: HostCommand = {
     name: 'chapters-save',
     description: 'Save completed turns as searchable chapters without creating a new session. Archives verbatim, updates the search index, and triggers enrichment. Idempotent — re-running saves only what has not yet been archived.',
-    input: { hint: '[messageSeq] [title]' },
+    input: { hint: '(no arguments \u2014 archives the watermark tail; titles derive from the content)' },
     async handler(invocation: { agent: unknown; rawInput?: string; signal?: AbortSignal }): Promise<{ kind: 'success'; text?: string } | { kind: 'error'; text: string }> {
       const agent = invocation.agent as CallerAgent
       if (agent?.session === undefined) return { kind: 'error' as const, text: 'chapters-save: no session context for this invocation' }
@@ -951,6 +952,7 @@ export function buildChaptersTools(
     async execute(args: { query: string; maxTokens?: number }, exec: ToolRunContext) {
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
+      bumpRetrieval(String((caller.session as { id?: string }).id ?? '?'), 'search') // #531: counted at the door itself
       const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
       // Typed once rather than spread from a conditional: the union of `{…} | {}` is
       // not spreadable under this tsconfig, and the alternative was casting blind.
@@ -1037,6 +1039,7 @@ export function buildChaptersTools(
     async execute(args: { path: string; action: string; query?: string; offset?: number; limit?: number; maxTokens?: number }, exec: ToolRunContext) {
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
+      bumpRetrieval(String((caller.session as { id?: string }).id ?? '?'), 'artifact') // #531
       const cwd = (caller.session as { header?: { cwd?: string } }).header?.cwd ?? ''
       const storeDir = resolveStoreRoot(cwd, config.artifactStoreRoot ?? '.dsh-chapters')
       let abs: string | null
@@ -1123,6 +1126,7 @@ export function buildChaptersTools(
     async execute(args: { query: string; scope?: string; maxTokens?: number }, exec: ToolRunContext) {
       const caller = callerOf(exec)
       if ('reason' in caller) return { ...CALLER_MISSING }
+      bumpRetrieval(String((caller.session as { id?: string }).id ?? '?'), 'rules') // #531
       if (config.harnessId === undefined || config.coreRulesBudgetTokens === undefined) {
         return { ok: false as const, error: 'rules surface not configured (harnessId/budget absent)' }
       }

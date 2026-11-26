@@ -11,13 +11,6 @@ lastUpdated: true
 > inference is *right* is unmeasured), and the browser-plane acceptance is blocked on a host-lock
 > move — see `docs/backlog.md`. Neither changes what this page describes.
 
-> **Status.** Both tiers ship. The *project* tier is what has been running since P3; the *session*
-> tier is [#50](https://github.com/fractalsynapse/dsh-chapters/issues/50), specified in
-> [the record §7](https://github.com/fractalsynapse/dsh-chapters/blob/main/docs/knowledge-repo.md).
-> What is **not** yet witnessed anywhere is a live small model doing the mining on real hardware —
-> the gate is proven against fixtures, and the browser-plane acceptance is blocked on a host-lock
-> move (see `docs/backlog.md`). Nothing on this page depends on that being done.
-
 Rules are short, category-tagged instructions — "check the archive before starting", "always run the
 tape replay before tagging" — the steering wheel for agent behavior on a project. They are **chapters
 of a different kind**: the same file format, the same write-once store, the same index, the same
@@ -68,8 +61,10 @@ What *can* go wrong is identity silently disagreeing — a checkout with no read
 to a path-derived key and gets a private rule set, a checkout whose first remote is a fork derives a
 different key, a pool linked through TreeDX keys on the pool location rather than your remote, and a
 fresh clone that has not been linked or synced has no rules at all. Those four are reported, not
-inferred: the head states `0 project rules — this checkout resolves project … from …`, and
-`/chapters-status` reports `projectKeySource`. Ungoverned must never look like governed.
+inferred: the head states `0 project rules — this checkout resolves no knowledge project
+(<cwd>); your session rules below are local only. Link one with /chapters-link to inherit the
+team's.` (that form appears when session rules govern an unlinked head), and `/chapters-status`
+reports `projectKeySource`. Ungoverned must never look like governed.
 
 ## Session rules
 
@@ -77,10 +72,11 @@ inferred: the head states `0 project rules — this checkout resolves project �
 
 - **`ADD RULE: <text>`** at the start of a line in one of your own messages becomes an active
   session rule immediately, with **zero model tokens** — a deterministic parse on the same turn
-  boundary the topic signatures use. The rule body is your sentence, verbatim.
-- **Model capture** rides the existing idle-batched enrichment pass (`rulesEnrichment`, on by
-  default). It runs *after* a chapter is archived, so a mined rule arrives at the next boundary,
-  not mid-turn — the local model server is single-slot and per-turn work would queue against your
+  boundary the topic signatures use. The rule body is your sentence, verbatim — with the one
+  exception every written text shares: credential redaction (`⟦redacted:credential sha256=…⟧`)
+- **Model capture** rides the enrichment pass (`rulesEnrichment`, on by default), which since
+  #529 runs the whole backlog after every archive moment (not on idle alone). It runs *after* a
+  chapter is archived, so a mined rule arrives at the next boundary, not mid-turn — the local model server is single-slot and per-turn work would queue against your
   own conversation. **A mined rule governs your session tree as soon as it is written.** It does
   not need to have been said by you first; that was an earlier design and it was dropped, because
   a rule you already stated is a rule you could have written with `ADD RULE:` — the point of asking
@@ -108,7 +104,11 @@ lineage edges — the continuation chain the plugin keeps, and the harness heade
 transitively and **read-only**, so a subagent inherits its delegator's standing orders without the
 archive's lineage bookkeeping changing shape. The walk only goes upward: a subagent's rules never
 steer the session that delegated it, and the parent keeps the authority to revoke what the child
-picked up. Where an ancestry walk has to stop at a bound, the head says so instead of looking complete.
+picked up. Where an ancestry walk hits its bound (the cap exists — 64 sessions), the bound is
+stated where you can read it: `/chapters-rule active` prints `LINEAGE TRUNCATED: …` rather than a
+set that looks complete. The rebuilt head renders the selected rules without its own truncation
+line today — a stated gap, not a silent one, because `active` is the audit surface for exactly
+this.
 
 ### Carried at the moments the head is rebuilt
 
@@ -125,12 +125,29 @@ could not survive was the rebuild, and that is what is fixed.
 Automatic capture means the active set grows on its own, so "render everything" stops being
 affordable. Selection has three classes: **pinned** rules (a human pins them; always rendered —
 ground rules are old, and any topical or recency ranking evicts them first), **relevance-selected**
-rules (the same scorer `chapters_search` uses, never a second one), and **index-only** rules shown
-as a one-line category entry with a path. Per-tier counts are configurable, and anything the caps
-drop is **announced with numbers** — `9 project rules active, 4 shown — /chapters-rule list`.
+rules (a topical-overlap selector of its own — pinned first, then overlap count, then category,
+then id; `search.rankEntries` scores the corpus, `selectRules` picks the head, and a test row
+fails if a THIRD rule-picker appears), and **index-only** rules shown as a one-line category
+entry with a path (the category index is built from project-tier rules; withheld session rules
+get the count line). Per-tier counts are configurable, and anything the caps drop is
+**announced with numbers** — `N more project rule(s) active but not shown — /chapters-rule
+active lists them, pin one to keep it here`.
 Selection that could silently drop the load-bearing rule would just rebuild the original bug inside
 the fix. The token ceiling keeps the old doctrine: over budget it refuses with per-rule numbers, it
 never clips.
+
+### The surfaces
+
+```
+/chapters-rule add <category> "<text>"      # PROJECT tier, write-once proposal — the reply teaches ADD RULE:
+/chapters-rule list [--all|--proposed|--category <c>|--scope project|session]
+/chapters-rule view <id>                    # ONE rule completely: full text, status, basis (#174 — approve deserves a reading surface)
+/chapters-rule active                       # exactly what a rebuilt head will show, + withheld counts + mining posture + lineage-bound notes
+/chapters-rule approve <id> | revoke <id>   # per-machine curation facts, never a shared rewrite
+/chapters-rule pin <id> | unpin <id>        # the always-rendered class (human-set only)
+/chapters-rule model [<provider/model> | clear]   # #506/#510: dedicated mining model at runtime — bare `model` SHOWS the route; /chapters-models lists its current value with the other model keys
+/chapters-rule conflicts                    # contradictory pairs with ids — one bounded call, report-only
+```
 
 ### Promotion stays a human act
 
@@ -145,7 +162,8 @@ Two live tiers means two sources of "must", and a small model handles a contradi
 rule is stated to the model in the block itself: **project rules are the team's order; session rules
 refine and add; a session rule never overrides a project rule.** `/chapters-rule conflicts` reads the
 assembled set and reports contradictory pairs with ids — one bounded model call, report-only, never an
-edit. Enrichment may flag the same pairs in its own pass. Your two options on a conflict are to
+edit (the enrichment pass does NOT flag pairs today — `conflicts` is the only contradiction
+surface, and the page says so rather than implying the ladder double-checks). Your two options on a conflict are to
 promote a fix to the project rule or revoke the session rule; nothing resolves itself.
 
 ## What the agent sees

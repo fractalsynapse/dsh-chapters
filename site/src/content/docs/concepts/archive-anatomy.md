@@ -25,9 +25,11 @@ pool transport, the mirror rehydrate and the corpus index then carry them with n
 `chapters_search` answers *"what did we plan about X"* with the plan itself. Their numbering is its own
 (`plan-NNN-`), so a plan can never consume a chapter number or reorder the table of contents.
 
-Two directories, one citation form. A chapter prints `artifacts/aa/<sha>.txt` whether the blob sits at the
-store root (arrival-time stubbing) or inside its own session tree (archive-time deferral, and every session
-plan), and `chapters_artifact` searches both before it searches the pool mirror — measured 2026-10-09,
+Two directories, and the citation form tells you which era wrote the line. **Archive-time** citations
+(deferred results, and every session plan) print base-prefixed — `.dsh-chapters/<root>/artifacts/aa/<sha>.txt`
+— so a chapter is readable-reachable from the workspace without knowing the store root (#69); **arrival-time**
+stubs and the Plans block print the bare `artifacts/aa/<sha>.txt` form. `chapters_artifact` accepts either and
+searches both trees before it searches the pool mirror — measured 2026-10-09,
 because the reader used to look in one place only and a deferred plan was unreachable on the machine that
 wrote it.
 
@@ -53,9 +55,12 @@ a requirement, not a hope:
   span that never closed and swallowed the `(seq N)` citation after it into rendered code. The head is
   now delimited by a run longer than anything inside, with CommonMark's padding for content that begins
   or ends with a backtick, and embedded newlines fold so one invocation stays one line.
-- **Nothing is clipped in place.** Where bytes are too large for the chapter body they are
-  content-addressed artifacts and the line says so; the inline head is a bounded *view* with the full
-  text retrievable, never the only copy.
+- **Results are never clipped in place.** Where a tool RESULT is too large for the chapter body it is
+  a content-addressed artifact and the line says so; the inline head is a bounded *view* with the full
+  text retrievable, never the only copy. One honest default to know: a tool-call's ARGUMENTS inline head is
+  400 chars, and the full argument text becomes an artifact **only when `callArgArtifactTokens > 0`**
+  (default `0` = off — switching it on changes chapter bytes wherever a `write` carried a whole file, which
+  is why it is opt-in, §17). Invocations themselves (name + arguments structure) are always preserved.
 
 ### What a chapter's Plans block looks like
 
@@ -89,7 +94,7 @@ cite without knowing any number, once as the `kind: plan` document the index can
 (`plans: [412:approved:8f3a1c9d]`), and the registry record carries the structured facts the child's notice
 is built from. Why the whole design looks like this is in the repo's `docs/plans-carriage.md`.
 
-Why the workspace: the model reloads chapters with its ordinary `read` tool, so the text must live where `read` reaches — a `$HOME` path can be reachable-but-not-writable or writable-but-not-readable; the workspace is the one place both guarantees hold. Content-addressing applies to the artifacts: identical tool results anywhere in the archive are stored **once**, at the store root — and since 0.1.4 they publish to the pool too, so a teammate's `chapters_artifact` read resolves the blob from the shared mirror when the local store doesn't hold it. Chapter bodies need no dedup — each is one validated, non-overlapping range of the log, so the same text never appears in two chapters.
+Why the workspace: the model reloads chapters with its ordinary `read` tool, so the text must live where `read` reaches — a `$HOME` path can be reachable-but-not-writable or writable-but-not-readable; the workspace is the one place both guarantees hold. Content-addressing applies to the artifacts: identical tool results are stored **once per session tree** (archive-time deferrals live under their ancestry tree; arrival-time stubs under the store root — the resolver searches both), and since 0.1.4 they publish to the pool once, deduped by content address, so a teammate's `chapters_artifact` read resolves the blob from the shared mirror when the local store doesn't hold it. Chapter bodies need no dedup — each is one validated, non-overlapping range of the log, so the same text never appears in two chapters.
 
 ## 2. The harness storage domain — bookkeeping
 

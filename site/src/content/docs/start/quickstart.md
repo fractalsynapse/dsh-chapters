@@ -6,7 +6,10 @@ lastUpdated: true
 
 ## Three steps
 
-**1. Install the plugin** (DeepSeek Harness ≥ 0.1.5-rc.x, Node ≥ 24). A harness profile is a directory
+**1. Install the plugin.** Requires DeepSeek Harness (`@deepseek-ai/dsh`) **≥ 0.2.0** — the floor the
+maintainer set in #446; the 0.1.\* line is deprecated, because below 0.2.0 a host cannot register the
+preset declaration rows the doors mount on (§19 says what you'll see there), and Node ≥ 24. A harness
+profile is a directory
 with its own `package.json` and `node_modules` (`~/.dsh/profiles/<profile>/`), so the plain npm install is
 the path this project documents and uses:
 
@@ -19,19 +22,26 @@ cd ~/.dsh/profiles/web && npm i @fractalsynapse/dsh-chapters@latest
 and for what this project relies on.
 
 The current release is the one the [npm page](https://www.npmjs.com/package/@fractalsynapse/dsh-chapters) calls
-`latest` — every version ships with a build provenance attestation and a green deterministic + tape-replay
-CI run behind it ([§26](/operations/changelog/)).
+`latest` — every CI-published version carries a build provenance attestation (the ledger names its one
+re-publish exception and the pre-attestation 0.1.0) and a green deterministic + tape-replay CI run behind
+it ([§26](/operations/changelog/)).
 
-**2. Restart your harness.** `dsh web` loads plugin bundles at boot. After restart you have, with no further configuration:
+**2. Restart your harness** (the running process holds the old bundle until it restarts — `/chapters-status`
+prints the version the CURRENT process loaded). After restart, in sessions composing the `chapters` agent
+preset — which is the default mount ([§23](/operations/install/)) — you have, with no further configuration:
 
-- the agent tools `chapters_segment`, `chapters_continue`, `chapters_fork`, `chapters_search`, `chapters_artifact`, `chapters_rule_propose`;
-- the composer commands `/chapters-link`, `/chapters-status`, `/chapters-enrich`, `/chapters-rule`, and the two door commands `/chapters-fork` and `/chapters-continue`;
-- a **Fork with chapters** and a **Continue with chapters** button on every assistant message: ONE
+- the seven agent tools `chapters_segment`, `chapters_continue`, `chapters_fork`, `chapters_search`, `chapters_artifact`, `chapters_rule_propose`, `chapters_rules`;
+- the composer commands `/chapters-link`, `/chapters-status`, `/chapters-enrich`, `/chapters-rule`, `/chapters-models`, `/chapters-prompt`, `/chapters-remove` (host plane, every session), the three door commands `/chapters-fork`, `/chapters-continue`, `/chapters-save` (preset realm), and `/chapters-repair` / `/chapters-restore` (operator doors, host plane — how you fix a broken archive from a session that cannot run the doors);
+- a **Fork with chapters** and a **Continue with chapters** button on assistant messages: ONE
   deterministic door with two intents, each button executing its own command. The archive is identical
-  either way (the plugin derives the ranges itself — a click needs no model turn); what differs is only
-  what the child is told about plans — a branch gets zero plan bytes, a continuation carries the operative
-  plan and, while the session is still planning, starts in plan mode for real;
-- the `chapters` agent preset (select it from the preset menu to route in-place `/compact` through the deterministic engine — optional; the archive tools work without it).
+  either way (the plugin derives the ranges itself — a click needs no model turn); what differs is what
+  the child is INHERITED: a branch gets zero plan bytes and zero session-tier rule bytes, a continuation
+  carries the operative plan, the session rules of its ancestry, and, while the session is still
+  planning, starts in plan mode for real;
+- the `chapters` agent preset itself, which IS the mount point: since 0.2.32 (#330) the seven tools, the three
+  door commands, the two buttons, and in-place `/compact` through the deterministic engine all ride it — a
+  session on another preset sees none of them and pays nothing for them (the standard preset keeps plain
+  `/compact`; the operator doors and host-plane commands stay reachable everywhere).
 
 **3. Take a continuation.** Work a few turns in a real task until the conversation feels expensive, then either click **Continue with chapters** on the last assistant message (**Fork with chapters** if this is a new direction rather than more of the same), or say:
 

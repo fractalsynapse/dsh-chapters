@@ -18,8 +18,12 @@ What happens now, conservatively:
   the parent's durable `goal/change` events by one selector (`foldGoalFromLog`) and rendered by one function
   (`renderGoalCarriage`). It states the **objective whole**, the revision, the round cap, the phase, and the
   seq it came from.
-- It then says, in the notice the child is guaranteed to read at birth: **the goal is NOT armed in the
-  child, and only the human can send `/goal resume`.** That sentence is the design, not a caveat.
+- And since #349's decision landed (2026-11-19, `goalRearmOnCarry` default **on**): an **ACTIVE** goal is
+  **re-created on the child** through the host's goal service — the objective keeps driving work instead of
+  becoming prose — and the block says exactly that. Paused or blocked goals are stated but NOT re-armed: a
+  human stopped it; only a human resumes it. With `goalRearmOnCarry: false` the notice carries the
+  older wording — "the goal is NOT armed in the child, and only the human can send `/goal resume`" — which
+  remains true of that mode.
 - A **cleared** goal carries nothing. A **completed** goal is stated as finished and gets no re-arm
   instruction, so a child cannot pick a closed purpose back up.
 - A session that never used a goal pays **zero bytes**: the block is absent, the notice is byte-identical
@@ -27,27 +31,31 @@ What happens now, conservatively:
 - The budget (`goalNoticeChars`, default 600) bounds the **objective display only**. The instruction lines
   are never truncated — a cut-off "only the human can re-arm" is worse than none.
 
-### Why the plugin does not simply re-create the goal
+### The authority question, and how it was answered (#349)
 
-The host's `create_goal` tool is gated behind `requireDirectHuman`: an open-turn message with
+The host's `create_goal` TOOL is gated behind `requireDirectHuman`: an open-turn message with
 `source.kind === 'user'`. A continuation child's first turn is authored `plugin:dsh-chapters`, so the child
 cannot call the tool. The **service** underneath (`ctx.get('goals').create(agent, …)`) has no such gate, so
-the plugin *could* arm a goal on the child's behalf.
+the plugin *could* arm a goal on the child's behalf — and routing around a direct-human gate because the
+seam is reachable is an authority widening, not a fix. #349 asked the maintainer explicitly rather than
+deciding silently.
 
-**It does not, and that is a deliberate non-choice pending the maintainer** (#349 asks the question
-explicitly). Silently routing around a direct-human gate because the seam is reachable is an authority
-widening, not a fix — the same category as a health check that was never asked whether its condition can
-be false. If the answer is "no, the plugin must not author goals," this fallback is the final shape. If it
-is "yes, deliberately," it becomes an explicit, documented, configurable step — not a side effect of the
-birth path.
+**The decision landed 2026-11-19: YES, scoped.** `goalRearmOnCarry` (default on) re-creates an ACTIVE
+carried goal on the child through the service — the one authorized exception to the direct-human gate,
+bounded by `goalRearmDecision` (paused/blocked/complete/cleared never re-arm), loud on every refusal, and
+`false` restores the notice-only wording byte-identically. The plugin ships the documented, configurable
+step the old section said it would need — which is the correct outcome of "not a side effect of the birth
+path": the seam is used by decision, behind a named control, not by accident.
 
 ### One state the log can give, and one it cannot
 
 `phase` (active / paused / blocked / complete) is carried inside `goal/change`, so the block can state it
 truthfully. **`activation` — armed or disarmed — is not in the log at all**: the host keeps it process-local,
-and the plugin reads it from the live service for its own driver decisions. So the notice says who *can*
-change the driver, never what the driver currently is. A claim about armedness recovered by folding history
-would be a guess dressed as a record.
+and the plugin reads it from the live service for its own driver decisions. In notice-only mode the block
+says who *can* change the driver, never what the driver currently is; a claim about armedness recovered by
+folding history would be a guess dressed as a record. The one thing the block may assert about armedness is
+the plugin's OWN act at birth — "re-created on the child (armed by the host's goal service)" — because that
+is a fact about what this door just did, read from the service call's result, not from history.
 
 Rows: `tests/unit/goal-carriage.test.ts` (fold semantics for every operation the host emits, including
 unknown ones ignored; clear vs complete; budget and instruction survival; zero bytes with no goal; notice

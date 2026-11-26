@@ -8,17 +8,18 @@ Seven tools ship, all schema-typed with output schemas (mandatory in this plugin
 
 | Tool | What it does | When it gets reached for |
 |---|---|---|
-| `chapters_segment` | returns the archive ceiling + chapter-shaped ranges (title/summary editable, text never) | when the human asks to archive or continue |
+| `chapters_segment` | returns the archive ceiling, the tool-result inventory, and the plan facts (title/summary editable, text never) — the model proposes the chapter-shaped ranges; the doors derive them without it | when the human asks to archive or continue |
 | `chapters_continue` | archive the chosen ranges, open a new session whose first message is the cumulative TOC, carry a handoff note | the workhorse of continuation |
 | `chapters_fork` | the same door's branch intent for the model: cites the existing archive, writes nothing (the human-pulled [`/chapters-fork`](/reference/commands/) archives the new span first) | "let's try another angle from here" |
 | `chapters_search` | ranked hits from **whichever corpus is real here**: the pool mirror when one is pulled, otherwise this machine's own store — the answer names the door it came from, and plans are findable **as plans** (`kind: plan`) | at the start of any domain ("has anyone hit this?") |
 | `chapters_artifact` | `toc / search / read` on content-addressed blobs kept as files | re-consulting stored results — after compaction, across windows — **and reading a session plan without swallowing it** |
 | `chapters_rule_propose` | write-once rule candidate (still needs a human per-machine approve) | "we learned a team convention" |
-| `chapters_rules` *(#50)* | the assembled **text** of the rules that apply to a task description — project + session tier, with the count it withheld. One scorer with `chapters_search`, never a second ranking | **before starting a task** — the one rule verb a head is told to reach for |
+| `chapters_rules` *(#50)* | the assembled **text** of the rules that apply to a task description — project + session tier, with the count it withheld. Same selection the rebuilt head uses (pinned → topical overlap → category → id), so the model's view and the child's view of "what applies" are one ledger, never two opinions | **before starting a task** — the one rule verb a head is told to reach for |
 
 These are the model's surface, not the only way in: in **chapters-preset sessions** every assistant row
-carries *Fork with chapters* and *Continue with chapters*, and the composer carries `/chapters-fork` and
-`/chapters-continue` — one deterministic door with two intents, where the plugin derives the ranges itself
+carries *Fork with chapters* and *Continue with chapters*, and the composer carries `/chapters-fork`,
+`/chapters-continue` and `/chapters-save` — one deterministic door with two intents (plus the archive-only
+save), where the plugin derives the ranges itself
 instead of asking the model to chain `chapters_segment` → `chapters_continue`. Same archive, same child,
 same notice, and the intent alone decides what the child is told about plans ([§15](/reference/commands/)).
 The doors and their commands ride the same realm row as the tools, so sessions on other presets show no
@@ -28,15 +29,17 @@ chapters door.
 
 | Tool | Returns |
 |---|---|
-| `chapters_segment` | `archiveCeiling`, `eventCount`, `toolResults[{seq, toolName, excerpt, deferred}]`, `plans[{seq, title, status, resultSeq, outline, verdict}]`, `livePlans[…]` (above the ceiling — an unfinished turn, so archivable by nothing), `modeActive`, `existingChapters` |
-| `chapters_continue` | `childSessionId`, `presetUsed`, `chapters`, `warnings[]` (coverage gaps, over-target chapters), `budget{usedTokens, allowanceTokens}` on refusal |
-| `chapters_fork` | `childSessionId`, `presetUsed` |
-| `chapters_search` | `results[{score, date, kind, title, path, topics}]`, `total`, `shown`, a `note` that names **which door answered** (pool mirror vs this machine's store) or says the list was trimmed, and `line` (the packed answer text) on the store door |
+| `chapters_segment` | `archiveCeiling`, `eventCount`, `toolResults[{seq, toolName, excerpt, deferred}]`, `toolResultsReport` (the "listing N of M" line — always present), `plans[{seq, title, status, resultSeq, outline, verdict}]`, `livePlans[…]` (above the ceiling — an unfinished turn, so archivable by nothing), `modeActive`, `planHint` (when plans exist), `existingChapters` |
+| `chapters_continue` | `childSessionId`, `presetUsed`, `chapters`, `warnings[]` (coverage gaps, over-target chapters), and `budget{usedTokens, allowanceTokens}` — present on success too (what the composed notice cost against its allowance), and on refusals |
+| `chapters_fork` | `childSessionId`, `presetUsed`, `budget` (same accounting; the branch pays the same measure) |
+| `chapters_search` | `results[{score, date, kind, title, path, topics}]`, `total`, `shown`, `budget`, a `note` that names **which door answered** (pool mirror vs this machine's store) or says the list was trimmed, and `line` (the packed answer text) on the store door |
 | `chapters_artifact` | per action — `toc`: heading map with line numbers; `search`: matched blocks + `totalMatches`/`truncated`/`remainingMatches`; `read`: `start`, `end`, `of`, `lines` |
 | `chapters_rule_propose` | `ok`, `text` — the proposal reply |
-| `chapters_rules` *(#50)* | `rules[{id, scope, category, text}]`, `shown`, `active` (per tier), `withheld` (count, with why) — the withheld count is returned even when nothing was withheld, so "you are seeing all of it" is a fact the model can rely on |
+| `chapters_rules` *(#50)* | `ok`, `shown`, `withheld` (count, with why), `text` — the assembled block, `tokens`, `note` — the withheld count is returned even when nothing was withheld, so "you are seeing all of it" is a fact the model can rely on |
 
-Every refusal shares one shape: `{ ok: false, reason, budget? }` — the numbers size **the notice the
+Refusures refuse in one of two shapes: the conversation doors (`segment`, `continue`, `fork`) answer
+`{ ok: false, reason, budget? }`; the query doors (`artifact`, `rules`) answer `{ ok: false, error }`.
+Either way the numbers size **the notice the
 plugin is composing** (its own artifact), never the model's window: since #330 the agent is never handed
 a measurement of its own context. `chapters_artifact read` windows are 1-based (default 200 lines, hard
 cap 400); `toc`/`search` pack to a default of 400 result units.

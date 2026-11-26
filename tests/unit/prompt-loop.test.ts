@@ -4,8 +4,9 @@
  * wheel, and a cap that cannot be re-armed past.
  */
 import test from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
-import { makePromptLoop, suggestPromptMessage } from '../../src/prompt-loop.ts'
+import { makePromptLoop, suggestPromptMessage, SUGGESTED_ID_PREFIX } from '../../src/prompt-loop.ts'
 import type { PromptSuggestionState } from '../../src/prompt-state.ts'
 
 const ready = (turnSeq: number, text = 'Run the plane.'): PromptSuggestionState =>
@@ -132,4 +133,21 @@ test('#522: the marker is applied exactly once and only at message construction'
   assert.equal((once.content as [{ text: string }])[0].text, '[auto] already marked.', 'never [auto] [auto]')
   const clean = suggestPromptMessage('plain offer', 's2')
   assert.equal((clean.content as [{ text: string }])[0].text, '[auto] plain offer')
+})
+
+// #532: the self-disarm landmine. Since #522 fired prompts are user-kind user/messages; the
+// human-typed listener must key on the PRODUCER ID, not the kind, or autorun disarms itself
+// after its first fire. These rows pin both arms of the distinction.
+test('#532: fired prompts carry the suggested- producer prefix; suggestPromptMessage is the only minter', () => {
+  const m = suggestPromptMessage('Do the next step.', 'sess-9') as { id: string; source: { kind: string } }
+  assert.ok(m.id.startsWith(SUGGESTED_ID_PREFIX), `producer identity present (${m.id})`)
+  assert.equal(m.source.kind, 'user', '#522 visibility stands — the fix must NOT undo the lane choice')
+})
+
+test('#532: the disarm listener excludes suggested- ids — code-shaped, one site, humans still disarm', () => {
+  const idx = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8')
+  const code = idx.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  assert.equal(code.split('promptBar.disarmHuman(').length - 1, 1, 'ONE disarm site — no second listener that could re-introduce the landmine')
+  const site = code.slice(code.indexOf("event?.type === 'user/message' && event.data?.source?.kind === 'user'"), code.indexOf('promptBar.disarmHuman('))
+  assert.ok(site.includes('startsWith(SUGGESTED_ID_PREFIX)'), 'the exclusion predicate rides the same condition as the kind check')
 })

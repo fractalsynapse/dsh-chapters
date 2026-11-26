@@ -19,10 +19,31 @@ import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /** The files whose bytes reach the model. Adding a file here is a deliberate act: it becomes part of every anchor. */
+/**
+ * #540: `src/commands.ts` REMOVED from the manifest. The anchor's premise (#156) is "the TEXT A
+ * MODEL SEES", and this file is the human menu plane: its descriptions and hints render in the
+ * slash list, and command text is measured NOT model-visible (docs/contract.md: "human command
+ * text is not model-visible"; command output never enters the model context, §7.2). Hashing them
+ * made doc-truth edits — correcting a hint to match its own handler! — declare the whole corpus
+ * stale for bytes no request ever carried: #362's "measures more than the model sees" failure in
+ * a new costume. A tripwire row pins that no tool-registration literal enters this file; if one
+ * ever does, the file comes back.
+ *
+ * #540 part 2: within src/tools.ts, the COMMAND-shape blocks (objects carrying `input: { hint:`
+ * — the door commands /chapters-fork, /chapters-continue, /chapters-save, /chapters-repair) are
+ * filtered out; the chapters_* TOOL blocks (no hint key) stay. Tool descriptions are model bytes;
+ * door descriptions are the same human menu plane as commands.ts.
+ */
 export const PROMPT_SURFACE = [
   'cordis.patch.yml',
   'src/tools.ts',
-  'src/commands.ts',
+  // #526: in, but NARROWLY (versionedRowNames below): the dynamic-append rows (VERSIONED_ROWS)
+  // name tools the model reads in its tool list — bytes that used to be static YAML scalars. An
+  // anchor that covers the YAML but not the code that replaced it is the #362 note's "opposite
+  // failure" verbatim. Only the row-name literals inside that one block count; comments, ids, and
+  // every other line cannot move the anchor — which was the legitimate half of #362's complaint.
+  // (src/commands.ts STAYS OUT: #540 — the human menu plane, measured not model-visible.)
+  'src/preset.ts',
 ]
 
 /**
@@ -93,12 +114,57 @@ export function yamlScalars(text) {
 }
 
 /**
- * Extract the model-facing tokens of one file. YAML goes through the realm-key whitelist; every TS
- * file through the same literal rule. (#362: `src/preset.ts` used to be "taken in full" on the claim
- * that it is the persona file. It is not — see the manifest note above.)
+ * #526: the VERSIONED_ROWS block's tool-name literals — the ONLY model-facing bytes in preset.ts.
+ * Token shape matches yamlScalars exactly (`name='…'`) so a row MOVING from the patch into the
+ * code reads as the same content under a new path, not as a new kind of thing.
  */
+export function versionedRowNames(text) {
+  const i = text.indexOf('VERSIONED_ROWS')
+  if (i < 0) return []
+  const end = text.indexOf('\n]', i)
+  if (end < 0) return []
+  const block = text.slice(i, end)
+  const out = []
+  for (const m of block.matchAll(/\bname:\s*'([^'\n]+)'/g)) out.push(`name='${m[1]}'`)
+  return out
+}
+
+/**
+ * Extract the model-facing tokens of one file. YAML goes through the realm-key whitelist;
+ * src/preset.ts through the row-name rule alone (#526); every other TS file through the literal rule.
+ * (#362: preset.ts used to be "taken in full" on the claim it is the persona file. It is not —
+ * full-file extraction stayed wrong; the NARROW rule is the correction.)
+ */
+/**
+ * #540: strip the HUMAN command objects from a TS file before literal extraction. A command object
+ * is identifiable structurally — it carries `input: { hint:`; tool objects carry parameter schemas and
+ * an output schema instead. The strip spans from the `name:` line of each such object through the end
+ * of its `input:` line; descriptions inside are menu text, not model text.
+ */
+export function withoutCommandBlocks(text) {
+  const lines = text.split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /\bname: '(chapters-[a-z-]+)'/.exec(lines[i])
+    if (m !== null) {
+      // look ahead (the object header, within a few lines) for the command shape marker
+      const head = lines.slice(i, i + 6).join('\n')
+      if (/input:\s*\{\s*hint:/.test(head)) {
+        let j = i
+        while (j < lines.length && !/input:\s*\{\s*hint:/.test(lines[j])) j += 1
+        i = j // skip the name/description/hint header lines of the human command object
+        continue
+      }
+    }
+    out.push(lines[i])
+  }
+  return out.join('\n')
+}
+
 export function extractTokens(path, text) {
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return yamlScalars(text)
+  if (path === 'src/tools.ts') return tsStringLiterals(withoutCommandBlocks(text))
+  if (path === 'src/preset.ts') return versionedRowNames(text)
   return tsStringLiterals(text)
 }
 

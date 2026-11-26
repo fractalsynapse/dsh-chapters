@@ -23,7 +23,8 @@ widens the corpus to every machine's work — [Part III](/knowledge/pool/) expla
 Either: they are ONE deterministic door pulled with two intents, and the archive they write is identical.
 The choice is about the work, not the machinery — **continue** extends the same stream (so the child is told
 which plan governs it, and stays in plan mode if you were still planning), **fork** splits a new direction
-(so the child is handed zero plan bytes and asks you what it should work on). Both derive their ranges in
+(so the child is handed zero plan bytes — and zero session-tier rule bytes, inheriting the project tier
+only — and asks you what it should work on). Both derive their ranges in
 the plugin, so a click needs no model turn ([§15](/reference/commands/)).
 
 ### `origin changed — rebuilding mirror`

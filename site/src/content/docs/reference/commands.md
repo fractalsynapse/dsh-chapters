@@ -45,11 +45,35 @@ preset or the door says it is needed.
 | `/chapters-link <https-url> <token>` | bind a smart-HTTP pool; the token is required **unless the host is loopback** (`127.0.0.1` / `localhost` / `::1`), and is stored **0600 under the DSH home**, never in the project |
 | `/chapters-link treedx+<url>/<repo> <token>` | bind a TreeDX service (token always required — bearer API); the managed repository is created server-side if absent |
 
-The no-args answer is a git-status-like block: `Provider`, `Upstream`, `Bound` (slug · project key · since), `Mirror` (branch/head, plus an origin-drift note when it will rebuild), `Sync` (last run + detail), `Pending` (files not yet mirrored), `Harness` (this machine's id). Relinking to a different target — or a push that finds the mirror diverged — rebuilds the mirror from the store (the store is the truth).
+The no-args answer is a git-status-like block: `Provider`, `Upstream`, `Bound` (slug · project key · since),
+**`Identity`** (§7.8 fail-loud: which source derived the project key here — `remote` / `config override` /
+`PATH` — and a loud ⚠ when this checkout resolves a DIFFERENT key than the bound one, because rules and
+chapters approved elsewhere will then not appear here), the diagnostics line, `Mirror` (branch/head, plus an
+origin-drift note when it will rebuild), `Sync` (last run + detail), `Pending` (files not yet mirrored, plus
+the no-credentials nudge), `Harness` (this machine's id). Relinking to a different target — or a push that
+finds the mirror diverged — rebuilds the mirror from the store (the store is the truth).
 
 ## `/chapters-status`
 
-Per linked project: `Project` / `Remote` / `Provider` lines, then `Sync: a push is pending (debounced)` or the last sync mode; then `Last sync: <time> — synced` (or `local-only: <reason>`) with the step trail behind it — `cloned → published N new file(s), M already mirrored → pushed` — and the enrichment status line. With no project and no history it says so in one line and points at `/chapters-link`. Pending counts, vocabulary curation notes, and failure details are all printed — no silence.
+The project's whole health surface, one command — printed in **every** state, unlinked included (#61: an
+absent block used to hide the health lines behind a one-sentence refusal). In order:
+
+```
+Version: <x.y.z> · loaded from <path>       # #260: the copy THIS process booted — the honest answer to "did my update take?" (other homes/servers not visible from here, each with its own restart and its own /chapters-status)
+Project / Remote / Provider                 # when linked; Identity line names the project KEY SOURCE and warns LOUDLY when this checkout resolves a different key than the bound one (§7.8)
+Sync / Last sync                            # pending-debounced or last mode, with the step trail (cloned → published N → pushed)
+Enrichment: <status line>                   # model, pending count, and since #529 whether a backlog chase is running
+Prompt suggestions / plane block            # #225: the model, transport, door sightings, and THIS session's last persisted verdict — "why did hundreds of pulls not offer?" is answerable, not archaeology
+retrieval: N search · N artifact · N rules  # #531: is the agent actually consulting the archive? per-session and per-process live counts (pool-vs-local line when linked)
+diagnostics line                            # where failures self-report, with the warning counts
+Auto-save line                              # the #47 behavior's live state
+Findings (registry-level) + "NOT checked here"   # what a status CANNOT verify without the durable log is named, not silently counted clean — coverage holes, orphans, dead citations belong to /chapters-repair audit
+Removals + missing-access ledger            # #255: removed stubs are a STATE, printed even when nothing is linked
+This session: N events, N turns, N chapters # a long session that has archived nothing is told so, in words, with the remedy (/chapters-save)
+```
+
+Pending counts, vocabulary notes and failure details are all printed — no silence, and no block omitted
+because it was empty: an unwired surface is STATED, not omitted.
 
 ## `/chapters-models`
 
@@ -74,11 +98,17 @@ provider or capability the host does not expose is reported as absent, never gue
 ## `/chapters-enrich`
 
 ```
-/chapters-enrich run                          # process one batch now (up to `enrichmentBatchCap` chapters)
-/chapters-enrich model                        # show the current annotator route
-/chapters-enrich model <provider/model|clear> # override it, or reset to the conversation route
+/chapters-enrich run                          # one manual batch now (up to `enrichmentBatchCap` chapters) — the backlog chase is the archive moments' job, not this verb's
+/chapters-enrich model [<provider/model> | clear]  # show the annotator route, override it, or reset it to the conversation route
 /chapters-enrich report                       # enrichment status line + pending chapter count
 ```
+
+The backlog drain belongs to the archive moments (#529), so an operator nudge can never
+become a second unbounded loop. Since
+#529 every archive moment (continue, fork, save, compaction finalize, subagent settlement,
+forced child archive, operator repair) drains the WHOLE pending backlog in capped passes: a
+full `enrichmentBatchCap` pass schedules its own follow-up 5 s later until a pass comes back
+short, a failing pass stops the chase, and the idle sweeper is now only the fallback.
 
 ## `/chapters-rule`
 
@@ -87,7 +117,7 @@ provider or capability the host does not expose is reported as absent, never gue
 /chapters-rule list [--all|--proposed|--category <c>]      # review surface
 /chapters-rule view <id>                                   # ONE rule, completely — full text, status, basis
 /chapters-rule approve <id> | revoke <id>                  # YOUR machine's curation fact — never a shared rewrite
-/chapters-rule model <provider/model | clear>      # #506: dedicated mining model at runtime; clear ⇒ rides the enrichment call. Effective value in /chapters-models
+/chapters-rule model [<provider/model> | clear]       # #506: dedicated mining model at runtime; bare `model` shows it; clear ⇒ rides the enrichment call. Effective value in /chapters-models
 ```
 
 `list` shows titles, and a title is the first sentence of the body cut at 60 characters — enough to
@@ -115,7 +145,7 @@ zero model tokens, active for your session tree, exactly the words you wrote. It
 mines instead is labelled `stated` or `inferred` in the head, so the two paths are never confused.
 See [Rules & governance](/knowledge/rules/).
 
-## The deterministic door: `/chapters-fork [title]` and `/chapters-continue [title]`
+## The deterministic door: `/chapters-fork [messageSeq] [title]` and `/chapters-continue [messageSeq] [title]`
 
 **One door, two intents — not two mechanisms.** Both commands come from the same builder
 (`deterministicCommand`, `src/tools.ts`), and a test pins that given the same events they archive
@@ -127,6 +157,12 @@ What the door does, either way: everything after the last archive watermark up t
 archived verbatim, ranges derived by the plugin itself — **zero model involvement** — and a titled child
 opens whose entire inherited history is the cumulative TOC. If nothing new was said since the last archive,
 both degrade to a pure citation child: created, citing the existing chapters unchanged, nothing written.
+
+A **bare integer first argument anchors the door** (#221): `/chapters-continue 412 pick up the parser`
+archives up to the last completed turn at or before seq 412 and titles the child after the rest. Clicking
+*Continue* on an earlier assistant row sends exactly that number; typing one works too. Parsing is strict —
+a non-numeric first token stays the title — and an out-of-range anchor **refuses with the numbers** rather
+than silently archiving more or less. No argument keeps the end-of-session behavior.
 
 The **only** difference is what the child is told about plans:
 
@@ -154,9 +190,14 @@ rewords that label the native button simply reappears — fails open, visibly, n
 ## `/chapters-save` — archive without creating a child session
 
 ```
-/chapters-save              # archive completed turns into searchable chapters
-/chapters-save [title]      # optional title prefix for the saved chapters
+/chapters-save                  # archive completed turns into searchable chapters
 ```
+
+The command takes **no arguments** — chapter titles come from the deterministic derivation
+([plan → first human line → goal objective](/concepts/archive-anatomy/), #530), not from a typed
+string, and the span is always the watermark tail. (The hint used to advertise `[messageSeq]
+[title]`; the handler never parsed either — #540 caught the ghost, and #541 tracks implementing
+a real anchored save if the maintainer wants the affordance.)
 
 Archives everything after the last archive watermark up to the last completed turn into
 verbatim chapters on disk, updates the search index, and triggers enrichment — **without**
@@ -328,20 +369,33 @@ zero chapters. Close it with `childAutoArchive: false`.
 ## `/chapters-prompt` — the recommending model ([§28](/concepts/prompt-recommendations/))
 
 ```
-/chapters-prompt                             # usage + the current state (ON with model / OFF)
+/chapters-prompt                             # usage — the verb list above
 /chapters-prompt model                       # show the effective model and its source (override or config)
 /chapters-prompt model <provider/model>      # set it — setting a model is what ENABLES the feature
+/chapters-prompt model <provider/model> [maxChars [contextChars]]  # #188: pin the caps beside the model (positive integers; omitted numbers derive from the model's window)
 /chapters-prompt model clear                 # drop the override; falls back to `promptModel` ('' ⇒ off)
-/chapters-prompt off                         # disable regardless of config (stores the empty override)
-/chapters-prompt suggest                     # machine verb: the composer ghost pulls this; ≤ one bounded call per turn boundary
-/chapters-prompt rounds [n | unlimited | show]  # #505: the autorun round cap, live — the default is UNLIMITED; a goal-active run was never capped (#188)
+/chapters-prompt on                          # per-session re-enable after the bar's ✕ (needs a model set; the model is the plane switch, this is the session one)
+/chapters-prompt off                         # disable for the WHOLE PLANE — clears the model for every session (#291 says so in its reply)
+/chapters-prompt off-session                 # the bar's ✕ verb: suggestions OFF for THIS session only, model kept (#291)
+/chapters-prompt state                       # the k:v heartbeat the client bar renders: status, model+source, autorun flag and rounds fired, turn, intent, goal revision, heartbeat, LIVE rounds cap
+/chapters-prompt run                         # the bar's Run button verb: submits THIS session's current offer as your turn (refuses a delivered/consumed one, #289)
+/chapters-prompt suggest                     # machine verb: the composer bar pulls this; ≤ one bounded call per turn boundary; writes the offer to the bar
+/chapters-prompt autorun on|off              # the loop: run each turn's offer automatically (arm/disarm are accepted aliases); `on` refuses with no model and says why
+/chapters-prompt rounds [n | unlimited | show | clear]  # #505: the autorun round cap, live — the default is UNLIMITED; a goal-active run was never capped (#188); `clear` drops the override back to config
 ```
+
+All ten verbs ride the same settings spine as the model override: stored, plane-wide, survives
+restarts, and printed live by `state` with its source — never the file's stale number. The brakes
+against a runaway loop are structural and named: one round per offer, a **typed human prompt**
+disarms instantly (the loop's own `[auto]`-fired prompts do not — #532 fixed that self-disarm),
+`off` stops the door, and a goal-bound run answers to the goal's lifecycle (#188).
 
 `suggest` is the client's door: it answers `{kind:'success', text:<one prompt>}` when a
 recommendation is current or computable, and refuses with the remedy (`off`, no route, model
 failure, over-cap answer) when it is not. A refusal latches the ghost hidden for the turn
 boundary — the disabled state shows nothing, ever. `/chapters-status` prints the feature's
-state beside enrichment and rules.
+state beside enrichment and rules. A unit row (#540) pins every verb above against the handler
+that parses it — an option may not ship unadvertised in the typing hint.
 
 ## Plus the host's `/compact`
 
