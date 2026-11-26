@@ -22,7 +22,7 @@ import {
 import { classifyOffer } from './prompt-state.ts'
 import { deliveredOffer } from './prompt-runner.ts'
 import { isLocalUpstreamUrl, readOrigin, resolveLocalUpstreamPath } from './gitops.ts'
-import { parseKnowledgeRemote, projectKeyForTarget, projectKeyFromRemote, resolveProject } from './repo.ts'
+import { parseKnowledgeRemote, projectKeyForTarget, projectKeyFromRemote, resolveProject, identityVerdict } from './repo.ts'
 import { createTreeDxClient } from './treedx/client.ts'
 import { resolveRepoId } from './treedx/provider.ts'
 import { readState } from './treedx/state.ts'
@@ -158,20 +158,12 @@ export function registerHostCommands(
             `Provider: ${rec.kind ?? 'git'}`,
             `Upstream: ${rec.remote}`,
             `Bound:    ${rec.slug} · key ${rec.projectKey} · since ${rec.linkedAt}`,
-            // §7.8 IDENTITY MUST FAIL LOUDLY. Project rules carry across checkouts
-            // because the key derives from the canonicalized REMOTE — so the four
-            // ways it can diverge (no remote ⇒ path-derived, a fork listed first,
-            // a TreeDX link keyed on the pool, an unlinked clone) are reported here
-            // rather than leaving a checkout silently owning its own namespace.
-            (() => {
-              const derived = resolveProject(cwd, config.projectKeyOverride !== undefined && config.projectKeyOverride !== '' ? config.projectKeyOverride : undefined)
-              const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
-                : derived.projectKeySource === 'override' ? 'config override'
-                  : `PATH ${cwd} (not the remote — unstable across machines)`
-              return derived.projectKey === rec.projectKey
-                ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
-                : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${rec.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`
-            })(),
+            // §7.8 IDENTITY MUST FAIL LOUDLY — for the drift it was written for: the SAME remote
+            // canonicalizing to two keys (fork listed first, stale link, canonicalization damage).
+            // #546: a pool that IS its own repository is the documented design (record §2.1), not
+            // drift — identityReport splits the two cases; everything that governs rides the
+            // BOUND key either way.
+            identityReport(cwd, rec, config.projectKeyOverride),
             diagnosticStatusLine(),
             `Mirror:   ${fs.existsSync(mirrorAbs) ? DEFAULT_CLONE_DIR : '(not created yet)'}` +
               (treedx ? `  head ${head ?? (tstate === null ? 'not cloned' : 'empty repo')}${tstate?.offline === true ? ' · OFFLINE (push deferred)' : ''}` : `  branch ${head ?? 'main'}`) +
@@ -291,6 +283,24 @@ export function registerHostCommands(
     })
   }
 
+  /**
+   * #546: one sentence per identity situation. A separate-pool link is BY DESIGN (record §2.1:
+   * the knowledge repo need not be the code repo — it can be pushed anywhere later), so it
+   * reports informationally and states which key governs; the ⚠ stays for §7.8's real drift —
+   * the same remote resolving to a different key (fork listed first, canonicalization damage),
+   * and for path-derived ambiguity on an identical key it never fires.
+   */
+  function identityReport(cwd: string, rec: { projectKey: string; remote: string }, override: string | undefined): string {
+    const derived = resolveProject(cwd, override !== undefined && override !== '' ? override : undefined)
+    const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
+      : derived.projectKeySource === 'override' ? 'config override'
+        : `PATH ${cwd} (not the remote — unstable across machines)`
+    const verdict = identityVerdict(rec, derived)
+    if (verdict.kind === 'match') return `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
+    if (verdict.kind === 'pool-keyed') return `Identity: pool-keyed ${rec.projectKey.slice(0, 8)}… — the bound upstream (${rec.remote}) is its own repository BY DESIGN (the knowledge repo need not be the code repo, record §2.1). Everything — chapters, rules, artifacts, search — rides this bound key; ${derived.remote !== null ? `the checkout's own remote (${derived.remote}) is identity for reporting only` : 'this checkout carries no git remote, and none is needed — the link is the identity'}. Rules approved via this pool appear here on every machine that links the same pool.`
+    return `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${rec.projectKey.slice(0, 8)}…) — the SAME remote canonicalizing to two keys means drift (fork listed first? a stale link?): rules and chapters approved under the bound key will NOT appear here. ${where}`
+  }
+
   const statusCommand = {
     name: 'chapters-status',
     description: 'The project\u2019s whole health surface: version and loaded copy, upstream/mirror/sync, identity, enrichment, prompt plane, retrieval counters, diagnostics, auto-save, findings, removals.',
@@ -325,15 +335,7 @@ export function registerHostCommands(
         // before origin, a TreeDX link keyed on the pool location) are reported
         // here instead of leaving a checkout owning a private rules namespace while
         // its developer believes the team's rules apply.
-        {
-          const derived = resolveProject(cwd, config.projectKeyOverride !== undefined && config.projectKeyOverride !== '' ? config.projectKeyOverride : undefined)
-          const where = derived.projectKeySource === 'remote' ? `remote ${derived.remote ?? ''}`
-            : derived.projectKeySource === 'override' ? 'config override'
-              : `PATH ${cwd} (not the remote — unstable across machines)`
-          lines.push(derived.projectKey === project.projectKey
-            ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
-            : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${project.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`)
-        }
+        lines.push(identityReport(cwd, project, config.projectKeyOverride))
         lines.push(pending ? 'Sync: a push is pending (debounced)' : `Sync: ${status?.mode ?? 'never run'}${pending ? '' : ''}`)
       }
       if (status !== null) {
@@ -357,7 +359,7 @@ export function registerHostCommands(
           if (sessId !== undefined) { try { lines.push(await plane.sessionRow(sessId)) } catch { /* the block degrades to what it has */ } }
         }
       }
-      lines.push(diagnosticStatusLine())
+      lines.push(diagnosticStatusLine(cwd, config.artifactStoreRoot))
       lines.push(AUTO_SAVE_LINE(config))
       // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
       // the durable log is named as unchecked rather than counted as clean: coverage holes, orphan
