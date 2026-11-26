@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 66249,
-      "detail": "pass 1560 / fail 0 / todo 1"
+      "ms": 67783,
+      "detail": "pass 1595 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 7696,
-      "detail": "pass 196 / fail 0 / todo 0"
+      "ms": 9100,
+      "detail": "pass 198 / fail 0 / todo 0"
     },
     {
       "leg": "compose",
       "ok": false,
-      "ms": 53168,
-      "detail": "fail-broken-preset — DECLARED BUT BROKEN — host-internal crash during preset mount (fires for ANY preset on this build, standard included — probed 2026-11-23): Cannot read properties of undefined (reading 'parent')"
+      "ms": 64421,
+      "detail": "known-host-broken (fail-broken-preset) — DECLARED BUT BROKEN — host-internal crash during preset mount (fires for ANY preset on this build, standard included — probed 2026-11-23): Cannot read properties of undefined (reading 'parent') — declared broken, https://github.com/fractalsynapse/dsh-chapters/issues/553"
     }
   ],
   "verdict": "fail",
-  "ts": "2026-11-24T14:59:07.113Z"
+  "ts": "2026-11-26T14:01:14.261Z"
 }
