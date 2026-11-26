@@ -1426,6 +1426,23 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.52 cut (2026-11-25): the self-driving audit closes at the roots; the support floor is enforced by composition
+
+**Shipped:** #532 (autorun survives its own fired prompts — the human-lane move of 0.2.51 made the
+loop's own message look like human input, so every run died at the first boundary), #529 (backlog
+chase: every archive moment drains the whole enrichment queue in capped passes; failure stops the
+chase — measured starvation HOURS on the live SAIP session), #530 (goal objectives title machine-
+prose spans), #531 (retrieval counters in /chapters-status), #537 (no JS executes at config load;
+platform eligibility rides PLATFORM_ELIGIBLE drop-and-name, drift-guarded), #526 (the retired
+list-agents subpath leaves the STATIC composition — it marked the whole preset broken on 0.2.2-rc.5+
+hosts before any plugin code ran — and returns as a predicate-gated dynamic append; the anchor rule
+gained versionedRowNames so the relocated bytes stay scanned; twelve legs replay the re-anchored
+build), #540 (+#462 groups via #538: every typing hint mirrors its handler — /chapters-prompt
+advertised 3 of 10 verbs, /chapters-save advertised a ghost — with a CI guard both directions; the
+promptAnchor now measures exactly the model-visible text; all 30 site pages re-verified). Maintainer
+authority: 'fix the remaining issues in this release… cut a new release and get SAIP back on track
+with your monitoring'.
+
 ## 0.2.51 cut (2026-11-25): prompts in the human lane, marked; the ghost bar dies
 
 **Shipped:** #523 (auto lane + [auto] marker, maintainer delegation, tape re-recorded green) and
