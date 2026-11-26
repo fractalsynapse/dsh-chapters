@@ -29,7 +29,7 @@ declaration read by both planes, so a head rebuilt by either path selects the sa
 | `enrichmentEnabled` | true | **false makes the whole P2 ladder a pure no-op** — corpus stays fully working |
 | `enrichmentModel` | `''` (conversation route) | the annotator override |
 | `enrichmentMaxTokens` | 4000 | one auxiliary completion budget (annotation, mined rules, the conflicts report). It has to cover **reasoning** tokens, not just the visible answer — measured mining usage ran 1.1K–3.2K per chapter. The route used here ignores `max_tokens`, so this is headroom for providers that don't rather than a live limit |
-| `enrichmentIdleMs` / `enrichmentBatchCap` | 60000 / 5 | the idle sweeper's quiet period — now a FALLBACK, not the main path — / chapters per PASS. Since #529 every archive moment drains the WHOLE backlog in capped passes: a full batch schedules its own follow-up 5 s later until a pass comes back short; a failing pass stops the chase |
+| `enrichmentIdleMs` / `enrichmentBatchCap` | 60000 / 5 | the idle sweeper's quiet period — now a FALLBACK, not the main path — / chapters per PASS. Since #529 every archive moment drains the WHOLE backlog in capped passes: a full batch schedules its own follow-up 5 s later until a pass comes back short; a failing pass stops the chase (per PASS is also what a manual /chapters-enrich run chains through — since #565 a run drains ALL pending across passes, or `run <n>` for a user-set limit) |
 | `vocabApply` | false | shadow (default) vs git-visible topic curation |
 | `vocabCoMin` / `vocabOverlapMin` | 3 / 0.5 | trust thresholds for emergent vocabulary |
 | `coreRulesBudgetTokens` | 1200 | the CORE RULES block in notices — **refuses with numbers, never clips** |
