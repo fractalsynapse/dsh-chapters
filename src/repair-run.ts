@@ -403,7 +403,7 @@ export async function runRepair(ports: RepairPorts, opts: RepairOptions): Promis
         }
         // append + counter-raise in ONE section: a re-registered number must never sit at or above
         // `nextChapterNumber`, or the next door collides with it (#59's twin).
-        await store.mutate(opts.sessionId, (fresh) => raiseCounters(appendChapters(fresh, [record])))
+        await store.mutate(opts.sessionId, (fresh) => raiseCounters(appendChapters(fresh, [record], cwd))) // #557: stamped, never guessed
         journal.entries.push({ kind: 'registry', path: relPath, beforeSha: null, afterSha: record.sha256 })
         flush()
         ports.log(`re-registered ${relPath} (seqs ${record.startSeq}-${record.endSeq}, ${record.estimatedTokens} tokens) — file untouched, row restored`)
