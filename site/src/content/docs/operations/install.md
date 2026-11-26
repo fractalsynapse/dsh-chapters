@@ -6,7 +6,7 @@ lastUpdated: true
 
 ## Requirements
 
-DeepSeek Harness (`@deepseek-ai/dsh`) ≥ 0.1.5-rc.x, Node ≥ 24. The plugin ships as one npm package: [`@fractalsynapse/dsh-chapters`](https://www.npmjs.com/package/@fractalsynapse/dsh-chapters).
+DeepSeek Harness (`@deepseek-ai/dsh`) **≥ 0.2.0** (the maintainer's floor since #446 — the 0.1.\* line is deprecated: below 0.2.0 a host cannot register preset declaration rows, and the doors have nowhere to mount), Node ≥ 24. The plugin ships as one npm package: [`@fractalsynapse/dsh-chapters`](https://www.npmjs.com/package/@fractalsynapse/dsh-chapters).
 
 ## Install / update — the path this project uses
 
@@ -52,8 +52,8 @@ state is the same directory `npm ls` reads.
 
 ## Restart and check
 
-Restart the harness. Expect on boot: engine-constructed lines in the server log, the six `chapters_*`
-tools, the six `/chapters-*` commands, **both** archive buttons on assistant rows (*Fork with chapters* and
+Restart the harness. Expect on boot: engine-constructed lines in the server log, the seven `chapters_*`
+tools, the thirteen `/chapters-*` commands (ten on the host plane, three in the preset realm — §15 has the table), **both** archive buttons on assistant rows (*Fork with chapters* and
 *Continue with chapters* — one deterministic door, two intents), and the optional `chapters` preset that
 routes `/compact` through the zero-token engine.
 
@@ -61,7 +61,7 @@ routes `/compact` through the zero-token engine.
 
 The version question after an update has one honest answer source: **the running process itself**.
 `/chapters-status` prints a `Version:` line naming the plugin version it loaded and the copy on disk it
-loaded from — so `dsh plugin --profile web update @fractalsynapse/dsh-chapters` (or the `npm i` path), a
+loaded from — so an update (however your harness takes it — note that this project has NEVER observed `dsh plugin add/update` working end-to-end; the verified path on this machine is installing from the tarball, §Install above), a
 restart, and one look at `/chapters-status` closes the update loop entirely inside the product. No
 repo-bundled script is part of any human or agent-facing release step; the parity script remains exactly
 where its strength is — the CI job that reads all trees at once.
@@ -135,7 +135,7 @@ shadowing the upgraded global install. Two steps, in order:
 ## Supply chain, auditable
 
 - every CI-published version carries an **npm provenance attestation** (SLSA v1, signed from the CI run's OIDC identity) linking the tarball to the exact repo, workflow, commit, and CI run that built it — publish auth itself is an npm org token in the `Production` environment since #261 (before that, trusted publishing), and no long-lived token is ever stored in the repo;
-- the package moved org with the repository: **`@fractalsynapse/dsh-chapters`** from 0.2.18. The old `@treeseed/dsh-chapters` stays at 0.2.16 permanently — an install from before the move updates once, then goes stale; switch it with `dsh plugin --profile web add @fractalsynapse/dsh-chapters` (remove the old one after);
+- the package moved org with the repository: **`@fractalsynapse/dsh-chapters`** from 0.2.21 (0.2.17–0.2.19 are dead tags that never reached the registry, and 0.2.20 is a deprecated stale-tree manual publish — the ledger in §26 carries all four). The old `@treeseed/dsh-chapters` stays at 0.2.16 permanently — an install from before the move updates once, then goes stale; switch it with `dsh plugin --profile web add @fractalsynapse/dsh-chapters` (remove the old one after);
 - `npm audit signatures` on an installed tree verifies it;
 - releases publish from a green `main`: the release workflow itself blocks on the **full deterministic suite — unit + integration, under the ≥85% coverage gate** — and CI runs the **browser acceptance chain replayed from committed model tapes** on every push to `main`, so a release is always cut from a green acceptance run — no LLM, no GPU, no key, and a *loud* failure (503 on tape miss) rather than a skip. The current row count lives in the release ledger ([§26](/operations/changelog/)), not here: a count typed into a page goes stale exactly like a version does;
 

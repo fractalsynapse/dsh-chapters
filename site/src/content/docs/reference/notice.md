@@ -4,10 +4,19 @@ description: The single message a new session starts with — every section, ann
 lastUpdated: true
 ---
 
-A continuation's whole inherited history is one message: exactly one synthetic `user/message` event at seq 0, seeded with source `{ kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [...] }` (a producer-owned kind — session format v4 retired the bare `plugin` wrapper; see `docs/contract.md`). Here is the structure, line by line (as `assembleNotice` renders it — `src/continue-core.ts` is its only author):
+A continuation's whole inherited history is one message: the notice is **authored as the child's real
+first user turn** — sent through the follow-up seam after the kernel records its header, never seeded
+from the parent's events (invariant 2; birth carries ZERO seeded surface events). Its producer source is
+`{ kind: 'plugin:dsh-chapters', form: 'snapshot', sections: [...] }` (a producer-owned kind — session
+format v4 retired the bare `plugin` wrapper; see `docs/contract.md`). The one case where a child's log
+starts with seeded events is the sanctioned synthetic `plan/mode` state (`plan-mode@0 → end-seed@1`,
+continuations whose archived span was still planning), and the notice is still the first AUTHORED turn
+after it. Here is the structure, in the order `assembleNotice` emits it (`src/continue-core.ts` is its
+only author; the `## First response` tail is appended by `buildTocNotice` and is part of what the budget
+gate measures):
 
 ```markdown
-# Continuation: <title>                              ← the branch's headline
+# Continuation: <title>                              ← the child's headline
                                                        (durable — renamed via the host's title service)
 
 Project: <slug> · <projectKey>                       ← only when a knowledge project is linked, with the
@@ -21,58 +30,42 @@ Project: <slug> · <projectKey>                       ← only when a knowledge 
 ## Active plan
 (this continuation keeps the same stream of work: 3 plan(s) submitted on the path — …)
 - ACTIVE PLAN: "Carry plans into chapters" — APPROVED
-  (ch. 4 · full text: .dsh-chapters/<root>/artifacts/8f/8f3….txt · plan document:
-   .dsh-chapters/<root>/chapters/plan-001-….md · ~4.6K tok)
-  Read the full text with chapters_artifact before implementing. Do NOT re-plan from recall.
+  (ch. 4 .dsh-chapters/<root>/chapters/004-….md · full text: .dsh-chapters/<root>/artifacts/8f/8f3….txt
+   · plan document: .dsh-chapters/<root>/chapters/plan-001-….md · sha 8f3a1c2… · ~4600 tok)
+  Read the full text with chapters_artifact (toc | search | read) before implementing.
+  Do NOT re-plan from recall: the bytes are in the store.
 
 ## Previous plans on this path
 (history — cited for evolution and status, not directives)
 - "Carry plans into chapters" — REJECTED — the user sent it back with feedback (ch. 4 …)
 
 - "Rollback plan" — PENDING … (NOT ARCHIVED — parent log seq 11 only)
-                                                     ← the ACTIVE block appears only for a CONTINUATION —
-                                                       whichever way it was pulled: the `chapters_continue`
-                                                       tool, `/chapters-continue`, or the *Continue with
-                                                       chapters* button (which runs that command). Same
-                                                       stream of work, so the operative plan stays a live
-                                                       directive and plan mode is SEEDED into the child when
-                                                       the archived span was still planning. A BRANCH
-                                                       (`chapters_fork`, `/chapters-fork`, the *Fork with
-                                                       chapters* button) splits a new direction, so it gets
-                                                       ZERO bytes here — the plans remain, but as history: in
-                                                       the cited chapters and as searchable `kind: plan`
-                                                       documents.
-                                                       A continuation whose plan was already approved is NOT
-                                                       seeded either — approving a plan exits plan mode, and
-                                                       that child's job is to implement. Anything not
-                                                       APPROVED says so to the child's face; a review left
-                                                       open sits in an unfinished turn, above the archive
-                                                       ceiling, and is named live and un-stored
+                                                      ← the ACTIVE block appears only for a CONTINUATION —
+                                                        whichever way it was pulled: the `chapters_continue`
+                                                        tool, `/chapters-continue`, or the *Continue with
+                                                        chapters* button (which runs that command). Same
+                                                        stream of work, so the operative plan stays a live
+                                                        directive and plan mode is SEEDED into the child when
+                                                        the archived span was still planning. A BRANCH
+                                                        (`chapters_fork`, `/chapters-fork`, the *Fork with
+                                                        chapters* button) splits a new direction, so it gets
+                                                        ZERO bytes here — the plans remain, but as history: in
+                                                        the cited chapters and as searchable `kind: plan`
+                                                        documents.
+                                                        A continuation whose plan was already approved is NOT
+                                                        seeded either — approving a plan exits plan mode, and
+                                                        that child's job is to implement. Anything not
+                                                        APPROVED says so to the child's face; a review left
+                                                        open sits in an unfinished turn, above the archive
+                                                        ceiling, and is named live and un-stored
+
+## Goal (carried from the parent session)             ← conditional block; explained below
+## Task list (carried from the parent session)        ← conditional block; explained below
 
 This session continues an archived conversation. Chapters are verbatim Markdown in the workspace;
 every byte remains retrievable — inline, or at artifact paths cited inside a chapter. Read a chapter
 by its path with the read tool when the detail matters. The previous session stays intact.
-                                                     ← the fixed preamble, identical every time
-
-## Goal
-
-If the parent session carried an **active goal** into the renewal, the notice gains a `## Goal` block
-above the fold: the objective whole (a display budget may state its cut, the archive holds every byte),
-the revision, the round cap, the phase, and the seq it was folded from. The plugin then **re-creates the
-goal on the child** through the host's goal service — the objective keeps driving work instead of
-becoming prose — and the block says so. A paused or blocked goal is stated but NOT re-armed (a human
-stopped it; only a human resumes it). A completed or cleared goal is reported as finished and never
-resumed. No goal, no bytes: ordinary sessions' notices are byte-identical. If the host refuses the
-re-creation, the door's reply says so plainly and `​/goal resume` by you remains the path.
-Control `goalRearmOnCarry` (default on) restores the notice-only wording if your deployment wants goal
-creation reserved for humans.
-
-## Task list
-
-A parent that used the todo list gets a `## Task list (carried from the parent session)` block — the
-final `todo/write` snapshot, statuses and all. Task lists stay surface-local in chapters (a decision
-recorded in the backlog); the notice carries them so the child knows what was in flight, not just what
-was said.
+                                                      ← the fixed preamble, identical every time
 
 ## In flight
 <State of play — the handoff note. Free text, the
@@ -82,41 +75,79 @@ agent's framing of "here's what's happening now".>   ← budget-checked TOGETHER
 ## Chapters
 1. [Deeply analyze this project…](.dsh-chapters/<root>/chapters/001-….md) — <summary> (33 msgs)
 2. [Earlier history](.dsh-chapters/<root>/chapters/002-….md) — <summary> ⚠ modified since archived
-                                                     ← a PATH to verbatim text, not a paraphrase. The count
-                                                       is CONVERSATION messages — injected host context
-                                                       (AGENTS.md, skill catalogs) is marked-and-excluded,
-                                                       so the same chapter counts identically on every
-                                                       machine. ⚠ marks a chapter missing or modified
-                                                       since archived — flagged, never trusted
+                                                      ← a PATH to verbatim text, not a paraphrase. The count
+                                                        is CONVERSATION messages — injected host context
+                                                        (AGENTS.md, skill catalogs) is marked-and-excluded,
+                                                        so the same chapter counts identically on every
+                                                        machine. ⚠ marks a chapter missing or modified
+                                                        since archived — flagged, never trusted. The
+                                                        continuation notice lists EVERY chapter; the
+                                                        `noticeIndexCap` row bounds only the compaction
+                                                        checkpoint's index (newest `cap`, default 6, with an
+                                                        overflow line pointing at chapters_search)
+
+## Finding things
+- Chapter detail: open its path above with the read tool.
+- A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — action 'toc' | 'search' | 'read'.
+- Anything else on this project — other sessions' work, archived plans (`kind: plan`), curated rules: chapters_search.
+- Before starting a task: chapters_rules with the task description — it returns the rules that actually apply, and says what it withheld.
+                                                      ← four verbs, one line each; the child's QUESTION
+                                                        decides which to reach for. The notice used to teach
+                                                        only `read`, so tools that were installed and never
+                                                        mentioned were tools a small model would not think to
+                                                        call. `retrievalHints` (default on) is the switch, and
+                                                        off removes this whole section — byte-identical to
+                                                        the pre-hint shape. The rules line lives HERE, not in
+                                                        the persona, on purpose: notice prose costs the tape
+                                                        corpus nothing (measured 2026-10-11) while a persona
+                                                        edit forces a re-record of every affected project
+
+Ancestry: root <session-id>; parent <session-id>; archive under .dsh-chapters/.
+                                                      ← explicit back-links, one line; the chapter list
+                                                        itself is the ancestor path flattened root-first —
+                                                        reading order IS causal order; the model never
+                                                        traverses
+
+## First response
+Acknowledge in one short sentence and wait for the human's next message. Do not call tools in your first turn.
+                                                      ← appended by buildTocNotice: the budget gate measures
+                                                        the notice WITH this tail — what the child actually
+                                                        receives
+```
+
+## The goal block, in detail
+
+If the parent session carried an **active goal** into the renewal, the notice gains the
+`## Goal (carried from the parent session)` block above the fold: the objective whole (a display budget
+may state its cut, the archive holds every byte), the revision, the round cap, the phase, and the seq it
+was folded from. The plugin then **re-creates the goal on the child** through the host's goal service —
+the objective keeps driving work instead of becoming prose — and the block says so. A paused or blocked
+goal is stated but NOT re-armed (a human stopped it; only a human resumes it). A **completed** goal
+renders `## Goal (completed — do not resume it)`. A **cleared** goal contributes **zero bytes** — the
+projection folds to null, and the notice simply has no block. No goal, no bytes: ordinary sessions'
+notices are byte-identical. If the host refuses the re-creation, the door's reply says so plainly and
+you typing `/goal resume` remains the path. Control `goalRearmOnCarry` (default on) restores the
+notice-only wording if your deployment wants goal creation reserved for humans.
+
+## The task list block
+
+A parent that used the todo list gets a `## Task list (carried from the parent session)` block — the
+final `todo/write` snapshot, statuses and all. Task lists stay surface-local in chapters (a decision
+recorded in the backlog); the notice carries them so the child knows what was in flight, not just what
+was said.
 
 ## The preset says it out loud
 
 A notice can only teach the session it creates, so a brand-new session and a delegated subagent would
-never be told these doors exist. The instruction therefore rides the `chapters` preset's own persona
-row — the same mechanism that carries the `PLOT:` discipline, and per-composition rather than global,
-which is what makes it allowed. It says, briefly: before a task run `chapters_rules` with the task
-description and name the rules you followed (or say none); for earlier work, decisions, or bug history
-run `chapters_search` first instead of re-reading files or asking the human; `chapters_artifact` holds
-the oversized tool outputs; a delegated child is covered by the same rules and the same archive.
-Sessions on the standard preset see none of it.
-
-## Finding things
-- Chapter detail: open its path above with the read tool.
-- A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — 'toc' | 'search' | 'read'.
-- Anything else on this project — other sessions' work, archived plans (`kind: plan`), curated rules: chapters_search.
-                                                     ← three verbs, one line each; the child's QUESTION
-                                                       decides which to reach for. The notice used to teach
-                                                       only `read`, so tools that were installed and never
-                                                       mentioned were tools a small model would not think to
-                                                       call. `retrievalHints` (default on) is the switch, and
-                                                       off the notice is byte-identical to the old shape
-
-Ancestry: root <session-id>; parent <session-id>; archive under .dsh-chapters/.
-                                                     ← explicit back-links, one line; the chapter list
-                                                       itself is the ancestor path flattened root-first —
-                                                       reading order IS causal order; the model never
-                                                       traverses
-```
+never be told these doors exist. The retrieval instruction therefore rides the `chapters` preset's own
+persona row — the same mechanism that carries the `PLOT:` discipline, and per-composition rather than
+global, which is what makes it allowed (invariant 3). It says, briefly: before a task run
+`chapters_rules` with the task description and name the rules you followed (or say none); for earlier
+work, decisions, or bug history run `chapters_search` first instead of re-reading files or asking the
+human; `chapters_artifact` holds the oversized tool outputs; a delegated child is covered by the same
+rules and the same archive. Sessions on the standard preset see none of it. (The notice itself carries
+the `chapters_rules` reach-for-it line — the persona states the discipline; both exist on purpose, and
+the persona's bytes are exactly why a wording change there costs a re-record.)
 
 That is the entire inherited-context surface. There is no replay of the parent's last messages and no second index — the TOC is the only index, deliberately (a regenerated duplicate would drift).
 

@@ -82,8 +82,10 @@ has an icon, a status label, the suggested prompt, and three actions:
   log (reminder spans stripped, host narration and goal rounds excluded) — never a guess,
   never a model call: the same read-the-log discipline as the archive.
 - **Autorun / Autorun off** is the loop: after each completed turn the bar generates the next
-  step and runs it, until you stop it, until you send a prompt yourself, or until the goal
-  finishes.
+  step and runs it, until you stop it, until a **typed human prompt** arrives, or until the goal
+  finishes. The loop’s own fired prompts — which since 0.2.51 ride the human lane carrying the
+  `` `[auto] ` `` marker — do **not** count as you taking the wheel (#532: the disarm listener used to
+  mistake the loop’s own message for human input, so autorun died at its first fire, every run).
 - **The bar's ✕ turns suggestions off for THIS session only** (#291). The configured model is
   kept; turning it back on is one action (`/chapters-prompt on`, or set a model again).
 - **The command `/chapters-prompt off` is plane-wide** — it clears the model for every session —
@@ -140,9 +142,10 @@ different purpose, and they are built to run together:
 - arming the loop takes the next turn away from the goal's own auto-continuation: the goal stays the objective, its
   driver pauses (the bar reads `Autorun off`, the goal control reads `Resume goal`), and autorun **disarms itself when
   the goal completes**, because the loop existed to serve that purpose;
-- a prompt you send yourself disarms autorun immediately. Generation keeps going on later
+- a **typed human prompt** disarms autorun immediately. Generation keeps going on later
   turn boundaries — suspending the loop is not disabling the feature — and re-arming is
-  always your action.
+  always your action. A prompt the loop fired itself (marked `[auto] ` in the lane) is not a
+  human prompt: the loop surviving its own first fire is what #532 fixed.
 
 That is the working pair this feature is for: a **director** that keeps defining the next
 move, and a **worker** that executes it, potentially on different models.
@@ -157,10 +160,13 @@ inside that split rather than around it:
   own reservation. When that is the case the bar **yields**: it keeps generating offers — the director's eye
   stays open — and runs none of them. Autorun resumes the moment the goal is paused, blocked, completed,
   disarmed, or absent.
-- **A step that re-cuts the goal is never auto-run.** The host reserves goal edits for a turn that contains a
-  direct human message. An autorun message is authored by the plugin, so it could not perform the edit even
-  if it ran — and faking a human message to make it work would hand an automated loop authority the host
-  deliberately withholds. Instead the recommending model prefixes such a step with `GOAL:` — only when an
+- **A step that re-cuts the goal is never auto-run.** The gate is ours, and it is deliberate:
+  since 0.2.51 a fired prompt rides the human lane, so the host WOULD grant it goal-edit authority —
+  which is exactly why the loop withholds it. A `goal-edit` offer is held for a keystroke: you see it
+  on the bar, and only your own click runs a re-cut. What changed in 0.2.51 is the WHY — the old reason
+  (“an autorun message is authored by the plugin, so it could not perform the edit”) is no longer true
+  of the bytes; the authority decision is still true, and it now sits with the operator on purpose.
+  The recommending model prefixes such a step with `GOAL:` — only when an
   ACTIVE goal actually governs the session (#300: with no active goal the prefix is never legal, not even
   for "close out this release cycle"-flavored wording) — and the bar carries the fact in its one message
   slot: the row's label reads **`Goal edit — run it yourself`** in place of `Recommended Next Step`, and
@@ -264,7 +270,7 @@ Syntax is at [§15 Commands](/reference/commands/), keys at
 | `promptContextChars` | derived | budget for the assembled input. **Model-derived by default**: `contextWindow × promptContextRatio` at 4 chars/token when the prompt model's window resolves; this key is the fallback when no window is known, and `/chapters-prompt model <id> [maxChars] [contextChars]` stores an explicit pair beside the model |
 | `promptContextRatio` | 0.5 | share of the model's context window the derived budget takes — a 1M-window model and a 32K model get budgets 30× apart from one rule |
 | `promptMaxChars` | 4096 | cap on the accepted answer (was 240 — a cap that cannot carry a paragraph cannot carry an instruction); over-cap ⇒ retry once ⇒ refuse with numbers |
-| `promptMaxRounds` | 24 | how many turns one arming of autorun may start **with no active goal**; re-arming does not refresh it. An active goal bounds the loop by its own lifecycle instead (#188) |
+| `promptMaxRounds` | **0 = unlimited** (since #505; was 24) | how many turns one arming of autorun may start **with no active goal**; re-arming does not refresh it. An active goal bounds the loop by its own lifecycle instead (#188). Runtime: `/chapters-prompt rounds <n | unlimited | show | clear>` — the wall an operator can actually raise |
 
 To look at the state rather than the bar: `/chapters-prompt state` prints the status, the
 model and where it came from, the autorun flag and rounds spent, the turn the offer belongs

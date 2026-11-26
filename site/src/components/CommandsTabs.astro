@@ -35,7 +35,8 @@ guard: 0 body mutations attempted · 1 legacy fragment stitched into index view`
     usage: `/chapters-rule add retrieval "Search the pool for prior findings before designing changes."
 /chapters-rule list --proposed
 /chapters-rule approve retrieval/a17f
-/chapters-rule revoke retrieval/a17f`,
+/chapters-rule revoke retrieval/a17f
+/chapters-rule model                     # #506: what mines rules right now; set/clear a dedicated model at runtime`,
     out: `proposed retrieval/a17f (category retrieval, write-once) — binds nothing until approved
 approved on this machine (harness "ws-dev") → included in continuation notices under the 1,200-token core budget`,
   },
@@ -44,15 +45,17 @@ approved on this machine (harness "ws-dev") → included in continuation notices
     desc: 'ONE deterministic door, in its branch intent. Everything since the last archive is written as verbatim chapters (the plugin derives the ranges — no model turn, no frozen numbers) and a titled child opens whose whole history is the cumulative TOC. A branch gets zero plan bytes: its plans stay reachable as history, cited by the chapters.',
     usage: `/chapters-fork                      # title defaults to the parent's + "— branch"
 /chapters-fork Try the TreeDX backend instead    # or name the branch
-# the same door as the "Fork with chapters" button on any assistant message`,
+/chapters-fork 132 Try from TreeDX               # #221 anchor: a completed-turn seq archives up to there
+# the same door as the "Fork with chapters" button (the button passes the clicked message's seq) `,
     out: `Forked: 4 new chapter(s) archived (watermark respected: seqs 24..132), branch “Try the TreeDX backend instead” is session ch-6b9c…; TOC ~118 tokens, allowance 3900. Switch to it from the sidebar — its first message is the table of contents.`,
   },
   {
     tab: '/chapters-continue',
-    desc: 'The same builder, in its continuation intent — the archive is identical, only what the child is TOLD differs: its notice carries the operative plan as a live directive, and if the session was still planning the child is seeded into plan mode for real.',
+    desc: 'The same builder, in its continuation intent — the archive is identical; what the child INHERITS differs: its notice carries the operative plan as a live directive and the session-tier rules of its ancestry, and if the session was still planning the child is seeded into plan mode for real (a branch inherits the project tier only, zero plan bytes).',
     usage: `/chapters-continue                    # same door, other intent
 /chapters-continue Finish the retrieval hints
-# the same door as the "Continue with chapters" button on any assistant message`,
+/chapters-continue 132 Finish the retrieval hints  # anchor at a completed-turn seq (#221)
+# the same door as the "Continue with chapters" button (the button passes the clicked message's seq)`,
     out: `Continued: 4 new chapter(s) archived (watermark respected: seqs 24..132), continuation “Finish the retrieval hints” is session ch-1a4d…; TOC ~121 tokens, allowance 3900. Switch to it from the sidebar — its first message is the table of contents.`,
   },
   {
@@ -67,12 +70,16 @@ plot carried: "PLOT: 3 of 6 reports in and cross-verified…" · inference token
 <section class="dsh-cmds" id="commands">
   <div class="dsh-section-title"><h2>The commands</h2></div>
   <p class="scope">
-    <strong>Scope &amp; activation.</strong> Installing the plugin registers these commands, six agent
-    tools, and <em>both</em> archive buttons — <em>Fork with chapters</em> and <em>Continue with chapters</em>,
-    one deterministic door with two intents — in <em>every session</em> of your profile, nothing else to enable.
-    Routing the host’s <code>/compact</code> through the plugin’s zero-token engine is the one part that
-    needs the <strong>chapters preset</strong>: pick it from the preset menu in the composer
-    (installed automatically; a continuation session composes its preset itself).
+    <strong>Scope &amp; activation.</strong> Installing the plugin mounts it through the
+    <strong>chapters</strong> agent preset (installed automatically; pick it from the preset menu, and a
+    continuation session composes its own preset). Inside sessions that compose it you get, with nothing
+    else to enable: the host-plane commands (<code>/chapters-status</code>, <code>/chapters-link</code> and
+    the rest — those resolve in <em>every</em> session, whatever preset it picks), the <strong>seven</strong>
+    <code>chapters_*</code> tools, the three door commands, and <em>both</em> archive buttons — <em>Fork with
+    chapters</em> and <em>Continue with chapters</em>, one deterministic door with two intents. Since 0.2.32
+    (#330) the tools, doors, buttons <em>and</em> the routed <code>/compact</code> engine all ride that preset
+    realm — a session on another preset sees none of them and pays nothing for them, which is why the operator
+    doors <code>/chapters-repair</code> / <code>/chapters-restore</code> deliberately stay host-plane.
   </p>
   <div class="dsh-tabs" role="tablist" aria-orientation="vertical">
     <div class="tablist">

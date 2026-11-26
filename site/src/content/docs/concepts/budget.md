@@ -4,15 +4,21 @@ description: Why the limit is a share of the space left after the header, and wh
 lastUpdated: true
 ---
 
-A continuation's cost is the **newly added** context: the Table of Contents plus the handoff note. The invariant that keeps it sane:
+A continuation's cost is the **newly added** context — the whole notice the child actually receives. The
+invariant that keeps it sane, and how it is really computed (AGENTS names the TOC+handoff pair as the intent;
+the shipped measurement is stricter, measuring the built artifact rather than a draft):
 
 ```
-tocTokens + handoffNoteTokens  ≤  continuationBudgetRatio × (window − systemPromptTokens)
+estimateTokens(built notice, with rules/plans/goal/task blocks, the project line, and the ## First response tail)
+   ≤  continuationBudgetRatio × (window − header bound)
 ```
+
+The header bound is the last real request's full prompt — a conservative stand-in for "the system prompt",
+and `0` allowance when no window resolves (unknown window ⇒ refuse, never guess).
 
 This math is the plugin's, about the artifact the plugin is composing — **it is never shown to the model as a reading of its own context** (#330; AGENTS § The Model Never Measures Its Context). A refusal names the notice size and the allowance; no agent-visible string states the window, its fill, or any estimate of session usage, because a model handed such numbers cannot verify them and will steer by the guess instead of the work.
 
-Measured **before** the session is created. Over budget → **refuse, with per-rule numbers.** Never silently truncate.
+Measured **before** the session is created. Over budget → **refuse with the measured numbers** — the notice's size and the allowance (the *per-rule* numbers belong to the rules block's own refusal). Never silently truncate.
 
 ## Why "after the header," not "of the window"
 

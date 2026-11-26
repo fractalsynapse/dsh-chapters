@@ -47,13 +47,18 @@ by its path with the read tool when the detail matters. The previous session sta
 - Chapter detail: open its path above with the read tool.
 - A deferred tool result: chapters_artifact (the path, or the bare sha a chapter cites) — action 'toc' | 'search' | 'read'.
 - Anything else on this project — other sessions' work, archived plans (`kind: plan`), curated rules: chapters_search.
+- Before starting a task: chapters_rules with the task description — it returns the rules that actually apply, and says what it withheld.
 
 Ancestry: root <root-id>; parent <parent-id>; archive under .dsh-chapters/.
+
+## First response
+Acknowledge in one short sentence and wait for the human's next message. Do not call tools in your first turn.
 ```
 
-Two blocks above the fold may or may not appear: the **CORE RULES** this machine approved, and the
-**operative plan** — which only a *continuation* gets, because a *branch* is handed zero plan bytes. The
-three **Finding things** verbs are there because a tool the child was never told about does not exist to it.
+Four optional blocks above the fold may or may not appear: the **CORE RULES** this machine approved, the
+**operative plan** (continuations only — a *branch* is handed zero plan bytes), a carried **## Goal**
+block, and a **## Task list** snapshot. The four **Finding things** verbs are there because a tool the
+child was never told about does not exist to it.
 [§18](/reference/notice/) annotates the real shape line by line.
 
 Measured size: **~102 tokens of index where the replaced transcript ran ~2,476** — and unlike a summary, every line is a *path to verbatim text*, not a paraphrase to trust.
@@ -61,8 +66,8 @@ Measured size: **~102 tokens of index where the replaced transcript ran ~2,476**
 ## Retrieval is the model's normal behavior
 
 The chapter list plus "reload with `read`" is all the instruction needed in practice — and the notice now
-names the other two verbs too (`chapters_artifact` for deferred blobs, `chapters_search` for everything on
-the project), because a tool an agent was never told about does not exist for it. In a real 10-session
+names the other lookup verbs too (`chapters_artifact` for deferred blobs, `chapters_search` for everything on
+the project, `chapters_rules` for what applies before a task starts), because a tool an agent was never told about does not exist for it. In a real 10-session
 production run, agents executed **49 archive retrievals — 49/49 successful, ~497 KB restored** — including a
 child session re-consulting a 24K-token artifact three times *after* compaction had removed it from its
 context. Tool output deferral works the same way: huge results arrive as a stub with a `chapters_artifact`
