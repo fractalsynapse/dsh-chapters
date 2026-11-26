@@ -19,7 +19,7 @@ import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import type { Context } from '@deepseek-ai/cordis'
 import { compactionNote } from './engine-note.ts'
 import { configureDiagnosticsCap, diagnosticNote, diagnosticWarn, ensureDiagnosticsDefault } from './diag.ts'
-import { makeChildArchiveListener } from './auto-save.ts'
+import { makeChildArchiveListener, readDurableSession } from './auto-save.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
 // #470: import from the package ROOT, not the './brand' subpath — 0.2.3 retired that
@@ -604,6 +604,8 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.enrichPromise ??= this.store().then(({ store }) => createEnrichWiring({
       store,
       cwd: () => this.lastCwd ?? undefined,
+      // #561: same authoritative last-resort on the realm plane.
+      sessionCwdOf: async (sid) => (await readDurableSession((name) => { try { return this.ctx.get?.(name) } catch { return undefined } }, sid))?.header?.cwd ?? undefined,
       config: this.enrichCfg,
       fetch: async (prompt, route) => {
         const r = route ?? this.lastRoute

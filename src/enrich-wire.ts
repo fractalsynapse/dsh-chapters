@@ -101,6 +101,8 @@ export interface EnrichWiringDeps {
   setTimer?: (fn: () => void, ms: number) => { cancel(): void }
   /** #557: the registry's own project workspaces as bounded, deterministic resolution candidates. */
   projectCwds?: (() => string[]) | undefined
+  /** #561: the row's own durable session header cwd — the authoritative locator for UNLINKED workspaces. */
+  sessionCwdOf?: ((sid: string) => Promise<string | undefined>) | undefined
 }
 
 export interface EnrichWiring {
@@ -255,10 +257,24 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
         const cand = resolveStoredPath(r, rec.path)
         if (fs.existsSync(cand)) { cwd = r; file = cand; break }
       }
+      // #561: the projects table cannot name UNLINKED workspaces — knowledge-local projects (the
+      // documented default!) have stores and rows but no project record, which left legacy rows
+      // undiscoverable and the queue-head blocked (measured live on 0.2.54: processed 0; the
+      // refusal was truthful — the root simply was never offered). The row's own HOST SESSION
+      // HEADER is the authoritative locator the product already trusts (restore/repair read the
+      // same durable record); consulted last, bounded to the miss path.
+      if (cwd === undefined && deps.sessionCwdOf !== undefined) {
+        const hdr = await deps.sessionCwdOf(sid).catch(() => undefined)
+        if (hdr !== undefined && hdr !== '') {
+          roots.push(hdr)
+          const cand = resolveStoredPath(hdr, rec.path)
+          if (fs.existsSync(cand)) { cwd = hdr; file = cand }
+        }
+      }
       if (cwd === undefined) {
         return { ok: false, skipped: roots.some((r) => r !== undefined && r !== '')
-          ? 'chapter file absent under the row, process, and project roots'
-          : 'row carries no owning workspace, no process cwd, and no project roots offered — re-derive via /chapters-repair' }
+          ? 'chapter file absent under the row, process, project roots, and session header'
+          : 'row carries no owning workspace, no process cwd, no project roots, and no session header offered — re-derive via /chapters-repair' }
       }
       if (state.cwd === undefined || state.cwd === '') {
         try {
