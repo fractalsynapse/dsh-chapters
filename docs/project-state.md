@@ -1426,6 +1426,15 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.55 cut (2026-11-26): the enrichment chain's last locator — session headers find what the projects table cannot name
+
+**Shipped:** #561 — the row's durable session-header cwd joins enrichment resolution as the final
+source (consulted only on miss; present-is-proof stamping unchanged; refusals name all four sources).
+Found because the 0.2.54 live run returned `processed 0` with a TRUTHFUL refusal and the registry
+showed the projects table names only linked pools — unlinked (knowledge-local) workspaces are the
+default posture, and #557's discovery had presupposed linkage. Maintainer gate held throughout: the
+resume waits for the executed live proof (`/chapters-enrich run` moves processed above zero).
+
 ## 0.2.54 cut (2026-11-26): the gate's second catch — the #550 fix needed the registry to actually carry the map
 
 **Shipped:** #557 — legacy rows heal on first true contact (ladder resolves row → process → the
