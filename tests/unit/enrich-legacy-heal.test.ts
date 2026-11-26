@@ -69,7 +69,7 @@ test('#557: nowhere-resolving rows refuse naming EVERY root tried — never the 
       fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
       log: (m) => { logs.push(m) }, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
     }).runNow()
-    assert.match(logs.join('\n'), /absent under the row, process, and project roots/, 'the skip names the full search it did')
+    assert.match(logs.join('\n'), /absent under the row, process, project roots, and session header/, "#561: the skip names the FULL search, session header included")
     assert.equal(state.cwd, undefined, 'no stamp from a failed search — present-is-proof only')
   } finally { fs.rmSync(wsProc, { recursive: true, force: true }) }
 })
@@ -95,4 +95,58 @@ test('#557: the boot witness row is never enrichment material (it names no file)
   const r = await w.runNow()
   assert.equal(r.processed, 0)
   assert.equal(r.remaining, 0, 'the witness row does not even count as pending — excluded at the source')
+})
+
+test('#561: an UNLINKED workspace heals from the row\'s own session header (projects table cannot name it)', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path')
+  const { createEnrichWiring } = await import('../../src/enrich-wire.ts')
+  const { sha256 } = await import('../../src/render.ts')
+  const { withMutate } = await import('../fake-store.ts')
+  const own = fs.mkdtempSync(path.join(os.tmpdir(), 'hdr-own-')), proc = fs.mkdtempSync(path.join(os.tmpdir(), 'hdr-proc-'))
+  const rel = '.dsh-chapters/sess-unlinked/chapters/001-topic.md'
+  fs.mkdirSync(path.join(own, '.dsh-chapters', 'sess-unlinked', 'chapters'), { recursive: true })
+  fs.writeFileSync(path.join(own, rel), chapterText)
+  const state: Record<string, unknown> = { chapters: [{ number: 1, path: rel, title: 'legacy fragment', summary: 'deterministic summary text', topics: ['src/a.ts'], sha256: sha256(chapterText) }] }
+  const settings = new Map<string, string>()
+  const store = withMutate({
+    get: async () => state,
+    put: async (_id: string, next: Record<string, unknown>) => { Object.assign(state, next) },
+    sessions: () => [['sess-unlinked', state]] as Iterable<[string, unknown]>,
+    getSetting: (k: string) => settings.get(k), putSetting: async (k: string, v: string) => { settings.set(k, v) },
+  }) as any
+  try {
+    await createEnrichWiring({
+      store, cwd: () => proc, projectCwds: () => [], // the live dsh-chapters shape: NO project record
+      sessionCwdOf: async (sid) => sid === 'sess-unlinked' ? own : undefined,
+      config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5, mineCap: 3 },
+      fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
+      log: () => {}, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
+    } as never).runNow()
+    assert.equal(state.cwd, own, 'the session header located the unlinked workspace and the row stamped')
+  } finally { fs.rmSync(own, { recursive: true, force: true }); fs.rmSync(proc, { recursive: true, force: true }) }
+})
+
+test('#561: nowhere-found refusal names the session header among the sources tried', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path')
+  const { createEnrichWiring } = await import('../../src/enrich-wire.ts')
+  const { withMutate } = await import('../fake-store.ts')
+  const proc = fs.mkdtempSync(path.join(os.tmpdir(), 'hdr-none-'))
+  const state: Record<string, unknown> = { chapters: [{ number: 1, path: '.dsh-chapters/sess-z/chapters/001-x.md', title: 't', summary: 's', topics: [], sha256: '0'.repeat(64) }] }
+  const settings = new Map<string, string>()
+  const logs: string[] = []
+  const store = withMutate({
+    get: async () => state, put: async () => {},
+    sessions: () => [['sess-z', state]] as Iterable<[string, unknown]>,
+    getSetting: (k: string) => settings.get(k), putSetting: async () => {},
+  }) as any
+  try {
+    await createEnrichWiring({
+      store, cwd: () => proc, projectCwds: () => [], sessionCwdOf: async () => proc,
+      config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5, mineCap: 3 },
+      fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
+      log: (m) => { logs.push(m) }, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
+    } as never).runNow()
+    assert.match(logs.join('\n'), /row, process, project roots, and session header/, 'the refusal states the full search')
+    assert.equal(state.cwd, undefined, 'a failed search stamps nothing')
+  } finally { fs.rmSync(proc, { recursive: true, force: true }) }
 })
