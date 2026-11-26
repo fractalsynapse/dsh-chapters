@@ -24,7 +24,7 @@ process.chdir(ROOT)
 import type { BootState } from '../tests/e2e/host-matrix-support.ts'
 
 const {
-  matrixTargets, classifyBootState, cellVerdict, matrixPort, isFloorRefusal,
+  matrixTargets, classifyBootState, cellVerdict, applyHostBroken, matrixPort, isFloorRefusal,
 } = await import('../tests/e2e/host-matrix-support.ts')
 const { bootE2eServer } = await import('../tests/e2e/boot.ts')
 const { chromium } = await import('@playwright/test')
@@ -228,7 +228,8 @@ for (const [i, version] of targets.entries()) {
     }
   }
   const v = cellVerdict({ installOk: tree.ok, bootOk, preset, dropped, composed, composeError: error })
-  const cell: Cell = { version, install: tree.detail, preset, dropped, composed, ...(error !== undefined ? { error } : {}), verdict: v.verdict, why: v.why }
+  const final = applyHostBroken(version, v)
+  const cell: Cell = { version, install: tree.detail, preset, dropped, composed, ...(error !== undefined ? { error } : {}), verdict: final.verdict, why: final.why }
   cells.push(cell)
   fs.appendFileSync(RESULTS, JSON.stringify(cell) + '\n')
   console.log(`${version.padEnd(14)} ${v.verdict.padEnd(18)} ${v.why}${dropped.length > 0 ? ` [dropped: ${dropped.join(', ')}]` : ''}`)
@@ -237,7 +238,8 @@ for (const [i, version] of targets.entries()) {
 // ---------------------------------------------------------------- report
 
 const atFloor = cells.filter((c) => matrixTargets(JSON.stringify([c.version])).length > 0)
-const bad = atFloor.filter((c) => !c.verdict.startsWith('pass'))
+// #553: declared-known-broken cells are REPORTED, not failures; everything else keeps its verdict.
+const bad = atFloor.filter((c) => applyHostBroken(c.version, { verdict: c.verdict as never, why: c.why }).countsAsFailure)
 const boundary = atFloor.filter((c) => c.verdict !== 'pass').map((c) => c.version)
 console.log('\n=== host-matrix verdict table ===')
 console.log('cells:', String(cells.length), '| supported-block failures:', String(bad.length))
