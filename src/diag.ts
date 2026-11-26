@@ -22,6 +22,7 @@
  *    90 characters for the composer are exactly the ones worth reading in full later.
  */
 import fs from 'node:fs'
+import path from 'node:path'
 
 /**
  * The sink, in resolution order: `DSH_CHAPTERS_ENGINE_ERRORS` (explicit wins), then the plugin-configured
@@ -115,7 +116,7 @@ export function diagnosticSink(): string | undefined {
  * (#54) — an unconfigured sink is invisible until the one moment you need it, which is exactly
  * when a human is asking "did the feature run, and what did the kernel say?".
  */
-export function diagnosticStatusLine(): string {
+export function diagnosticStatusLine(cwd?: string, storeRoot?: string): string {
   const sink = diagnosticSink()
   const envSet = process.env.DSH_CHAPTERS_ENGINE_ERRORS
   if (sink === undefined) {
@@ -125,7 +126,16 @@ export function diagnosticStatusLine(): string {
     const rejected = diagnosticSinkRejection()
     if (rejected !== undefined)
       return `Diagnostics: sink value "${rejected}" REFUSED as a stringified missing value (#417) — nothing is written to disk; set a real path or the literal \`off\``
-    return 'Diagnostics: NO SINK AT ALL — no store root was resolved, so door/child failures reach only the profile logger (this is a bug, not a setting)'
+    // #548: the lazy sink ("first door wins" — a session that never touches a door leaves no
+    // stray file) makes ABSENCE NORMAL in a process that has not run a door yet. Crying "bug"
+    // on the healthy fresh-boot path manufactures the very thing #61 guards against: a reported
+    // defect that is not real, teaching operators to ignore the line that once WAS real (#417).
+    // The bug claim survives only for what it was written for: no sink AND nowhere to derive one.
+    if (cwd !== undefined && cwd !== '' && storeRoot !== undefined && storeRoot !== '') {
+      const pending = path.join(path.isAbsolute(storeRoot) ? storeRoot : path.join(cwd, storeRoot), 'diagnostics.log')
+      return `Diagnostics: default sink ${pending} — not created yet (lazy by design, "first door wins"); no door or turn has run in this process, so failures so far reached only the profile logger`
+    }
+    return 'Diagnostics: NO SINK AT ALL — no store root was resolved and none is derivable here, so door/child failures reach only the profile logger (this is a bug, not a setting)'
   }
   return `Diagnostics: sink → ${sink}${envSet !== undefined && envSet !== '' ? ' (env override)' : ''}`
 }

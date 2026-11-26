@@ -359,7 +359,7 @@ export function registerHostCommands(
           if (sessId !== undefined) { try { lines.push(await plane.sessionRow(sessId)) } catch { /* the block degrades to what it has */ } }
         }
       }
-      lines.push(diagnosticStatusLine())
+      lines.push(diagnosticStatusLine(cwd, config.artifactStoreRoot))
       lines.push(AUTO_SAVE_LINE(config))
       // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
       // the durable log is named as unchecked rather than counted as clean: coverage holes, orphan
