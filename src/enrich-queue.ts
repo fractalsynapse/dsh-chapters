@@ -47,6 +47,12 @@ export interface EnrichQueue {
   noteActivity: () => void
   /** manual drain (command surface); returns processed count */
   drainNow: () => Promise<number>
+  /** #565: drain ALL pending (or at most `limit`) in chained capped passes, in the BACKGROUND.
+   *  Returns immediately with what was started; single-flight (a second call reports the running
+   *  drain and starts nothing). Failure-stops / short-pass-ends / dispose-ends — same rules as #529. */
+  drainAll: (limit?: number) => { started: boolean; alreadyRunning: boolean; pendingEstimate: number }
+  /** #565: is a full drain currently running (the report surface prints its state). */
+  isDraining: () => boolean
   /** queue state for /chapters-status + reports */
   state: () => { enabled: boolean; trigger: string; pendingEstimate: number; lastBatch: number; model: string | null }
   dispose: () => void
@@ -58,13 +64,18 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
   let lastBatch = 0
   let modelCache: string | null = null
   let pendingEstimate = 0
+  const nextHead = async (): Promise<string | undefined> => {
+    try { const p = await deps.listPending(modelCache ?? 'peek', 1); return p[0]?.key } catch { return undefined }
+  }
+  let fullDrain: Promise<void> | null = null
+  let disposed = false
 
   const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => {
     const t = setTimeout(fn, ms)
     return { cancel: () => clearTimeout(t) }
   })
 
-  const drain = (forced = false): Promise<number> => {
+  const drain = (forced = false, capOverride?: number): Promise<number> => {
     // auto drains honor the trigger choice; a forced drain (the command /
     // manual surface) only honors the kill switch
     // #61a, and the reason this file exists in the release: a queue that decides not to work must
@@ -79,7 +90,8 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         const model = await deps.resolveModel()
         modelCache = model
         if (model === '') { deps.log('enrichment drain skipped: no enrichment model resolvable'); return 0 }
-        const pending = await deps.listPending(model, deps.batchCap)
+        const cap = Math.min(deps.batchCap, capOverride ?? deps.batchCap) // #565: run <n> ends EXACTLY at n
+        const pending = await deps.listPending(model, cap)
         pendingEstimate = pending.length
         if (pending.length === 0) deps.log(`enrichment drain: pending=0 via ${model} (trigger=${deps.trigger}, idleMs=${String(deps.idleMs)})`)
         let done = 0
@@ -97,7 +109,7 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         // #529: a full batch means the cap clipped the backlog — chase. A partial batch means
         // the queue is empty — nothing to schedule. The honest read of pending.length vs done,
         // not an estimate, because this is the last place the real numbers exist.
-        if (done > 0 && pending.length >= deps.batchCap) scheduleChase()
+        if (done > 0 && pending.length >= cap) scheduleChase()
         return done
       } catch (error) {
         deps.log(`enrichment drain failed (kept silent for the user): ${String(error)}`)
@@ -142,6 +154,47 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
       idleTimer?.cancel()
       idleTimer = setTimer(() => { void drain() }, deps.idleMs)
     },
+    // #565: FULL DRAIN (maintainer decision, overriding the one-batch manual design): chained
+    // capped passes until the queue comes back short — per-pass batchCap UNCHANGED (memory
+    // discipline), the CHAINING is what changed. Runs in the background: the command returns the
+    // pending it started with, and `report` follows the number down. A failing pass ends the
+    // pump (drain() returns 0 on failure and logs why — never hammer a broken model); a short
+    // or empty pass ends it naturally; dispose ends it. Single-flight: a second run while
+    // draining reports that and starts nothing, so two operators can never double-pump the model.
+    drainAll: (limit?: number) => {
+      if (!deps.enabled) {
+        deps.log('enrichment drain skipped: disabled (enrichmentEnabled=false)')
+        return { started: false, alreadyRunning: false, pendingEstimate }
+      }
+      if (fullDrain !== null) return { started: false, alreadyRunning: true, pendingEstimate }
+      const budget = limit !== undefined && limit > 0 ? limit : Number.POSITIVE_INFINITY
+      let processed = 0
+      let passes = 0
+      let lastHead: string | undefined
+      fullDrain = (async () => {
+        while (!disposed && processed < budget) {
+          const head = await nextHead()
+          if (head !== undefined && head === lastHead) {
+            // #565 circuit-breaker: the ladder claimed success but the SAME chapter is still at
+            // the head — pending is not shrinking. A chained pump against a non-depleting queue
+            // would spin the model forever; stop loudly instead. (The unit fake that never shrinks
+            // found this the day the feature shipped — the class is real: an enrichment that
+            // writes but whose re-qualification key never settles is exactly this shape.)
+            deps.log(`enrichment full drain STOPPED: head ${head} unchanged after a successful pass — pending is not shrinking; investigate before re-running`)
+            break
+          }
+          lastHead = head
+          const done = await drain(true, Number.isFinite(budget) ? budget - processed : undefined)
+          if (done === 0) break // empty, failing, or model-unresolvable — drain() names which
+          processed += done
+          passes += 1
+          stopChase() // a boundary chase is redundant under a full drain — one pump at a time
+        }
+        deps.log(`enrichment full drain ended: ${processed} chapter(s) across ${passes} pass(es)`)
+      })().finally(() => { fullDrain = null })
+      return { started: true, alreadyRunning: false, pendingEstimate }
+    },
+    isDraining: () => fullDrain !== null,
     drainNow: async () => {
       // same rule as `drain`: an entry point that returns zero names its reason, or the next
       // 420-second poll has nothing to read but a guess.
@@ -155,6 +208,6 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
       lastBatch,
       model: modelCache,
     }),
-    dispose: () => { idleTimer?.cancel(); idleTimer = null; stopChase() },
+    dispose: () => { disposed = true; idleTimer?.cancel(); idleTimer = null; stopChase() }, // #565: the full drain loop checks disposed
   }
 }

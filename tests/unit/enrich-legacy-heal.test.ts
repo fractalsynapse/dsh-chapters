@@ -11,6 +11,12 @@ import { createEnrichWiring, type EnrichWiringDeps } from '../../src/enrich-wire
 import { sha256 } from '../../src/render.ts'
 import { withMutate } from '../fake-store.ts'
 
+/** #565: run is a BACKGROUND drain — await completion on microtasks only (fakes resolve
+ * without timers; #456 ratchet honored). */
+async function pump(w: { isDraining(): boolean }): Promise<void> {
+  for (let i = 0; i < 400 && w.isDraining(); i += 1) for (let j = 0; j < 6; j += 1) await Promise.resolve()
+}
+
 const chapterText = `---\ntitle: "legacy fragment"\nsummary: deterministic summary text\ntopics: ["src/a.ts"]\n---\n# Topic\n\n**User:** always run the tape replay before cutting a tag\n\n**Assistant:** done: pushed a tag\n`
 const answer = async () => '{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"],"rules":[]}'
 
@@ -42,8 +48,9 @@ test('#557: an unstamped legacy row is located by a PROJECT ROOT, enriched, and 
       conversationRoute: () => ({ provider: 'p', model: 'm1' }),
       log: () => {}, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
     })
-    const r = await w.runNow()
-    assert.equal(r.processed, 1, 'located via the project root — the live phantom skip cannot survive this')
+    w.runNow()
+    await pump(w)
+    assert.equal(w.isDraining(), false, 'located via the project root — the live phantom skip cannot survive this')
     assert.equal(state.cwd, wsOwn, 'the row is STAMPED with the root that resolved it (fact, not guess)')
     assert.ok(fs.readFileSync(path.join(wsOwn, rel), 'utf8').includes('title: "Enriched"'))
   } finally { fs.rmSync(wsOwn, { recursive: true, force: true }); fs.rmSync(wsProc, { recursive: true, force: true }) }
@@ -63,12 +70,14 @@ test('#557: nowhere-resolving rows refuse naming EVERY root tried — never the 
     getSetting: (k: string) => settings.get(k), putSetting: async (k: string, v: string) => { settings.set(k, v) },
   }) as unknown as EnrichWiringDeps['store']
   try {
-    await createEnrichWiring({
+    const noneW = createEnrichWiring({
       store, cwd: () => wsProc, projectCwds: () => [],
       config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5, mineCap: 3 },
       fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
       log: (m) => { logs.push(m) }, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
-    }).runNow()
+    })
+    noneW.runNow()
+    await pump(noneW)
     assert.match(logs.join('\n'), /absent under the row, process, project roots, and session header/, "#561: the skip names the FULL search, session header included")
     assert.equal(state.cwd, undefined, 'no stamp from a failed search — present-is-proof only')
   } finally { fs.rmSync(wsProc, { recursive: true, force: true }) }
@@ -92,9 +101,9 @@ test('#557: the boot witness row is never enrichment material (it names no file)
     conversationRoute: () => ({ provider: 'p', model: 'm1' }),
     log: (m) => { logs.push(m) }, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
   })
-  const r = await w.runNow()
-  assert.equal(r.processed, 0)
-  assert.equal(r.remaining, 0, 'the witness row does not even count as pending — excluded at the source')
+  const rep = await w.runNow()
+  assert.equal(rep.draining, true, 'the run starts a background drain')
+  assert.equal(await w.pendingCount(), 0, 'the witness row does not even count as pending — excluded at the source')
 })
 
 test('#561: an UNLINKED workspace heals from the row\'s own session header (projects table cannot name it)', async () => {
@@ -115,13 +124,15 @@ test('#561: an UNLINKED workspace heals from the row\'s own session header (proj
     getSetting: (k: string) => settings.get(k), putSetting: async (k: string, v: string) => { settings.set(k, v) },
   }) as any
   try {
-    await createEnrichWiring({
+    const hdr = createEnrichWiring({
       store, cwd: () => proc, projectCwds: () => [], // the live dsh-chapters shape: NO project record
       sessionCwdOf: async (sid) => sid === 'sess-unlinked' ? own : undefined,
       config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5, mineCap: 3 },
       fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
       log: () => {}, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
-    } as never).runNow()
+    } as never)
+    hdr.runNow()
+    await pump(hdr as unknown as { isDraining(): boolean })
     assert.equal(state.cwd, own, 'the session header located the unlinked workspace and the row stamped')
   } finally { fs.rmSync(own, { recursive: true, force: true }); fs.rmSync(proc, { recursive: true, force: true }) }
 })
@@ -140,12 +151,14 @@ test('#561: nowhere-found refusal names the session header among the sources tri
     getSetting: (k: string) => settings.get(k), putSetting: async () => {},
   }) as any
   try {
-    await createEnrichWiring({
+    const ref = createEnrichWiring({
       store, cwd: () => proc, projectCwds: () => [], sessionCwdOf: async () => proc,
       config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5, mineCap: 3 },
       fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
       log: (m) => { logs.push(m) }, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
-    } as never).runNow()
+    } as never)
+    ref.runNow()
+    await pump(ref as unknown as { isDraining(): boolean })
     assert.match(logs.join('\n'), /row, process, project roots, and session header/, 'the refusal states the full search')
     assert.equal(state.cwd, undefined, 'a failed search stamps nothing')
   } finally { fs.rmSync(proc, { recursive: true, force: true }) }

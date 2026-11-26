@@ -225,6 +225,11 @@ test('§7.5 §9 redaction runs over a mined body too', () => {
 
 // ------------------------------------------------------------- the ladder
 
+/** #565: background-drain await, microtasks only (#456 ratchet). */
+async function pump(w: { isDraining(): boolean }): Promise<void> {
+  for (let i = 0; i < 400 && w.isDraining(); i += 1) for (let j = 0; j < 6; j += 1) await Promise.resolve()
+}
+
 function ladderHarness(fetchImpl: (prompt: string) => Promise<string>, over: Partial<EnrichWiringDeps> = {}) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'ew-mine-'))
   const rel = '.dsh-chapters/sess-1/chapters/001-topic.md'
@@ -269,8 +274,9 @@ test('§7.5 the ladder hands the sink the chapter’s HUMAN bytes and the postur
     return { written: 1, stated: 1, inferred: 0, pending: 0 }
   }
   try {
-    const r = await createEnrichWiring(h.deps).runNow()
-    assert.equal(r.processed, 1, JSON.stringify(r))
+    const mw = createEnrichWiring(h.deps)
+    mw.runNow()
+    await pump(mw)
     assert.equal(seen.length, 1)
     assert.match(seen[0]!.humanText, /always run the tape replay before cutting a tag/)
     assert.ok(!seen[0]!.humanText.includes('pushed and verified'), 'assistant prose is not warrant evidence: ' + seen[0]!.humanText)
@@ -311,7 +317,7 @@ test('§7.5 mining is not gated on the frontmatter write — a guarded chapter s
     onMinedRules: async () => { mined += 1; return { written: 1, activated: 1, suggested: 0 } },
   }
   try {
-    await createEnrichWiring(deps).runNow()
+    { const mw5 = createEnrichWiring(deps); mw5.runNow(); await pump(mw5) }
     assert.equal(mined, 1, 'the rule was mined even though the annotation was refused')
     assert.match(warns.join('\n'), /enrichment failed for sess-9#2/, warns.join('\n'))
     // and the refusal did not lose the mining — the sink ran first
@@ -325,10 +331,10 @@ test('§7.5 gated off logs the drop; unwired warns loudly — mining is never si
   off.deps.onMinedRules = async () => { sinkCalls += 1; return { written: 0, activated: 0, suggested: 0 } }
   const unwired = ladderHarness(minedAnswer('always run the tape replay'))
   try {
-    await createEnrichWiring(off.deps).runNow()
+    { const mw6 = createEnrichWiring(off.deps); mw6.runNow(); await pump(mw6) }
     assert.equal(sinkCalls, 0)
     assert.match(off.logs.join('\n'), /rule mining skipped for sess-1#1: 1 candidate\(s\) dropped \(rulesEnrichment off\)/, off.logs.join('\n'))
-    await createEnrichWiring(unwired.deps).runNow()
+    { const mw7 = createEnrichWiring(unwired.deps); mw7.runNow(); await pump(mw7) }
     assert.match(unwired.warns.join('\n'), /rule mining UNWIRED on this plane/, unwired.warns.join('\n'))
   } finally { off.dispose(); unwired.dispose() }
 })
@@ -337,8 +343,9 @@ test('§7.5 a sink that throws must not cost the chapter its annotation', async 
   const h = ladderHarness(minedAnswer('always run the tape replay'))
   h.deps.onMinedRules = async () => { throw new Error('disk gone') }
   try {
-    const r = await createEnrichWiring(h.deps).runNow()
-    assert.equal(r.processed, 1, 'the ladder completed anyway')
+    const mw2 = createEnrichWiring(h.deps)
+    mw2.runNow()
+    await pump(mw2)
     const doc = fs.readFileSync(path.join(h.ws, h.rel), 'utf8')
     assert.ok(doc.includes('title: "Enriched"'), doc.slice(0, 200))
     assert.match(h.warns.join('\n'), /rule mining failed for sess-1#1/)
@@ -442,7 +449,7 @@ test('§7.5 rulesModel set: a second bounded call on that route, and its answer 
   let got: { rules: readonly { text: string }[] } | null = null
   h.deps.onMinedRules = async (a) => { got = { rules: a.rules }; return { written: 1, stated: 0, inferred: 1, pending: 0 } }
   try {
-    await createEnrichWiring(h.deps).runNow()
+    { const mw4 = createEnrichWiring(h.deps); mw4.runNow(); await pump(mw4) }
     assert.equal(calls.length, 2, 'annotation pass + mining pass')
     assert.equal((calls[1]!.route as { provider: string; model: string }).model, 'bigger', 'mining runs on the configured model')
     assert.ok(got !== null, 'the sink was called')
@@ -471,10 +478,12 @@ test('§7.5 the settings key wins over the row, and a failing mining pass cannot
   const seen: number[] = []
   h.deps.onMinedRules = async (a) => { seen.push(a.rules.length); return { written: 1, stated: 1, inferred: 0, pending: 0 } }
   try {
-    const r = await createEnrichWiring(h.deps).runNow()
+    const mw3 = createEnrichWiring(h.deps)
+    mw3.runNow()
+    await pump(mw3)
     assert.equal(routeSeen, 'p/from-settings', 'a runtime override beats the profile row')
     assert.equal(seen.length, 0, 'a failed mining pass mines nothing')
-    assert.equal(r.processed, 1, 'and the chapter was still annotated')
+    // (r.processed assertion retired with the sync contract; the file effects below prove it)
     boom = false
     const r2 = await createEnrichWiring(h.deps).runNow()
     assert.ok(r2.processed >= 0)

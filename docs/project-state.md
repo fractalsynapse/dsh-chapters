@@ -1426,6 +1426,17 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.56 cut (2026-11-26): the manual enrichment surface inherits the full-sweep law
+
+**Shipped:** #565 — /chapters-enrich run drains ALL pending in chained capped passes (background,
+returns the pending it started with), run <n> is exact (limit threaded into the pass), single-flight,
+failure-stops, dispose-stops, and a non-shrinking-head circuit-breaker (a fake that never depleted
+found the production shape the day it shipped). Maintainer rule (verbatim): 'We should process all
+of the unfinished ones or allow the user to specify a limit. I want the full enrichment before we
+start again because that affects search.' Docs-first commit precedes code; five existing test files
+converted to the background contract with microtask-only pumps. Suite 1813/0/1 (1819); 5/5 CI on
+the first pass. Live purpose: the enrichment-before-resume precondition now has a finite end.
+
 ## 0.2.55 cut (2026-11-26): the enrichment chain's last locator — session headers find what the projects table cannot name
 
 **Shipped:** #561 — the row's durable session-header cwd joins enrichment resolution as the final

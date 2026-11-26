@@ -99,13 +99,14 @@ provider or capability the host does not expose is reported as absent, never gue
 ## `/chapters-enrich`
 
 ```
-/chapters-enrich run                          # one manual batch now (up to `enrichmentBatchCap` chapters) — the backlog chase is the archive moments' job, not this verb's
+/chapters-enrich run                          # drain ALL pending in capped passes (maintainer decision #565 — batches of `enrichmentBatchCap` chain until empty; a failing pass stops the drain; a second run while draining says so)
+/chapters-enrich run <n>                       # or drain at most n chapters (user-specified limit)
 /chapters-enrich model [<provider/model> | clear]  # show the annotator route, override it, or reset it to the conversation route
 /chapters-enrich report                       # enrichment status line + pending chapter count
 ```
 
-The backlog drain belongs to the archive moments (#529), so an operator nudge can never
-become a second unbounded loop. Since
+The drain runs in the BACKGROUND — the command returns the pending it started with, and `report` follows the count down. The safety shape is inherited from #529 unchanged: per-pass caps (memory discipline), failure stops the pump, one drain at a time (single-flight), dispose ends it. The archive-moment chases stay
+as they were. Since
 #529 every archive moment (continue, fork, save, compaction finalize, subagent settlement,
 forced child archive, operator repair) drains the WHOLE pending backlog in capped passes: a
 full `enrichmentBatchCap` pass schedules its own follow-up 5 s later until a pass comes back

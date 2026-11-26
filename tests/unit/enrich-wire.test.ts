@@ -8,6 +8,12 @@ import { parseChapterFile } from '../../src/enrich-store.ts'
 import { sha256 } from '../../src/render.ts'
 import { withMutate } from '../fake-store.ts'
 
+/** #565: run is a BACKGROUND drain — await completion on microtasks only (fakes
+ * resolve without timers; #456 ratchet honored). */
+async function pump(w: { isDraining(): boolean }): Promise<void> {
+  for (let i = 0; i < 400 && w.isDraining(); i += 1) for (let j = 0; j < 6; j += 1) await Promise.resolve()
+}
+
 function harness(fetchImpl?: (prompt: string) => Promise<string>) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'ew-'))
   const rel = '.dsh-chapters/sess-1/chapters/001-topic.md'
@@ -48,8 +54,8 @@ test('ladder: enriches file + record, stamps provenance, schedules republish', a
   let scheduled = ''
   h.deps.scheduler = { schedule: (c, w) => { scheduled = `${c}|${w}` } }
   const w = createEnrichWiring(h.deps)
-  const r = await w.runNow()
-  assert.equal(r.processed, 1, JSON.stringify(r))
+  w.runNow()
+  await pump(w)
   const doc = parseChapterFile(fs.readFileSync(path.join(h.ws, h.rel), 'utf8'))
   const fm = doc.fmLines.join('\n')
   assert.ok(fm.includes('title: "Enriched title"') && fm.includes('generated:'), fm.slice(0, 300))
@@ -58,16 +64,17 @@ test('ladder: enriches file + record, stamps provenance, schedules republish', a
   assert.equal((h.state.chapters[0] as unknown as { title: string }).title, 'Enriched title', 'registry record mirrors')
   assert.ok(scheduled.endsWith('|archive:enrichment'))
   assert.equal(await w.pendingCount(), 0, 'nothing pending after enrichment')
-  const r2 = await w.runNow()
-  assert.equal(r2.processed, 0, 'idempotent second run')
+  w.runNow()
+  await pump(w)
+  assert.equal(await w.pendingCount(), 0, 'idempotent second run')
   h.dispose()
 })
 
 test('failure ladder: garbage -> one nudge retry -> deterministic values kept, pending unchanged', async () => {
   const h = harness(async () => 'sorry, I cannot produce JSON today')
   const w = createEnrichWiring(h.deps)
-  const r = await w.runNow()
-  assert.equal(r.processed, 0)
+  w.runNow()
+  await pump(w)
   assert.equal((h.state.chapters[0] as unknown as { title: string }).title, 'legacy fragment')
   const fmText = fs.readFileSync(path.join(h.ws, h.rel), 'utf8')
   assert.ok(!fmText.includes('generated:'), 'no provenance written for a failed ladder')
@@ -79,7 +86,8 @@ test('failure ladder: garbage -> one nudge retry -> deterministic values kept, p
 test('model change re-qualifies chapters (idempotency key includes the model)', async () => {
   const h = harness()
   const w = createEnrichWiring(h.deps)
-  await w.runNow()
+  w.runNow()
+  await pump(w)
   assert.equal(await w.pendingCount(), 0)
   await w.setModelOverride('p/m2')
   assert.equal(await w.pendingCount(), 1, 'a newer model makes pending work again')
@@ -92,8 +100,8 @@ test('config.model without a slash keeps the conversation provider (bare-model s
   const h = harness()
   h.deps.config = { ...h.deps.config, model: 'barem' }
   const w = createEnrichWiring(h.deps)
-  const r = await w.runNow()
-  assert.equal(r.processed, 1)
+  w.runNow()
+  await pump(w)
   const fm = parseChapterFile(fs.readFileSync(path.join(h.ws, h.rel), 'utf8')).fmLines.join('\n')
   assert.ok(fm.includes('model: p/barem'), `provider rides from conversationRoute: ${fm.slice(0, 300)}`)
   h.dispose()
@@ -104,8 +112,8 @@ test('a persisted enrichment.route is consulted before the live conversation rou
   h.deps.config = { ...h.deps.config, model: '' }
   h.settings.set('enrichment.route', 'storedprov/storedmodel')
   const w = createEnrichWiring(h.deps)
-  const r = await w.runNow()
-  assert.equal(r.processed, 1)
+  w.runNow()
+  await pump(w)
   const fm = parseChapterFile(fs.readFileSync(path.join(h.ws, h.rel), 'utf8')).fmLines.join('\n')
   assert.ok(fm.includes('model: storedprov/storedmodel'), 'the stored auxiliary route wins over conversation')
   h.dispose()
@@ -117,8 +125,8 @@ test('model override set/clear through the wiring surface; statusLine reflects i
   await w.setModelOverride('override/prov-model')
   assert.equal(w.modelOverride(), 'override/prov-model')
   assert.match(w.statusLine(), /override\/prov-model/)
-  const r = await w.runNow()
-  assert.equal(r.processed, 1)
+  w.runNow()
+  await pump(w)
   const fm = parseChapterFile(fs.readFileSync(path.join(h.ws, h.rel), 'utf8')).fmLines.join('\n')
   assert.ok(fm.includes('model: override/prov-model'), 'override wins over config.model')
   await w.setModelOverride(null)
@@ -130,7 +138,8 @@ test('model override set/clear through the wiring surface; statusLine reflects i
 test('the heartbeat: a queue log line persists enrichment.state for status', async () => {
   const h = harness()
   const w = createEnrichWiring(h.deps)
-  await w.runNow()
+  w.runNow()
+  await pump(w)
   await new Promise((r) => setImmediate(r)) // the heartbeat write is fire-and-forget
   const st = JSON.parse(h.settings.get('enrichment.state') ?? '{}') as { at?: string; line?: string }
   assert.ok(typeof st.at === 'string' && st.at.length > 0, 'timestamped heartbeat stored')
