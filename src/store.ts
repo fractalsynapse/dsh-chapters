@@ -382,6 +382,9 @@ export function makeAllocator(store: RegistryStore, sessionId: string): NumberAl
 }
 
 /** The commit-point write: verified chapter records into the session state. */
+/** The boot witness row (#61 status-probe): it names no file and is never enrichment material (#557). */
+export const WITNESS_SESSION = 'dsh-chapters-witness'
+
 export async function commitChapters(
   store: RegistryStore,
   sessionId: string,

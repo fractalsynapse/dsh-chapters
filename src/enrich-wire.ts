@@ -99,6 +99,8 @@ export interface EnrichWiringDeps {
   log(m: string): void
   warn(m: string): void
   setTimer?: (fn: () => void, ms: number) => { cancel(): void }
+  /** #557: the registry's own project workspaces as bounded, deterministic resolution candidates. */
+  projectCwds?: (() => string[]) | undefined
 }
 
 export interface EnrichWiring {
@@ -116,6 +118,10 @@ export interface EnrichWiring {
   rememberCwd(cwd: string): void
   dispose(): void
 }
+
+/** #557: the boot witness row is a status probe, not archived conversation — one predicate,
+ *  every queue-facing loop obeys it (pending listing AND counting). */
+export function isWitnessRow(sessionId: string): boolean { return sessionId === 'dsh-chapters-witness' }
 
 const ROUTE_KEY = 'enrichment.route'
 const STATE_KEY = 'enrichment.state'
@@ -236,10 +242,32 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       // printed 'chapter file absent' FOREVER for files that exist. Measured live: SAIP's status
       // skipped dsh-chapters' 978f1856#6 while its 006 chapter sat in its own tree. The process
       // cwd survives only as the fallback for pre-#348 rows, and its absence names the true cause.
-      const cwd = state.cwd ?? deps.cwd() ?? rememberedCwd
-      if (cwd === undefined) return { ok: false, skipped: 'row carries no owning workspace (pre-#348) and no process cwd — re-derive via /chapters-repair' }
-      const file = resolveStoredPath(cwd, rec.path)
-      if (!fs.existsSync(file)) return { ok: false, skipped: 'chapter file absent' }
+      // #557 (completing #550): pre-#348 rows carry no cwd. Present-is-proof: try the known roots
+      // in order (row, process/remembered, then the registry's OWN project cwds — bounded, same
+      // store), and where the file EXISTS that root IS the row's owner: stamp it, so every later
+      // consumer (repair/remove/GC per #348) inherits the attribution. Stamping a guess is
+      // forbidden; stamping a resolved read is a fact.
+      const roots: (string | undefined)[] = [state.cwd, deps.cwd() ?? rememberedCwd, ...(deps.projectCwds?.() ?? [])]
+      let cwd: string | undefined
+      let file = ''
+      for (const r of roots) {
+        if (r === undefined || r === '') continue
+        const cand = resolveStoredPath(r, rec.path)
+        if (fs.existsSync(cand)) { cwd = r; file = cand; break }
+      }
+      if (cwd === undefined) {
+        return { ok: false, skipped: roots.some((r) => r !== undefined && r !== '')
+          ? 'chapter file absent under the row, process, and project roots'
+          : 'row carries no owning workspace, no process cwd, and no project roots offered — re-derive via /chapters-repair' }
+      }
+      if (state.cwd === undefined || state.cwd === '') {
+        try {
+          await deps.store.mutate(sid, (st) => {
+            const row = st as { cwd?: string }
+            return row.cwd === undefined || row.cwd === '' ? ({ ...row, cwd } as unknown) as never : st
+          })
+        } catch { /* the annotation proceeds; the stamp retries on the next pass */ }
+      }
       const doc = parseChapterFile(fs.readFileSync(file, 'utf8'))
       // A plan document is a WORK DIRECTIVE: its body is the approved text, and an
       // annotator rewriting its summary is a paraphrase of an order (invariant 4's
@@ -377,6 +405,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
     listPending: async (modelKey2, cap) => {
       const out: { key: string; label: string }[] = []
       for (const [sid, st] of deps.store.sessions()) {
+        if (isWitnessRow(sid)) continue // #557: the witness names no file — probe row, never enrichment material
         for (const c of chaptersOf(st)) {
           if (!isPendingChapter(c, modelKey2)) continue
           out.push({ key: `${sid}#${c.number}`, label: c.title.slice(0, 48) })
@@ -407,7 +436,8 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
     async pendingCount() {
       let n = 0
       const key2 = modelKey()
-      for (const [, st] of deps.store.sessions()) {
+      for (const [sid, st] of deps.store.sessions()) {
+        if (isWitnessRow(sid)) continue // #557: counted nowhere, queued nowhere — one predicate
         for (const c of chaptersOf(st)) {
           if (isPendingChapter(c, key2)) n += 1
         }
