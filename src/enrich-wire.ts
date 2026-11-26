@@ -74,7 +74,7 @@ export interface EnrichConfig {
 
 export interface EnrichWiringDeps {
   store: {
-    get(id: string): Promise<{ chapters: { number: number; path: string; title: string; summary: string; topics: string[]; sha256: string; generated?: Record<string, GeneratedMark[]> }[] }>
+    get(id: string): Promise<{ cwd?: string | undefined; chapters: { number: number; path: string; title: string; summary: string; topics: string[]; sha256: string; generated?: Record<string, GeneratedMark[]> }[] }>
     put(id: string, state: unknown, expectedRev?: number): Promise<void>
     /** #59: the ladder's whole-row write must run as one section over a FRESH read. */
     mutate(id: string, fn: (state: ChapterRow) => ChapterRow | Promise<ChapterRow>): Promise<unknown>
@@ -224,14 +224,20 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
     const sep = key.lastIndexOf('#')
     const sid = key.slice(0, sep)
     const num = Number(key.slice(sep + 1))
-    const cwd = deps.cwd() ?? rememberedCwd
-    if (cwd === undefined) return { ok: false, skipped: 'no workspace cwd yet (a sync or command arms it)' }
     try {
       // Pre-flight read: cheap, and only used to find the file to annotate. The WRITE below never
       // touches this snapshot (#59).
       const state = await deps.store.get(sid)
       const rec = state.chapters.find((c) => c.number === num)
       if (rec === undefined) return { ok: false, skipped: 'record gone' }
+      // #550: the ROW locates the file. The registry is per-HOME (#348's lesson: one
+      // dsh_chapters.json holds every project's sessions) and listPending walks all of it, so a
+      // queue armed by project A walks project B's chapters too — resolving those against A's cwd
+      // printed 'chapter file absent' FOREVER for files that exist. Measured live: SAIP's status
+      // skipped dsh-chapters' 978f1856#6 while its 006 chapter sat in its own tree. The process
+      // cwd survives only as the fallback for pre-#348 rows, and its absence names the true cause.
+      const cwd = state.cwd ?? deps.cwd() ?? rememberedCwd
+      if (cwd === undefined) return { ok: false, skipped: 'row carries no owning workspace (pre-#348) and no process cwd — re-derive via /chapters-repair' }
       const file = resolveStoredPath(cwd, rec.path)
       if (!fs.existsSync(file)) return { ok: false, skipped: 'chapter file absent' }
       const doc = parseChapterFile(fs.readFileSync(file, 'utf8'))
