@@ -48,7 +48,8 @@ import type { SessionState } from './registry.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
 export interface EnrichCommandSurface {
-  runNow(cwd?: string): Promise<{ processed: number; remaining: number }>
+  runNow(cwd?: string, limit?: number): Promise<{ processed: number; remaining: number; draining: boolean; alreadyRunning: boolean }>
+  batchCap(): number
   setModelOverride(v: string | null): Promise<void>
   modelOverride(): string | null
   statusLine(): string
@@ -406,7 +407,7 @@ export function registerHostCommands(
   const enrichCommand = {
     name: 'chapters-enrich',
     description: 'P2 chapter enrichment (record \u00A76): run a batch now, set the model, or report pending work.',
-    input: { hint: 'run | model [<provider/model> | clear] | report' },
+    input: { hint: 'run [n] | model [<provider/model> | clear] | report' },
     async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
       if (config.enrich === undefined) return { kind: 'error', text: 'enrichment is not wired on this plane' }
       const parts = (invocation.rawInput ?? '').trim().split(/\s+/).filter((p) => p.length > 0)
@@ -422,13 +423,25 @@ export function registerHostCommands(
           return { kind: 'success', text: arg === 'clear' ? 'enrichment model reset to the conversation default' : `enrichment model set to ${arg} (pending chapters re-qualify under the new key)` }
         }
         if (verb === 'run') {
-          const r = await config.enrich.runNow(cwdOf(invocation.agent))
-          return { kind: 'success', text: `enrichment: processed ${r.processed} chapter(s); ${r.remaining} pending` }
+          // #565: `run` drains ALL pending (or `run <n>`), in the background; the reply names the
+          // start, the report follows the fall. A non-numeric arg refuses with the usage.
+          const arg = parts[1]
+          let limit: number | undefined
+          if (arg !== undefined) {
+            const n = Number(arg)
+            if (!Number.isInteger(n) || n <= 0) return { kind: 'error', text: `run takes a positive whole-number limit or nothing (got: ${arg}) — usage: /chapters-enrich run [n]` }
+            limit = n
+          }
+          const r = await config.enrich.runNow(cwdOf(invocation.agent), limit)
+          const scope = limit !== undefined ? `up to ${limit} chapter(s)` : 'all pending'
+          return { kind: 'success', text: r.alreadyRunning
+            ? `enrichment: a drain is ALREADY RUNNING (${r.remaining} pending) — one pump at a time; /chapters-enrich report follows the count`
+            : `enrichment: draining ${scope} — ${r.remaining} pending, batches of ${String(config.enrich.batchCap())}, failure stops the pump; /chapters-enrich report follows the count` }
         }
         if (verb === 'report') {
           return { kind: 'success', text: `${config.enrich.statusLine()}\npending: ${await config.enrich.pendingCount()} chapter(s)` }
         }
-        return { kind: 'success', text: 'usage: /chapters-enrich run | model [<provider/model> | clear] | report' }
+        return { kind: 'success', text: 'usage: /chapters-enrich run [n] | model [<provider/model> | clear] | report' }
       } catch (error) {
         return { kind: 'error', text: `chapters-enrich failed: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
       }

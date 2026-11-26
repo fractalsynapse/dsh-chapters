@@ -133,3 +133,98 @@ test('#529: a failing drain stops the chase — the loop never hammers a broken 
   await q.onSyncDone('test')
   assert.equal(chase, null, 'failure ⇒ no follow-up scheduled')
 })
+
+// #565: the manual surface DRAINS (maintainer decision over the one-batch design). The pump chains
+// capped passes on promise completion alone — these rows run on microtasks, no timers anywhere.
+test('#565: drainAll pumps a full backlog to empty across capped passes and says so', async () => {
+  let backlog = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7']
+  const logs: string[] = []
+  const { q, calls } = harness({
+    trigger: 'manual',
+    batchCap: 2,
+    listPending: async (_m: string, cap: number) => { const t = backlog.slice(0, cap); return t.map((k) => ({ key: k, label: k })) },
+    enrichOne: async (k: string) => { calls.push(k); backlog = backlog.filter((x) => x !== k); return { ok: true } },
+    log: (m: string) => { logs.push(m) },
+  })
+  const r = q.drainAll()
+  assert.equal(r.started, true)
+  assert.equal(q.isDraining(), true, 'the state is observable while running')
+  for (let i = 0; i < 80 && q.isDraining(); i += 1) await flush(8)
+  assert.equal(calls.length, 7, 'every chapter processed, cap 2 per pass')
+  assert.match(logs.join('\n'), /full drain ended: 7 chapter\(s\) across 4 pass\(es\)/, logs.join('\n'))
+  assert.equal(q.isDraining(), false)
+  q.dispose()
+})
+
+test('#565: drainAll(3) honors the user-specified limit and leaves the rest pending', async () => {
+  let backlog = ['c1', 'c2', 'c3', 'c4', 'c5']
+  const { q, calls } = harness({
+    trigger: 'manual',
+    batchCap: 2,
+    listPending: async (_m: string, cap: number) => backlog.slice(0, cap).map((k) => ({ key: k, label: k })),
+    enrichOne: async (k: string) => { calls.push(k); backlog = backlog.filter((x) => x !== k); return { ok: true } },
+  })
+  q.drainAll(3)
+  for (let i = 0; i < 60 && q.isDraining(); i += 1) await flush(8)
+  assert.equal(calls.length, 3, 'exactly the limit, rounded through whole passes (2+1)')
+  assert.deepEqual(backlog, ['c4', 'c5'], 'the remainder is untouched, still pending')
+  q.dispose()
+})
+
+test('#565: a failing pass ENDS the drain — the pump never hammers a broken model', async () => {
+  let boom = false
+  let backlog = ['c1', 'c2', 'c3', 'c4']
+  const logs: string[] = []
+  const { q, calls } = harness({
+    trigger: 'manual',
+    batchCap: 2,
+    listPending: async (_m: string, cap: number) => { if (boom) throw new Error('model down'); return backlog.slice(0, cap).map((k) => ({ key: k, label: k })) },
+    enrichOne: async (k: string) => { calls.push(k); backlog = backlog.filter((x) => x !== k); if (calls.length === 2) boom = true; return { ok: true } },
+    log: (m: string) => { logs.push(m) },
+  })
+  q.drainAll()
+  for (let i = 0; i < 80 && q.isDraining(); i += 1) await flush(8)
+  assert.equal(calls.length, 2, 'pass one ran, then the failing pass stopped the pump')
+  assert.match(logs.join('\n'), /drain failed/, logs.join('\n'))
+  assert.match(logs.join('\n'), /full drain ended: 2 chapter\(s\) across 1 pass\(es\)/, logs.join('\n'))
+  q.dispose()
+})
+
+test('#565: single-flight — a second run while draining starts NOTHING', async () => {
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((res) => { release = res })
+  let backlog = ['c1', 'c2']
+  const { q, calls } = harness({
+    trigger: 'manual',
+    batchCap: 2,
+    listPending: async (_m: string, cap: number) => { await gate; return backlog.slice(0, cap).map((k) => ({ key: k, label: k })) },
+    enrichOne: async (k: string) => { calls.push(k); backlog = backlog.filter((x) => x !== k); return { ok: true } },
+  })
+  const first = q.drainAll()
+  assert.equal(first.started, true)
+  for (let i = 0; i < 10; i += 1) await flush(4) // let the first pass reach the (blocked) listPending
+  const second = q.drainAll()
+  assert.equal(second.started, false, 'no double pump')
+  assert.equal(second.alreadyRunning, true)
+  release!()
+  for (let i = 0; i < 60 && q.isDraining(); i += 1) await flush(8)
+  assert.equal(calls.length, 2, 'the ONE drain the gate held finished; the second call added nothing')
+  q.dispose()
+})
+
+test('#565: circuit-breaker — a queue that never shrinks stops the pump LOUDLY (spin guard)', async () => {
+  const logs: string[] = []
+  const { q, calls } = harness({
+    trigger: 'manual',
+    batchCap: 2,
+    listPending: async () => [{ key: 'c-stuck', label: 'stuck' }], // never depletes even on success
+    enrichOne: async (k: string) => { calls.push(k); return { ok: true } },
+    log: (m: string) => { logs.push(m) },
+  })
+  q.drainAll()
+  for (let i = 0; i < 40 && q.isDraining(); i += 1) await flush(8)
+  assert.equal(q.isDraining(), false, 'the pump stopped on its own — it may not spin a non-shrinking queue')
+  assert.ok(calls.length <= 2, `bounded work: ${calls.length} calls`)
+  assert.match(logs.join('\n'), /STOPPED: head c-stuck unchanged/, logs.join('\n'))
+  q.dispose()
+})
