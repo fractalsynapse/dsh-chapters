@@ -1426,6 +1426,19 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.53 cut (2026-11-26): the no-known-errors gate's harvest — enrichment reaches every project, pool identity reads true, the sink line stops crying wolf, the sweep declares dead host builds falsifiably
+
+**Shipped:** #550 (the ladder resolves the row's owning workspace — in a per-HOME registry on a
+multi-project server, other projects' chapters had been skipping as phantom 'file absent' FOREVER;
+live proof sat in SAIP's own status line), #546 (identityVerdict: a deliberately separate pool reads
+as the §2.1 design it is; the ⚠ stays for same-remote key drift, credential/scp forms collapse),
+#548 (the fresh-boot sink line reports the lazy default path instead of self-reporting a bug — false
+alarms are how real ones die), #553 (host-matrix known-host-broken declarations for
+0.2.2-alpha.2/0.2.3-alpha.1, drift-guarded both directions; #545's card invisibility classified by
+execution as host-side, identical repro on 0.2.51). Gate: maintainer 'I don't want to run it again
+with known errors in the process, even if they are benign' — the gate found #550, which was NOT
+benign.
+
 ## 0.2.52 cut (2026-11-25): the self-driving audit closes at the roots; the support floor is enforced by composition
 
 **Shipped:** #532 (autorun survives its own fired prompts — the human-lane move of 0.2.51 made the
