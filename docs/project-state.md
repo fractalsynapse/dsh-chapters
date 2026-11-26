@@ -1426,6 +1426,20 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.54 cut (2026-11-26): the gate's second catch — the #550 fix needed the registry to actually carry the map
+
+**Shipped:** #557 — legacy rows heal on first true contact (ladder resolves row → process → the
+registry's own project roots; WHERE the file exists that root is the owner and gets stamped —
+present-is-proof, never a guess), both unstamped writers fixed (repair-run stamps ports.cwd; the
+boot witness — a probe row naming a file never written — is excluded from the queue and the count,
+itself a permanent phantom-skip), refusals name the full search. Found because the maintainer's
+live /chapters-enrich report forced the registry read: 0 of 67 rows carried the field the 0.2.53
+reader needed — the lesson, recorded on the release entry: a fixture that hand-writes a field MUST
+be paired with a row proving the production writer stamps it. CI: four attempts on the candidate
+(three single-leg pool stalls, zero tape misses, local repro self-refuted and retracted), then
+5/5 green. Maintainer gate: 'let's go ahead and fix those issues and cut a new release so we can
+return to the SAIP autorun experiment' (2026-11-26).
+
 ## 0.2.53 cut (2026-11-26): the no-known-errors gate's harvest — enrichment reaches every project, pool identity reads true, the sink line stops crying wolf, the sweep declares dead host builds falsifiably
 
 **Shipped:** #550 (the ladder resolves the row's owning workspace — in a per-HOME registry on a
