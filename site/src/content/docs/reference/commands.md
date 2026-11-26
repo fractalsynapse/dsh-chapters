@@ -46,9 +46,10 @@ preset or the door says it is needed.
 | `/chapters-link treedx+<url>/<repo> <token>` | bind a TreeDX service (token always required — bearer API); the managed repository is created server-side if absent |
 
 The no-args answer is a git-status-like block: `Provider`, `Upstream`, `Bound` (slug · project key · since),
-**`Identity`** (§7.8 fail-loud: which source derived the project key here — `remote` / `config override` /
-`PATH` — and a loud ⚠ when this checkout resolves a DIFFERENT key than the bound one, because rules and
-chapters approved elsewhere will then not appear here), the diagnostics line, `Mirror` (branch/head, plus an
+**`Identity`** (§7.8 fail-loud, pool-aware since #546: which source derived the project key here —
+`remote` / `config override` / `PATH`; a pool linked as its OWN repository reports `pool-keyed … rides
+this bound key` — by design, never an alarm; the loud ⚠ is reserved for real drift, the SAME remote
+canonicalizing to two different keys), the diagnostics line, `Mirror` (branch/head, plus an
 origin-drift note when it will rebuild), `Sync` (last run + detail), `Pending` (files not yet mirrored, plus
 the no-credentials nudge), `Harness` (this machine's id). Relinking to a different target — or a push that
 finds the mirror diverged — rebuilds the mirror from the store (the store is the truth).

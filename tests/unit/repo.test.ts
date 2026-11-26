@@ -131,3 +131,21 @@ test('repoPaths: layout matches record §2.2', () => {
   assert.equal(p.rulesDir, path.join('rules', 'KEY'))
   assert.equal(p.vocabularyJson, path.join('topics', 'vocabulary.json'))
 })
+
+// #546: the identity verdict, pure. A separate-pool link is the documented design and must read
+// informationally; the §7.8 alarm stays reserved for what it was written for — the SAME remote
+// canonicalizing to two keys, which really does strand a checkout from its team's rules.
+test('#546: identityVerdict — match, pool-keyed (own repo / no remote), and same-remote drift are three distinct arms', async () => {
+  const { identityVerdict, canonicalizeRemote } = await import('../../src/repo.ts')
+  const pool = '/home/u/saip-kb.git'
+  const bound = { projectKey: 'pool-key', remote: pool }
+  assert.equal(identityVerdict(bound, { projectKey: 'pool-key', remote: pool, projectKeySource: 'remote' }).kind, 'match')
+  assert.equal(identityVerdict(bound, { projectKey: 'code-key', remote: 'https://github.com/org/saip.git', projectKeySource: 'remote' }).kind, 'pool-keyed')
+  assert.equal(identityVerdict(bound, { projectKey: 'x', remote: null, projectKeySource: 'path-derived' }).kind, 'pool-keyed')
+  // the real drift: same repository, different recorded key (fork-first, stale link, damage)
+  assert.equal(identityVerdict(bound, { projectKey: 'stale-key', remote: pool, projectKeySource: 'remote' }).kind, 'drift')
+  // canonicalization must NOT turn same-repo into pool-keyed (credentials/ssh-vs-https forms)
+  const g = 'https://github.com/org/pool.git'
+  assert.equal(identityVerdict({ projectKey: 'a', remote: g }, { projectKey: 'b', remote: `https://token:x-oauth-basic@github.com/org/pool`, projectKeySource: 'remote' }).kind, 'drift')
+  void canonicalizeRemote
+})
