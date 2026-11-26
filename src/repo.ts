@@ -183,6 +183,31 @@ export function resolveProject(cwd: string, overrideKey?: string, overrideRemote
   return { projectKey: uuidv5(NAMESPACE_OID, cwd), projectKeySource: 'path-derived', remote: null }
 }
 
+/**
+ * #546: the identity verdict, ONE predicate for both report sites (/chapters-link,
+ * /chapters-status). The §7.8 fail-loud was written when the pool and the checkout shared
+ * one remote, so a key mismatch meant drift (no remote ⇒ path-derived, a fork listed first,
+ * canonicalization damage). But linking an UPSTREAM OF ITS OWN is a first-class design (record
+ * §2.1 — a knowledge repo is not the code repo), and a link record is an explicit human act:
+ * when it exists, ITS key governs everything (sync, rules reads, search doors, artifacts all
+ * resolve through projectForCwd — the derived checkout-remote key governs nothing). So a
+ * separate-pool link is not a failure and must not print the warning; the warning stays exactly
+ * where §7.8 intended it: same remote, different key.
+ */
+export function identityVerdict(
+  bound: { projectKey: string; remote: string },
+  derived: { projectKey: string; remote: string | null; projectKeySource: 'override' | 'remote' | 'path-derived' },
+): { kind: 'match' | 'pool-keyed' | 'drift'; sameRemote: boolean } {
+  if (derived.projectKey === bound.projectKey) return { kind: 'match', sameRemote: false }
+  let sameRemote = false
+  if (derived.remote !== null) {
+    try {
+      sameRemote = canonicalizeRemote(derived.remote) === canonicalizeRemote(bound.remote)
+    } catch { sameRemote = false }
+  }
+  return { kind: sameRemote ? 'drift' : 'pool-keyed', sameRemote }
+}
+
 /** Repo layout (record §2.2) — every path the sync/index/search layers touch. */
 export function repoPaths(projectKey: string, harnessId: string, sessionId?: string) {
   const base = ''

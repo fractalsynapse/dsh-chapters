@@ -98,3 +98,19 @@ test('#445: a BROKEN preset is attributed by shape — host crash vs retired row
   assert.match(rows.why, /rows this host cannot activate/, 'a row-spec payload keeps the row attribution')
   assert.equal(rows.verdict, 'fail-broken-preset', 'both stay the same verdict — only the attribution differs')
 })
+
+// #553: the declared-known-broken table must fail BOTH ways — the cell keeps probing, an
+// unexpected pass is drift, and a different failure class than declared stays loud.
+test('#553: applyHostBroken — declared match reports, unexpected pass fails as drift, other failures stay loud', async () => {
+  const { applyHostBroken } = await import('../e2e/host-matrix-support.ts')
+  const a = applyHostBroken('0.2.2-alpha.2', { verdict: 'fail-broken-preset', why: 'host-internal crash' })
+  assert.equal(a.countsAsFailure, false, 'declared host-broken does not fail the sweep')
+  assert.match(a.verdict, /known-host-broken \(fail-broken-preset\)/)
+  const b = applyHostBroken('0.2.2-alpha.2', { verdict: 'pass', why: 'composed' })
+  assert.equal(b.countsAsFailure, true, 'a declared-broken build that PASSES is drift — the table must move')
+  assert.equal(b.verdict, 'fail-drift')
+  const c = applyHostBroken('0.2.2-alpha.2', { verdict: 'fail-compose', why: 'other' })
+  assert.equal(c.countsAsFailure, true, 'a DIFFERENT failure than declared stays loud')
+  const d = applyHostBroken('0.2.2-rc.5', { verdict: 'pass', why: 'composed' })
+  assert.equal(d.countsAsFailure, false, 'undeclared versions keep normal semantics')
+})

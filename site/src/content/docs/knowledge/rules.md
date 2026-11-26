@@ -64,7 +64,12 @@ fresh clone that has not been linked or synced has no rules at all. Those four a
 inferred: the head states `0 project rules — this checkout resolves no knowledge project
 (<cwd>); your session rules below are local only. Link one with /chapters-link to inherit the
 team's.` (that form appears when session rules govern an unlinked head), and `/chapters-status`
-reports `projectKeySource`. Ungoverned must never look like governed.
+reports `projectKeySource`. Ungoverned must never look like governed. #546 sharpened what the
+IDENTITY line treats as drift: a pool bound to its OWN repository (the knowledge repo is not the
+code repo — the documented §2.1 design) reports `pool-keyed … rides this bound key`, because the
+explicit link is the identity everywhere it governs; the ⚠ alarm fires only for what it was written
+for — the SAME remote resolving to two different keys (fork listed first, stale link, canonicalization
+damage).
 
 ## Session rules
 

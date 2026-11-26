@@ -124,6 +124,32 @@ export function cellVerdict(cell: {
   return { verdict: 'pass', why: cell.preset === 'pruned' ? `composed; rows pruned as unshipped: ${cell.dropped.join(', ')}` : 'composed' }
 }
 
+/**
+ * #553: published builds PROVEN broken on the host's side, declared here rather than silently
+ * tolerated. The cells still PROBE every nightly; a match downgrades the sweep failure to a
+ * REPORTED known-broken line (with the issue cite), and a cell that unexpectedly PASSES is drift —
+ * the host got fixed or this table lies — which stays a failure until the table and #553 move.
+ * A one-way carve-out is how known-broken lists rot.
+ */
+export const HOST_BROKEN: Record<string, { expect: CellVerdict; cite: string }> = {
+  '0.2.2-alpha.2': { expect: 'fail-broken-preset', cite: 'https://github.com/fractalsynapse/dsh-chapters/issues/553' },
+  '0.2.3-alpha.1': { expect: 'fail-boot', cite: 'https://github.com/fractalsynapse/dsh-chapters/issues/553' },
+}
+
+/** One decision point for the sweep loop: declared-known-broken cells are reported, everything
+ *  else keeps its failure status. `known` cells do NOT count against the run; UNEXPECTED passes on
+ *  a declared version return countsAsFailure=true with a drift why. */
+export function applyHostBroken(
+  version: string,
+  v: { verdict: CellVerdict; why: string },
+): { verdict: string; why: string; countsAsFailure: boolean } {
+  const declared = HOST_BROKEN[version]
+  if (declared === undefined) return { ...v, countsAsFailure: v.verdict !== 'pass' }
+  if (v.verdict === declared.expect) return { verdict: `known-host-broken (${declared.expect})`, why: `${v.why} — declared broken, ${declared.cite}`, countsAsFailure: false }
+  if (v.verdict === 'pass') return { verdict: 'fail-drift', why: `declared host-broken (${declared.expect}, ${declared.cite}) but this build now PASSES — update the table and the issue`, countsAsFailure: true }
+  return { ...v, countsAsFailure: true } // a DIFFERENT failure class than declared: the table misattributes it; still loud
+}
+
 /** The rig's own below-floor refusal (bootE2eServer throws on a pin < 0.2.0) — recognized so a
  *  driver can report it as a verdict instead of a crash. */
 export function isFloorRefusal(text: string): boolean {
