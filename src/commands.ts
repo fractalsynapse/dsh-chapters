@@ -172,7 +172,7 @@ export function registerHostCommands(
                 ? `Identity: ${derived.projectKeySource} — matches the bound key (${where})`
                 : `Identity: ${derived.projectKeySource}  ⚠ THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY (${derived.projectKey.slice(0, 8)}… vs bound ${rec.projectKey.slice(0, 8)}…) — rules and chapters approved elsewhere will NOT appear here. ${where}`
             })(),
-            diagnosticStatusLine(),
+            diagnosticStatusLine(cwd, config.artifactStoreRoot),
             `Mirror:   ${fs.existsSync(mirrorAbs) ? DEFAULT_CLONE_DIR : '(not created yet)'}` +
               (treedx ? `  head ${head ?? (tstate === null ? 'not cloned' : 'empty repo')}${tstate?.offline === true ? ' · OFFLINE (push deferred)' : ''}` : `  branch ${head ?? 'main'}`) +
               (origin !== null && origin !== (treedx ? rec.remote : local ? resolveLocalUpstreamPath(rec.remote, cwd) : rec.remote) ? `  [origin drift: ${origin} — will rebuild]` : ''),
@@ -357,7 +357,7 @@ export function registerHostCommands(
           if (sessId !== undefined) { try { lines.push(await plane.sessionRow(sessId)) } catch { /* the block degrades to what it has */ } }
         }
       }
-      lines.push(diagnosticStatusLine())
+      lines.push(diagnosticStatusLine(cwd, config.artifactStoreRoot))
       lines.push(AUTO_SAVE_LINE(config))
       // Findings, read-only, from the #60 auditor's row-level view. What a status cannot check WITHOUT
       // the durable log is named as unchecked rather than counted as clean: coverage holes, orphan
