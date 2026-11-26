@@ -35,7 +35,7 @@ import type { ChapterRecord } from './archive.ts'
 import { registerChaptersRepairRestore, type ToolsConfig } from './tools.ts'
 import { CHAPTERS_PRESET_ID, inventoryEntry, unusableRows, type PresetRegistryLike } from './preset.ts'
 import { registerHostCommands } from './commands.ts'
-import { wireSubagentAutoSave } from './auto-save.ts'
+import { readDurableSession, wireSubagentAutoSave } from './auto-save.ts'
 import { createEnrichWiring } from './enrich-wire.ts'
 import { ENRICH_MAX_TOKENS_DEFAULT } from './enrich.ts'
 import { carryActivePlan, detectPlans } from './plans.ts'
@@ -487,7 +487,9 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       projectCwds: () => [...(store.projects?.() ?? new Map<string, { cwd?: string }>().entries())]
         .map(([, rec]) => rec?.cwd ?? '')
         .filter((c) => c !== '')
-        .sort(), 
+        .sort(),
+      // #561: unlinked workspaces have no project record — the row's durable session header does.
+      sessionCwdOf: async (sid) => (await readDurableSession((name) => { try { return ctx.get?.(name) } catch { return undefined } }, sid))?.header?.cwd ?? undefined, 
       config: {
         enabled: config.enrichmentEnabled,
         model: config.enrichmentModel,
