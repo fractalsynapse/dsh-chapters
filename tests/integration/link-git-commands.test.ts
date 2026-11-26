@@ -172,27 +172,64 @@ test('#50 §7.8 /chapters-status reports the identity the rules namespace derive
   const r = await status().handler({ agent: agent() })
   const t = r.text ?? ''
   assert.match(t, /^Identity: /m, 'the key derivation is a reported fact, not an assumption')
-  // EITHER outcome is honest; what is forbidden is silence. This fixture's
-  // workspace has a bound record but no .git of its own, so the key genuinely
-  // resolves path-derived here — the row caught that the first draft asserted the
-  // wrong branch of a working feature, not a bug in it.
-  assert.match(t, /matches the bound key|THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY/, t)
+  // #546 semantics: a bound record but no .git here — the link IS the identity, stated calmly.
+  // Silence remains forbidden; ALARM on a by-design configuration is now the forbidden branch too.
+  assert.match(t, /matches the bound key|pool-keyed/, t)
+  assert.doesNotMatch(t, /THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY/,
+    '#546: no-remote checkout with a valid link is not drift — the maintainer\'s pool-on-purpose setup must not read as broken')
 })
 
-test('#50 §7.8 a checkout resolving a DIFFERENT key is flagged, not silently private', async () => {
+test('#546 a DELIBERATELY separate pool repo reads informationally, never as a failure', async () => {
+  // The maintainer's exact configuration: pool linked to its own repository, checkout's git
+  // remote is the CODE repo. Both identities are named; the sentence states which one governs.
+  const rec = [...projects.values()].find((p) => p.cwd === ws())
+  assert.ok(rec !== undefined)
+  const git = path.join(ws(), '.git')
+  fs.mkdirSync(git, { recursive: true })
+  fs.writeFileSync(path.join(git, 'config'), '[remote "origin"]\n\turl = https://github.com/org/saip-code.git\n')
+  try {
+    const t = (await status().handler({ agent: agent() })).text ?? ''
+    assert.match(t, /pool-keyed/, t)
+    assert.match(t, /rides this bound key|by design/i, 'the governance fact is stated, not just the difference')
+    assert.doesNotMatch(t, /THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY/, 'a separate-pool link is the documented design (§2.1) — never an alarm')
+  } finally {
+    fs.rmSync(git, { recursive: true, force: true })
+  }
+})
+
+test('#50 §7.8 a checkout resolving a DIFFERENT key under the SAME remote is flagged, not silently private', async () => {
   // The divergence class: a bound record whose projectKey no longer matches what
   // this cwd derives (a fork listed first, a pool re-link, a path-derived
   // fallback). Silence here means a developer working all day under rules the
   // team approved elsewhere, believing they apply.
-  const rec = [...projects.values()].find((p) => p.cwd === ws())
-  assert.ok(rec !== undefined)
-  const real = rec!.projectKey
-  rec!.projectKey = 'deadbeef-0000-0000-0000-000000000000'
+  // #546 makes the drift CLASS precise: the alarm fires when the checkout's own remote IS the
+  // bound remote yet the keys disagree (stale link, canonicalization damage, fork listed first).
+  // A path-derived key under a valid link is no longer in this class — see the row above.
+  // (A second link test bound ANOTHER record to this same cwd; the resolver picks one, so the
+  // row tampers every record for the cwd and reads the bound remote from any — the honest shape
+  // of "a stored key no longer matches what the same remote derives".)
+  // One deterministic record: keep the first for this cwd, stash the rest, restore all after.
+  const all = [...projects.entries()]
+  const forCwd = all.filter(([, p]) => p.cwd === ws())
+  assert.ok(forCwd.length > 0)
+  const [keepKey, keepRec] = forCwd[0]!
+  const boundRemote = String(keepRec!.remote)
+  const stash = new Map(all)
+  projects.clear()
+  for (const [k, v] of stash) if (k !== keepKey && String(v.cwd) === ws()) { /* drop siblings for determinism */ }
+  else projects.set(k, v)
+  const realKey = String(keepRec!.projectKey)
+  keepRec!.projectKey = 'deadbeef-0000-0000-0000-000000000000'
+  const git = path.join(ws(), '.git')
+  fs.mkdirSync(git, { recursive: true })
+  fs.writeFileSync(path.join(git, 'config'), `[remote "origin"]\n\turl = ${boundRemote}\n`)
   try {
     const t = (await status().handler({ agent: agent() })).text ?? ''
     assert.match(t, /THIS CHECKOUT RESOLVES A DIFFERENT PROJECT KEY/, t)
     assert.match(t, /will NOT appear here/, t)
   } finally {
-    rec!.projectKey = real
+    keepRec!.projectKey = realKey
+    for (const [k, v] of stash) projects.set(k, v)
+    fs.rmSync(git, { recursive: true, force: true })
   }
 })
