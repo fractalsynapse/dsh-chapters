@@ -961,15 +961,22 @@ Rules that follow, in the order they bite:
    manifest file that contributes no tokens fails its own row, so a silently-dead extraction rule cannot masquerade as
    protection.
 
-1a. **A file belongs in the anchor only while it contains literals that reach the model (#362).** `src/preset.ts` was
-    listed on the stated premise that it *is* the persona; it is not — the persona is `cordis.patch.yml`'s
-    `prefix`/`suffix`, already covered — and the whole-file extraction it used matched `'([^'\n]*)'`, so two apostrophes
-    on one line of ordinary JSDoc manufactured a token out of comment prose. All 77 of its "model-facing bytes" were
-    artifacts of that rule, and editing a comment moved `promptAnchor`: a green corpus was declared stale and the tool
-    demanded a full re-record of every project. It is removed from `PROMPT_SURFACE`, with a tripwire row that fails if
-    persona literals ever appear in that file, so the removal cannot quietly become a hole. The general shape to guard
-    against is the one the item above already names for the opposite case: a rule that measures more than the model
-    sees trains people to route around it, exactly like a rule that measures nothing.
+1a. **A file belongs in the anchor only while it contains literals that reach the model (#362, amended by #526).**
+    `src/preset.ts` was listed on the stated premise that it *is* the persona; it is not — the persona is
+    `cordis.patch.yml`'s `prefix`/`suffix`, already covered — and the whole-file extraction it used matched
+    `'([^'\n]*)'`, so two apostrophes on one line of ordinary JSDoc manufactured a token out of comment prose. All 77
+    of its "model-facing bytes" were artifacts of that rule, and editing a comment moved `promptAnchor`: a green
+    corpus was declared stale and the tool demanded a full re-record of every project. It was removed from
+    `PROMPT_SURFACE`, with a tripwire row so the removal could not quietly become a hole. #526 then moved a real
+    model-facing byte INTO that file — the `tool-subagent-list-agents` row left the patch's static YAML (where
+    `yamlScalars` covered its `name:`) and became a row the code appends, and a tool name reaches the model in its
+    tool list whatever file composes it. So the file returned **with the rule narrowed to the `VERSIONED_ROWS` name
+    literals**: comment prose, ids and persona types cannot move the anchor (the legitimate half of #362 stands,
+    tested), a renamed row must (tested the other way), and the token shape matches the YAML rule (`name='…'`) so
+    the move reads as a relocation, not an invention. The general shape guards both directions: a rule that measures
+    more than the model sees trains people to route around it, exactly like a rule that measures nothing — and an
+    anchor that covers the bytes a file used to carry while ignoring the code that replaced them is the quiet escape
+    the #362 tripwire itself named.
 2. **`PROVENANCE.md` per leg is necessary, not sufficient.** It records the host and regime; it cannot
    say "this leg predates three plugin commits". The stamp is what says that, and #156's split is what stops the stamp from
    crying wolf on every rebuild.

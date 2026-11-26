@@ -347,8 +347,12 @@
             config:
               - id: tool-subagent-control
                 name: '@deepseek-ai/dsh-tool-subagent-control'
-              - id: tool-subagent-list-agents
-                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+              # #526: the ./list-agents SUBPATH row is deliberately NOT declared here. The host's
+              # composition loader imports static row specifiers at profile load — before any
+              # chapters code runs — so a subpath a host version retires (0.2.2-rc.5 removed it)
+              # marks the WHOLE preset BROKEN no matter what our pruning predicate decides.
+              # Version-dependent rows are appended by preset.ts's ensureVersionedRows, gated on
+              # the host's own exports map, the only place the keep/drop call can be made correctly.
               - id: tool-subagent
                 name: '@deepseek-ai/dsh-tool-subagent'
                 config:

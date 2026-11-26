@@ -23,6 +23,13 @@ export const PROMPT_SURFACE = [
   'cordis.patch.yml',
   'src/tools.ts',
   'src/commands.ts',
+  // #526: BACK in, but narrowly. The dynamic-append rows (VERSIONED_ROWS) name tools the model
+  // reads in its tool list — bytes that used to be static YAML scalars. An anchor that covers the
+  // YAML but not the code that replaced it is the #362 note's "opposite failure" verbatim: the
+  // scan quietly stops seeing bytes the model reads. The extractor takes ONLY the row-name
+  // literals inside that one block — comments, ids, and every other line of the file cannot move
+  // the anchor, which was the entire reason for the 362 removal.
+  'src/preset.ts',
 ]
 
 /**
@@ -93,12 +100,30 @@ export function yamlScalars(text) {
 }
 
 /**
- * Extract the model-facing tokens of one file. YAML goes through the realm-key whitelist; every TS
- * file through the same literal rule. (#362: `src/preset.ts` used to be "taken in full" on the claim
- * that it is the persona file. It is not — see the manifest note above.)
+ * #526: the VERSIONED_ROWS block's tool-name literals — the ONLY model-facing bytes in preset.ts.
+ * Token shape matches yamlScalars exactly (`name='…'`) so a row MOVING from the patch into the
+ * code reads as the same content under a new path, not as a new kind of thing.
+ */
+export function versionedRowNames(text) {
+  const i = text.indexOf('VERSIONED_ROWS')
+  if (i < 0) return []
+  const end = text.indexOf('\n]', i)
+  if (end < 0) return []
+  const block = text.slice(i, end)
+  const out = []
+  for (const m of block.matchAll(/\bname:\s*'([^'\n]+)'/g)) out.push(`name='${m[1]}'`)
+  return out
+}
+
+/**
+ * Extract the model-facing tokens of one file. YAML goes through the realm-key whitelist;
+ * src/preset.ts through the row-name rule alone (#526); every other TS file through the literal rule.
+ * (#362: preset.ts used to be "taken in full" on the claim it is the persona file. It is not —
+ * full-file extraction stayed wrong; the NARROW rule is the correction.)
  */
 export function extractTokens(path, text) {
   if (path.endsWith('.yml') || path.endsWith('.yaml')) return yamlScalars(text)
+  if (path === 'src/preset.ts') return versionedRowNames(text)
   return tsStringLiterals(text)
 }
 

@@ -143,18 +143,30 @@ test('#362: editing a COMMENT in a manifest file cannot move the anchor', async 
   assert.notDeepEqual(literalChanged, base, 'a rewritten description MUST move the anchor — this fix cannot pass by hashing nothing')
 })
 
-test('#362: preset.ts stays out of the manifest, and the reason is policed', async () => {
+// #362 removed preset.ts wholesale; #526 moved STATIC tool rows INTO that file, and the #362
+// note's own warning applies: bytes the model reads must not leave the anchor's sight. The fix is
+// the NARROW rule — row names inside VERSIONED_ROWS are covered, everything else in the file is
+// not (that was the legitimate half of #362's complaint: comments and ids must not move it).
+test('#526: preset.ts is in the manifest via the row-name rule ONLY — the relocated bytes stay covered', async () => {
   const { PROMPT_SURFACE, extractTokens } = await import('../../scripts/prompt-anchor.mjs')
-  assert.equal(PROMPT_SURFACE.includes('src/preset.ts'), false,
-    '#362 removed it: preset.ts holds no model-facing bytes (the persona is cordis.patch.yml prefix/suffix)')
-  // Tripwire. If someone later writes persona prose into that file, it must go BACK into the manifest —
-  // otherwise the anchor quietly stops covering bytes the model reads, which is the opposite failure.
+  assert.ok(PROMPT_SURFACE.includes('src/preset.ts'),
+    '#526: a file whose code composes model-facing tool rows belongs in the anchor')
   const src = fs.readFileSync('src/preset.ts', 'utf8')
-  const modelFacing = extractTokens('src/preset.ts', src)
-  assert.deepEqual(modelFacing, [],
-    `src/preset.ts now contains model-facing literals (${JSON.stringify(modelFacing.slice(0, 3))}) — add it back to PROMPT_SURFACE (#362)`)
-  // Structural form of the same claim, independent of the extractor's key list:
+  const rows = extractTokens('src/preset.ts', src)
+  assert.ok(rows.length >= 1, 'the anchor must see the VERSIONED_ROWS tool names — an empty rule is the #156 silent false assurance')
+  assert.ok(rows.every((t) => t.startsWith('name=')), `only row names may come from this file, got ${JSON.stringify(rows.slice(0, 3))}`)
+  // The token SHAPE matches the YAML rule, so a row moving from patch to code is the same content
+  // under a new path — here is the byte-level proof the move was a relocation, not a invention:
+  assert.ok(rows.includes("name='@deepseek-ai/dsh-tool-subagent-control/list-agents'"),
+    'the list-agents row the patch used to declare statically is the very token the code now carries')
+  // Comments cannot move it (the #362 grievance, honored): a two-apostrophe JSDoc insert changes nothing.
+  const commented = extractTokens('src/preset.ts', src.replace('export const VERSIONED_ROWS', "// the host's own view: it's just prose\nexport const VERSIONED_ROWS"))
+  assert.deepEqual(commented, rows, 'comment prose — even with paired apostrophes — is not a model-facing byte')
+  // Renaming a row MUST move it: this is the half the old full-file removal could no longer catch.
+  const renamed = extractTokens('src/preset.ts', src.replace("name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'", "name: '@deepseek-ai/dsh-tool-subagent-control/renamed-row'"))
+  assert.notDeepEqual(renamed, rows, 'a rewritten row name MUST move the anchor')
+  // Persona prose staying OUT of this file is still true, and still policed (the #362 tripwire):
   const personaish = /\b(prefix|suffix|personaPrompt|systemPrompt|promptText)\s*:\s*['"`]/.exec(src)
   assert.equal(personaish, null,
-    `src/preset.ts gained persona text (${personaish?.[0]}) — the manifest removal in #362 must be reverted`)
+    `src/preset.ts gained persona text (${personaish?.[0]}) — the narrow rule is not a license for persona bytes`)
 })
