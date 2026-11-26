@@ -108,7 +108,11 @@ export interface EnrichWiringDeps {
 export interface EnrichWiring {
   queue: EnrichQueue
   /** manual drain for the command surface (cwd arms the workspace for files) */
-  runNow(cwd?: string): Promise<{ processed: number; remaining: number }>
+  runNow(cwd?: string, limit?: number): Promise<{ processed: number; remaining: number; draining: boolean; alreadyRunning: boolean }>
+  /** the configured per-pass cap (#565: the reply names it; the cap itself never changes at runtime) */
+  batchCap(): number
+  /** #565: the background drain's live state (surfaces and tests await it). */
+  isDraining(): boolean
   setModelOverride(v: string | null): Promise<void>
   modelOverride(): string | null
   statusLine(): string
@@ -460,10 +464,15 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       }
       return n
     },
-    async runNow(cwd?: string) {
+    async runNow(cwd?: string, limit?: number) {
       if (cwd !== undefined) rememberedCwd = cwd
-      const processed = await queue.drainNow()
-      return { processed, remaining: await this.pendingCount() }
+      // #565: the manual surface DRAINS (all pending, or the caller's limit) in the background —
+      // the maintainer's rule replaced the one-batch design: 'We should process all of the
+      // unfinished ones or allow the user to specify a limit.' The return names what started,
+      // not what finished; `report` follows the count down.
+      const d = queue.drainAll(limit)
+      const remaining = await this.pendingCount()
+      return { processed: 0, remaining, draining: d.started, alreadyRunning: d.alreadyRunning }
     },
     async setModelOverride(v) {
       if (v === null) await deps.store.putSetting('enrichment.model', '')
@@ -481,8 +490,11 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       let last = ''
       try { last = ` · last: ${(JSON.parse(heartbeat ?? '{}') as { line?: string }).line ?? 'idle'}` } catch { /* cosmetic */ }
       const mine = deps.config.mineRules === false ? ' · rule mining OFF' : ` · rule mining ON (≤${deps.config.mineCap ?? 3}/chapter, verbatim-quote gated)`
-      return `enrichment: ${deps.config.trigger}, model ${model}${mine}${last}`
+      const drainState = queue.isDraining() ? ' · FULL DRAIN RUNNING' : ''
+      return `enrichment: ${deps.config.trigger}, model ${model}${mine}${drainState}${last}`
     },
+    batchCap: () => deps.config.batchCap,
+    isDraining: () => queue.isDraining(),
     dispose() { queue.dispose() },
   }
 }

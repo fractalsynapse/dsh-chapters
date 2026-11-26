@@ -12,6 +12,12 @@ import { sha256 } from '../../src/render.ts'
 import { createEnrichWiring, type EnrichWiringDeps } from '../../src/enrich-wire.ts'
 import { withMutate } from '../fake-store.ts'
 
+/** #565: run is a BACKGROUND drain — await completion on microtasks only (fakes resolve
+ * without timers; #456 ratchet honored). */
+async function pump(w: { isDraining(): boolean }): Promise<void> {
+  for (let i = 0; i < 400 && w.isDraining(); i += 1) for (let j = 0; j < 6; j += 1) await Promise.resolve()
+}
+
 const chapter = (rel: string) => `---\ntitle: "legacy fragment"\nsummary: deterministic summary text\ntopics: ["src/a.ts"]\n---\n# Topic\n\n**User:** always run the tape replay before cutting a tag\n\n**Assistant:** done: pushed a tag\n`
 const answer = async () => '{"title":"Enriched","summary":"A summary that is informative.","topics":["auth"],"rules":[]}'
 
@@ -53,8 +59,10 @@ test('#550: a chapter owned by ANOTHER workspace enriches via the row cwd (live 
   const w = world(undefined, undefined)
   w.state.cwd = w.wsOwn
   try {
-    const r = await createEnrichWiring(w.deps).runNow()
-    assert.equal(r.processed, 1, `skip reasons: ${w.logs.join('|')}${w.warns.join('|')}`)
+    const wiring = createEnrichWiring(w.deps)
+    wiring.runNow()
+    await pump(wiring)
+    assert.equal(wiring.isDraining(), false, `drain ran: ${w.logs.join('|')}${w.warns.join('|')}`)
     const doc = fs.readFileSync(path.join(w.wsOwn, w.rel), 'utf8')
     assert.ok(doc.includes('title: "Enriched"'), doc.slice(0, 160))
   } finally { w.dispose() }
@@ -80,13 +88,15 @@ test('#550: a pre-#348 row (no cwd field) still falls back to the process cwd', 
     putSetting: async (k: string, v: string) => { settings.set(k, v) },
   }) as unknown as EnrichWiringDeps['store']
   try {
-    const r = await createEnrichWiring({
+    const legacy = createEnrichWiring({
       store, cwd: () => ws,
       config: { enabled: true, model: 'p/m1', trigger: 'both', idleMs: 10, batchCap: 5, mineCap: 3 },
       fetch: answer, conversationRoute: () => ({ provider: 'p', model: 'm1' }),
       log: () => {}, warn: () => {}, setTimer: () => ({ cancel: () => {} }),
-    }).runNow()
-    assert.equal(r.processed, 1, 'legacy rows keep working through the remembered cwd')
+    })
+    legacy.runNow()
+    await pump(legacy)
+    assert.match(fs.readFileSync(path.join(ws, rel), 'utf8'), /Enriched/, 'legacy rows keep working through the remembered cwd')
   } finally { fs.rmSync(ws, { recursive: true, force: true }) }
 })
 
@@ -97,7 +107,9 @@ test('#550: no row cwd AND no process cwd refuses naming the REAL cause, not a p
   w.deps.cwd = () => undefined
   try {
     // with no cwd anywhere the ladder cannot resolve at all — the reason names the missing owner
-    const r = await createEnrichWiring(w.deps).runNow()
-    assert.equal(r.processed, 0)
+    const refus = createEnrichWiring(w.deps)
+    refus.runNow()
+    await pump(refus)
+    assert.match(w.logs.join('|'), /row carries no owning workspace|absent under the row/, 'the refusal names the searched sources')
   } finally { fs.rmSync(empty, { recursive: true, force: true }); w.dispose() }
 })

@@ -16,6 +16,11 @@ const CONFIG: RenderConfig = { toolResultDeferFloorTokens: 200, chapterTokenTarg
 const human = (seq: number, text: string): SessionEventLike =>
   ({ type: 'user/message', seq, data: { content: [{ type: 'text', text }], source: { kind: 'user' } } })
 
+/** #565: background-drain await, microtasks only (#456 ratchet). */
+async function pump(w: { isDraining(): boolean }): Promise<void> {
+  for (let i = 0; i < 400 && w.isDraining(); i += 1) for (let j = 0; j < 6; j += 1) await Promise.resolve()
+}
+
 test('render: reasoning-only turns, nameless tool calls, and truncated argument lines', () => {
   const events: SessionEventLike[] = [
     human(0, 'please inspect the runner'),
@@ -115,8 +120,9 @@ test('ladder: no workspace ever seen → the honest skip, not a crash', async ()
     fetch: async () => { throw new Error('must not be called') },
     conversationRoute: () => null, log: () => undefined, warn: () => undefined,
   })
-  const r = await w.runNow() // no cwd passed, none remembered
-  assert.equal(r.processed, 0, 'nothing enriched without a workspace')
+  w.runNow() // no cwd passed, none remembered
+  await pump(w)
+  assert.equal(await w.pendingCount(), 1, 'the row stayed pending — nothing enriched without a workspace')
 })
 
 test('ladder: a fetch that throws is contained — warn, skip, keep going', async () => {
@@ -142,8 +148,8 @@ test('ladder: a fetch that throws is contained — warn, skip, keep going', asyn
     conversationRoute: () => ({ provider: 'p', model: 'm' }),
     log: () => undefined, warn: (m: string) => { warns.push(m) },
   })
-  const r = await w.runNow()
-  assert.equal(r.processed, 0)
+  w.runNow()
+  await pump(w)
   assert.ok(warns.some((m) => /enrichment failed/.test(m)), 'the failure was warned, not swallowed')
   fsmod.rmSync(ws, { recursive: true, force: true })
 })

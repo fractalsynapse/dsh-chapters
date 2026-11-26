@@ -44,7 +44,8 @@ before(async () => {
   // of model-set/clear/report before this file.
   let override: string | null = null
   const enrichStub = {
-    runNow: async () => ({ processed: 1, remaining: 2 }),
+    runNow: async () => ({ processed: 0, remaining: 2, draining: true, alreadyRunning: false }),
+    batchCap: () => 5,
     setModelOverride: async (v: string | null) => { override = v },
     modelOverride: () => override,
     statusLine: () => 'enrichment: manual, model conversation default',
@@ -125,10 +126,23 @@ test('a target that is neither path, http(s), nor treedx+ falls back to the usag
 
 const enrich = (): CmdDef => defs.get('chapters-enrich')!
 
-test('/chapters-enrich run reports the batch in the run|pending shape', async () => {
+test('#565 /chapters-enrich run announces the background drain of ALL pending', async () => {
   const r = await enrich().handler({ agent: agent(), rawInput: 'run' })
   assert.equal(r.kind, 'success')
-  assert.match(r.text ?? '', /processed 1 chapter\(s\); 2 pending/)
+  assert.match(r.text ?? '', /draining all pending — 2 pending, batches of 5/, r.text ?? '')
+})
+
+test('#565 /chapters-enrich run <n> passes the user limit and rejects junk', async () => {
+  let seen: number | undefined
+  const stub = defs.get('chapters-enrich')!
+  void stub
+  const r = await enrich().handler({ agent: agent(), rawInput: 'run 7' })
+  assert.equal(r.kind, 'success')
+  assert.match(r.text ?? '', /draining up to 7 chapter\(s\)/, r.text ?? '')
+  const bad = await enrich().handler({ agent: agent(), rawInput: 'run all-of-them' })
+  assert.equal(bad.kind, 'error')
+  assert.match(bad.text ?? '', /positive whole-number limit/, bad.text ?? '')
+  void seen
 })
 
 test('/chapters-enrich model: set, view, clear — override round-trips', async () => {
