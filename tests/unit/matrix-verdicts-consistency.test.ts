@@ -44,6 +44,7 @@ test('#455: the matrix-cell skip roster is exactly the frozen named set — no s
     'unit/host-plan-card-shape.test.ts': 4, // all four rows read the pinned host tree (#466)
     'unit/preset-declaration.test.ts': 2,     // the two host-standard identity rows (#467)
     'unit/host-projection-shape.test.ts': 1, // stateOf(session,key) contract vs the pinned host's shipped types (#497)
+    'unit/host-surface-fold.test.ts': 2, // #588: both rows read the pinned host tree (fold constant + client event map) (#466)
   }
   const found = new Map<string, number>()
   const walk = (d: string): void => {
