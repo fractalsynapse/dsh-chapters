@@ -28,7 +28,7 @@ export interface EnrichQueueDeps {
   /** enumerate chapters lacking current-model enrichment (cheap, durable-read only) */
   listPending: (model: string, cap: number) => Promise<{ key: string; label: string }[]>
   /** run the ladder for one chapter; must never throw (S1 core + persistence) */
-  enrichOne: (key: string) => Promise<{ ok: boolean; skipped?: string }>
+  enrichOne: (key: string) => Promise<{ ok: boolean; skipped?: string; resynced?: boolean }>
   /** current enrichment model id ('' = resolver said: conversation model — queue still needs a concrete string for keys) */
   resolveModel: () => Promise<string>
   enabled: boolean
@@ -36,6 +36,10 @@ export interface EnrichQueueDeps {
   idleMs: number
   batchCap: number
   log: (msg: string) => void
+  /** #571: shared drain lease over the per-home registry (settings spine). */
+  getSetting?: (key: string) => string | undefined
+  putSetting?: (key: string, value: string | undefined) => void | Promise<void>
+  planeId?: string
   /** injectable timer for tests */
   setTimer?: (fn: () => void, ms: number) => { cancel: () => void }
 }
@@ -50,7 +54,7 @@ export interface EnrichQueue {
   /** #565: drain ALL pending (or at most `limit`) in chained capped passes, in the BACKGROUND.
    *  Returns immediately with what was started; single-flight (a second call reports the running
    *  drain and starts nothing). Failure-stops / short-pass-ends / dispose-ends — same rules as #529. */
-  drainAll: (limit?: number) => { started: boolean; alreadyRunning: boolean; pendingEstimate: number }
+  drainAll: (limit?: number) => { started: boolean; alreadyRunning: boolean; pendingEstimate: number; leaseHeldBy?: string }
   /** #565: is a full drain currently running (the report surface prints its state). */
   isDraining: () => boolean
   /** queue state for /chapters-status + reports */
@@ -70,6 +74,44 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
   let fullDrain: Promise<void> | null = null
   let disposed = false
 
+  // #571 CROSS-PLANE LEASE. Two queues (host-plane manual, realm-plane boundary) drain the SAME
+  // per-home registry; concurrent pumps are what split file writes from registry commits (354
+  // stale records, live-measured). The holder writes {plane, at, token} to the settings spine;
+  // freshness is bounded — a crashed holder's lease goes stale and the next claimer takes it
+  // LOUDLY, because a lease that permanently starves every drain is worse than the race it
+  // prevents. Unwired planes (tests, old wiring) fall back to today's per-queue behavior.
+  const LEASE_KEY = 'enrichment.drainLease'
+  const LEASE_TTL_MS = 20 * 60_000
+  const leaseToken = Math.random().toString(36).slice(2)
+  const leaseRead = (): { plane?: string; at?: number; token?: string } | undefined => {
+    try {
+      const raw = deps.getSetting?.(LEASE_KEY)
+      if (raw === undefined || raw === '') return undefined
+      return JSON.parse(raw) as { plane?: string; at?: number; token?: string }
+    } catch { return undefined }
+  }
+  const leaseFresh = (l: { at?: number } | undefined): boolean => l !== undefined && typeof l.at === 'number' && Date.now() - l.at < LEASE_TTL_MS
+  const leaseClaim = (): boolean => {
+    if (deps.getSetting === undefined || deps.putSetting === undefined) return true
+    const cur = leaseRead()
+    if (leaseFresh(cur) && cur?.token !== leaseToken) return false
+    void Promise.resolve(deps.putSetting(LEASE_KEY, JSON.stringify({ plane: deps.planeId ?? 'plane', at: Date.now(), token: leaseToken })))
+    return true
+  }
+  const leaseRelease = (): void => {
+    if (deps.putSetting === undefined) return
+    const cur = leaseRead()
+    if (cur?.token === leaseToken) void Promise.resolve(deps.putSetting(LEASE_KEY, undefined))
+  }
+  const leaseHeldByOther = (): string | undefined => {
+    const cur = leaseRead()
+    if (leaseFresh(cur) && cur?.token !== leaseToken) return typeof cur?.plane === 'string' ? cur.plane : 'another plane'
+    return undefined
+  }
+  // #571: per-pass outcome split — the pump distinguishes transient failure from done.
+  let lastAttempted = 0
+  let lastErrored = 0
+
   const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => {
     const t = setTimeout(fn, ms)
     return { cancel: () => clearTimeout(t) }
@@ -83,6 +125,7 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
     // tape showed only the conversation and title requests and the sink had no enrichment line at
     // all — the queue knew (disabled? manual trigger? no model? nothing pending?) and told nobody.
     if (!deps.enabled) { deps.log('enrichment drain skipped: disabled (enrichmentEnabled=false)'); return Promise.resolve(0) }
+    if (!forced && leaseHeldByOther() !== undefined) { deps.log(`enrichment drain skipped: ${leaseHeldByOther()} holds the drain lease (#571)`); return Promise.resolve(0) }
     if (!forced && deps.trigger === 'manual') { deps.log('enrichment drain skipped: trigger=manual — only /chapters-enrich run drains it'); return Promise.resolve(0) }
     if (draining !== null) return draining // one batch at a time; requests collapse
     draining = (async () => {
@@ -95,14 +138,20 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         pendingEstimate = pending.length
         if (pending.length === 0) deps.log(`enrichment drain: pending=0 via ${model} (trigger=${deps.trigger}, idleMs=${String(deps.idleMs)})`)
         let done = 0
+        lastAttempted = pending.length
+        lastErrored = 0
         for (const item of pending) {
           const r = await deps.enrichOne(item.key)
           if (r.ok) done++
+          if ((r as { resynced?: boolean }).resynced === true) deps.log(`enrichment resynced registry receipt from file: ${item.key} (#571)`)
           // Measured: the manual command reported `processed 0 chapter(s); 1 pending` and the sink
           // had nothing, because only successes were ever written. A skip IS a decision with a cause
           // (`skipped:` is the ladder's own label), and an unreported one turns a 420-second poll into
           // an argument — the third time today a queue knew and said nothing (#61a).
-          else deps.log(`enrichment skipped ${item.key}: ${r.skipped ?? 'no reason given by the ladder'}`)
+          else {
+            deps.log(`enrichment skipped ${item.key}: ${r.skipped ?? 'no reason given by the ladder'}`)
+            if ((r.skipped ?? '').startsWith('error')) lastErrored += 1
+          }
         }
         lastBatch = done
         if (done > 0) deps.log(`enrichment batch: ${done}/${pending.length} chapter(s) via ${model}`)
@@ -134,6 +183,8 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
   const stopChase = (): void => { chaseTimer?.cancel(); chaseTimer = null }
   const scheduleChase = (): void => {
     if (!deps.enabled || deps.trigger === 'manual') return
+    const chaseHeld = leaseHeldByOther() // #571: a manual drain owns the registry right now — this beat is redundant
+    if (chaseHeld !== undefined) { deps.log(`enrichment chase deferred: ${chaseHeld} holds the drain lease`); return }
     stopChase()
     chaseTimer = setTimer(() => {
       chaseTimer = null
@@ -167,14 +218,27 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         return { started: false, alreadyRunning: false, pendingEstimate }
       }
       if (fullDrain !== null) return { started: false, alreadyRunning: true, pendingEstimate }
+      if (!leaseClaim()) {
+        const held = leaseRead()
+        return { started: false, alreadyRunning: false, pendingEstimate, leaseHeldBy: typeof held?.plane === 'string' ? held.plane : 'another plane' }
+      }
       const budget = limit !== undefined && limit > 0 ? limit : Number.POSITIVE_INFINITY
       let processed = 0
       let passes = 0
+      let backoffStreak = 0
+      let transientGaveUp = false
+      let prevDone = 0
+      const BACKOFF_RETRIES = 3
+      const BACKOFF_BASE_MS = 60_000 // 60s, 3m, 9m — setTimer-injected; tests fire by hand, #456-safe
+      const sleep = (ms: number): Promise<void> => new Promise((res) => { setTimer(() => res(), ms) })
       let lastHead: string | undefined
       fullDrain = (async () => {
         while (!disposed && processed < budget) {
           const head = await nextHead()
-          if (head !== undefined && head === lastHead) {
+          // #571 refinement: the breaker judges a head that SURVIVED a successful pass — if the
+          // last pass processed nothing (errored), retrying the same head is the backoff's job,
+          // not stagnation.
+          if (head !== undefined && head === lastHead && prevDone > 0) {
             // #565 circuit-breaker: the ladder claimed success but the SAME chapter is still at
             // the head — pending is not shrinking. A chained pump against a non-depleting queue
             // would spin the model forever; stop loudly instead. (The unit fake that never shrinks
@@ -185,13 +249,29 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
           }
           lastHead = head
           const done = await drain(true, Number.isFinite(budget) ? budget - processed : undefined)
-          if (done === 0) break // empty, failing, or model-unresolvable — drain() names which
+          if (done === 0) {
+            // #571: zero processed SPLITS by cause. Items attempted but errored = TRANSIENT (rate
+            // limits ride out with exponential backoff — maintainer: 'maybe we have backoff retries
+            // so it doesn't just quit'). Zero with no errors = done at this head; end normally.
+            if (lastAttempted > 0 && lastErrored > 0 && backoffStreak < BACKOFF_RETRIES) {
+              backoffStreak += 1
+              const waitMs = BACKOFF_BASE_MS * 3 ** (backoffStreak - 1)
+              deps.log(`enrichment drain: transient model failures (${lastErrored}/${lastAttempted} errored) — retry ${backoffStreak}/${BACKOFF_RETRIES} after ${waitMs / 1000}s`)
+              await sleep(waitMs)
+              if (disposed) break
+              continue
+            }
+            if (backoffStreak >= BACKOFF_RETRIES && lastErrored > 0) transientGaveUp = true
+            break
+          }
+          backoffStreak = 0
+          prevDone = done // empty, failing, or model-unresolvable — drain() names which
           processed += done
           passes += 1
           stopChase() // a boundary chase is redundant under a full drain — one pump at a time
         }
-        deps.log(`enrichment full drain ended: ${processed} chapter(s) across ${passes} pass(es)`)
-      })().finally(() => { fullDrain = null })
+        deps.log(`enrichment full drain ended: ${processed} chapter(s) across ${passes} pass(es)${transientGaveUp ? ' — TRANSIENT FAILURES PERSISTED after 3 backoff retries; retry later' : ''}`)
+      })().finally(() => { fullDrain = null; leaseRelease() })
       return { started: true, alreadyRunning: false, pendingEstimate }
     },
     isDraining: () => fullDrain !== null,
@@ -208,6 +288,6 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
       lastBatch,
       model: modelCache,
     }),
-    dispose: () => { disposed = true; idleTimer?.cancel(); idleTimer = null; stopChase() }, // #565: the full drain loop checks disposed
+    dispose: () => { disposed = true; idleTimer?.cancel(); idleTimer = null; stopChase(); leaseRelease() }, // #565: the full drain loop checks disposed
   }
 }
