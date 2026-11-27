@@ -1426,6 +1426,18 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.57 cut (2026-11-27): the stuck drain — 354 stale receipts healed from file truth, one leased pump, backoff on transient
+
+**Shipped:** #571 — HEAL (registry record resynced from a file whose model mark + body anchor prove
+the write landed; corruption keeps its loud refusal), LEASE (cross-plane drain ownership on the
+settings spine; the dual-queue race that split the receipts cannot recur; stale leases taken over
+loudly), BACKOFF (60s/3m/9m exponential retry on error-shaped zero-progress passes, explicit
+give-up heartbeat — maintainer: 'backoff retries so it doesn't just quit'; circuit-breaker refined
+to judge only heads that survived a successful pass). Found by the maintainer's 'it is no longer
+processing' — measured, not guessed: file vs registry mark census (352+2 split receipts, one tree).
+Suite 1818/0/1 (1824); 5/5 first pass. Live acceptance: the next /chapters-enrich run names the 354
+resynced and converges the remaining ~1,168 real pending toward zero; then the SAIP resume.
+
 ## 0.2.56 cut (2026-11-26): the manual enrichment surface inherits the full-sweep law
 
 **Shipped:** #565 — /chapters-enrich run drains ALL pending in chained capped passes (background,
