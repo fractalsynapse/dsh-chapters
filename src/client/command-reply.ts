@@ -15,18 +15,7 @@
  */
 import { createElement as h, useEffect, useState, type ReactElement } from 'react'
 
-/** One raw journal event as the follow wire carries it (measured against the pinned host's
- *  typert types: SessionEventEntry {type:'event', event: SessionWireEvent}). */
-export interface WireEvent {
-  type: string
-  seq: number
-  time: number
-  data: unknown
-}
-
-/** The newest command exchange, shaped for the row. Payload field names are the host's own,
- *  measured from the maintainer's live durable log (command/run {commandId,name,args},
- *  command/done {commandId,kind,text}). */
+/** The newest command exchange, shaped for the row. */
 export interface CommandReply {
   line: string
   kind: 'success' | 'error' | 'running' | string
@@ -42,34 +31,6 @@ export function excerptOf(text: string): string {
 }
 
 /**
- * The newest command exchange in journal order. A done pairs with its run by commandId (the
- * done carries no name — measured); a run with no done above it is IN FLIGHT and renders as
- * 'running' — the honest answer to "did it hang?" that started this whole issue.
- */
-export function lastCommandReply(events: readonly WireEvent[]): CommandReply | null {
-  let done: Extract<WireEvent, { data: unknown }> | null = null
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const e = events[i]
-    if (e === undefined) continue
-    if (e.type === 'command/done') { done = e; break }
-    if (e.type === 'command/run') {
-      const d = e.data as { commandId?: string; name?: string; args?: string }
-      return { line: `/${d.name ?? '?'}${d.args ?? ''}`, kind: 'running', text: '', seq: e.seq }
-    }
-  }
-  if (done === null) return null
-  const dd = done.data as { commandId?: string; kind?: string; text?: string }
-  let line = '/command'
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const e = events[i]
-    if (e === undefined || e.type !== 'command/run') continue
-    const rd = e.data as { commandId?: string; name?: string; args?: string }
-    if (rd.commandId === dd.commandId) { line = `/${rd.name ?? '?'}${rd.args ?? ''}`; break }
-  }
-  return { line, kind: dd.kind ?? 'success', text: dd.text ?? '', seq: done.seq }
-}
-
-/**
  * Does the host already render this reply? The probe runs BEFORE the row mounts (once per new
  * exchange), so an excerpt found in the document is the host's card, not our own echo. Absent
  * document (tests, odd hosts) reads as "not shown" — fail-visible, never fail-silent.
@@ -81,53 +42,107 @@ export function hostCardShowsReply(excerpt: string, doc?: { body?: { innerText?:
   return text.includes(excerpt.slice(0, 80))
 }
 
-/** The follow wire, typed narrowly: remote.session.follow(request, signal) -> async iterable of
- *  frames {type:'snapshot', records:[{type:'event',event}]} | {type:'event', event}. */
-interface FollowFrame {
-  type: string
-  records?: readonly { type: string; event?: WireEvent }[]
-  event?: WireEvent
+/**
+ * #590, the channel as MEASURED: the host's follow wire filters command events before the
+ * browser (reload-leg evidence 2026-11-27: snapshot 27 records, 0 command events), so the row
+ * reads the server's reply record instead — `chapters-reply last` through the exec channel the
+ * bar already owns. Pulls are human-driven only, and every one is named:
+ *   - mount (the restart+resume case: reload answers 'what did my last command say?'),
+ *   - visibility return (tab away, tab back),
+ *   - composer submit: a /chapters line that was in the composer and is now empty means the
+ *     host just dispatched it — one pull follows. Bounded by human action, never ambient
+ *     (#229's drumbeat ban stands: zero timers, zero polls).
+ */
+export interface CommandReplyRow { line?: string; kind?: string; text?: string; at?: string }
+
+export function parseReplyRow(raw: string): CommandReply | null {
+  if (raw.trim() === '') return null
+  try {
+    const p = JSON.parse(raw) as CommandReplyRow
+    if (typeof p.line !== 'string' || p.line === '') return null
+    // seq: the record's own timestamp — dismissal and 'newest wins' both ride it.
+    return { line: p.line, kind: p.kind ?? 'success', text: p.text ?? '', seq: Number.isFinite(Date.parse(p.at ?? '')) ? Date.parse(p.at ?? '') : 1 }
+  } catch { return null }
 }
 
-export interface JournalRemote {
-  session?: {
-    follow?: (request: { address: { kind: 'session'; sessionId: string } }, signal?: AbortSignal) => AsyncIterable<FollowFrame>
+const composerTextOf = (): string => {
+  try {
+    const el = document.querySelector<HTMLElement>('[data-composer-input]')
+    if (el === null) return ''
+    return ('value' in el ? String((el as unknown as { value: string }).value ?? '') : (el.innerText ?? ''))
+  } catch { return '' }
+}
+
+export function subscribeReply(exec: (line: string) => Promise<string>, onReply: (r: CommandReply | null) => void): () => void {
+  let closed = false
+  const pullOnce = async (): Promise<boolean> => {
+    try {
+      const raw = await exec('/chapters-reply last')
+      const parsed = parseReplyRow(raw)
+      if (closed) return true
+      console.info(`[client:chapters] command reply pull: ${String(raw.length)} chars, parsed=${String(parsed !== null)}`)
+      if (parsed === null) return false
+      onReply(parsed)
+      return true
+    } catch { return false /* transport hiccup: the retry ladder decides */ }
+  }
+  // The composer empties at DISPATCH time; the handler writes the record asynchronously after.
+  // A single submit-triggered pull races its own answer and reads empty (measured in the reload
+  // leg: record present in the registry, every pull 0 chars). So the submit pull retries —
+  // bounded, human-triggered, stops at the first parse: four tries, 500ms apart, then it waits
+  // for the next sanctioned moment. Not a drumbeat: a doorbell that stops ringing.
+  const pull = async (retry = false): Promise<void> => {
+    if (await pullOnce()) return
+    if (!retry) return
+    for (let i = 0; i < 4; i += 1) {
+      await new Promise((res) => setTimeout(res, 500))
+      if (closed || await pullOnce()) return
+    }
+  }
+  void pull()
+  const onVis = (): void => { try { if (document.visibilityState === 'visible') void pull() } catch { /* no document: mount pull already ran */ } }
+  try { document.addEventListener('visibilitychange', onVis) } catch { /* headless test env */ }
+  let prior = composerTextOf()
+  let observer: MutationObserver | undefined
+  let attachTimer: ReturnType<typeof setTimeout> | undefined
+  const onComposerMutate = (): void => {
+    const now = composerTextOf()
+    if (/^\s*\/chapters[-a-z]*/i.test(prior) && now.trim() === '') { console.info('[client:chapters] command reply submit detected'); void pull(true) }
+    prior = now
+  }
+  const attachComposer = (): boolean => {
+    try {
+      const el = document.querySelector('[data-composer-input]')
+      if (el === null) return false
+      observer = new MutationObserver(onComposerMutate)
+      observer.observe(el, { childList: true, subtree: true, characterData: true, attributes: true })
+      console.info('[client:chapters] command reply composer observer attached')
+      return true
+    } catch { return true } // no MutationObserver at all: mount + visibility pulls remain; stop retrying
+  }
+  // #429's mount-retry shape, DOM-side: the dock mounts BEFORE the composer hydrates, so the
+  // first probe can find nothing — and an observer attached to nothing silently never fires
+  // (measured in the reload leg 2026-11-27: mounted, no row). 8x2s of querySelector costs zero
+  // wire nodes; #229's ban is on command drumbeats, not DOM lookups.
+  if (!attachComposer()) {
+    let attempts = 0
+    const retry = (): void => {
+      if (closed || attempts >= 8 || attachComposer()) return
+      attempts += 1
+      attachTimer = setTimeout(retry, 2_000)
+    }
+    attachTimer = setTimeout(retry, 2_000)
+  }
+  return () => {
+    closed = true
+    if (attachTimer !== undefined) clearTimeout(attachTimer)
+    try { document.removeEventListener('visibilitychange', onVis) } catch { /* paired with the guarded add */ }
+    observer?.disconnect()
   }
 }
 
-/**
- * Subscribe to the session journal and report the newest command exchange on every relevant
- * frame. Returns the teardown. A missing face (older host, federation gap) yields a silent
- * no-subscribe — the row simply never appears, which is the pre-#590 status quo, never a crash.
- */
-export function subscribeJournal(remote: JournalRemote | undefined, sessionId: string, cb: (reply: CommandReply | null) => void): () => void {
-  const follow = remote?.session?.follow
-  if (typeof follow !== 'function') return () => { /* no journal face: nothing to tear down */ }
-  const ac = new AbortController()
-  let closed = false
-  void (async () => {
-    const events: WireEvent[] = []
-    try {
-      for await (const frame of follow({ address: { kind: 'session', sessionId } }, ac.signal)) {
-        if (closed) return
-        if (frame.type === 'snapshot') {
-          for (const rec of frame.records ?? []) if (rec.event !== undefined) events.push(rec.event)
-          cb(lastCommandReply(events))
-        } else if (frame.type === 'event' && frame.event !== undefined) {
-          const ev = frame.event
-          if (ev.type === 'command/run' || ev.type === 'command/done') {
-            events.push(ev)
-            cb(lastCommandReply(events))
-          }
-        }
-      }
-    } catch { /* stream closed or wire error: the row keeps its last truth; a remount re-reads */ }
-  })()
-  return () => { closed = true; ac.abort() }
-}
-
 export interface CommandReplyProps {
-  subscribe: (cb: (reply: CommandReply | null) => void) => () => void
+  exec: (line: string) => Promise<string>
 }
 
 export function CommandReplyRow(props: CommandReplyProps): ReactElement | null {
@@ -136,12 +151,23 @@ export function CommandReplyRow(props: CommandReplyProps): ReactElement | null {
   const [reply, setReply] = useState<CommandReply | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [dismissedSeq, setDismissedSeq] = useState<number | null>(null)
-  useEffect(() => props.subscribe(setReply), [props.subscribe])
+  useEffect(() => {
+    // #590 triage breadcrumb: registered -> mounted -> pulls. A row that never appears is one
+    // of these links, and the console names which. Silent is the failure mode this feature
+    // exists to end.
+    console.info('[client:chapters] command reply row mounted')
+    return subscribeReply(props.exec, setReply)
+  }, [props.exec])
   const excerpt = reply === null || reply.kind === 'running' ? '' : excerptOf(reply.text)
   const [suppressed, setSuppressed] = useState(false)
   // The host rendered it — no duplicate row. Re-decided per exchange, so a later command still
   // gets its own answer.
-  useEffect(() => { setExpanded(false); setSuppressed(reply !== null && hostCardShowsReply(excerpt, document)) }, [reply?.seq, excerpt])
+  useEffect(() => {
+    setExpanded(false)
+    const sup = reply !== null && excerpt !== '' && hostCardShowsReply(excerpt, document)
+    if (reply !== null) console.info(`[client:chapters] command reply render decision: seq=${String(reply.seq)} suppressed=${String(sup)}`)
+    setSuppressed(sup)
+  }, [reply?.seq, excerpt])
   if (reply === null || reply.seq === dismissedSeq) return null
   if (suppressed) return null
   const color = reply.kind === 'error' ? 'var(--color-danger, #d33)' : reply.kind === 'running' ? 'var(--color-warning, #b80)' : 'var(--color-fg-dimmed, #888)'

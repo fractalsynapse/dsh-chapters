@@ -119,6 +119,13 @@ test.describe('a continued child survives a host restart (#319)', () => {
       catch { throw new Error(`boot B never listened on port ${String(portB)}; its output tail:\n${buf.slice(-600)}`) }
       console.log(`[reload-leg] stage: boot B is LISTENING; output tail: ${buf.slice(-160)}`)
       const pageB = await browser.newPage()
+      // #590 probe: the client's console lines are the difference between 'face absent', 'stream
+      // failed' and 'never mounted' — invisible in the server log, decisive in a DOM assertion's
+      // post-mortem. Kept permanently: every future dock-row failure gets triaged from the log.
+      pageB.on('console', (msg) => {
+        const t = msg.text()
+        if (t.includes('[client:chapters]')) console.log(`[reload-leg][browser] ${t.slice(0, 200)}`)
+      })
       pageB.setDefaultTimeout(60_000)  // locator calls in openSessionByRow otherwise wait on the TEST timeout
       await pageB.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       console.log(`[reload-leg] ${new Date().toISOString().slice(11, 19)}Z stage: goto done`)
@@ -185,10 +192,18 @@ test.describe('a continued child survives a host restart (#319)', () => {
       // timeline the host's surface fold leaves blank. If this goes red while the durable lines
       // above stay green, the row broke (journal face, extraction, or a suppression misfire) and
       // the maintainer is back to flying blind — which is the pain this feature exists to end.
-      await expect(pageB.locator('[data-chapters-reply]').first(), 'command reply row renders for the resumed-session command').toBeVisible({ timeout: 30_000 })
-      const replyRowText = await pageB.locator('[data-chapters-reply]').first().innerText()
-      expect(replyRowText, 'the row names the command you ran').toContain('/chapters-status')
-      expect(replyRowText, 'the row carries the reply, not just the line').toMatch(/Version|chapters/i)
+      // #590: THE CONTRACT — the reply to the command you ran is VISIBLE after restart+resume,
+      // whichever channel delivers it. The pinned rig host (0.2.0-rc.2) renders command cards on
+      // rebuilt timelines and the row correctly suppresses; the maintainer's live host (0.2.2-rc.5)
+      // filters them out (#545) and the row is the only channel. Grading the OUTCOME survives both
+      // hosts; grading the row's DOM would have pinned the rig's accident. The breadcrumb names
+      // which channel answered, so a regression in either is still attributable.
+      await expect.poll(() => pageB.evaluate(() => document.body.innerText), {
+        timeout: 30_000, intervals: [2000],
+        message: 'the command reply is visible NEITHER as host card NOR as dock row — invisibility is back',
+      }).toMatch(/Version: 0\.2/)
+      const channels = await pageB.evaluate(() => ({ row: document.querySelector('[data-chapters-reply]') !== null, cardText: (document.body.innerText.match(/Version: 0\.2/g) ?? []).length }))
+      console.log(`[reload-leg] #590 reply visible: row=${String(channels.row)}, Version-mentions-in-DOM=${String(channels.cardText)}`)
     } finally {
       stop()
     }

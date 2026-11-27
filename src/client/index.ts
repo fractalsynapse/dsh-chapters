@@ -30,7 +30,7 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 import { withTooltip, nativeTitle } from './tooltip.ts'
 import { PromptDock } from './prompt-dock.ts'
 import { DOOR_ACTIONS, doorActionsVisibleFor, makeDoorRunner, presetOfSession, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
-import { CommandReplyRow, subscribeJournal } from './command-reply.ts'
+import { CommandReplyRow } from './command-reply.ts'
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -45,7 +45,7 @@ interface Ctx {
 // #77: `uiWorkspace` is not optional in practice — it owns `openSession(target)`, the verb the
 // host's own fork button uses (`ctx.uiWorkspace.openSession(childId)` in dsh-client-ui-chat).
 // `sessions` has no `open` at all, so without this row the door has never had a way to switch.
-export const inject = ['slots', 'remote', 'remote.commands', 'remote.session', 'sessions', 'uiWorkspace'] as const
+export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
 
 /** Props composed by the slot framework: owner (`messageId`) + our injected verb. */
 interface DoorActionProps {
@@ -234,7 +234,7 @@ export function apply(ctx: Ctx): void {
     id: 'chapters-command-reply',
     order: 31,
     inject: (sessionId: string) => ({
-      subscribe: (cb: Parameters<typeof subscribeJournal>[2]) => subscribeJournal(remote as unknown as Parameters<typeof subscribeJournal>[0], sessionId, cb),
+      exec: (line: string) => runCommandText(remote, sessionId, line),
     }),
   }, CommandReplyRow))
   console.info(`[client:chapters] command reply row registered: ${typeof disposeReplyRow}`)

@@ -48,6 +48,6 @@ test('the client threads the anchor: inject reads owner.messageId, resolves via 
 test('the anchor RPC is registered beside the other plugin commands', () => {
   const COMMANDS = fs.readFileSync(path.join(SRC, 'commands.ts'), 'utf8')
   assert.match(COMMANDS, /name: 'chapters-anchor'/, 'the command exists')
-  assert.match(COMMANDS, /commands\.register\(anchorCommand\)/, 'and is registered')
+  assert.match(COMMANDS, /commands\.register\(rec\(anchorCommand\)\)/, 'and is registered (rec() = the #590 reply record wrapper — registration is still the point)')
   assert.match(COMMANDS, /e\.data\?\.message\?\.id === messageId/, 'it matches the DURABLE shape: assistant/message data.message.id → seq')
 })
