@@ -1426,6 +1426,10 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.58 cut (2026-11-27): the reporting-truth trilogy closes the week — ghost gate gone, phantom skips gone, mining route printed
+
+**Shipped:** #575 (mining status describes the amendment's actual semantics), #577 (dangling-else re-pair: successes never log as skips, invariant pinned both ways — the maintainer's question, not a test, caught it), #578 (/chapters-rule reprocess [n]: human-only rule re-mining pump, annotations untouched, lease/single-flight/backoff shared; resolved mining route printed in report — proof instead of trust). All three PRs 5/5 CI first pass; suites green. Maintainer's live drain converged from 2,354 pending toward zero during the same day the misreports were unwound — the corpus enrichment precondition for the SAIP resume is met.
+
 ## 0.2.57 cut (2026-11-27): the stuck drain — 354 stale receipts healed from file truth, one leased pump, backoff on transient
 
 **Shipped:** #571 — HEAL (registry record resynced from a file whose model mark + body anchor prove
