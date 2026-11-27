@@ -8,22 +8,22 @@
     {
       "leg": "unit",
       "ok": true,
-      "ms": 66677,
-      "detail": "pass 1560 / fail 0 / todo 1"
+      "ms": 86696,
+      "detail": "pass 1613 / fail 0 / todo 1"
     },
     {
       "leg": "integration",
       "ok": true,
-      "ms": 7102,
-      "detail": "pass 196 / fail 0 / todo 0"
+      "ms": 8629,
+      "detail": "pass 198 / fail 0 / todo 0"
     },
     {
       "leg": "compose",
       "ok": false,
-      "ms": 153443,
-      "detail": "fail-boot — the host binary from this tree never produced a reachable server"
+      "ms": 159497,
+      "detail": "known-host-broken (fail-boot) — the host binary from this tree never produced a reachable server — declared broken, https://github.com/fractalsynapse/dsh-chapters/issues/553"
     }
   ],
   "verdict": "fail",
-  "ts": "2026-11-24T14:59:29.230Z"
+  "ts": "2026-11-27T14:00:52.527Z"
 }
