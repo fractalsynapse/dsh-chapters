@@ -1068,6 +1068,8 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           get: (k) => store.getSetting(k),
           put: async (k, v) => { await store.putSetting(k, v) },
         },
+        reprocess: (n?: number) => enrich.reprocessAll(n),
+        reprocessState: () => enrich.reprocessState(),
         // §7.7: ONE bounded call, report-only, reusing the conversation route (and
         // therefore the conversation's own cached prefix). An explicit exception to
         // zero-inference in the elicitedPlot family — never a mutation.

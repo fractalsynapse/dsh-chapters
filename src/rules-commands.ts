@@ -66,11 +66,14 @@ export interface RulesIo {
   autoActivate?: boolean | undefined
   /** the shared settings table (`rules.model` lives beside `enrichment.model`) */
   settings?: { get(key: string): string | undefined; put(key: string, value: string): Promise<void> } | undefined
+  /** #578: human-only RULE reprocess across every existing chapter (host wiring provides it). */
+  reprocess?: (limit?: number) => Promise<{ started: boolean; alreadyRunning: boolean; leaseHeldBy?: string; total: number }>
+  reprocessState?: () => string | undefined
 }
 
 export interface RulesReply { kind: 'success' | 'error'; text: string }
 
-const HELP = 'usage: /chapters-rule add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | model [<provider/model|clear>] | conflicts'
+const HELP = 'usage: /chapters-rule add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | model [<provider/model|clear>] | conflicts | reprocess [n]'
 
 /** one row per rule, both tiers, with the effective status of THIS machine */
 interface RuleRow {
@@ -94,6 +97,25 @@ export async function rulesCommand(io: RulesIo, args: string): Promise<RulesRepl
   const parts = args.trim().split(/\s+/).filter((p) => p.length > 0)
   const verb = parts[0] ?? 'help'
   const cwd = io.cwd()
+  if (verb === 'reprocess') {
+    // #578: the human REPAIR verb — re-mine every existing chapter's standing orders under the
+    // CURRENT resolved mining route. Never touches annotations; reachable only as a slash command
+    // a person types. A repeat call reports the running state instead of starting a second pump.
+    if (io.reprocess === undefined) return { kind: 'error', text: 'reprocess is not wired on this plane — it runs where the enrichment queue lives' }
+    const arg = parts[1]
+    let n: number | undefined
+    if (arg !== undefined) {
+      if (!/^[1-9][0-9]*$/.test(arg)) return { kind: 'error', text: 'reprocess takes a positive whole-number limit or nothing (got: ' + arg + ') — usage: /chapters-rule reprocess [n]' }
+      n = Number(arg)
+    }
+    const r = await io.reprocess(n)
+    const stateNow = io.reprocessState?.() ?? ''
+    if (r.alreadyRunning) return { kind: 'success', text: 'rule reprocess ALREADY RUNNING — ' + (stateNow !== '' ? stateNow : 'progress in flight (total ' + String(r.total) + ')') }
+    if (r.leaseHeldBy !== undefined) return { kind: 'error', text: 'rule reprocess deferred: ' + r.leaseHeldBy + ' holds the drain lease — one pump at a time; try again when it ends' }
+    const limited = n !== undefined ? 'limit ' + String(n) + ' — ' : ''
+    return { kind: 'success', text: 'reprocessing RULES across ' + String(r.total) + ' chapter(s) in the background — ' + limited + 'mining only, annotations untouched; progress: a second /chapters-rule reprocess' }
+  }
+
   const project = io.projectFor(cwd)
   if (project === undefined) {
     return { kind: 'error', text: 'no knowledge repository is linked for this workspace — link one with /chapters-link first (rules are shared state)' }
