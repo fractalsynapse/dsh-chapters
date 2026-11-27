@@ -1,3 +1,5 @@
+import { createDrainLease } from './enrich-lease.ts'
+
 /**
  * P2 S2 — the enrichment queue: one queue, pluggable triggers, hard idle
  * guarantee (record §6.2, plan decisions).
@@ -80,35 +82,13 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
   // freshness is bounded — a crashed holder's lease goes stale and the next claimer takes it
   // LOUDLY, because a lease that permanently starves every drain is worse than the race it
   // prevents. Unwired planes (tests, old wiring) fall back to today's per-queue behavior.
-  const LEASE_KEY = 'enrichment.drainLease'
-  const LEASE_TTL_MS = 20 * 60_000
-  const leaseToken = Math.random().toString(36).slice(2)
-  const leaseRead = (): { plane?: string; at?: number; token?: string } | undefined => {
-    try {
-      const raw = deps.getSetting?.(LEASE_KEY)
-      if (raw === undefined || raw === '') return undefined
-      return JSON.parse(raw) as { plane?: string; at?: number; token?: string }
-    } catch { return undefined }
-  }
-  const leaseFresh = (l: { at?: number } | undefined): boolean => l !== undefined && typeof l.at === 'number' && Date.now() - l.at < LEASE_TTL_MS
-  const leaseClaim = (): boolean => {
-    if (deps.getSetting === undefined || deps.putSetting === undefined) return true
-    const cur = leaseRead()
-    if (leaseFresh(cur) && cur?.token !== leaseToken) return false
-    void Promise.resolve(deps.putSetting(LEASE_KEY, JSON.stringify({ plane: deps.planeId ?? 'plane', at: Date.now(), token: leaseToken })))
-    return true
-  }
-  const leaseRelease = (): void => {
-    if (deps.putSetting === undefined) return
-    const cur = leaseRead()
-    if (cur?.token === leaseToken) void Promise.resolve(deps.putSetting(LEASE_KEY, undefined))
-  }
-  const leaseHeldByOther = (): string | undefined => {
-    const cur = leaseRead()
-    if (leaseFresh(cur) && cur?.token !== leaseToken) return typeof cur?.plane === 'string' ? cur.plane : 'another plane'
-    return undefined
-  }
-  // #571: per-pass outcome split — the pump distinguishes transient failure from done.
+  const lease = createDrainLease(
+    deps.getSetting !== undefined && deps.putSetting !== undefined
+      ? { get: deps.getSetting, put: (k, v) => void deps.putSetting!(k, v) }
+      : { get: () => undefined, put: () => undefined }, // unwired: legacy per-queue behavior
+    deps.planeId ?? 'plane',
+  )
+    // #571: per-pass outcome split — the pump distinguishes transient failure from done.
   let lastAttempted = 0
   let lastErrored = 0
 
@@ -125,7 +105,7 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
     // tape showed only the conversation and title requests and the sink had no enrichment line at
     // all — the queue knew (disabled? manual trigger? no model? nothing pending?) and told nobody.
     if (!deps.enabled) { deps.log('enrichment drain skipped: disabled (enrichmentEnabled=false)'); return Promise.resolve(0) }
-    if (!forced && leaseHeldByOther() !== undefined) { deps.log(`enrichment drain skipped: ${leaseHeldByOther()} holds the drain lease (#571)`); return Promise.resolve(0) }
+    if (!forced && lease.heldByOther() !== undefined) { deps.log(`enrichment drain skipped: ${lease.heldByOther()} holds the drain lease (#571)`); return Promise.resolve(0) }
     if (!forced && deps.trigger === 'manual') { deps.log('enrichment drain skipped: trigger=manual — only /chapters-enrich run drains it'); return Promise.resolve(0) }
     if (draining !== null) return draining // one batch at a time; requests collapse
     draining = (async () => {
@@ -183,7 +163,7 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
   const stopChase = (): void => { chaseTimer?.cancel(); chaseTimer = null }
   const scheduleChase = (): void => {
     if (!deps.enabled || deps.trigger === 'manual') return
-    const chaseHeld = leaseHeldByOther() // #571: a manual drain owns the registry right now — this beat is redundant
+    const chaseHeld = lease.heldByOther() // #571: a manual drain owns the registry right now — this beat is redundant
     if (chaseHeld !== undefined) { deps.log(`enrichment chase deferred: ${chaseHeld} holds the drain lease`); return }
     stopChase()
     chaseTimer = setTimer(() => {
@@ -218,8 +198,8 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         return { started: false, alreadyRunning: false, pendingEstimate }
       }
       if (fullDrain !== null) return { started: false, alreadyRunning: true, pendingEstimate }
-      if (!leaseClaim()) {
-        const held = leaseRead()
+      if (!lease.claim()) {
+        const held = lease.read()
         return { started: false, alreadyRunning: false, pendingEstimate, leaseHeldBy: typeof held?.plane === 'string' ? held.plane : 'another plane' }
       }
       const budget = limit !== undefined && limit > 0 ? limit : Number.POSITIVE_INFINITY
@@ -271,7 +251,7 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
           stopChase() // a boundary chase is redundant under a full drain — one pump at a time
         }
         deps.log(`enrichment full drain ended: ${processed} chapter(s) across ${passes} pass(es)${transientGaveUp ? ' — TRANSIENT FAILURES PERSISTED after 3 backoff retries; retry later' : ''}`)
-      })().finally(() => { fullDrain = null; leaseRelease() })
+      })().finally(() => { fullDrain = null; lease.release() })
       return { started: true, alreadyRunning: false, pendingEstimate }
     },
     isDraining: () => fullDrain !== null,
@@ -288,6 +268,6 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
       lastBatch,
       model: modelCache,
     }),
-    dispose: () => { disposed = true; idleTimer?.cancel(); idleTimer = null; stopChase(); leaseRelease() }, // #565: the full drain loop checks disposed
+    dispose: () => { disposed = true; idleTimer?.cancel(); idleTimer = null; stopChase(); lease.release() }, // #565: the full drain loop checks disposed
   }
 }
