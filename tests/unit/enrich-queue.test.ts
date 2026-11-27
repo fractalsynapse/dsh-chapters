@@ -306,3 +306,40 @@ test('#571: a transient failure followed by recovery CONTINUES the drain (backof
   assert.doesNotMatch(logs.join('\n'), /TRANSIENT FAILURES PERSISTED/, logs.join('\n'))
   q.dispose()
 })
+
+// #577: the else-pairing invariant. A SUCCESS may never log as a skip, whatever else is
+// instrumented near the branch; the skip line belongs exclusively to !r.ok. (The bug that made
+// the maintainer ask 'what is this skipped message': the #571 resynced note was inserted between
+// 'if (r.ok) done++' and its else, silently re-pairing it — every success logged a bogus
+// 'skipped … no reason given'. Three misreports of mine in one day; the pairing test is the
+// cheapest gate that would have caught all three.)
+test('#577: successes never log as skips (with or without a resynced note)', async () => {
+  const mk = (results: Array<{ ok: boolean; resynced?: boolean; skipped?: string }>) => {
+    const logs: string[] = []
+    let i = 0
+    const q = createEnrichQueue({
+      listPending: async (_m, cap) => Array.from({ length: Math.min(cap, results.length) }, (_, k) => ({ key: 'k' + k, label: 'k' })),
+      enrichOne: async () => results[Math.min(i++, results.length - 1)],
+      resolveModel: async () => 'm', enabled: true, trigger: 'manual', idleMs: 1000, batchCap: results.length,
+      log: (msg: string) => { logs.push(msg) }, setTimer: () => ({ cancel: () => {} }),
+    })
+    return { q, logs }
+  }
+  {
+    const { q, logs } = mk([{ ok: true }, { ok: true, resynced: true }])
+    await q.drainNow()
+    const all = logs.join('\n')
+    assert.doesNotMatch(all, /enrichment skipped/, all)
+    assert.match(all, /batch: 2\/2/, all)
+    assert.match(all, /resynced registry receipt from file: k1/, 'the resynced note still prints — just never on the else branch')
+    q.dispose()
+  }
+  {
+    const { q, logs } = mk([{ ok: false, skipped: 'already enriched' }, { ok: false }])
+    await q.drainNow()
+    const all = logs.join('\n')
+    assert.match(all, /skipped k0: already enriched/, all)
+    assert.match(all, /skipped k1: no reason given by the ladder/, 'the fallback survives for genuinely unlabeled refusals')
+    q.dispose()
+  }
+})
