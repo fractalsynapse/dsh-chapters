@@ -63,10 +63,10 @@ Per-project, `0600`, under the DSH home — never in the repo, never in a chapte
 
 ### I ran a slash command after a restart and no card appeared — did it run?
 
-Almost certainly yes, and the durable log knows. The host decides which recorded events a timeline may
-re-render; the current surface set covers system/developer/user/assistant messages and tool results —
-command events are recorded but not re-rendered after a restart+resume (issue #545, cause closed on the
-host's own constant). The reply is durable: an agent (or you, via the session log) can read the full
-`command/run` + `command/done` pair back, so nothing is lost — the card is presentation, the log is the
-record. A drift guard (#588) fails CI the day the host changes that fold posture in either direction: if
-command events become surface-eligible, this FAQ entry retires with the fix.
+Since **0.2.60 it does not matter whether the host renders it: your reply now appears in the
+command reply row** above the composer — command line, outcome color, excerpt, click for the full
+text (see the commands reference). Before that release the answer was still yes: the host's
+surface fold (`SURFACE_EVENT_TYPES`, issue #545) records command events durably but refuses to
+re-render them in a restarted+resumed timeline, so the reply existed and only the screen lost it.
+The row reads the raw durable journal through the host's own `session.follow` API — zero polling,
+zero model calls — and steps aside when the host card is visible.

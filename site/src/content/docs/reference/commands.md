@@ -3,6 +3,19 @@ title: "15. Commands"
 description: The full composer surface, exact syntax, and what each answer means.
 lastUpdated: true
 ---
+## The command reply row (#590)
+
+Every `/chapters-*` command you type gets its reply **on screen, every time** — including in a
+session that was restarted and resumed, where the host's timeline deliberately does not re-render
+command events (the #545 cause, closed on the host's `SURFACE_EVENT_TYPES`). A single compact row
+mounts in the input dock, closest to the composer: the command line, the reply's first ~200
+characters, and the outcome color. Click it for the full text; dismiss it with **X**; the next
+command replaces it. The row reads the session's **raw durable journal** through the host's own
+`session.follow` API — the same bytes the timeline filters out — so it costs zero model calls,
+zero polling (the follow stream pushes live), and it suppresses itself when the host has already
+rendered the reply as a timeline card. If you ever see a command "do nothing" again: it didn't.
+
+
 ## Reload self-check (#319)
 
 Every continuation child checks its own event stream against the host's fold rule at its FIRST
