@@ -53,6 +53,7 @@ import { ancestorSessionIds, captureMinedRules, makeHeaderParentReader, ruleAnce
 import { configureDiagnostics, configureDiagnosticsCap, diagnosticNote, diagnosticStatusLine, diagnosticWarn } from './diag.ts'
 import { BlockAssembler } from '@deepseek-ai/dsh-llm'
 import { auxPromptMessage } from './aux-message.ts'
+import { streamAuxText } from './llm-fold.ts'
 import { createSyncScheduler, makeCollectionsReader, projectForCwd, readToken, DEFAULT_CLONE_DIR, type SyncScheduler } from './sync.ts'
 import { removedGuard } from './removal.ts'
 import { parseKnowledgeRemote, projectKeyForTarget, resolveProject } from './repo.ts'
@@ -523,15 +524,15 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
       fetch: async (prompt, route) => {
         if (route === null) throw new Error('no enrichment route resolvable (set /chapters-enrich model … or run a turn first)')
         const llm = ctx.llm
-        if (llm?.stream === undefined) throw new Error('llm.stream absent')
-        const assembler = new BlockAssembler()
-        for await (const chunk of llm.stream({
+        const auxStream = llm?.stream
+        if (auxStream === undefined) throw new Error('llm.stream absent')
+        // #583: same fold as the door (was the old two-liner with no failure probe at all).
+        return await streamAuxText((req) => auxStream.call(llm, req as never), {
           provider: route.provider, model: route.model,
           messages: [auxPromptMessage(prompt)],
           maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
-        })) assembler.push(chunk as never)
-        return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+        })
       },
       conversationRoute: () => hostRoute,
       log: (m) => ctx.logger?.info?.(`dsh-chapters: ${m}`),
@@ -542,20 +543,7 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
     // bare model name rides the same last-seen route enrichment uses, with the
     // persisted route as fallback — a fork-only flow that never compacted in
     // place still has a provider to route through after one tool call.
-    /** Pull the host's own failure text out of a `finish` chunk whose reason kind is `error`. */
-function hostStreamFailure(chunks: readonly string[]): string | null {
-  for (const raw of chunks) {
-    try {
-      const j = JSON.parse(raw) as { type?: string; reason?: { kind?: string; failure?: { message?: string } } }
-      if (j.type === 'finish' && j.reason?.kind === 'error') {
-        const msg = j.reason.failure?.message ?? 'the host reported an error without a message'
-        return `host llm.stream failed: ${msg.replace(/\s+/g, ' ').slice(0, 300)}`
-      }
-    } catch { /* truncated probe slice, not an error signal */ }
-  }
-  return null
-}
-
+    
     const prompt = createPromptSurface({
       getSetting: (k) => store.getSetting(k),
       putSetting: (k, v) => store.putSetting(k, v),
@@ -639,31 +627,18 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
       },
       fetch: async (input, route) => {
         const llm = ctx.llm
-        if (llm?.stream === undefined) throw new Error('llm.stream absent')
-        const assembler = new BlockAssembler()
-        const seen: string[] = []
-        const lastChunk: string[] = []
-        for await (const chunk of llm.stream({
+        const auxStream = llm?.stream
+        if (auxStream === undefined) throw new Error('llm.stream absent')
+        // #583: ONE fold (llm-fold.ts) for every auxiliary call. The probe below used to slice
+        // finish chunks to 120 chars BEFORE parsing, so a provider refusal with a longer message
+        // arrived unparseable, folded to '', and printed 'the model returned no text' — evidence
+        // destroyed at collection. A refusal now THROWS the host's own words into the plane row.
+        return await streamAuxText((req) => auxStream.call(llm, req as never), {
           provider: route.provider, model: route.model,
           messages: [auxPromptMessage(input)],
           maxTokens: config.enrichmentMaxTokens,
           purpose: 'compaction',
-        })) {
-          // Measured, not assumed: the fold below keeps only `type === 'text'` blocks, and the bar said
-          // "the model returned no text" on a route that returns text when called directly — so the shapes the
-          // host stream hands us are exactly what had to be seen.
-          lastChunk.push(JSON.stringify(chunk).slice(0, 120))
-          const c = chunk as { type?: string; text?: string; delta?: { text?: string }; content?: { type?: string } }
-          seen.push(`${String(c.type ?? '?')}:${String(c.content?.type ?? c.text ?? c.delta?.text ?? '').slice(0, 10)}`)
-          assembler.push(chunk as never)
-        }
-        // #61: the host already told us what went wrong, inside the stream. Before this, a provider with no
-        // adapter, a refused request, and an empty completion all arrived here as "the model returned no text"
-        // — the detected failure was thrown away and a stranger diagnosis took its place. Now the FIRST real
-        // failure is what the surface reports.
-        const failure = hostStreamFailure(lastChunk)
-        if (failure !== null) throw new Error(failure)
-        return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+        })
       },
       warn: (m) => ctx.logger?.warn?.(`dsh-chapters: ${m}`),
     })
@@ -1077,15 +1052,15 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
           const route = hostRoute
           if (route === null) throw new Error('no conversation route yet — run a turn first')
           const llm = ctx.llm
-          if (llm?.stream === undefined) throw new Error('llm.stream absent')
-          const assembler = new BlockAssembler()
-          for await (const chunk of llm.stream({
+          const auxStream = llm?.stream
+          if (auxStream === undefined) throw new Error('llm.stream absent')
+          // #583: same fold; a refused conflicts probe now says WHY instead of showing empty.
+          return await streamAuxText((req) => auxStream.call(llm, req as never), {
             provider: route.provider, model: route.model,
             messages: [auxPromptMessage(prompt)],
             maxTokens: config.enrichmentMaxTokens,
             purpose: 'compaction',
-          })) assembler.push(chunk as never)
-          return (assembler.blocks() as { type?: string; text?: string }[]).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+          })
         },
       } satisfies RulesIo, args),
     })
@@ -1141,6 +1116,11 @@ function hostStreamFailure(chunks: readonly string[]): string | null {
         // plus intent, driver precedence and revision staleness, all re-checked at the moment of firing.
         promptLoop.maybeFire(sessionId, state, promptLoop.goalSignal(sessionId))
       },
+      // #583: a failed offer under ARMED autorun re-decides with the drain's own backoff ladder
+      // (60s/3m/9m, then one loud STALLED line). Unarmed stays single-attempt: an unarmed bar is the
+      // human's, and background retries there would be model calls nobody asked for.
+      armed: (id: string) => promptLoop.statusOf(id).autorun === 'armed',
+      setTimer: (fn: () => void, ms: number) => { const t = setTimeout(fn, ms); return { cancel: () => { clearTimeout(t) } } },
       now: () => new Date().toISOString(),
       // THREE sinks, because every one of them has been the only surviving copy of an answer:
       //  - the diagnostics FILE (#352). Until now the prompt plane was the one subsystem with no durable
