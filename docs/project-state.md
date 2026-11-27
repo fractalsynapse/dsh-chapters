@@ -1426,6 +1426,10 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.59 cut (2026-11-27): honest attribution of provider failures + armed loops ride out transient offer failures
+
+**Shipped:** #583 (PR #584): the shared llm-fold (full-length finish capture, host words surface in the plane row), the honest empty sentence, and the 60s/3m/9m re-decide ladder with one loud OFFER STALLED — unarmed stays single-attempt. CI needed a third attempt (attempts 1-2: rotating single-leg environment failures — revival stall, then a prompt-bar timing race on a loaded runner); all six suspect legs proven green locally on the branch first (prompt-off x2, prompt-revival, prompt x3). The release verifier executes both #583 proofs against the published tarball and was rehearsed against 0.2.58 to prove it discriminates. Context: this release is the precondition the maintainer set for the SAIP resume — no loop restart with known errors in the process.
+
 ## 0.2.58 cut (2026-11-27): the reporting-truth trilogy closes the week — ghost gate gone, phantom skips gone, mining route printed
 
 **Shipped:** #575 (mining status describes the amendment's actual semantics), #577 (dangling-else re-pair: successes never log as skips, invariant pinned both ways — the maintainer's question, not a test, caught it), #578 (/chapters-rule reprocess [n]: human-only rule re-mining pump, annotations untouched, lease/single-flight/backoff shared; resolved mining route printed in report — proof instead of trust). All three PRs 5/5 CI first pass; suites green. Maintainer's live drain converged from 2,354 pending toward zero during the same day the misreports were unwound — the corpus enrichment precondition for the SAIP resume is met.
