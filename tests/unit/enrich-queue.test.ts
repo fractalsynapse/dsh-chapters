@@ -228,3 +228,81 @@ test('#565: circuit-breaker — a queue that never shrinks stops the pump LOUDLY
   assert.match(logs.join('\n'), /STOPPED: head c-stuck unchanged/, logs.join('\n'))
   q.dispose()
 })
+
+// ---------------- #571: lease, backoff ----------------
+test('#571: cross-plane lease — a second queue holding the settings spine refuses a concurrent drain, and releases on dispose', async () => {
+  const settings = new Map<string, string>()
+  const mk = (plane: string, pending: string[], timers: Array<() => void>) => createEnrichQueue({
+    listPending: async (_m, cap) => pending.slice(0, cap).map((k) => ({ key: k, label: k })),
+    enrichOne: async () => ({ ok: true }),
+    resolveModel: async () => 'm',
+    enabled: true, trigger: 'manual', idleMs: 1000, batchCap: 2,
+    log: () => undefined,
+    setTimer: (fn) => { timers.push(fn); return { cancel: () => { const i = timers.indexOf(fn); if (i >= 0) timers.splice(i, 1) } } },
+    getSetting: (k) => settings.get(k),
+    putSetting: (k, v) => { if (v === undefined || v === '') settings.delete(k); else settings.set(k, v) },
+    planeId: plane,
+  })
+  const a = mk('host', ['c1', 'c2', 'c3'], [])
+  const r1 = a.drainAll() // leaseClaim is synchronous against the sync-backed fake spine
+  assert.equal(r1.started, true)
+  const b = mk('realm', ['c9'], [])
+  const r2 = b.drainAll() // IMMEDIATELY: a still holds the lease
+  assert.equal(r2.started, false, 'realm must not double-pump the registry the host is draining')
+  assert.equal(r2.leaseHeldBy, 'host')
+  // release: host finishes (c1..c3 in batches of 2 => two drains, no timer waits needed)
+  a.dispose(); b.dispose()
+})
+
+test('#571: transient model failures back off three times (60s/3m/9m via injected timer) before the pump gives up', async () => {
+  const logs: string[] = []
+  const timers: Array<() => void> = []
+  const q = createEnrichQueue({
+    listPending: async (_m, cap) => Array.from({ length: 2 }, (_, i) => ({ key: `t${i}`, label: 't' })).slice(0, cap),
+    enrichOne: async () => ({ ok: false, skipped: 'error' }), // every attempt errors (rate-limit shape)
+    resolveModel: async () => 'm',
+    enabled: true, trigger: 'manual', idleMs: 1000, batchCap: 5,
+    log: (m) => { logs.push(m) },
+    setTimer: (fn) => { timers.push(fn); return { cancel: () => { const i = timers.indexOf(fn); if (i >= 0) timers.splice(i, 1) } } },
+  })
+  const r = q.drainAll()
+  assert.equal(r.started, true)
+  for (let i = 0; i < 30; i += 1) for (let j = 0; j < 8; j += 1) await Promise.resolve()
+  const waits1 = timers.length
+  assert.ok(waits1 >= 1, `expected first backoff wait armed, timers=${waits1}`)
+  while (timers.length > 0) { const t = timers.shift()!; t(); for (let j = 0; j < 40; j += 1) await Promise.resolve() }
+  assert.equal(q.isDraining(), false, 'pump ended after the retries')
+  const all = logs.join('\n')
+  assert.match(all, /retry 1\/3 after 60s/, all)
+  assert.match(all, /retry 2\/3 after 180s/, all)
+  assert.match(all, /retry 3\/3 after 540s/, all)
+  assert.match(all, /TRANSIENT FAILURES PERSISTED/, all)
+  q.dispose()
+})
+
+test('#571: a transient failure followed by recovery CONTINUES the drain (backoff is a ride-out, not a stop)', async () => {
+  let failNext = true
+  let backlog = ['r1', 'r2', 'r3']
+  const logs: string[] = []
+  const timers: Array<() => void> = []
+  const q = createEnrichQueue({
+    listPending: async (_m, cap) => backlog.slice(0, cap).map((k) => ({ key: k, label: k })),
+    enrichOne: async (k) => {
+      if (failNext) { failNext = false; return { ok: false, skipped: 'error' } } // first call only: transient
+      backlog = backlog.filter((x) => x !== k)
+      return { ok: true }
+    },
+    resolveModel: async () => 'm',
+    enabled: true, trigger: 'manual', idleMs: 1000, batchCap: 1,
+    log: (m) => { logs.push(m) },
+    setTimer: (fn) => { timers.push(fn); return { cancel: () => { const i = timers.indexOf(fn); if (i >= 0) timers.splice(i, 1) } } },
+  })
+  q.drainAll()
+  for (let i = 0; i < 30; i += 1) for (let j = 0; j < 8; j += 1) await Promise.resolve()
+  while (timers.length > 0) { const t = timers.shift()!; t(); for (let j = 0; j < 60; j += 1) await Promise.resolve() }
+  assert.equal(q.isDraining(), false)
+  assert.equal(backlog.length, 0, 'the drain rode out the transient error and finished the backlog')
+  assert.match(logs.join('\n'), /retry 1\/3/, logs.join('\n'))
+  assert.doesNotMatch(logs.join('\n'), /TRANSIENT FAILURES PERSISTED/, logs.join('\n'))
+  q.dispose()
+})

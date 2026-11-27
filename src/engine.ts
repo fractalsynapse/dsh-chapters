@@ -606,6 +606,7 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
       cwd: () => this.lastCwd ?? undefined,
       // #561: same authoritative last-resort on the realm plane.
       sessionCwdOf: async (sid) => (await readDurableSession((name) => { try { return this.ctx.get?.(name) } catch { return undefined } }, sid))?.header?.cwd ?? undefined,
+      planeId: 'realm', // #571
       config: this.enrichCfg,
       fetch: async (prompt, route) => {
         const r = route ?? this.lastRoute

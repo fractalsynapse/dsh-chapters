@@ -489,7 +489,8 @@ export async function apply(ctx: HostCtx, config: Config): Promise<void> {
         .filter((c) => c !== '')
         .sort(),
       // #561: unlinked workspaces have no project record — the row's durable session header does.
-      sessionCwdOf: async (sid) => (await readDurableSession((name) => { try { return ctx.get?.(name) } catch { return undefined } }, sid))?.header?.cwd ?? undefined, 
+      sessionCwdOf: async (sid) => (await readDurableSession((name) => { try { return ctx.get?.(name) } catch { return undefined } }, sid))?.header?.cwd ?? undefined,
+      planeId: 'host', // #571 
       config: {
         enabled: config.enrichmentEnabled,
         model: config.enrichmentModel,
