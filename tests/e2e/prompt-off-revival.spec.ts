@@ -69,13 +69,16 @@ test.describe('a persisted off surviving a reload revives (#276)', () => {
     // Revival. Both claims matter and they are different: visibility proves the veto lost,
     // the reply seam proves a REAL pull answered (a cached render could never set it).
     const revived = page.locator(DOCK_BAR)
-    await expect(revived, 'the bar revives despite the stale cached off').toBeVisible({ timeout: 30_000 })
+    // #462 band (2026-11-26): under shared-runner contention a reload+boot+mount-pull chain exceeded
+    // the old 30 s; the CLAIM here is correctness (the veto lost), never latency — widen to the measured
+    // load band, inside the test's own 600 s budget. Latency assertions live in the arrival bands file.
+    await expect(revived, 'the bar revives despite the stale cached off').toBeVisible({ timeout: 45_000 })
     // The visible bar is the DISK-TAGGED CACHE RENDER (#272 renders immediately and pulls async);
     // reading the reply seam right now can race the pull itself. CI measured it: the first reply
     // read was EMPTY (the response had not landed) and the leg failed on MY timing, not the
     // product. Wait for the wire to answer; THEN name what it said.
     await expect.poll(() => page.evaluate(() => (window as unknown as { __dshPromptReply?: string }).__dshPromptReply ?? ''),
-      { timeout: 20_000, message: 'the mount pull must answer the reply seam — an empty seam is a race, not a revival' })
+      { timeout: 60_000, message: 'the mount pull must answer the reply seam — an empty seam is a race, not a revival' }) // #462 band, see above
       .toMatch(/suggested next step/)
     const reply = await page.evaluate(() => (window as unknown as { __dshPromptReply?: string }).__dshPromptReply ?? '')
     // #304 taught this seam a fourth honest answer: a boot that released a zombie claim can make

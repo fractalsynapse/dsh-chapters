@@ -48,7 +48,7 @@ import type { SessionState } from './registry.ts'
 
 /** Structural slice of EnrichWiring the commands need (keeps queue types out). */
 export interface EnrichCommandSurface {
-  runNow(cwd?: string, limit?: number): Promise<{ processed: number; remaining: number; draining: boolean; alreadyRunning: boolean }>
+  runNow(cwd?: string, limit?: number): Promise<{ processed: number; remaining: number; draining: boolean; alreadyRunning: boolean; leaseHeldBy?: string }>
   batchCap(): number
   setModelOverride(v: string | null): Promise<void>
   modelOverride(): string | null
@@ -434,9 +434,11 @@ export function registerHostCommands(
           }
           const r = await config.enrich.runNow(cwdOf(invocation.agent), limit)
           const scope = limit !== undefined ? `up to ${limit} chapter(s)` : 'all pending'
-          return { kind: 'success', text: r.alreadyRunning
-            ? `enrichment: a drain is ALREADY RUNNING (${r.remaining} pending) — one pump at a time; /chapters-enrich report follows the count`
-            : `enrichment: draining ${scope} — ${r.remaining} pending, batches of ${String(config.enrich.batchCap())}, failure stops the pump; /chapters-enrich report follows the count` }
+          return { kind: r.leaseHeldBy === undefined ? 'success' : 'error', text: r.leaseHeldBy !== undefined
+            ? `enrichment: ${r.leaseHeldBy} holds the drain lease — one pump over the shared registry at a time (#571); try again when it ends, /chapters-enrich report shows the holder's progress`
+            : r.alreadyRunning
+              ? `enrichment: a drain is ALREADY RUNNING (${r.remaining} pending) — one pump at a time; /chapters-enrich report follows the count`
+              : `enrichment: draining ${scope} — ${r.remaining} pending, batches of ${String(config.enrich.batchCap())}, transient model failures back off 3x before the pump stops; /chapters-enrich report follows the count` }
         }
         if (verb === 'report') {
           return { kind: 'success', text: `${config.enrich.statusLine()}\npending: ${await config.enrich.pendingCount()} chapter(s)` }

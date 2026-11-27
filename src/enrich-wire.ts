@@ -23,6 +23,7 @@ import path from 'node:path'
 import { createEnrichQueue, type EnrichQueue } from './enrich-queue.ts'
 import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, applyEnrich, type CurrentValues, type GeneratedProvenance, type GeneratedMark, type MinedRuleOut } from './enrich.ts'
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
+import { sha256 } from './render.ts'
 import { resolveStoredPath } from './archive.ts'
 import { isActiveChapter } from './registry.ts'
 
@@ -101,6 +102,8 @@ export interface EnrichWiringDeps {
   setTimer?: (fn: () => void, ms: number) => { cancel(): void }
   /** #557: the registry's own project workspaces as bounded, deterministic resolution candidates. */
   projectCwds?: (() => string[]) | undefined
+  /** #571: which pump surface this wiring is ('host' | 'realm') — names the lease holder. */
+  planeId?: string
   /** #561: the row's own durable session header cwd — the authoritative locator for UNLINKED workspaces. */
   sessionCwdOf?: ((sid: string) => Promise<string | undefined>) | undefined
 }
@@ -108,7 +111,7 @@ export interface EnrichWiringDeps {
 export interface EnrichWiring {
   queue: EnrichQueue
   /** manual drain for the command surface (cwd arms the workspace for files) */
-  runNow(cwd?: string, limit?: number): Promise<{ processed: number; remaining: number; draining: boolean; alreadyRunning: boolean }>
+  runNow(cwd?: string, limit?: number): Promise<{ processed: number; remaining: number; draining: boolean; alreadyRunning: boolean; leaseHeldBy?: string }>
   /** the configured per-pass cap (#565: the reply names it; the cap itself never changes at runtime) */
   batchCap(): number
   /** #565: the background drain's live state (surfaces and tests await it). */
@@ -232,7 +235,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
   }
   let rememberedCwd: string | undefined
 
-  const ladder = async (key: string): Promise<{ ok: boolean; skipped?: string }> => {
+  const ladder = async (key: string): Promise<{ ok: boolean; skipped?: string; resynced?: boolean }> => {
     const sep = key.lastIndexOf('#')
     const sid = key.slice(0, sep)
     const num = Number(key.slice(sep + 1))
@@ -294,6 +297,47 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       // discipline applied to the ladder). Directives are indexed, cited and searched
       // as they are; only transcript chapters are ever annotated.
       if (doc.fmLines.some((l) => /^kind:\s*plan\s*$/.test(l))) return { ok: false, skipped: 'plan documents are directives — never annotated' }
+      // #571 HEAL (dual-queue split receipts): when the FILE already carries this model key's
+      // annotation (the enrichment write landed but the registry commit did not — measured at
+      // 354 records), the guarded rewrite would refuse FOREVER and head-block the queue. If the
+      // file is body-self-consistent (the declared anchor matches the parsed body — so this is a
+      // stale RECEIPT, not corruption) the ladder resyncs the registry record from the file and
+      // counts it done, without any model call. Self-consistency failing stays a loud refusal:
+      // real damage keeps the alarm that caught it.
+      {
+        const keyNow = modelKey()
+        const genIdx = doc.fmLines.findIndex((l) => /^generated:/.test(l))
+        const fileHasModelMark = genIdx >= 0 && doc.fmLines.slice(genIdx).some((l) => l.includes(`model: ${keyNow}`))
+        if (fileHasModelMark) {
+          const anchor = doc.fmLines.find((l) => /^(?:bodySha256|sha256):/.test(l))?.split(': ')[1]?.trim()
+          const bodyText = doc.body
+          const selfConsistent = anchor === undefined || anchor === sha256(bodyText) || anchor === sha256(bodyText.replace(/\n$/, ''))
+          if (selfConsistent) {
+            const fmGet = (k: string): string | undefined => doc.fmLines.find((l) => l.startsWith(`${k}:`))?.slice(k.length + 1).trim()
+            const unq = (v: string | undefined): string | undefined => {
+              if (v === undefined) return undefined
+              try { return JSON.parse(v) as string } catch { return v.replace(/^"|"$/g, '') }
+            }
+            let topics: string[] | undefined
+            const rawTopics = fmGet('topics')
+            if (rawTopics !== undefined) { try { topics = JSON.parse(rawTopics) as string[] } catch { topics = undefined } }
+            const atLine = doc.fmLines.slice(doc.fmLines.findIndex((l) => l.includes(`model: ${keyNow}`)) + 1, doc.fmLines.findIndex((l) => l.includes(`model: ${keyNow}`)) + 3).find((l) => /at:/.test(l))
+            const at = atLine?.split(': ')[1]?.trim().replace(/^'|'$/g, '') ?? new Date().toISOString()
+            const fileText = fs.readFileSync(file, 'utf8')
+            await deps.store.mutate(sid, (fresh) => {
+              const cur = fresh.chapters.find((c) => c.number === num)
+              if (cur === undefined) return fresh
+              return {
+                ...fresh,
+                chapters: fresh.chapters.map((c) => c.number === num
+                  ? { ...c, title: unq(fmGet('title')) ?? c.title, summary: unq(fmGet('summary')) ?? c.summary, topics: topics ?? c.topics, generated: { ...(c.generated ?? {}), title: [{ by: 'model', model: keyNow, at }] }, sha256: sha256(fileText) }
+                  : c),
+              }
+            })
+            return { ok: true, resynced: true }
+          }
+        }
+      }
       const body = doc.body
       const userChunks = body.split(/\*\*User[^*\n]*:\*\*/g).slice(1)
       const asstChunks = body.split(/\*\*Assistant[^*\n]*:\*\*/g).slice(1)
@@ -447,6 +491,9 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       void deps.store.putSetting(STATE_KEY, JSON.stringify({ at: new Date().toISOString(), line: m })).catch(() => undefined)
     },
     ...(deps.setTimer !== undefined ? { setTimer: deps.setTimer } : {}),
+    getSetting: (k) => deps.store.getSetting(k),
+    putSetting: async (k, v) => { await deps.store.putSetting(k, v ?? '') },
+    planeId: deps.planeId ?? 'host',
   })
 
   return {
@@ -472,7 +519,7 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       // not what finished; `report` follows the count down.
       const d = queue.drainAll(limit)
       const remaining = await this.pendingCount()
-      return { processed: 0, remaining, draining: d.started, alreadyRunning: d.alreadyRunning }
+      return { processed: 0, remaining, draining: d.started, alreadyRunning: d.alreadyRunning, ...(d.leaseHeldBy !== undefined ? { leaseHeldBy: d.leaseHeldBy } : {}) }
     },
     async setModelOverride(v) {
       if (v === null) await deps.store.putSetting('enrichment.model', '')
