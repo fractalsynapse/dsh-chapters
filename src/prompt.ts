@@ -501,7 +501,7 @@ export function validateSuggestion(raw: string, maxChars: number): { ok: true; t
   if (fence?.[1] !== undefined) text = fence[1].trim()
   const quoted = text.match(/^"([\s\S]+)"$/) ?? text.match(/^“([\s\S]+)”$/)
   if (quoted?.[1] !== undefined) text = quoted[1].trim()
-  if (text === '') return { ok: false, reason: 'the model returned no text' }
+  if (text === '') return { ok: false, reason: 'the call completed with no text blocks' }
   if (text.length > maxChars) return { ok: false, reason: `the answer is ${text.length} characters, over the ${maxChars}-char cap` }
   return { ok: true, text }
 }

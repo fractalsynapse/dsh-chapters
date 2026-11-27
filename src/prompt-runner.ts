@@ -86,6 +86,12 @@ export interface PromptRunnerDeps {
   now: () => string
   log?: (message: string) => void
   warn?: (message: string) => void
+  /** #583: is this session's autorun ARMED right now? A failed offer re-decides ONLY while the human's
+   *  loop is armed — an unarmed plane never pays a call nobody asked for. Read live, never snapshotted:
+   *  disarming mid-backoff must stop the chain (one predicate per decision, #59). */
+  armed?: ((sessionId: string) => boolean) | undefined
+  /** #583: injectable timer for the re-decide backoff (tests arm a fake queue; the wiring uses setTimeout). */
+  setTimer?: ((fn: () => void, ms: number) => { cancel(): void }) | undefined
 }
 
 /**
@@ -116,6 +122,91 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
     await deps.store.mutate(id, (row) => ({ ...row, promptSuggestion: next }))
   }
 
+  // #583: a failed offer must not silently stall an ARMED loop — the maintainer's rule for every
+  // pump is that transient failures ride out with bounded backoff, they do not make it quit. Three
+  // re-decides at 60s/3m/9m (the drain's own schedule), then one loud STALLED line so the human
+  // knows exactly what stopped and why. Unarmed: single attempt, exactly as before — a human owns
+  // an unarmed bar, and retries there would be model calls nobody asked for.
+  const RETRY_DELAYS_MS = [60_000, 180_000, 540_000]
+  const retryState = new Map<string, { turnSeq: number; attempt: number; timer?: { cancel(): void } }>()
+  const scheduleRetry = (session: { id: string; header?: Record<string, unknown> }, turnSeq: number): void => {
+    const id = session.id
+    if (deps.setTimer === undefined) return
+    if (deps.armed?.(id) !== true) return
+    const st = retryState.get(id) ?? { turnSeq, attempt: 0 }
+    if (st.turnSeq !== turnSeq) return // a newer boundary owns the plane
+    if (st.attempt >= RETRY_DELAYS_MS.length) {
+      deps.warn?.(`prompt: ${id} OFFER STALLED — the model call failed ${String(RETRY_DELAYS_MS.length)} re-decides (60s/3m/9m); autorun stays armed but waits for a human turn`)
+      retryState.delete(id)
+      return
+    }
+    // explicit ladder: the array's indexed read is `number | undefined` under noUncheckedIndexedAccess,
+    // and a stall must never be reachable by an arithmetic slip in the schedule itself.
+    const waitMs = st.attempt === 0 ? 60_000 : st.attempt === 1 ? 180_000 : 540_000
+    st.attempt += 1
+    retryState.set(id, st)
+    deps.log?.(`prompt: offer failed for ${id} — autorun armed, re-decide ${String(st.attempt)}/${String(RETRY_DELAYS_MS.length)} in ${String(Math.round(waitMs / 1000))}s`)
+    st.timer = deps.setTimer(() => {
+      section(id, async () => {
+        // Re-claim only while this retry still OWNS the plane: the live row decides, not memory.
+        let fresh = false
+        await deps.store.mutate(id, (row) => {
+          const cur = row.promptSuggestion ?? noSuggestion
+          if (cur.turnSeq !== turnSeq) return row
+          fresh = true
+          return { ...row, promptSuggestion: { ...noSuggestion, status: 'analyzing', turnSeq, at: deps.now() } }
+        })
+        if (!fresh) {
+          retryState.delete(id)
+          deps.log?.(`prompt: retry dropped for ${id} — a newer turn owns the plane`)
+          return
+        }
+        deps.pushRow?.(session, id)
+        await runAttempt(session, turnSeq)
+      })
+    }, waitMs)
+  }
+  const runAttempt = async (session: { id: string; header?: Record<string, unknown> }, turnSeq: number): Promise<void> => {
+    const id = session.id
+    try {
+      const out = await deps.generate(session, turnSeq)
+      if (out.ok && typeof out.text === 'string' && out.text !== '') {
+        // Classified HERE, at the moment of authorship: intent is a property of the durable offer, so the
+        // bar, the `state` verb and the loop read the same fact instead of re-parsing the text three ways
+        // (one predicate per decision, #59). The `GOAL:` prefix is stripped — the worker must never be
+        // handed protocol scaffolding as if it were the human's own words.
+        const offer = classifyOffer(out.text)
+        const ready: PromptSuggestionState = {
+      status: 'ready', text: offer.text, turnSeq, error: '', at: deps.now(),
+      intent: offer.intent, goalRevision: out.goalRevision ?? null,
+        }
+        await write(id, ready)
+        deps.pushRow?.(session, id)
+        deps.log?.(`prompt: recommended next step ready for ${id} (turn ${String(turnSeq)}, ${offer.intent})`)
+        deps.onReady?.(id, ready)
+        retryState.delete(id) // boundary resolved: no re-decides outstanding
+        return
+      }
+      if (out.quiet === true) {
+        await write(id, { ...noSuggestion, turnSeq: null })
+        deps.pushRow?.(session, id)
+        deps.log?.(`prompt: nothing to recommend for ${id} — bar stays silent`)
+        return
+      }
+      await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: out.reason ?? 'the suggestion call returned nothing', at: deps.now() })
+      deps.pushRow?.(session, id)
+      deps.warn?.(`prompt: generation failed for ${id}: ${out.reason ?? 'unknown'}`)
+      scheduleRetry(session, turnSeq)
+    } catch (error) {
+      // A failed generation is a DELIVERED failure (#61): the bar shows it, it does not vanish.
+      const message = String((error as Error)?.message ?? error).slice(0, 200)
+      await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: message, at: deps.now() }).catch(() => undefined)
+      deps.pushRow?.(session, id)
+      deps.warn?.(`prompt: generation threw for ${id}: ${message}`)
+      scheduleRetry(session, turnSeq)
+    }
+  }
+
   return (session, event) => {
     try {
       const ev = event as { type?: string; seq?: number } | undefined
@@ -138,41 +229,12 @@ export function makePromptRoundRunner(deps: PromptRunnerDeps): (session: { id: s
           return { ...row, promptSuggestion: { ...noSuggestion, status: 'analyzing', turnSeq, at: deps.now() } }
         })
         if (!claimed) { deps.log?.(`prompt: turn ${String(turnSeq)} already claimed for ${id}`); return }
+        // #583: a newer boundary owns the plane — cancel any re-decide chain from the old turn.
+        const prior = retryState.get(id)
+        if (prior?.timer !== undefined) prior.timer.cancel()
+        retryState.delete(id)
         deps.pushRow?.(session, id)
-        try {
-          const out = await deps.generate(session, turnSeq)
-          if (out.ok && typeof out.text === 'string' && out.text !== '') {
-            // Classified HERE, at the moment of authorship: intent is a property of the durable offer, so the
-            // bar, the `state` verb and the loop read the same fact instead of re-parsing the text three ways
-            // (one predicate per decision, #59). The `GOAL:` prefix is stripped — the worker must never be
-            // handed protocol scaffolding as if it were the human's own words.
-            const offer = classifyOffer(out.text)
-            const ready: PromptSuggestionState = {
-              status: 'ready', text: offer.text, turnSeq, error: '', at: deps.now(),
-              intent: offer.intent, goalRevision: out.goalRevision ?? null,
-            }
-            await write(id, ready)
-            deps.pushRow?.(session, id)
-            deps.log?.(`prompt: recommended next step ready for ${id} (turn ${String(turnSeq)}, ${offer.intent})`)
-            deps.onReady?.(id, ready)
-            return
-          }
-          if (out.quiet === true) {
-            await write(id, { ...noSuggestion, turnSeq: null })
-            deps.pushRow?.(session, id)
-            deps.log?.(`prompt: nothing to recommend for ${id} — bar stays silent`)
-            return
-          }
-          await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: out.reason ?? 'the suggestion call returned nothing', at: deps.now() })
-          deps.pushRow?.(session, id)
-          deps.warn?.(`prompt: generation failed for ${id}: ${out.reason ?? 'unknown'}`)
-        } catch (error) {
-          // A failed generation is a DELIVERED failure (#61): the bar shows it, it does not vanish.
-          const message = String((error as Error)?.message ?? error).slice(0, 200)
-          await write(id, { ...noSuggestion, status: 'failed', turnSeq, error: message, at: deps.now() }).catch(() => undefined)
-          deps.pushRow?.(session, id)
-          deps.warn?.(`prompt: generation threw for ${id}: ${message}`)
-        }
+        await runAttempt(session, turnSeq)
       })
     } catch (error) {
       deps.warn?.(`prompt: turn listener failed: ${String((error as Error)?.message ?? error).slice(0, 160)}`)
