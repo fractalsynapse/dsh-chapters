@@ -181,6 +181,14 @@ test.describe('a continued child survives a host restart (#319)', () => {
       expect(countDeliveries(cmdSid, '/chapters-status '), 'the dispatch is counted on the durable plane').toBeGreaterThanOrEqual(1)
       expect(durable, 'the reply TEXT (the Version line /chapters-status prints) survives in the log even though the fold hides the card').toMatch(/Version:/)
       stage('durable command round-trip confirmed on the resumed session')
+      // #590: the reply must also be VISIBLE — the dock row renders the exchange in exactly the
+      // timeline the host's surface fold leaves blank. If this goes red while the durable lines
+      // above stay green, the row broke (journal face, extraction, or a suppression misfire) and
+      // the maintainer is back to flying blind — which is the pain this feature exists to end.
+      await expect(pageB.locator('[data-chapters-reply]').first(), 'command reply row renders for the resumed-session command').toBeVisible({ timeout: 30_000 })
+      const replyRowText = await pageB.locator('[data-chapters-reply]').first().innerText()
+      expect(replyRowText, 'the row names the command you ran').toContain('/chapters-status')
+      expect(replyRowText, 'the row carries the reply, not just the line').toMatch(/Version|chapters/i)
     } finally {
       stop()
     }

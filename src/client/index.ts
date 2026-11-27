@@ -30,6 +30,7 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 import { withTooltip, nativeTitle } from './tooltip.ts'
 import { PromptDock } from './prompt-dock.ts'
 import { DOOR_ACTIONS, doorActionsVisibleFor, makeDoorRunner, presetOfSession, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
+import { CommandReplyRow, subscribeJournal } from './command-reply.ts'
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -44,7 +45,7 @@ interface Ctx {
 // #77: `uiWorkspace` is not optional in practice — it owns `openSession(target)`, the verb the
 // host's own fork button uses (`ctx.uiWorkspace.openSession(childId)` in dsh-client-ui-chat).
 // `sessions` has no `open` at all, so without this row the door has never had a way to switch.
-export const inject = ['slots', 'remote', 'remote.commands', 'sessions', 'uiWorkspace'] as const
+export const inject = ['slots', 'remote', 'remote.commands', 'remote.session', 'sessions', 'uiWorkspace'] as const
 
 /** Props composed by the slot framework: owner (`messageId`) + our injected verb. */
 interface DoorActionProps {
@@ -221,4 +222,20 @@ export function apply(ctx: Ctx): void {
       exec: (line: string) => runCommandText(remote, sessionId, line),
     }),
   }, PromptDock))
+  // #590: the command reply row. Mounted beside the prompt bar (order 31 = between the bar and
+  // the composer, because the reply to what you JUST typed belongs closest to where you typed
+  // it). Data is the host's raw session journal via follow — snapshot plus live event frames —
+  // so the row needs no exec pulls, no timers, and no server state of its own; and it
+  // suppresses itself whenever the host renders the card. The inject face 'remote.session' is
+  // listed above because the federation gates every face (#372: naming remote alone was once
+  // not enough — the list is the contract).
+  const disposeReplyRow = slots.inject('conversation.input.dock', () => slots.register({
+    name: 'conversation.input.dock',
+    id: 'chapters-command-reply',
+    order: 31,
+    inject: (sessionId: string) => ({
+      subscribe: (cb: Parameters<typeof subscribeJournal>[2]) => subscribeJournal(remote as unknown as Parameters<typeof subscribeJournal>[0], sessionId, cb),
+    }),
+  }, CommandReplyRow))
+  console.info(`[client:chapters] command reply row registered: ${typeof disposeReplyRow}`)
 }
