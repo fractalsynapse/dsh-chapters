@@ -107,7 +107,7 @@ model defining the work, and you should know which mind suggested it.
 | `idle` | "No suggestion yet — I will recommend one after your next turn" | enabled, and there is no completed turn to read yet |
 | `analyzing` | "Analyzing the session…" | a generation is running for the current turn |
 | `ready` | **Recommended Next Step** + the prompt | an offer is on screen, yours to run or ignore |
-| `failed` | the reason, in red | the call did not work — the bar keeps the last offer rather than pretending |
+| `failed` | the reason, in red | the call did not work — the bar keeps the last offer rather than pretending. Since #583 the reason is the HOST'S OWN WORDS (`host llm.stream failed: …`) whenever the stream carried one: 'the call completed with no text blocks' is now reserved for completions that genuinely had no text. While autorun is armed, a failure re-decides on the drains' own ladder — 60s, 3m, 9m — and an armed loop that still cannot reach the model says `OFFER STALLED` once, loudly, instead of waiting in silence |
 | `running` (display overlay, not a wire state) | "Agent is running — a fresh suggestion lands when the turn ends" | a turn is in flight (from Run, autorun, or your own prompt): the previous offer is cleared and the bar collapsed, because acting on a stale offer is how a bar lies (#282) |
 
 `idle` exists because an earlier build collapsed "enabled but nothing to say yet" into `off`, and the bar
