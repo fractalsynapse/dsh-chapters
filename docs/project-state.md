@@ -1426,6 +1426,10 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.60 cut (2026-11-27): the command reply row — invisible-card era ends plugin-side, plus the #588 gate trilogy
+
+**Shipped:** #590 (PR #591): the dock row rendering every /chapters-* reply (server-recorded settings row, human-driven pulls, self-suppression when the host card exists, in-flight as running) — the maintainer's downtime complaint, ended. #588 (PR #589): the regression gates — host fold drift guard both ways (mutation-proved), durable round-trip stage, FAQ. Development record kept honest: the follow-wire channel was MEASURED dead (27 records, 0 command events) before merge, the exec-slash and dispatch-race bugs found by breadcrumb-driven reload legs (fourteen iterations), and the e2e now grades the reply-visible CONTRACT rather than my assumption about the channel. The row on the maintainer's exact host version is graded by the post-install live pass — recorded as pending, not claimed.
+
 ## 0.2.59 cut (2026-11-27): honest attribution of provider failures + armed loops ride out transient offer failures
 
 **Shipped:** #583 (PR #584): the shared llm-fold (full-length finish capture, host words surface in the plane row), the honest empty sentence, and the 60s/3m/9m re-decide ladder with one loud OFFER STALLED — unarmed stays single-attempt. CI needed a third attempt (attempts 1-2: rotating single-leg environment failures — revival stall, then a prompt-bar timing race on a loaded runner); all six suspect legs proven green locally on the branch first (prompt-off x2, prompt-revival, prompt x3). The release verifier executes both #583 proofs against the published tarball and was rehearsed against 0.2.58 to prove it discriminates. Context: this release is the precondition the maintainer set for the SAIP resume — no loop restart with known errors in the process.

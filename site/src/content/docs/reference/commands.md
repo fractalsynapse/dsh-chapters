@@ -3,6 +3,19 @@ title: "15. Commands"
 description: The full composer surface, exact syntax, and what each answer means.
 lastUpdated: true
 ---
+## The command reply row (#590)
+
+Every `/chapters-*` command you type gets its reply **on screen, every time** — including in a
+session that was restarted and resumed, where the host's timeline deliberately does not re-render
+command events (the #545 cause, closed on the host's `SURFACE_EVENT_TYPES`). A single compact row
+mounts in the input dock, closest to the composer: the command line, the reply's first ~200
+characters, and the outcome color. Click it for the full text; dismiss it with **X**; the next
+command replaces it. The row reads the session's **raw durable journal** through the host's own
+`session.follow` API — the same bytes the timeline filters out — so it costs zero model calls,
+zero polling (the follow stream pushes live), and it suppresses itself when the host has already
+rendered the reply as a timeline card. If you ever see a command "do nothing" again: it didn't.
+
+
 ## Reload self-check (#319)
 
 Every continuation child checks its own event stream against the host's fold rule at its FIRST
@@ -139,6 +152,7 @@ The session tier and the audit surface, so automatic capture is never opaque
 /chapters-rule pin <id> | unpin <id>                       # the always-rendered class (human-set only)
 /chapters-rule model [<provider/model> | clear]            # a dedicated model for mining; costs one call per chapter
 /chapters-rule conflicts                                  # report contradictory pairs — never edits a rule
+/chapters-reply last                                # the last recorded command reply — the dock row's channel (#590); human commands are recorded, the bar's own state pulls are not
 /chapters-rule reprocess [n]                        # HUMAN REPAIR ONLY (#578): re-run RULE MINING across every
                                       # existing transcript chapter through the resolved mining route — annotations
                                       # untouched, dedupe honored, lease/backoff/single-flight shared with enrichment.

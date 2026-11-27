@@ -60,3 +60,13 @@ It is a file. `cat .dsh-chapters/<root>/chapters/001-*.md`. The archive is plain
 ### Where do credentials live?
 
 Per-project, `0600`, under the DSH home — never in the repo, never in a chapter, never in the corpus. See [§27 security](/operations/security/).
+
+### I ran a slash command after a restart and no card appeared — did it run?
+
+Since **0.2.60 it does not matter whether the host renders it: your reply now appears in the
+command reply row** above the composer — command line, outcome color, excerpt, click for the full
+text (see the commands reference). Before that release the answer was still yes: the host's
+surface fold (`SURFACE_EVENT_TYPES`, issue #545) records command events durably but refuses to
+re-render them in a restarted+resumed timeline, so the reply existed and only the screen lost it.
+The row reads the raw durable journal through the host's own `session.follow` API — zero polling,
+zero model calls — and steps aside when the host card is visible.

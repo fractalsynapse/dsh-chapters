@@ -17,7 +17,7 @@ import { test, expect } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { deliveredFor, openApp, dismissTestingNotice, newSessionWithTurn, currentSessionId, openSessionByRow, forkDoor, typeComposer, E2E_HOME } from './session.ts'
+import { deliveredFor, openApp, dismissTestingNotice, newSessionWithTurn, currentSessionId, openSessionByRow, forkDoor, typeComposer, E2E_HOME, countDeliveries, sessionLogTextById } from './session.ts'
 import { rigChildEnv } from './boot.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 
@@ -119,6 +119,13 @@ test.describe('a continued child survives a host restart (#319)', () => {
       catch { throw new Error(`boot B never listened on port ${String(portB)}; its output tail:\n${buf.slice(-600)}`) }
       console.log(`[reload-leg] stage: boot B is LISTENING; output tail: ${buf.slice(-160)}`)
       const pageB = await browser.newPage()
+      // #590 probe: the client's console lines are the difference between 'face absent', 'stream
+      // failed' and 'never mounted' — invisible in the server log, decisive in a DOM assertion's
+      // post-mortem. Kept permanently: every future dock-row failure gets triaged from the log.
+      pageB.on('console', (msg) => {
+        const t = msg.text()
+        if (t.includes('[client:chapters]')) console.log(`[reload-leg][browser] ${t.slice(0, 200)}`)
+      })
       pageB.setDefaultTimeout(60_000)  // locator calls in openSessionByRow otherwise wait on the TEST timeout
       await pageB.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 })
       console.log(`[reload-leg] ${new Date().toISOString().slice(11, 19)}Z stage: goto done`)
@@ -165,6 +172,38 @@ test.describe('a continued child survives a host restart (#319)', () => {
       stage('cold boot reached; asserting history')
       await expect(pageB.getByText('HTTP redirect').first(), 'child content after cold load (row titles truncate — measured)').toBeVisible({ timeout: 60_000 })
       await expect.poll(() => pageB.evaluate(() => document.body.innerText), { timeout: 60_000, intervals: [2000], message: 'child assistant row after cold load' }).toMatch(/redirect|30[1278]|status|[Aa]cknowledg/i)
+      // #588: THE INVISIBLE-CARD DURABLE INVARIANT. The host's surface fold
+      // (dsh-session SURFACE_EVENT_TYPES, see the #588 unit guard) excludes command events, so after
+      // a restart+resume the TIMELINE renders no command cards — that is #545, proven host-side and
+      // pinned as drift there. What the PRODUCT must guarantee, every release, is what the screen
+      // cannot: the command executed on the resumed session and the durable log holds the full
+      // round-trip — run, done, success, reply text. If this row ever fails, a user's command output
+      // has become UNRECOVERABLE, which is the real outage; the missing card is presentation.
+      stage('typing a command on the resumed session (durable-plane invariant, #588)')
+      const cmdSid = coldId ?? childId
+      await typeComposer(pageB, '/chapters-status ', deliveredFor(cmdSid, '/chapters-status '), 30_000)
+      await expect.poll(() => sessionLogTextById(cmdSid), { timeout: 30_000, intervals: [2000],
+        message: 'no command/done round-trip recorded on the resumed session' }).toMatch(/command\/done/)
+      const durable = sessionLogTextById(cmdSid)
+      expect(countDeliveries(cmdSid, '/chapters-status '), 'the dispatch is counted on the durable plane').toBeGreaterThanOrEqual(1)
+      expect(durable, 'the reply TEXT (the Version line /chapters-status prints) survives in the log even though the fold hides the card').toMatch(/Version:/)
+      stage('durable command round-trip confirmed on the resumed session')
+      // #590: the reply must also be VISIBLE — the dock row renders the exchange in exactly the
+      // timeline the host's surface fold leaves blank. If this goes red while the durable lines
+      // above stay green, the row broke (journal face, extraction, or a suppression misfire) and
+      // the maintainer is back to flying blind — which is the pain this feature exists to end.
+      // #590: THE CONTRACT — the reply to the command you ran is VISIBLE after restart+resume,
+      // whichever channel delivers it. The pinned rig host (0.2.0-rc.2) renders command cards on
+      // rebuilt timelines and the row correctly suppresses; the maintainer's live host (0.2.2-rc.5)
+      // filters them out (#545) and the row is the only channel. Grading the OUTCOME survives both
+      // hosts; grading the row's DOM would have pinned the rig's accident. The breadcrumb names
+      // which channel answered, so a regression in either is still attributable.
+      await expect.poll(() => pageB.evaluate(() => document.body.innerText), {
+        timeout: 30_000, intervals: [2000],
+        message: 'the command reply is visible NEITHER as host card NOR as dock row — invisibility is back',
+      }).toMatch(/Version: 0\.2/)
+      const channels = await pageB.evaluate(() => ({ row: document.querySelector('[data-chapters-reply]') !== null, cardText: (document.body.innerText.match(/Version: 0\.2/g) ?? []).length }))
+      console.log(`[reload-leg] #590 reply visible: row=${String(channels.row)}, Version-mentions-in-DOM=${String(channels.cardText)}`)
     } finally {
       stop()
     }
