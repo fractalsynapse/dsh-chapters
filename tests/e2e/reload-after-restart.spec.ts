@@ -17,7 +17,7 @@ import { test, expect } from '@playwright/test'
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { deliveredFor, openApp, dismissTestingNotice, newSessionWithTurn, currentSessionId, openSessionByRow, forkDoor, typeComposer, E2E_HOME } from './session.ts'
+import { deliveredFor, openApp, dismissTestingNotice, newSessionWithTurn, currentSessionId, openSessionByRow, forkDoor, typeComposer, E2E_HOME, countDeliveries, sessionLogTextById } from './session.ts'
 import { rigChildEnv } from './boot.ts'
 import { reapOrphanBoots } from './boot-reap.ts'
 
@@ -165,6 +165,22 @@ test.describe('a continued child survives a host restart (#319)', () => {
       stage('cold boot reached; asserting history')
       await expect(pageB.getByText('HTTP redirect').first(), 'child content after cold load (row titles truncate — measured)').toBeVisible({ timeout: 60_000 })
       await expect.poll(() => pageB.evaluate(() => document.body.innerText), { timeout: 60_000, intervals: [2000], message: 'child assistant row after cold load' }).toMatch(/redirect|30[1278]|status|[Aa]cknowledg/i)
+      // #588: THE INVISIBLE-CARD DURABLE INVARIANT. The host's surface fold
+      // (dsh-session SURFACE_EVENT_TYPES, see the #588 unit guard) excludes command events, so after
+      // a restart+resume the TIMELINE renders no command cards — that is #545, proven host-side and
+      // pinned as drift there. What the PRODUCT must guarantee, every release, is what the screen
+      // cannot: the command executed on the resumed session and the durable log holds the full
+      // round-trip — run, done, success, reply text. If this row ever fails, a user's command output
+      // has become UNRECOVERABLE, which is the real outage; the missing card is presentation.
+      stage('typing a command on the resumed session (durable-plane invariant, #588)')
+      const cmdSid = coldId ?? childId
+      await typeComposer(pageB, '/chapters-status ', deliveredFor(cmdSid, '/chapters-status '), 30_000)
+      await expect.poll(() => sessionLogTextById(cmdSid), { timeout: 30_000, intervals: [2000],
+        message: 'no command/done round-trip recorded on the resumed session' }).toMatch(/command\/done/)
+      const durable = sessionLogTextById(cmdSid)
+      expect(countDeliveries(cmdSid, '/chapters-status '), 'the dispatch is counted on the durable plane').toBeGreaterThanOrEqual(1)
+      expect(durable, 'the reply TEXT (the Version line /chapters-status prints) survives in the log even though the fold hides the card').toMatch(/Version:/)
+      stage('durable command round-trip confirmed on the resumed session')
     } finally {
       stop()
     }

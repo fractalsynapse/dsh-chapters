@@ -60,3 +60,13 @@ It is a file. `cat .dsh-chapters/<root>/chapters/001-*.md`. The archive is plain
 ### Where do credentials live?
 
 Per-project, `0600`, under the DSH home — never in the repo, never in a chapter, never in the corpus. See [§27 security](/operations/security/).
+
+### I ran a slash command after a restart and no card appeared — did it run?
+
+Almost certainly yes, and the durable log knows. The host decides which recorded events a timeline may
+re-render; the current surface set covers system/developer/user/assistant messages and tool results —
+command events are recorded but not re-rendered after a restart+resume (issue #545, cause closed on the
+host's own constant). The reply is durable: an agent (or you, via the session log) can read the full
+`command/run` + `command/done` pair back, so nothing is lost — the card is presentation, the log is the
+record. A drift guard (#588) fails CI the day the host changes that fold posture in either direction: if
+command events become surface-eligible, this FAQ entry retires with the fix.
