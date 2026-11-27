@@ -143,15 +143,20 @@ export function createEnrichQueue(deps: EnrichQueueDeps): EnrichQueue {
         for (const item of pending) {
           const r = await deps.enrichOne(item.key)
           if (r.ok) done++
-          if ((r as { resynced?: boolean }).resynced === true) deps.log(`enrichment resynced registry receipt from file: ${item.key} (#571)`)
           // Measured: the manual command reported `processed 0 chapter(s); 1 pending` and the sink
           // had nothing, because only successes were ever written. A skip IS a decision with a cause
           // (`skipped:` is the ladder's own label), and an unreported one turns a 420-second poll into
           // an argument — the third time today a queue knew and said nothing (#61a).
           else {
+            // #577: and NOTHING ELSE may steal this else. The #571 insertion of the resynced note
+            // ABOVE this clause silently re-paired it, so every SUCCESSFUL chapter logged a bogus
+            // 'skipped … no reason given' — the misreport that hid successes as failures in the
+            // heartbeat. Successes (healed or not) log below; only !r.ok reaches this branch.
             deps.log(`enrichment skipped ${item.key}: ${r.skipped ?? 'no reason given by the ladder'}`)
             if ((r.skipped ?? '').startsWith('error')) lastErrored += 1
           }
+          // #577: the resynced note rides AFTER the pairing — additive, never in the if/else chain
+          if ((r as { resynced?: boolean }).resynced === true) deps.log(`enrichment resynced registry receipt from file: ${item.key} (#571)`)
         }
         lastBatch = done
         if (done > 0) deps.log(`enrichment batch: ${done}/${pending.length} chapter(s) via ${model}`)
