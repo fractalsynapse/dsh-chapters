@@ -179,7 +179,7 @@ test.describe('a continued child survives a host restart (#319)', () => {
         message: 'no command/done round-trip recorded on the resumed session' }).toMatch(/command\/done/)
       const durable = sessionLogTextById(cmdSid)
       expect(countDeliveries(cmdSid, '/chapters-status '), 'the dispatch is counted on the durable plane').toBeGreaterThanOrEqual(1)
-      assert.match(durable, /Version:/, 'the reply TEXT (the Version line /chapters-status prints) survives in the log even though the fold hides the card')
+      expect(durable, 'the reply TEXT (the Version line /chapters-status prints) survives in the log even though the fold hides the card').toMatch(/Version:/)
       stage('durable command round-trip confirmed on the resumed session')
     } finally {
       stop()
