@@ -139,6 +139,10 @@ The session tier and the audit surface, so automatic capture is never opaque
 /chapters-rule pin <id> | unpin <id>                       # the always-rendered class (human-set only)
 /chapters-rule model [<provider/model> | clear]            # a dedicated model for mining; costs one call per chapter
 /chapters-rule conflicts                                  # report contradictory pairs — never edits a rule
+/chapters-rule reprocess [n]                        # HUMAN REPAIR ONLY (#578): re-run RULE MINING across every
+                                      # existing transcript chapter through the resolved mining route — annotations
+                                      # untouched, dedupe honored, lease/backoff/single-flight shared with enrichment.
+                                      # The end heartbeat names processed/written/deduped/skipped.
 ```
 
 `ADD RULE: <text>` at the start of a line in your own message is the deterministic capture path —

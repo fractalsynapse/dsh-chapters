@@ -25,6 +25,7 @@ import { buildEnrichInput, buildMineInput, parseEnrichResult, parseMinedRules, a
 import { parseChapterFile, updateChapterFrontmatter } from './enrich-store.ts'
 import { sha256 } from './render.ts'
 import { resolveStoredPath } from './archive.ts'
+import { createDrainLease, mineRouteOf } from './enrich-lease.ts'
 import { isActiveChapter } from './registry.ts'
 
 /** The row shape the ladder may read and re-write — structural, never the registry's own type. */
@@ -116,6 +117,11 @@ export interface EnrichWiring {
   batchCap(): number
   /** #565: the background drain's live state (surfaces and tests await it). */
   isDraining(): boolean
+  /** #578: human-only RULE reprocessing across every existing transcript chapter. Background;
+   *  never touches annotations; shares the drain lease and the backoff/breaker discipline. */
+  reprocessAll: (limit?: number) => Promise<{ started: boolean; alreadyRunning: boolean; leaseHeldBy?: string; total: number }>
+  isReprocessing: () => boolean
+  reprocessState: () => string | undefined
   setModelOverride(v: string | null): Promise<void>
   modelOverride(): string | null
   statusLine(): string
@@ -185,7 +191,7 @@ export function humanBytesOf(body: string): string {
   return out.join('\n')
 }
 
-type ChapterLike = { number: number; title: string; status?: 'superseded' | 'removed'; generated?: Record<string, { by: string; model?: string }[]> }
+type ChapterLike = { number: number; title: string; status?: 'superseded' | 'removed'; generated?: Record<string, { by: string; model?: string }[]>; messages?: number; path?: string }
 /**
  * The ONE "does this chapter still need annotating?" test, used by BOTH the queue and `pendingCount`
  * (#61). They were two hand-written loops over `chaptersOf` that had already drifted in shape, and the
@@ -213,6 +219,8 @@ function chaptersOf(state: unknown): ChapterLike[] {
   return Array.isArray(c) ? (c as ChapterLike[]).filter(isActiveChapter) : []
 }
 
+
+const splitHumanRequests = (body: string): string[] => body.split(/\*\*User[^*\n]*:\*\*/g).slice(1).map(stripFence)
 export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
   const resolveRoute = (): { provider: string, model: string } | null => {
     const override = deps.store.getSetting('enrichment.model') ?? ''
@@ -234,6 +242,74 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
     return r !== null && r.model !== '' ? `${r.provider}/${r.model}` : 'conversation'
   }
   let rememberedCwd: string | undefined
+
+  // #578 reprocess state
+  const REPROCESS_STATE_KEY = 'rules.reprocess.state'
+  let reprocessRun: Promise<void> | null = null
+  let reprocessTotal = 0
+  let reprocessDisposed = false
+  const reprocessLease = createDrainLease(
+    { get: (k) => deps.store.getSetting(k), put: (k, v) => { void deps.store.putSetting(k, v ?? '') } },
+    `${deps.planeId ?? 'host'}:reprocess`,
+  )
+  const reprocessSetState = (line: string): void => {
+    void deps.store.putSetting(REPROCESS_STATE_KEY, JSON.stringify({ at: new Date().toISOString(), line }))
+  }
+  const reprocessSnapshot = async (): Promise<{ key: string; label: string }[]> => {
+    const out: { key: string; label: string }[] = []
+    for (const [sid, st] of deps.store.sessions()) {
+      if (isWitnessRow(sid)) continue
+      for (const c of chaptersOf(st)) {
+        if ((c.messages ?? 1) === 0) continue
+        const base = String(c.path ?? '').split('/').pop() ?? ''
+        if (base.startsWith('plan-')) continue // plan documents are directives — never mined, never annotated
+        out.push({ key: `${sid}#${c.number}`, label: String(c.title ?? '').slice(0, 48) })
+      }
+    }
+    return out
+  }
+  const mineRouteNow = (): { provider: string; model: string } | null => {
+    const spec = (deps.store.getSetting('rules.model') ?? deps.config.rulesModel ?? '').trim()
+    const dedicated = mineRouteOf(spec, resolveRoute())
+    return dedicated ?? resolveRoute() // reprocess always makes its OWN call: no spec ⇒ conversation route
+  }
+  const mineChapterRules = async (key: string): Promise<{ ok: boolean; candidates: number; written: number; skipped?: string }> => {
+    const sep = key.lastIndexOf('#')
+    const sid = key.slice(0, sep)
+    const num = Number(key.slice(sep + 1))
+    const state = await deps.store.get(sid)
+    const rec = state.chapters.find((c) => c.number === num)
+    if (rec === undefined) return { ok: false, candidates: 0, written: 0, skipped: 'record gone' }
+    const roots: (string | undefined)[] = [state.cwd, deps.cwd() ?? rememberedCwd, ...(deps.projectCwds?.() ?? [])]
+    if (deps.sessionCwdOf !== undefined) roots.push(await deps.sessionCwdOf(sid).catch(() => undefined))
+    let cwd: string | undefined
+    let file = ''
+    for (const r of roots) {
+      if (r === undefined || r === '') continue
+      const cand = resolveStoredPath(r, rec.path)
+      if (fs.existsSync(cand)) { cwd = r; file = cand; break }
+    }
+    if (cwd === undefined) return { ok: false, candidates: 0, written: 0, skipped: 'chapter file absent under all known roots' }
+    const doc = parseChapterFile(fs.readFileSync(file, 'utf8'))
+    if (doc.fmLines.some((l) => /^kind:\s*plan\s*$/.test(l))) return { ok: false, candidates: 0, written: 0, skipped: 'plan document' }
+    const humanText = humanBytesOf(doc.body)
+    const route = mineRouteNow()
+    if (route === null || route.provider === '') return { ok: false, candidates: 0, written: 0, skipped: 'no routable mining model' }
+    const rules = parseMinedRules(await deps.fetch(buildMineInput({ requests: splitHumanRequests(doc.body) }, doc.body.slice(0, 6000)), route))
+    if (rules.length === 0) return { ok: true, candidates: 0, written: 0 }
+    if (deps.config.mineRules === false || deps.onMinedRules === undefined) return { ok: true, candidates: rules.length, written: 0 }
+    const got = await deps.onMinedRules({
+      cwd, sessionId: sid, chapterNumber: num, humanText, rules,
+      max: deps.config.mineCap ?? 3, autoActivate: deps.config.rulesAutoActivate !== false,
+    })
+    return { ok: true, candidates: rules.length, written: got.written }
+  }
+
+  const rpTimer = (fn: () => void, ms: number): { cancel(): void } => {
+    const arm = deps.setTimer
+    return arm !== undefined ? arm(fn, ms) : (() => { const id = setTimeout(fn, ms); return { cancel: () => clearTimeout(id) } })()
+  }
+  const rpSleep = (ms: number): Promise<void> => new Promise((res) => { rpTimer(() => res(), ms) })
 
   const ladder = async (key: string): Promise<{ ok: boolean; skipped?: string; resynced?: boolean }> => {
     const sep = key.lastIndexOf('#')
@@ -540,10 +616,88 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       // CLASSIFIES warrants (stated/inferred), it does not authorize; authority is rulesAutoActivate.
       const mine = deps.config.mineRules === false ? ' · rule mining OFF' : ` · rule mining ON (≤${deps.config.mineCap ?? 3}/chapter, warrants labelled stated/inferred; auto-activate ${deps.config.rulesAutoActivate !== false ? 'on' : 'review-first'})`
       const drainState = queue.isDraining() ? ' · FULL DRAIN RUNNING' : ''
-      return `enrichment: ${deps.config.trigger}, model ${model}${mine}${drainState}${last}`
+      const mRoute = mineRouteNow()
+      const specSet = (deps.store.getSetting('rules.model') ?? deps.config.rulesModel ?? '').trim() !== '' && (deps.store.getSetting('rules.model') ?? deps.config.rulesModel ?? '').trim() !== 'conversation'
+      const minePart = deps.config.mineRules === false ? '' : ` · mining ${specSet && mRoute !== null ? `${mRoute.provider}/${mRoute.model} (dedicated)` : 'rides annotation route'}`
+      const repart = reprocessRun !== null ? ' · RULE REPROCESS RUNNING' : ''
+      return `enrichment: ${deps.config.trigger}, model ${model}${mine}${minePart}${repart}${drainState}${last}`
     },
+    // #578: RULE REPROCESS. The repair verb for "re-observe every chapter's standing orders under
+    // the CURRENT mining route" — a model setting that changed, a window where mining was off, or
+    // simply proof instead of trust. It mines ONLY: no annotation reads through the ladder, no file
+    // writes at all — rules go through the same onMinedRules sink (dedupe, ≤cap written, stated/
+    // inferred warrants, never staged) that live sessions use. The snapshot is taken up front so
+    // the total is an announced number, not a vibe; progress and the end line land in their own
+    // settings row so the enrichment heartbeat stays honest about enrichment. Lease/backoff mirror
+    // #571/#565: one pump over the shared registry, transient failures ride out loudly.
+    reprocessAll: async (limit?: number) => {
+      if (reprocessRun !== null) {
+        return { started: false, alreadyRunning: true, total: reprocessTotal }
+      }
+      const held = reprocessLease.heldByOther()
+      if (held !== undefined) return { started: false, alreadyRunning: false, leaseHeldBy: held, total: 0 }
+      if (!reprocessLease.claim()) {
+        const cur = reprocessLease.read()
+        return { started: false, alreadyRunning: false, leaseHeldBy: typeof cur?.plane === 'string' ? cur.plane : 'another pump', total: 0 }
+      }
+      const all = await reprocessSnapshot()
+      const budget = limit !== undefined && limit > 0 ? limit : Number.POSITIVE_INFINITY
+      reprocessTotal = Math.min(all.length, budget)
+      reprocessDisposed = false
+      reprocessRun = (async () => {
+        let processed = 0
+        let written = 0
+        let candidates = 0
+        let skipped = 0
+        let backoffStreak = 0
+        let gaveUp = false
+        const BACKOFF_RETRIES = 3
+        const BACKOFF_BASE_MS = 60_000
+        let i = 0
+        while (i < all.length && processed < budget && !reprocessDisposed) {
+          const room = Number.isFinite(budget) ? budget - processed : deps.config.batchCap
+          const chunk = all.slice(i, i + Math.min(deps.config.batchCap, room))
+          i += chunk.length
+          let chunkErrored = 0
+          for (const item of chunk) {
+            try {
+              const r = await mineChapterRules(item.key)
+              processed += 1
+              candidates += r.candidates
+              written += r.written
+              if (r.skipped !== undefined) skipped += 1
+              if (!r.ok) skipped += 0
+            } catch (error) {
+              chunkErrored += 1
+              deps.warn(`rule reprocess failed for ${item.key}: ${String((error as Error)?.message ?? error).slice(0, 140)}`)
+            }
+          }
+          if (chunkErrored === chunk.length && chunkErrored > 0) {
+            if (backoffStreak < BACKOFF_RETRIES) {
+              backoffStreak += 1
+              const waitMs = BACKOFF_BASE_MS * 3 ** (backoffStreak - 1)
+              reprocessSetState(`transient failures (${chunkErrored}/${chunk.length}) — retry ${backoffStreak}/${BACKOFF_RETRIES} after ${waitMs / 1000}s`)
+              await rpSleep(waitMs)
+              i -= chunk.length // re-attempt the chunk
+              processed -= chunkErrored
+              continue
+            }
+            gaveUp = true
+            break
+          }
+          backoffStreak = 0
+          reprocessSetState(`running — processed ${processed}/${String(reprocessTotal)} chapter(s), ${written} rule(s) written of ${candidates} candidate(s)`)
+        }
+        const line = `rules.reprocess ${gaveUp ? 'GAVE UP after backoff retries' : 'ended'}: ${processed} chapter(s) mined, ${written} rule(s) written, ${candidates - written} deduped/capped, ${skipped} skipped`
+        reprocessSetState(line.replace(/^.*: /, '') === line ? line : line)
+        deps.log(line)
+      })().finally(() => { reprocessRun = null; reprocessLease.release() })
+      return { started: true, alreadyRunning: false, total: reprocessTotal }
+    },
+    isReprocessing: () => reprocessRun !== null,
+    reprocessState: () => (deps.store.getSetting(REPROCESS_STATE_KEY) ?? ''),
     batchCap: () => deps.config.batchCap,
     isDraining: () => queue.isDraining(),
-    dispose() { queue.dispose() },
+    dispose() { reprocessDisposed = true; queue.dispose(); reprocessLease.release() },
   }
 }

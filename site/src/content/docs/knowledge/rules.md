@@ -80,7 +80,11 @@ damage).
   boundary the topic signatures use. The rule body is your sentence, verbatim — with the one
   exception every written text shares: credential redaction (`⟦redacted:credential sha256=…⟧`)
 - **Model capture** rides the enrichment pass (`rulesEnrichment`, on by default), which since
-  #529 runs the whole backlog after every archive moment (not on idle alone). It runs *after* a
+  #529 runs the whole backlog after every archive moment (not on idle alone). **The route it uses is a printed fact** — `/chapters-enrich report` names the resolved mining route
+  (dedicated `rules.model` when set, riding the annotation call otherwise), and
+  `/chapters-rule reprocess [n]` (#578) re-runs rule mining ALONE across every existing chapter —
+  the human repair verb for "the model setting changed and I want the corpus re-observed", never
+  touching annotations, dedupe-gated against what disk already holds. It runs *after* a
   chapter is archived, so a mined rule arrives at the next boundary, not mid-turn — the local model server is single-slot and per-turn work would queue against your
   own conversation. **A mined rule governs your session tree as soon as it is written.** It does
   not need to have been said by you first; that was an earlier design and it was dropped, because

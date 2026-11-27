@@ -996,7 +996,7 @@ export function registerHostCommands(
       const rulesCommandDef = {
         name: 'chapters-rule',
         description: 'Rules (record \u00A77): project tier propose/approve/revoke per machine; session tier review, pin, conflict report.',
-        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts | model [<provider/model> | clear]' },
+        input: { hint: 'add <category> <text> | list [--all|--proposed|--category <c>|--scope project|session] | view <id> | active | approve <id> | revoke <id> | pin <id> | unpin <id> | conflicts | model [<provider/model> | clear] | reprocess [n]' },
         async handler(invocation: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
           // the session id reaches the resolver because the SESSION tier activates
           // by ancestry (§7.5): `active` cannot answer without knowing which tree
