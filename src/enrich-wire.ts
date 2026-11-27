@@ -536,7 +536,9 @@ export function createEnrichWiring(deps: EnrichWiringDeps): EnrichWiring {
       const heartbeat = deps.store.getSetting(STATE_KEY)
       let last = ''
       try { last = ` · last: ${(JSON.parse(heartbeat ?? '{}') as { line?: string }).line ?? 'idle'}` } catch { /* cosmetic */ }
-      const mine = deps.config.mineRules === false ? ' · rule mining OFF' : ` · rule mining ON (≤${deps.config.mineCap ?? 3}/chapter, verbatim-quote gated)`
+      // #575: the wording must match the 2026-10-21 amendment's semantics: the quote check
+      // CLASSIFIES warrants (stated/inferred), it does not authorize; authority is rulesAutoActivate.
+      const mine = deps.config.mineRules === false ? ' · rule mining OFF' : ` · rule mining ON (≤${deps.config.mineCap ?? 3}/chapter, warrants labelled stated/inferred; auto-activate ${deps.config.rulesAutoActivate !== false ? 'on' : 'review-first'})`
       const drainState = queue.isDraining() ? ' · FULL DRAIN RUNNING' : ''
       return `enrichment: ${deps.config.trigger}, model ${model}${mine}${drainState}${last}`
     },
