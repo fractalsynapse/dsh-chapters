@@ -242,6 +242,18 @@ applicable CI. Keep internal docs and site sources current where behavior change
 
 ## Efficiency Rules
 
+**Before writing a single line of change, read the actual DeepSeek Harness source
+under `examples/dsh` — the host mechanism the change touches first, then the plan.
+This is critical, not advisory.** Installed bundles, minified client artifacts and
+`.d.ts` files are evidence of behavior, never a substitute for architecture. A
+design made from them alone will route around the host's own contracts: the #590
+dock-row incident read `SURFACE_EVENT_TYPES` (a model-context concept) from a
+bundle, concluded the host hid command cards by design, and built a plugin-side bar
+around the host's unified command timeline — the host renders those nodes canonically
+(`ui-chat` `conversation-nodes/command.ts`), and the bar solved nothing the timeline
+was supposed to solve. Learn the mechanism, take notes, keep them in front of the
+work, then touch code.
+
 Use CodeGraph before text search or file reads to locate or understand code in an
 indexed checkout. Query the relevant symbol or seam and keep exploration bounded.
 Use the corresponding upstream source under `examples/` for DSH, Cordis, TreeDX
