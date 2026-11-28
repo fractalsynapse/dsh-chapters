@@ -58,3 +58,27 @@ test('#590: subscribeReply pulls the record through exec — mount pull answers,
   assert.equal(replies, 1)
   stop()
 })
+
+test('#594: the self-echo regression — a mounted row must NEVER suppress itself (the maintainer-measured flash-then-vanish)', () => {
+  const text = 'enrichment: manual, model qwen-token-plan/qwen3.8-flash · rule mining ON · pending: 0 chapter(s)'
+  const ex = excerptOf(text)
+  // The exact live shape: the probe runs AFTER the row mounted, so body.innerText already
+  // contains the row's own text. First cut: found the echo, suppressed, row ate itself.
+  const selfOnly = {
+    body: { innerText: `sidebar… ${ex} …composer` },
+    querySelector: (sel: string) => (sel === '[data-chapters-reply]' ? { innerText: ex } : null),
+  }
+  assert.equal(hostCardShowsReply(ex, selfOnly as never), false, 'own echo is NOT the host card — the row stays')
+  // Host card present IN ADDITION to the row: suppress (the real #590 behavior, now measured outside own text).
+  const cardAndRow = {
+    body: { innerText: `timeline card: ${text} … dock row: ${ex}` },
+    querySelector: (sel: string) => (sel === '[data-chapters-reply]' ? { innerText: ex } : null),
+  }
+  assert.equal(hostCardShowsReply(ex, cardAndRow as never), true, 'text OUTSIDE the row is the host card — the row stands aside')
+  // Row absent (first probe before mount) with a card: suppress.
+  const cardOnly = {
+    body: { innerText: `timeline card: ${text}` },
+    querySelector: () => null,
+  }
+  assert.equal(hostCardShowsReply(ex, cardOnly as never), true, 'pre-mount card detection still works')
+})
