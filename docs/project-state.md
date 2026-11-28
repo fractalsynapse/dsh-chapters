@@ -1426,6 +1426,10 @@ three models swapped live at runtime, autorun uncapped; durable-log watching nam
 mechanism. Open: #491/#462 await the still-undelivered scheduled cycle (cron ~10h late, past
 pattern — dispatch fallback decided for tomorrow if absent); #456 Tier B remains the campaign day.
 
+## 0.2.61 cut (2026-11-27): reply-row self-suppression + dock geometry — maintainer-graded, rig-blind
+
+**Shipped:** #594 (PR #595, all five contexts first pass): suppression subtracts the row's own mounted text (the flash-then-vanish was the row eating its own echo; the rig's card-rendering host hid it behind a correct-looking suppressed=true), and the row ships the bar's measured dock geometry as its own stylesheet. Live corroboration BEFORE the fix: the maintainer's registry held the perfect record ('/chapters-status · success · Version: 0.2.60 · loaded from …') — server side always right, client display ate itself. Suite 1847/0/1+, tsc + client typecheck clean. Acceptance pending on the ONLY grader that matters: the row appears with the last recorded reply at page load on the maintainer's host and STAYS.
+
 ## 0.2.60 cut (2026-11-27): the command reply row — invisible-card era ends plugin-side, plus the #588 gate trilogy
 
 **Shipped:** #590 (PR #591): the dock row rendering every /chapters-* reply (server-recorded settings row, human-driven pulls, self-suppression when the host card exists, in-flight as running) — the maintainer's downtime complaint, ended. #588 (PR #589): the regression gates — host fold drift guard both ways (mutation-proved), durable round-trip stage, FAQ. Development record kept honest: the follow-wire channel was MEASURED dead (27 records, 0 command events) before merge, the exec-slash and dispatch-race bugs found by breadcrumb-driven reload legs (fourteen iterations), and the e2e now grades the reply-visible CONTRACT rather than my assumption about the channel. The row on the maintainer's exact host version is graded by the post-install live pass — recorded as pending, not claimed.

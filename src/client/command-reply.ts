@@ -15,6 +15,37 @@
  */
 import { createElement as h, useEffect, useState, type ReactElement } from 'react'
 
+
+// #594: the row's OWN stylesheet, geometry copied from the prompt bar's measured dock rules
+// (the maintainer's live report: the first cut rendered 'way outside the timeline view' — a bare
+// inline-styled div in a dock container that expects the bar's width calc). Self-injected, not
+// borrowed from prompt-dock, because the bar may never mount (no prompt model) and the row must
+// still be a card, not a stranger.
+const REPLY_CSS_ID = 'dsh-chapters/command-reply.css'
+const REPLY_CSS = [
+  '.dsh-chapters_replyDock{box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance) - 4 * var(--dsh-composer-dock-inset));max-width:calc(var(--dsh-composer-card-max-width) - 4 * var(--dsh-composer-dock-inset));margin:0 auto}',
+  '.dsh-chapters_replyBar{isolation:isolate;box-sizing:border-box;width:100%;position:relative;display:flex;align-items:center;gap:10px;border-radius:var(--dsw-radius-md);min-height:32px;padding:4px 12px;font-size:12px;box-shadow:var(--dsw-elevation-panel)}',
+  '.dsh-chapters_replyBar::before{z-index:-1;border-radius:inherit;background:var(--dsw-specific-menu);backdrop-filter:var(--dsw-menu-backdrop-filter);content:"";position:absolute;inset:0;pointer-events:none}',
+  '.dsh-chapters_replyLine{font-family:var(--dsw-font-code,monospace);flex:none;color:var(--dsw-alias-label-secondary)}',
+  '.dsh-chapters_replyText{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary-dimmed);line-height:18px;cursor:pointer}',
+  '.dsh-chapters_replyFull{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;max-height:180px;overflow-y:auto;flex:1;min-width:0;color:var(--dsw-alias-label-primary);line-height:18px;cursor:pointer}',
+  '.dsh-chapters_replyError .dsh-chapters_replyLine{color:var(--dsw-alias-state-error-primary)}',
+  '.dsh-chapters_replyRunning .dsh-chapters_replyLine{color:var(--dsw-alias-state-warning-primary)}',
+  '.dsh-chapters_replyBtn{width:24px;height:24px;flex:none;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:999px;display:inline-flex;align-items:center;justify-content:center}',
+  '.dsh-chapters_replyBtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}',
+].join('\n')
+function ensureReplyCss(): void {
+  if (typeof document === 'undefined') return
+  try {
+    if (document.getElementById(REPLY_CSS_ID) !== null) return
+    const style = document.createElement('style')
+    style.id = REPLY_CSS_ID
+    style.setAttribute('data-plugin-css', REPLY_CSS_ID)
+    style.textContent = REPLY_CSS
+    document.head.appendChild(style)
+  } catch { /* styling is cosmetic; the row still answers without it */ }
+}
+
 /** The newest command exchange, shaped for the row. */
 export interface CommandReply {
   line: string
@@ -35,10 +66,21 @@ export function excerptOf(text: string): string {
  * exchange), so an excerpt found in the document is the host's card, not our own echo. Absent
  * document (tests, odd hosts) reads as "not shown" — fail-visible, never fail-silent.
  */
-export function hostCardShowsReply(excerpt: string, doc?: { body?: { innerText?: string } } | undefined): boolean {
+export function hostCardShowsReply(excerpt: string, doc?: { body?: { innerText?: string }; querySelector?: (sel: string) => { innerText?: string } | null } | undefined): boolean {
   if (excerpt === '') return false
-  const text = doc?.body?.innerText
+  let text = doc?.body?.innerText
   if (typeof text !== 'string') return false
+  // #594 THE SELF-SUPPRESSION BUG, measured live by the maintainer on 0.2.60 (flash-then-vanish):
+  // the probe runs AFTER React mounts the row, so the document already contains the row's own
+  // excerpt — the first cut read its own echo as 'the host rendered the card' and stood aside
+  // from itself. Subtract the row's own text before searching; only what remains OUTSIDE the
+  // row can be the host's card.
+  const own = typeof doc?.querySelector === 'function' ? doc.querySelector('[data-chapters-reply]') : null
+  const ownText = own?.innerText
+  if (typeof ownText === 'string' && ownText !== '') {
+    const i = text.indexOf(ownText)
+    if (i >= 0) text = text.slice(0, i) + text.slice(i + ownText.length)
+  }
   return text.includes(excerpt.slice(0, 80))
 }
 
@@ -170,30 +212,30 @@ export function CommandReplyRow(props: CommandReplyProps): ReactElement | null {
   }, [reply?.seq, excerpt])
   if (reply === null || reply.seq === dismissedSeq) return null
   if (suppressed) return null
-  const color = reply.kind === 'error' ? 'var(--color-danger, #d33)' : reply.kind === 'running' ? 'var(--color-warning, #b80)' : 'var(--color-fg-dimmed, #888)'
+  ensureReplyCss()
+  const kindClass = reply.kind === 'error' ? ' dsh-chapters_replyError' : reply.kind === 'running' ? ' dsh-chapters_replyRunning' : ''
   return h(
     'div',
-    {
-      'data-chapters-reply': 'true',
-      style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '4px 10px', borderLeft: `3px solid ${color}`, opacity: 0.92 },
-      title: reply.kind === 'running' ? `${reply.line} — running` : `${reply.line} — ${reply.kind}`,
-      onClick: () => { if (excerpt !== '') setExpanded((e) => !e) },
-    },
-    h('span', { style: { fontFamily: 'monospace', color } }, reply.kind === 'running' ? `> ${reply.line} …` : `> ${reply.line}`),
-    excerpt === '' ? null : h(
-      'span',
-      { style: { color: 'var(--color-fg, #ccc)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: expanded ? 'pre-wrap' : 'nowrap', maxWidth: '60ch', flex: 1 } },
-      expanded ? reply.text : excerpt,
-    ),
+    { className: 'dsh-chapters_replyDock', 'data-chapters-reply': 'true' },
     h(
-      'button',
+      'div',
       {
-        type: 'button',
-        'aria-label': 'Dismiss command reply',
-        style: { marginLeft: 'auto', border: 'none', background: 'none', color, cursor: 'pointer' },
-        onClick: (ev: { stopPropagation(): void }) => { ev.stopPropagation(); setDismissedSeq(reply.seq) },
+        className: `dsh-chapters_replyBar${kindClass}`,
+        title: reply.kind === 'running' ? `${reply.line} — running` : `${reply.line} — ${reply.kind}`,
+        onClick: () => { if (excerpt !== '') setExpanded((e) => !e) },
       },
-      '×',
+      h('span', { className: 'dsh-chapters_replyLine' }, reply.kind === 'running' ? `> ${reply.line} …` : `> ${reply.line}`),
+      excerpt === '' ? null : h('span', { className: expanded ? 'dsh-chapters_replyFull' : 'dsh-chapters_replyText' }, expanded ? reply.text : excerpt),
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'dsh-chapters_replyBtn',
+          'aria-label': 'Dismiss command reply',
+          onClick: (ev: { stopPropagation(): void }) => { ev.stopPropagation(); setDismissedSeq(reply.seq) },
+        },
+        '\u00d7',
+      ),
     ),
   )
 }
