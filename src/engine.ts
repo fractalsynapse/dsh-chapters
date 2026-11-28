@@ -11,6 +11,7 @@
  * listeners already model.
  */
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
+import { bindPublicMethods } from './proxy-safe.ts'
 import { extractSignature, enrichSignatureWithCodegraph, turnSpanOf } from './signature.ts'
 import { appendCollection } from './registry.ts'
 import type { SessionEventLike } from './types.ts'
@@ -549,6 +550,13 @@ export class ChaptersCompactionEngine extends BasicCompactionEngine {
     this.#listenForSignatures()
     this.#listenForRuleCapture()
     this.#listenForFirstTurnPull()
+    // #601: the host calls this service through a cordis interface PROXY (measured stack:
+    // command-compact -> Object.apply -> Proxy.compactNow), and ES private brands throw on a
+    // proxy receiver — "Receiver must be an instance of class ChaptersCompactionEngine" —
+    // while `instanceof` answers true. The host's own engine survives because it uses zero ES
+    // privates; ours has 46. Late-dispatch wrappers bind the brands to the real instance
+    // without freezing prototype stubs (the engine test seams) or shadowing overrides.
+    bindPublicMethods(this)
     ctx.logger?.info?.('dsh-chapters: engine constructed for a mount (signature listener live)')
   }
 
