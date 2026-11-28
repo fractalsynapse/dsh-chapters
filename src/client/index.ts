@@ -30,7 +30,6 @@ import { createElement as h, useCallback, useEffect, useRef, useState, type Reac
 import { withTooltip, nativeTitle } from './tooltip.ts'
 import { PromptDock } from './prompt-dock.ts'
 import { DOOR_ACTIONS, doorActionsVisibleFor, makeDoorRunner, presetOfSession, runCommandText, type ClientRemote, type ClientSessions, type DoorAction, type DoorResult } from './doors.ts'
-import { CommandReplyRow } from './command-reply.ts'
 
 interface ClientSlots {
   inject(name: string, factory: () => unknown): void
@@ -222,20 +221,4 @@ export function apply(ctx: Ctx): void {
       exec: (line: string) => runCommandText(remote, sessionId, line),
     }),
   }, PromptDock))
-  // #590: the command reply row. Mounted beside the prompt bar (order 31 = between the bar and
-  // the composer, because the reply to what you JUST typed belongs closest to where you typed
-  // it). Data is the host's raw session journal via follow — snapshot plus live event frames —
-  // so the row needs no exec pulls, no timers, and no server state of its own; and it
-  // suppresses itself whenever the host renders the card. The inject face 'remote.session' is
-  // listed above because the federation gates every face (#372: naming remote alone was once
-  // not enough — the list is the contract).
-  const disposeReplyRow = slots.inject('conversation.input.dock', () => slots.register({
-    name: 'conversation.input.dock',
-    id: 'chapters-command-reply',
-    order: 31,
-    inject: (sessionId: string) => ({
-      exec: (line: string) => runCommandText(remote, sessionId, line),
-    }),
-  }, CommandReplyRow))
-  console.info(`[client:chapters] command reply row registered: ${typeof disposeReplyRow}`)
 }

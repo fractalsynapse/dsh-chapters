@@ -976,64 +976,20 @@ export function registerHostCommands(
     },
   }
 
-  // #590: THE REPLY RECORD. The follow wire filters command events before the browser (measured:
-  // snapshot 27 records, 0 command events — the #545 filter lives at the wire boundary, not only
-  // the projector), so the dock row cannot read the journal itself. The server is the only party
-  // that both knows the reply and can hand the client something readable: every command reply is
-  // recorded to one settings row, and `chapters-reply last` hands it back. Two exclusions, both
-  // stated: the read command never records itself (recursion), and the bar's own `chapters-prompt
-  // state` pull never records (its reply is the BAR's surface — a row echoing every sanctioned
-  // pull would drown the human's actual commands). A human who types those verbs gets the same
-  // answer the bar already shows; everything else gets the row.
-  const REPLY_ROW = 'commands.lastReply'
-  const noRecord = (name: string, rawInput: string | undefined): boolean => {
-    const args = (rawInput ?? '').trim()
-    return name === 'chapters-reply' || (name === 'chapters-prompt' && (args === 'state' || args === ''))
-  }
-  interface Recortable { name: string; handler: (inv: { agent: unknown; rawInput?: string }) => Promise<CommandResult> }
-  const rec = <T extends Recortable>(cmd: T): T => ({
-    ...cmd,
-    async handler(inv: { agent: unknown; rawInput?: string }): Promise<CommandResult> {
-      const r = await cmd.handler(inv)
-      if (!noRecord(cmd.name, inv.rawInput)) {
-        try {
-          const args = (inv.rawInput ?? '').trim()
-          await domain.table('settings').put(REPLY_ROW, { value: JSON.stringify({ /* logged below on success */
-            line: `/${cmd.name}${args === '' ? '' : ' ' + args}`,
-            kind: r.kind, text: (r.text ?? '').slice(0, 4000), at: new Date().toISOString(),
-          }) })
-          console.error(`[chapters-reply] recorded /${cmd.name}`)
-        } catch (e) { console.error(`[chapters-reply] record FAILED: ${String((e as Error)?.message ?? e).slice(0, 120)}`) /* best-effort: a reply that cannot be recorded is STILL returned to the host */ }
-      }
-      return r
-    },
-  })
-  const replyCommand = {
-    name: 'chapters-reply',
-    description: 'Read the last recorded command reply (the dock row\u2019s channel, #590): /chapters-reply last',
-    input: { hint: 'last' },
-    async handler(): Promise<CommandResult> {
-      const raw = domain.table('settings').get(REPLY_ROW)?.value
-      console.error(`[chapters-reply] last served: ${String(raw?.length ?? -1)} chars`)
-      return { kind: 'success', text: raw ?? '' }
-    },
-  }
   try {
-    const dReply = commands.register(replyCommand)
-    if (typeof dReply === 'function') disposers.push(dReply as () => void)
-    const d1 = commands.register(rec(linkCommand))
+    const d1 = commands.register(linkCommand)
     if (typeof d1 === 'function') disposers.push(d1 as () => void)
-    const d2 = commands.register(rec(statusCommand))
+    const d2 = commands.register(statusCommand)
     if (typeof d2 === 'function') disposers.push(d2 as () => void)
-    const dRemove = commands.register(rec(removeCommand))
+    const dRemove = commands.register(removeCommand)
     if (typeof dRemove === 'function') disposers.push(dRemove as () => void)
-    const d3 = commands.register(rec(enrichCommand))
+    const d3 = commands.register(enrichCommand)
     if (typeof d3 === 'function') disposers.push(d3 as () => void)
-    const d3b = commands.register(rec(promptCommand))
+    const d3b = commands.register(promptCommand)
     if (typeof d3b === 'function') disposers.push(d3b as () => void)
-    const d3d = commands.register(rec(anchorCommand))
+    const d3d = commands.register(anchorCommand)
     if (typeof d3d === 'function') disposers.push(d3d as () => void)
-    const d3c = commands.register(rec(modelsCatalogCommand))
+    const d3c = commands.register(modelsCatalogCommand)
     if (typeof d3c === 'function') disposers.push(d3c as () => void)
     if (config.rules !== undefined) {
       const rulesFn = config.rules
@@ -1050,7 +1006,7 @@ export function registerHostCommands(
           return { kind: r.kind, text: r.text }
         },
       }
-      const d4 = commands.register(rec(rulesCommandDef))
+      const d4 = commands.register(rulesCommandDef)
       if (typeof d4 === 'function') disposers.push(d4 as () => void)
     }
   } catch (error) {
